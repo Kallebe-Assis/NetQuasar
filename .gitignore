@@ -13,6 +13,8 @@ docker-compose.override.yml
 **/dist/
 **/build/
 **/coverage/
+!quasar_backend/internal/embedui/dist/
+!quasar_backend/internal/embedui/dist/**
 
 # Binários, logs e temporários
 *.exe
