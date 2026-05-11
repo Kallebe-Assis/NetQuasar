@@ -1,0 +1,15 @@
+# Git e editores
+.git
+.gitignore
+.cursor
+**/.DS_Store
+
+# Node
+**/node_modules
+quasar_frontend/dist
+
+# Go build local
+quasar_backend/**/*.exe
+quasar_backend/netquasar
+quasar_backend/.env
+quasar_backend/.env.local

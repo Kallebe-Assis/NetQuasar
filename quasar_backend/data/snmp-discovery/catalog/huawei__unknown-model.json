@@ -1,0 +1,10 @@
+{
+  "key": "huawei__unknown-model",
+  "brand": "huawei",
+  "model": "unknown-model",
+  "updated_at": "2026-05-10T02:17:42Z",
+  "sample_count": 10,
+  "known_oids": [],
+  "class_summary": {},
+  "collect_profile": {}
+}

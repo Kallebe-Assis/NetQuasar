@@ -1,0 +1,362 @@
+-- **********************************************************************
+-- HILLSTONE-SYSTEM-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks SYSTEM MIB Object Identifier Assignments
+-- **********************************************************************
+--
+
+HILLSTONE-SYSTEM-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	MODULE-IDENTITY			FROM SNMPv2-SMI
+	NetworkAddress, IpAddress,
+	Counter, Gauge, TimeTicks	FROM RFC1155-SMI
+	TruthValue                      FROM SNMPv2-TC
+	hillstoneSys			FROM HILLSTONE-SMI;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneSysMibObjects OBJECT IDENTIFIER ::= { hillstoneSys 1 }
+
+-- hillstone systems
+sysSerialNumber OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 1 }
+
+sysSoftware OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 2 }
+
+sysCPU OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 3 }
+
+sysTotalMemory OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 4 }
+
+sysCurMemory OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 5 }
+
+sysTotalSession OBJECT-TYPE
+	SYNTAX Counter
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 6 }
+
+sysCurSession OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 7 }
+
+sysHAStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	   {
+		none (0),
+		init (1),
+		hello (2),
+		backup (3),
+		master (4),
+		AA-mode (6),
+		failed (15)
+	   }
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 8 }
+
+sysSnmpStackStatus OBJECT-TYPE
+    SYNTAX TruthValue
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The running status of snmp Stack."
+    ::= { hillstoneSysMibObjects 9 }
+
+sysTr069StackStatus OBJECT-TYPE
+    SYNTAX TruthValue
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The running status of tr069 stack."
+    ::= { hillstoneSysMibObjects 10 }
+
+sysVedorOUI OBJECT-TYPE
+    SYNTAX DisplayString
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The oui code of the Tr069 stack.."
+    ::= { hillstoneSysMibObjects 11 }
+
+sysLogStackStatus OBJECT-TYPE
+    SYNTAX TruthValue
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The running status of syslog stack."
+    ::= { hillstoneSysMibObjects 12 }
+
+sysLogServerAddress1 OBJECT-TYPE
+    SYNTAX DisplayString
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The syslog receiver addrees 1."
+    ::= { hillstoneSysMibObjects 13 }
+
+sysLogServerAddress2 OBJECT-TYPE
+    SYNTAX DisplayString
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The syslog receiver addrees 2."
+    ::= { hillstoneSysMibObjects 14 }
+
+sysDeviceReloadAction OBJECT-TYPE
+    SYNTAX INTEGER
+    {
+	reloadUnAvailable(1),
+	reloadAtOnce(2)
+    }
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The actioin of reloading the device. when the value is set to 2,the device will reboot at once."
+    ::= { hillstoneSysMibObjects 15 }
+
+sysStatisticsPeriod OBJECT-TYPE
+   SYNTAX INTEGER
+    {
+	oneDay(1)
+    }
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The period of statistics.  default statistics  period is 24hours"
+    ::= { hillstoneSysMibObjects 16 }
+
+
+sysMemRatio OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 17 }
+
+
+sysSessionRampupRate OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 18 }
+
+sysOverallThroughput OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 19 }
+
+sysCTWapStat OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 20 }
+
+sysRampupRate OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 21 }
+
+sysL4SynCheckDrop OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 22 }
+
+sysL4SynBitCheckDrop OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 23 }
+
+sysL4SeqCheckDrop OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 24 }
+
+sysL4HwCPUError OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 25 }
+
+sysHistoryMaxSessNum OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 26 }
+
+sysTCPSessNum OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 27 }
+
+sysUDPSessNum OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 28 }
+
+sysICMPSessNum OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 29 }
+
+sysTopAppthroughputTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF sysTopAppthroughputEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for Top App throughput daily data."
+::= { hillstoneSysMibObjects 30 }
+
+sysTopAppthroughputEntry OBJECT-TYPE
+	SYNTAX sysTopAppthroughputEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION "The table for Top10 App throughput daily data."
+INDEX { hillstoneAppIndex }
+::= { sysTopAppthroughputTable 1 }
+
+sysTopAppthroughputEntry ::=
+    SEQUENCE {
+	hillstoneAppIndex
+	    INTEGER,
+	hillstoneAppthroughput
+		DisplayString
+	     }
+hillstoneAppIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The index of the Top10App."
+::= { sysTopAppthroughputEntry 1 }
+
+hillstoneAppthroughput OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The throughput daily data of the App."
+::= { sysTopAppthroughputEntry 2 }
+
+sysCurSessionIPv4 OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 31 }
+
+sysCurSessionIPv6 OBJECT-TYPE
+	SYNTAX Gauge32
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 32 }
+
+sysRampupRateIPv4 OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 33 }
+
+sysRampupRateIPv6 OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 34 }
+
+sysPendingSessionQueueFullDrop OBJECT-TYPE
+    SYNTAX INTEGER
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+    "The pak drop counter for session pending queue full."
+    ::= { hillstoneSysMibObjects 35 }
+
+sysPeerHAStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	   {
+		none (0),
+		init (1),
+		hello (2),
+		backup (3),
+		master (4),
+		failed (15)
+	   }
+	ACCESS read-only
+	STATUS mandatory
+	DESCRIPTION
+	"Peer device's HA status in HA AP mode."
+	::= { hillstoneSysMibObjects 36 }
+
+sysHAGroupStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	   {
+		normal (0),
+		abnormal (1)
+	   }
+	ACCESS read-only
+	STATUS mandatory
+	DESCRIPTION
+	"Whether HA status is normal in HA AP mode."
+	::= { hillstoneSysMibObjects 37 }
+
+sysHAStatusChangeTimes OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS mandatory
+	DESCRIPTION
+	"How many times has HA status changed between 2 GETTING operations."
+	::= { hillstoneSysMibObjects 38 }
+
+sysOverallIPv4Throughput OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 39 }
+
+sysOverallIPv6Throughput OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS mandatory
+	::= { hillstoneSysMibObjects 40 }
+
+END
+

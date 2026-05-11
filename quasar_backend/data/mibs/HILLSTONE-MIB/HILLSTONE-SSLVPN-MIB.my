@@ -1,0 +1,65 @@
+-- *************************************************************************
+-- HILLSTONE-SSLVPN-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks SSLVPN MIB Object Identifier Assignments
+-- *************************************************************************
+--
+
+HILLSTONE-SSLVPN-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneSslvpn			FROM HILLSTONE-SMI
+	OBJECT-TYPE			FROM RFC-1212;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+sslvpnTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF sslvpnEntry
+	ACCESS not-accessible
+	STATUS current
+	::= { hillstoneSslvpn 1 }
+
+sslvpnEntry OBJECT-TYPE
+	SYNTAX sslvpnEntry
+	ACCESS not-accessible
+	STATUS current
+	::= { sslvpnTable 1}
+
+sslvpnEntry ::=
+	SEQUENCE{
+		sslvpnOnlineUserNumberTotal
+			INTEGER,
+		sslvpnOnlineUserNumberOfVsys
+			INTEGER
+	}
+
+sslvpnOnlineUserNumberTotal OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	 DESCRIPTION
+		"The SSLVPN online user nmuber total"
+	::= { sslvpnEntry 1 }
+
+sslvpnOnlineUserNumberOfVsys OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	 DESCRIPTION
+		"The SSLVPN online user nmuber of vsys"
+	::= { sslvpnEntry 2 }
+
+END
+

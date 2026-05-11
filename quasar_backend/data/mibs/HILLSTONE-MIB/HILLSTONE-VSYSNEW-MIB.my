@@ -1,0 +1,145 @@
+-- **************************************************************************
+-- HILLSTONE-VSYS-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V6
+-- Description:	 Hillstone Networks TEMPERATURE MIB Object Identifier Assignments
+-- **************************************************************************
+--
+
+HILLSTONE-VSYSNEW-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneVsysNew
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+        RowStatus
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneVsysObjects OBJECT IDENTIFIER ::= { hillstoneVsysNew 1 }
+
+hillstoneVsysTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneVsysEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "This table contains all the vsys data."
+::= { hillstoneVsysObjects 1 }
+
+hillstoneVsysEntry OBJECT-TYPE
+	SYNTAX hillstoneVsysEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of vsys."
+INDEX { hillstoneVsysNewIndex }
+::= { hillstoneVsysTable 1 }
+
+hillstoneVsysEntry ::=
+SEQUENCE {
+	hillstoneVsysNewIndex
+		INTEGER,
+	hillstoneVsysNewName
+		DisplayString,
+	hillstoneVsysNewID
+		INTEGER,
+	hillstoneVsysNewRampup
+		Counter,
+	hillstoneVsysNewRampupSpe
+		Counter,
+	hillstoneVsysNewCurSession
+		Counter,
+	hillstoneVsysNewCurSessionSpe
+		Counter,
+	hillstoneVsysNewThroughput
+		Counter64,
+	hillstoneVsysNewThroughputSpe
+		Counter64
+	}
+
+hillstoneVsysNewIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys index ."
+::= { hillstoneVsysEntry 1 }
+
+hillstoneVsysNewName OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys name ."
+::= { hillstoneVsysEntry 2 }
+
+hillstoneVsysNewID OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys id ."
+::= { hillstoneVsysEntry 3 }
+
+hillstoneVsysNewRampup OBJECT-TYPE
+	SYNTAX Counter
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys rampup."
+::= { hillstoneVsysEntry 4 }
+
+hillstoneVsysNewRampupSpe OBJECT-TYPE
+	SYNTAX Counter
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys rampup spe ."
+::= { hillstoneVsysEntry 5 }
+
+hillstoneVsysNewCurSession OBJECT-TYPE
+	SYNTAX Counter
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys current session ."
+::= { hillstoneVsysEntry 6 }
+
+hillstoneVsysNewCurSessionSpe OBJECT-TYPE
+	SYNTAX Counter
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys current session spe."
+::= { hillstoneVsysEntry 7 }
+
+hillstoneVsysNewThroughput OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys throughput."
+::= { hillstoneVsysEntry 8 }
+
+hillstoneVsysNewThroughputSpe OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The vsys throughput spe."
+::= { hillstoneVsysEntry 9 }
+
+END

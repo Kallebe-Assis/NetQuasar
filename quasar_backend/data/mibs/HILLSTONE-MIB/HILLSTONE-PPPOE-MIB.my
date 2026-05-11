@@ -1,0 +1,106 @@
+-- ***********************************************************************
+-- HILLSTONE-PPPoE-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks PPPoE MIB Object Identifier Assignments
+-- ***********************************************************************
+--
+
+HILLSTONE-PPPoE-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstonePPPoE
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstonePPPoEObjects OBJECT IDENTIFIER ::= { hillstonePPPoE 1 }
+
+--
+-- PPPoE Ext MIB Objects
+--
+
+hillstonePPPoEAttriTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstonePPPoEAttriEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"The table contains all the PPPoE data."
+::= { hillstonePPPoEObjects 1 }
+
+hillstonePPPoEAttriEntry OBJECT-TYPE
+	SYNTAX hillstonePPPoEAttriEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of PPPoE."
+INDEX { hillstonePPPoEIfIndex }
+::= { hillstonePPPoEAttriTable 1 }
+
+hillstonePPPoEAttriEntry ::=
+    SEQUENCE {
+	hillstonePPPoEIfIndex
+	    INTEGER,
+	hillstonePPPoEIfName
+	    DisplayString,
+	hillstonePPPoEUserName
+	    DisplayString,
+	hillstonePPPoEIfNetAddr
+		IpAddress,
+	hillstonePPPoEOnlineTime
+	    INTEGER
+	    }
+hillstonePPPoEIfIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The index of the pppoe interface."
+::= { hillstonePPPoEAttriEntry 1 }
+
+hillstonePPPoEIfName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The name of the pppoe interface."
+::= { hillstonePPPoEAttriEntry 2 }
+
+hillstonePPPoEUserName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The pppoe username."
+::= { hillstonePPPoEAttriEntry 3 }
+
+hillstonePPPoEIfNetAddr OBJECT-TYPE
+	SYNTAX IpAddress
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The ip address of the pppoe interface."
+::= { hillstonePPPoEAttriEntry 4 }
+
+hillstonePPPoEOnlineTime OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"The pppoe OnlineTime."
+::= { hillstonePPPoEAttriEntry 5 }
+
+END

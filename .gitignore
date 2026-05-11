@@ -1,0 +1,33 @@
+# Segredos e ambiente local
+.env
+.env.local
+.env.*.local
+quasar_backend/.env
+docker-compose.override.yml
+
+# Credenciais persistidas pelo servidor
+**/database-credentials.json
+
+# Dependências e artefatos gerados
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+
+# Binários, logs e temporários
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.log
+*.tmp
+*.temp
+*.pid
+
+# Cache e tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/

@@ -1,0 +1,625 @@
+-- ********************************************************************************
+-- HILLSTONE-SMI
+--
+-- Copyright (c) 2010 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V5
+-- Description:	 Hillstone Networks Enterprise Structure of Management Information
+-- ********************************************************************************
+--
+
+HILLSTONE-SMI DEFINITIONS ::= BEGIN
+
+IMPORTS
+	MODULE-IDENTITY,
+	OBJECT-IDENTITY,
+	enterprises
+		FROM SNMPv2-SMI
+	TRAP-TYPE
+        FROM RFC-1215;
+
+
+
+hillstone MODULE-IDENTITY
+	LAST-UPDATED "200706150000Z"
+	ORGANIZATION "Hillstone Networks, Inc."
+	CONTACT-INFO
+		"	Hillstone Networks, Inc.
+
+		Postal: 113 Road Zhichun
+			Haidian, Beijing  100086
+			CHN
+
+		   Tel: +86 10-62614767
+
+		E-mail: nmo&hillstonenet.com"
+	DESCRIPTION
+		"The Structure of Management Information for Hillstone Networks"
+	::= { enterprises 28557 }	-- assigned by IANA
+
+hillstoneProducts OBJECT-IDENTITY
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's Product OIDs."
+	::= { hillstone 1 }
+
+hillstoneMibs OBJECT-IDENTITY
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's MIB objects."
+	::= { hillstone 2 }
+
+hillstoneTraps OBJECT-IDENTITY
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's Trap OIDs."
+	::= { hillstone 3 }
+
+hillstoneTrapSeverity OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		 emerg (0),
+		 alert (1),
+		 crit  (2),
+		 err   (3),
+		 warning (4),
+		 notice   (5),
+		 info	(6),
+		 debug (7)
+	}
+	MAX-ACCESS read-only
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's Trap severity OIDs."
+	::= { hillstone 4 }
+
+
+hillstoneIpsec OBJECT-IDENTITY
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's VPN OIDs."
+	::= { hillstoneMibs 1 }
+
+hillstoneSys OBJECT-IDENTITY
+	STATUS	current
+	DESCRIPTION
+		"The root of Hillstone's system OIDs."
+	::= { hillstoneMibs 2 }
+
+hillstoneStatistics OBJECT-IDENTITY
+	STATUS  current
+	DESCRIPTION
+		"The Hillstone statistics OIDs."
+	::= { hillstoneMibs 3 }
+
+hillstoneDNS OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone DNS OIDs."
+	::= { hillstoneMibs 4 }
+
+hillstoneDHCP OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone DHCP OIDs."
+	::= { hillstoneMibs 5 }
+
+hillstoneInterface OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone interface extend OIDs."
+	::= { hillstoneMibs 6 }
+
+hillstoneIp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone ip extend OIDs."
+	::= { hillstoneMibs 7 }
+
+hillstoneNTP OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone ntp OIDs."
+	::= { hillstoneMibs 8 }
+
+hillstoneZONE OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone ZONE OIDs."
+	::= { hillstoneMibs 9 }
+
+hillstoneAV OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone AV OIDs."
+	::= { hillstoneMibs 10 }
+
+hillstoneServiceBook OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Service Book OIDs."
+	::= { hillstoneMibs 11 }
+
+hillstoneServiceBookMember OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Service Book member OIDs."
+	::= { hillstoneMibs 12 }
+
+hillstoneServiceGroup OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Service Group OIDs."
+	::= { hillstoneMibs 13 }
+
+hillstoneServiceGroupMember OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Service Group member OIDs."
+	::= { hillstoneMibs 14 }
+
+hillstoneAddressBook OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Address Book OIDs."
+	::= { hillstoneMibs 15 }
+
+hillstoneAddressBookMember OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Address Book OIDs."
+	::= { hillstoneMibs 16 }
+
+hillstoneSchedule OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Schedule OIDs."
+	::= { hillstoneMibs 17 }
+
+hillstoneSchedulePeriodicMember OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Schedule OIDs."
+	::= { hillstoneMibs 18 }
+
+hillstonePolicy OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy OIDs."
+	::= { hillstoneMibs 19 }
+
+hillstonePolicySourceAddress OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy Source Address OIDs."
+	::= { hillstoneMibs 20 }
+
+hillstonePolicyDestinationAddress OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy Destination Address OIDs."
+	::= { hillstoneMibs 21 }
+
+hillstonePolicyService OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy Service OIDs."
+	::= { hillstoneMibs 22 }
+
+hillstonePolicySchedule OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy Schedule OIDs."
+	::= { hillstoneMibs 23 }
+	
+hillstonePolicyMovement OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Policy Movement OIDs."
+	::= { hillstoneMibs 24 }
+
+hillstoneModule OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Module OIDs."
+	::= { hillstoneMibs 25 }
+
+hillstoneFan OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Fan OIDs."
+	::= { hillstoneMibs 26 }
+
+hillstonePower OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Power OIDs."
+	::= { hillstoneMibs 27 }
+
+hillstoneTemperature OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Temperature OIDs."
+	::= { hillstoneMibs 28 }
+
+hillstonePPPoE OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone PPPoE OIDs."
+	::= { hillstoneMibs 29 }
+
+hillstoneVsys OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Vsys OIDs."
+	::= { hillstoneMibs 30 }
+
+hillstoneSlb OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Slb OIDs."
+	::= { hillstoneMibs 31 }
+
+hillstoneL3s OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone L3s OIDs."
+	::= { hillstoneMibs 32 }
+
+hillstoneNat OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Nat OIDs."
+	::= { hillstoneMibs 33 }
+
+hillstoneSslvpn OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone SSLVPN OIDs."
+	::= { hillstoneMibs 34 }
+--hillstoneNat OBJECT-IDENTITY
+--	STATUS current
+--	DESCRIPTION
+--		"The hillstone Nat OIDs."
+--	::= { hillstoneMibs 29 }
+
+hillstoneStorage OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Storage OIDs."
+	::= { hillstoneMibs 35 }
+
+hillstonePakBuffer OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Pak Buffer OIDs."
+	::= { hillstoneMibs 36 }
+
+hillstoneVsysNew OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Vsys OIDs."
+	::= { hillstoneMibs 37 }
+
+hillstoneSSH OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone SSH OIDs."
+	::= { hillstoneMibs 44 }
+
+hillstoneSfp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The hillstone Sfp OIDs."
+	::= { hillstoneMibs 46 }
+
+-- trap message
+
+hillstoneCPUStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The CPU status trap OIDs."
+	::= {hillstoneTraps 1}
+
+hillstoneFANStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The FAN status trap OIDs."
+	::= {hillstoneTraps 2}
+
+hillstoneTempStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The temperature trap OIDs."
+	::= {hillstoneTraps 3}
+
+hillstoneMemoryStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The memory trap OIDs."
+	::= {hillstoneTraps 4}
+
+hillstoneHAStatus	OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The HA status trap OIDs."
+	::= {hillstoneTraps 5}
+
+hillstoneADType OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The Attack type trap OIDs."
+	::= {hillstoneTraps 6}
+
+hillstoneVPNDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The vpn tunnel trap OIDs."
+	::= {hillstoneTraps 7}
+
+hillstoneVPNUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The VPN up trap OIDs."
+	::= {hillstoneTraps 8}
+
+hillstoneIfIpChange OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface ipaddress change trap OIDs."
+	::= {hillstoneTraps 9}
+
+hillstoneDeviceNameChange OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The device name change trap OIDs."
+	::= {hillstoneTraps 10}
+
+hillstoneIPSStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The IPS status trap OIDs."
+	::= {hillstoneTraps 11}
+
+hillstoneAVStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The AV status trap OIDs."
+	::= {hillstoneTraps 12}
+
+hillstoneSystemReboot OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The system reboot trap OIDs."
+	::= {hillstoneTraps 13}
+
+hillstoneDiskSpaceStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The system disk space low trap OIDs."
+	::= {hillstoneTraps 14}
+
+hillstoneSessionOverThreshold OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The session count over threshold trap OIDs."
+	::= {hillstoneTraps 15}
+
+hillstoneLogOverThreshold OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The log size over threshold trap OIDs."
+	::= {hillstoneTraps 16}
+
+hillstoneBandwidthOverThreshold OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The bandwidth over threshold trap OIDs."
+	::= {hillstoneTraps 17}
+
+hillstonePolicyCountOverThreshold OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The policy count over threshold trap OIDs."
+	::= {hillstoneTraps 18}
+
+hillstoneConfigurationChange OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The configuration change trap OIDs."
+	::= {hillstoneTraps 19}
+
+hillstoneSlotUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The slot up trap OIDs."
+	::= {hillstoneTraps 20}
+
+hillstoneSlotDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The slot down trap OIDs."
+	::= {hillstoneTraps 21}
+
+hillstoneSNATResourceOverThreshold OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"SNAT resouce usage is over threshold."
+	::= {hillstoneTraps 22}
+
+hillstoneLoginFailed OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The admin user login failed."
+	::= {hillstoneTraps 23}
+
+hillstoneBypassBypass OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The bypass moudle changed to bypass state."
+	::= {hillstoneTraps 24}
+
+hillstoneBypassInline OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The bypass moudle changed to inline state."
+	::= {hillstoneTraps 25}
+
+hillstoneWarningCpuUtilStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The cpu utiliy status warning OIDS."
+	::= {hillstoneTraps 26}
+
+hillstoneWarningMemoryStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The memory status warning OIDS."
+	::= {hillstoneTraps 27}
+
+hillstoneWarningX86DiskSpaceStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The x86 disk space status warning OIDS."
+	::= {hillstoneTraps 28}
+
+hillstoneWarningNewSessionStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The new session status warning OIDS."
+	::= {hillstoneTraps 29}
+
+hillstoneWarningConcurrentSessionStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The concurrent session status warning OIDS."
+	::= {hillstoneTraps 30}
+
+hillstoneWarningIfBandwidthStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface bandwidth status warning OIDS."
+	::= {hillstoneTraps 31}
+
+hillstoneWarningSnatResourceStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The snat resource status warning OIDS."
+	::= {hillstoneTraps 32}
+
+hillstoneWarningCpuTemperatureStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The cpu temperature status warning OIDS."
+	::= {hillstoneTraps 33}
+
+hillstoneWarningChassisTemperatureStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The chassis temperature status warning OIDS."
+	::= {hillstoneTraps 34}
+
+hillstoneWarningAppStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The app status warning OIDS."
+	::= {hillstoneTraps 35}
+
+hillstoneWarningMonitorNodeStatus OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The monitor node status warning OIDS."
+	::= {hillstoneTraps 36}
+
+hillstonePowerError OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The power module error."
+	::= {hillstoneTraps 37}
+
+hillstoneFanError OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The fan module error OIDS."
+	::= {hillstoneTraps 38}
+
+hillstoneThreatLog OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The threat log OIDS."
+	::= {hillstoneTraps 46}
+
+hillstoneCmdAuthenEscapeModeStart OBJECT-IDENTITY
+        STATUS current
+        DESCRIPTION
+                "The cmd authen escape mode start."
+        ::= {hillstoneTraps 64}
+
+hillstoneCmdAuthenEscapeModeFinish OBJECT-IDENTITY
+        STATUS current
+        DESCRIPTION
+                "The cmd authen escape mode finish."
+        ::= {hillstoneTraps 65}
+
+hillstoneIfPhysicalUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to physical up OIDS."
+	::= {hillstoneTraps 66}
+
+hillstoneIfPhysicalDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to physical down OIDS."
+	::= {hillstoneTraps 67}
+
+hillstoneIfAdminUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to admin up OIDS."
+	::= {hillstoneTraps 68}
+
+hillstoneIfAdminDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to admin down OIDS."
+	::= {hillstoneTraps 69}
+
+hillstoneIfLinkUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to link up OIDS."
+	::= {hillstoneTraps 70}
+
+hillstoneIfLinkDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to link down OIDS."
+	::= {hillstoneTraps 71}
+
+hillstoneIfProtocolUp OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to protocol up OIDS."
+	::= {hillstoneTraps 72}
+
+hillstoneIfProtocolDown OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to protocol down OIDS."
+	::= {hillstoneTraps 73}
+
+hillstoneIfProtocol6Up OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to protocol6 up OIDS."
+	::= {hillstoneTraps 74}
+
+hillstoneIfProtocol6Down OBJECT-IDENTITY
+	STATUS current
+	DESCRIPTION
+		"The interface turn to protocol6 down OIDS."
+	::= {hillstoneTraps 75}
+END
+

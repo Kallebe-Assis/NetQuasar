@@ -1,0 +1,79 @@
+# NetQuasar — stack: API + UI (binário único), PostgreSQL, Redis.
+# Linux (Debian/Ubuntu/VM Proxmox): ver deploy/linux-debian/README.md
+# Pré-requisito: .env na raiz (copiar de .env.example). Verificação: bash scripts/verify-compose-env.sh
+
+name: netquasar
+
+services:
+  netquasar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Ex.: PowerShell: $env:CACHEBUST = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); docker compose build netquasar
+        CACHEBUST: ${CACHEBUST:-0}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${NETQUASAR_PUBLISH_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      # NETQUASAR_DATABASE_URL vem só do env_file (.env na raiz), não da shell do Windows
+      # (evita que `docker compose` substitua ${...} com um valor antigo na sessão e parta o :8080).
+      NETQUASAR_HTTP_ADDR: ":8080"
+      NETQUASAR_EMBEDDED_UI: "true"
+      NETQUASAR_DB_HOST: postgres
+      NETQUASAR_DB_PORT: "5432"
+      NETQUASAR_DB_USER: ${POSTGRES_USER}
+      NETQUASAR_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      NETQUASAR_DB_NAME: ${POSTGRES_DB}
+      NETQUASAR_DB_SSLMODE: disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - netquasar_net
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - netquasar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - netquasar_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - netquasar_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - netquasar_net
+
+volumes:
+  netquasar_pgdata:
+  netquasar_redis:
+
+networks:
+  netquasar_net:
+    driver: bridge

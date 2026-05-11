@@ -1,0 +1,166 @@
+-- **************************************************************************
+-- HILLSTONE-STORAGE-MIB
+--
+-- Copyright (c) 2020 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V6
+-- Description:	 Hillstone Networks STORAGE MIB Object Identifier Assignments
+-- **************************************************************************
+--
+
+HILLSTONE-STORAGE-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneStorage
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+        RowStatus		
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneStorageObjects OBJECT IDENTIFIER ::= { hillstoneStorage 1 }
+hillstoneStorageTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneStorageEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "This table contains all the Storage data."
+::= { hillstoneStorageObjects 1 }
+
+hillstoneStorageNumber OBJECT-TYPE    
+    SYNTAX Integer32    
+    MAX-ACCESS read-only    
+    STATUS current
+    DESCRIPTION "The number of storage."
+::= { hillstoneStorageObjects 2 }
+
+hillstoneStorageEntry OBJECT-TYPE
+	SYNTAX hillstoneStorageEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of STORAGE."
+INDEX { hillstoneStorageIndex }
+::= { hillstoneStorageTable 1 }
+	
+hillstoneStorageEntry ::=
+SEQUENCE { 
+	hillstoneStorageIndex
+		INTEGER,
+	hillstoneStorageType
+		INTEGER,
+	hillstoneStorageSpace
+		INTEGER,
+	hillstoneStorageSpaceFree
+		INTEGER,
+	hillstoneStorageName
+		DisplayString,
+	hillstoneStorageDescr
+		DisplayString,
+	hillstoneStoragePN
+		DisplayString,
+	hillstoneStorageSN
+		DisplayString,
+	hillstoneStorageManufacturer
+		DisplayString,
+	hillstoneStoragePluggable
+		DisplayString
+	}
+
+hillstoneStorageIndex OBJECT-TYPE
+	SYNTAX INTEGER 
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "The storage index ."
+::= { hillstoneStorageEntry 1 }
+
+hillstoneStorageType OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		NandFlash(1),
+		EMMC(2),
+		HardDisk(3)
+	}
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage type ."
+::= { hillstoneStorageEntry 2 }
+
+hillstoneStorageSpace OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage spacee ."
+::= { hillstoneStorageEntry 3 }
+
+hillstoneStorageSpaceFree OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage spacefree ."
+::= { hillstoneStorageEntry 4 }
+
+hillstoneStorageName OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage name ."
+::= { hillstoneStorageEntry 5 }
+
+hillstoneStorageDescr OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage descr ."
+::= { hillstoneStorageEntry 6 }
+
+hillstoneStoragePN OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage part number ."
+::= { hillstoneStorageEntry 7 }
+
+hillstoneStorageSN OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage serial number ."
+::= { hillstoneStorageEntry 8 }
+
+hillstoneStorageManufacturer OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The storage manufacturer ."
+::= { hillstoneStorageEntry 9 }
+
+hillstoneStoragePluggable OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The type is of whether HardDisk is pluggable ."
+::= { hillstoneStorageEntry 10 }
+
+END

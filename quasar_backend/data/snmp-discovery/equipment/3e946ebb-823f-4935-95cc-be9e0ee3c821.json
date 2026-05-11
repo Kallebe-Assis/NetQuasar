@@ -1,0 +1,107 @@
+{
+  "device_id": "3e946ebb-823f-4935-95cc-be9e0ee3c821",
+  "brand": "mikrotik",
+  "model": "RouterOS RB3011UiAS",
+  "collected_at": "2026-05-10T13:34:35Z",
+  "root_oid": "1.3.6.1.2.1",
+  "row_count": 11,
+  "truncated": false,
+  "walk_note": "request timeout (after 0 retries)",
+  "class_summary": {
+    "bridge": 0,
+    "host_resources": 0,
+    "interfaces": 4,
+    "ip": 0,
+    "other": 0,
+    "snmp": 0,
+    "system": 7,
+    "tcp_udp": 0
+  },
+  "collect_profile": {
+    "uptime_oid": "1.3.6.1.2.1.1.3.0",
+    "sysname_oid": "1.3.6.1.2.1.1.5.0",
+    "sysdescr_oid": "1.3.6.1.2.1.1.1.0"
+  },
+  "discovery_debug": {
+    "selected": {
+      "uptime_oid": "1.3.6.1.2.1.1.3.0"
+    },
+    "candidates": [
+      {
+        "oid": "",
+        "metric": "cpu",
+        "decision": "rejected",
+        "reason": "nenhum OID de CPU encontrado"
+      },
+      {
+        "oid": "",
+        "metric": "memory",
+        "decision": "rejected",
+        "reason": "nenhum par used/size identificado"
+      },
+      {
+        "oid": "",
+        "metric": "temperature",
+        "decision": "rejected",
+        "reason": "nenhum OID de temperatura confiável encontrado"
+      }
+    ]
+  },
+  "rows": [
+    {
+      "oid": "1.3.6.1.2.1.1.1.0",
+      "type": "OctetString",
+      "value": "RouterOS RB3011UiAS"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.2.0",
+      "type": "ObjectIdentifier",
+      "value": ".1.3.6.1.4.1.14988.1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.3.0",
+      "type": "TimeTicks",
+      "value": "69292300"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.4.0",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.5.0",
+      "type": "OctetString",
+      "value": "CONCENTRADOR-AGUA VIVA"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.6.0",
+      "type": "OctetString",
+      "value": "AGUA-VIVA"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.7.0",
+      "type": "Integer",
+      "value": "78"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.1.0",
+      "type": "Integer",
+      "value": "45"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.1",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.2",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.3",
+      "type": "Integer",
+      "value": "3"
+    }
+  ]
+}

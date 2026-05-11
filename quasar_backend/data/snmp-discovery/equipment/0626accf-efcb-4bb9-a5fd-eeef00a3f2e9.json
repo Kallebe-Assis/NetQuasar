@@ -1,0 +1,45 @@
+{
+  "device_id": "0626accf-efcb-4bb9-a5fd-eeef00a3f2e9",
+  "brand": "unknown",
+  "model": "unknown-model",
+  "collected_at": "2026-05-10T02:20:57Z",
+  "root_oid": "1.3.6.1.2.1",
+  "row_count": 0,
+  "truncated": false,
+  "walk_note": "request timeout (after 0 retries)",
+  "class_summary": {
+    "bridge": 0,
+    "host_resources": 0,
+    "interfaces": 0,
+    "ip": 0,
+    "other": 0,
+    "snmp": 0,
+    "system": 0,
+    "tcp_udp": 0
+  },
+  "collect_profile": {},
+  "discovery_debug": {
+    "selected": {},
+    "candidates": [
+      {
+        "oid": "",
+        "metric": "cpu",
+        "decision": "rejected",
+        "reason": "nenhum OID de CPU encontrado"
+      },
+      {
+        "oid": "",
+        "metric": "memory",
+        "decision": "rejected",
+        "reason": "nenhum par used/size identificado"
+      },
+      {
+        "oid": "",
+        "metric": "temperature",
+        "decision": "rejected",
+        "reason": "nenhum OID de temperatura confiável encontrado"
+      }
+    ]
+  },
+  "rows": []
+}

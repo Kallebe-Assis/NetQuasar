@@ -1,0 +1,216 @@
+-- ******************************************************************************
+-- HILLSTONE-NAT-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks NAT MIB Object Identifier Assignments
+-- ******************************************************************************
+--
+
+HILLSTONE-NAT-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneNat
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+-- hillstone NAT data
+hillstoneNatObjects OBJECT IDENTIFIER ::= { hillstoneNat 1 }
+
+-- hillstone SNAT data
+hillstoneSnatObjects OBJECT IDENTIFIER ::= { hillstoneNatObjects 1 }
+
+hillstoneSnatResourceTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneSnatResourceEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the snat resource."
+::= { hillstoneSnatObjects 1 }
+
+hillstoneSnatResourceEntry OBJECT-TYPE
+	SYNTAX hillstoneSnatResourceEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION ""
+INDEX { hillstoneSnatRuleId }
+::= { hillstoneSnatResourceTable 1 }
+
+hillstoneSnatResourceEntry ::=
+    SEQUENCE {
+	hillstoneSnatRuleId
+	    INTEGER,
+	hillstoneSnatTotalTcpResource
+	    INTEGER,
+	hillstoneSnatUsedTcpResource
+	    INTEGER,
+	hillstoneSnatTotalUdpResource
+	    INTEGER,
+	hillstoneSnatUsedUdpResource
+	    INTEGER,
+	hillstoneSnatTotalIcmpResource
+	    INTEGER,
+	hillstoneSnatUsedIcmpResource
+		INTEGER
+	}
+hillstoneSnatRuleId OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"snat rule id is SnatResourceIndex."
+::= { hillstoneSnatResourceEntry 1 }
+
+hillstoneSnatTotalTcpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"total tcp resource"
+::= { hillstoneSnatResourceEntry 2 }
+
+hillstoneSnatUsedTcpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"used tcp resource"
+::= { hillstoneSnatResourceEntry 3 }
+
+hillstoneSnatTotalUdpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"total udp resource"
+::= { hillstoneSnatResourceEntry 4 }
+
+hillstoneSnatUsedUdpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"used udp resource"
+::= { hillstoneSnatResourceEntry 5 }
+
+hillstoneSnatTotalIcmpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"total icmp resource"
+::= { hillstoneSnatResourceEntry 6 }
+
+hillstoneSnatUsedIcmpResource OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"used icmp resource"
+::= { hillstoneSnatResourceEntry 7 }
+
+-- hillstone DNAT data
+hillstoneDnatObjects OBJECT IDENTIFIER ::= { hillstoneNatObjects 2 }
+
+hillstoneDnatServerTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneDnatServerEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for dnat server info."
+::= { hillstoneDnatObjects 1 } 
+
+hillstoneDnatServerEntry OBJECT-TYPE
+	SYNTAX hillstoneDnatServerEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"Dnat server info entry."
+INDEX { hillstoneDnatServerIndex }
+::= { hillstoneDnatServerTable 1 }
+
+hillstoneDnatServerEntry ::= 
+    SEQUENCE {
+	hillstoneDnatServerIndex
+		INTEGER,
+	hillstoneDnatServerIPAndPort
+		DisplayString,
+	hillstoneDnatServerVrName
+		DisplayString,
+	hillstoneDnatServerConnectionNum
+		INTEGER,
+	hillstoneDnatServerStatus
+		INTEGER,
+	hillstoneDnatServerGroup
+		INTEGER
+	}
+
+hillstoneDnatServerIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server index"
+::= { hillstoneDnatServerEntry 1 }
+
+hillstoneDnatServerIPAndPort OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server IP and port info."
+::= { hillstoneDnatServerEntry 2 }
+
+hillstoneDnatServerVrName OBJECT-TYPE
+	SYNTAX DisplayString
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server vr name."
+::= { hillstoneDnatServerEntry 3 }
+
+hillstoneDnatServerConnectionNum OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server connection num."
+::= { hillstoneDnatServerEntry 4 }
+
+hillstoneDnatServerStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		unknown(0),
+		ok(1),
+		failed(2),
+		full-load(3)
+	}
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server status."
+::= { hillstoneDnatServerEntry 5 }
+
+hillstoneDnatServerGroup OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb server HA group."
+::= { hillstoneDnatServerEntry 6 }
+
+END
+

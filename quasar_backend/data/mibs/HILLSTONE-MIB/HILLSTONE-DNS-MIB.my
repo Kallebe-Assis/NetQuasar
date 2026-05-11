@@ -1,0 +1,119 @@
+-- ***********************************************************************
+-- HILLSTONE-DNS-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks DNS MIB Object Identifier Assignments
+-- ***********************************************************************
+--
+
+HILLSTONE-DNS-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneDNS
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneDnsMibObjects OBJECT IDENTIFIER ::= { hillstoneDNS 1 }
+
+
+-- static dns
+hillstoneStaticDnsServAddressTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF hillstoneStaticDnsServAddressEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"The table is used in static domain informatioin of this Static dns server"
+    ::= { hillstoneDnsMibObjects 3 }
+
+hillstoneStaticDnsServAddressEntry OBJECT-TYPE
+    SYNTAX hillstoneStaticDnsServAddressEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"The entry is used in ip address informatioin of this Static dns server"
+    INDEX { hillstoneStaticDnsServIdx }
+    ::= { hillstoneStaticDnsServAddressTable 1 }
+
+hillstoneStaticDnsServAddressEntry ::=
+    SEQUENCE{
+	hillstoneStaticDnsServIdx
+	    INTEGER,
+	hillstoneStaticDnsIpAddr
+	    IpAddress
+	}
+
+hillstoneStaticDnsServIdx OBJECT-TYPE
+    SYNTAX INTEGER
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The index of this Dns server table."
+    ::= { hillstoneStaticDnsServAddressEntry 1 }
+
+hillstoneStaticDnsIpAddr OBJECT-TYPE
+    SYNTAX IpAddress
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"Dns server ip address."
+    ::= { hillstoneStaticDnsServAddressEntry 2 }
+
+
+--  DDns
+hillstoneDynamicDnsServAddressTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF hillstoneDynamicDnsServAddressEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"The table is used in static domain informatioin of this Dynamic dns server"
+    ::= { hillstoneDnsMibObjects 4 }
+
+hillstoneDynamicDnsServAddressEntry OBJECT-TYPE
+    SYNTAX hillstoneDynamicDnsServAddressEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION
+	"The entry is used in ip address informatioin of this Dynamic dns server"
+    INDEX { hillstoneDynamicDnsServIdx }
+    ::= { hillstoneDynamicDnsServAddressTable 1 }
+
+hillstoneDynamicDnsServAddressEntry ::=
+    SEQUENCE{
+	hillstoneDynamicDnsServIdx
+	    INTEGER,
+	hillstoneDynamicDnsIpAddr
+	    IpAddress
+	}
+
+hillstoneDynamicDnsServIdx OBJECT-TYPE
+    SYNTAX INTEGER
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The index of this Dns server table."
+    ::= { hillstoneDynamicDnsServAddressEntry 1 }
+
+hillstoneDynamicDnsIpAddr OBJECT-TYPE
+    SYNTAX IpAddress
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"Dns server ip address."
+    ::= { hillstoneDynamicDnsServAddressEntry 2 }
+
+
+END

@@ -1,0 +1,126 @@
+-- **************************************************************************
+-- HILLSTONE-L3S-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V6
+-- Description:	 Hillstone Networks L3S MIB Object Identifier Assignments
+-- **************************************************************************
+--
+
+HILLSTONE-L3S-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneL3s
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+        RowStatus
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneL3sObjects OBJECT IDENTIFIER ::= { hillstoneL3s 1 }
+
+hillstoneL3sTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneL3sEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "This table contains all the L3S data."
+::= { hillstoneL3sObjects 1 }
+
+hillstoneL3sEntry OBJECT-TYPE
+	SYNTAX hillstoneL3sEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of L3s."
+INDEX { hillstoneL3sIFID }
+::= { hillstoneL3sTable 1 }
+
+hillstoneL3sEntry ::=
+SEQUENCE {
+	hillstoneL3sIFID
+		INTEGER,
+	hillstoneL3sIFname
+		DisplayString,
+	hillstoneL3sUpLossRate
+		DisplayString,
+	hillstoneL3sDownLossRate
+		DisplayString,
+	hillstoneL3sTotalLossRate
+		DisplayString,
+	hillstoneL3sDelay
+		DisplayString,
+	hillstoneL3sJitter
+		DisplayString
+	}
+
+hillstoneL3sIFID OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The L3s interface id ."
+::= { hillstoneL3sEntry 1 }
+
+hillstoneL3sIFname OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The l3s interface name ."
+::= { hillstoneL3sEntry 2 }
+
+hillstoneL3sUpLossRate OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The interface up loss rate value ."
+::= { hillstoneL3sEntry 3 }
+
+hillstoneL3sDownLossRate OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The interface down loss rate value ."
+::= { hillstoneL3sEntry 4 }
+
+hillstoneL3sTotalLossRate OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The interface total loss rate value ."
+::= { hillstoneL3sEntry 5 }
+
+hillstoneL3sDelay OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The interface delay value ."
+::= { hillstoneL3sEntry 6 }
+
+hillstoneL3sJitter OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The interface jitter value ."
+::= { hillstoneL3sEntry 7 }
+
+
+END

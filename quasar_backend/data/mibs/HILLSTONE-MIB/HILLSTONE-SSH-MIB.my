@@ -1,0 +1,53 @@
+-- ******************************************************************************
+-- HILLSTONE-SSH-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V6
+-- Description:	 Hillstone Networks SSH MIB Object Identifier Assignments
+-- ******************************************************************************
+--
+
+HILLSTONE-SSH-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneSSH
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+-- hillstone SSH data
+hillstoneSSHObjects OBJECT IDENTIFIER ::= { hillstoneSSH 1 }
+
+-- hillstone SSH Connection info
+hillstoneSSHConnectionInfo OBJECT IDENTIFIER ::= { hillstoneSSHObjects 1 }
+
+hillstoneSSHMaxConnectionNum OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	"The maximum number of SSH connections."
+::= { hillstoneSSHConnectionInfo 1 }
+
+hillstoneSSHCurrentConnectionNum OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	"The current number of SSH connections."
+::= { hillstoneSSHConnectionInfo 2 }
+
+END
+

@@ -1,0 +1,139 @@
+-- **********************************************************************
+-- HILLSTONE-POLICY-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V3
+-- Description:	 Hillstone Networks POLICY MIB Object Identifier Assignments
+-- **********************************************************************
+--
+
+HILLSTONE-POLICY-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	MODULE-IDENTITY			FROM SNMPv2-SMI
+	NetworkAddress, IpAddress,
+	Counter, Gauge, TimeTicks	FROM RFC1155-SMI
+	TruthValue                      FROM SNMPv2-TC
+	hillstonePolicy			FROM HILLSTONE-SMI;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstonePlcObjects OBJECT IDENTIFIER ::= { hillstonePolicy 1 }
+
+-- hillstone policy
+policynumber OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The number of policy interfaces."
+	::= { hillstonePlcObjects 1 }
+
+policynumbermax OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The max number of policy support interfaces."
+	::= { hillstonePlcObjects 2 }
+
+hillstonePlcAttriTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstonePlcAttriEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the policy attribute."
+::= { hillstonePlcObjects 3 }
+
+hillstonePlcAttriEntry OBJECT-TYPE
+	SYNTAX hillstonePlcAttriEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION ""
+INDEX { hillstonePlcIndex }
+::= { hillstonePlcAttriTable 1 }
+
+hillstonePlcAttriEntry ::=
+    SEQUENCE {
+	hillstonePlcIndex
+	    INTEGER,
+	hillstonePlcplcid
+	    INTEGER,
+	hillstonePlcvsysid
+	    INTEGER,
+	hillstonePlcfwbps
+	    INTEGER,
+	hillstonePlcrebps
+	    INTEGER,
+	hillstonePlcfwpps
+	    INTEGER,
+	hillstonePlcrepps
+	    INTEGER
+	}
+hillstonePlcIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 1 }
+
+hillstonePlcplcid OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 2 }
+
+hillstonePlcvsysid OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 3 }
+
+hillstonePlcfwbps OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 4 }
+
+hillstonePlcrebps OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 5 }
+
+hillstonePlcfwpps OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 6 }
+
+hillstonePlcrepps OBJECT-TYPE
+	SYNTAX INTEGER
+	MAX-ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ucIfIndex equals to PlcIndex of Plc-MIB."
+::= { hillstonePlcAttriEntry 7 }
+
+END

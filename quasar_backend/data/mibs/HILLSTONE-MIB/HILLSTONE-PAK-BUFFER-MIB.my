@@ -1,0 +1,97 @@
+-- **************************************************************************
+-- HILLSTONE-PAKBUFFER-MIB
+--
+-- Copyright (c) 2020 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V6
+-- Description:	 Hillstone Networks PAK BUFFER MIB Object Identifier Assignments
+-- **************************************************************************
+--
+
+HILLSTONE-PAK-BUFFER-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstonePakBuffer
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+        RowStatus
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstonePakBufferObjects OBJECT IDENTIFIER ::= { hillstonePakBuffer 1 }
+
+hillstonePakBufferTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstonePakBufferEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "This table contains all the Pak Buffer data."
+::= { hillstonePakBufferObjects 1 }
+
+hillstonePakBufferEntry OBJECT-TYPE
+	SYNTAX hillstonePakBufferEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of Pak Buffer."
+INDEX { hillstonePakBufferIndex }
+::= { hillstonePakBufferTable 1 }
+
+hillstonePakBufferEntry ::=
+SEQUENCE {
+	hillstonePakBufferIndex
+		INTEGER,
+	hillstonePakBufferSize
+		INTEGER,
+	hillstonePakBufferCurrentTotal
+		INTEGER,
+	hillstonePakBufferCurrentUsed
+		INTEGER
+	}
+
+hillstonePakBufferIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "The pak buffer index ."
+::= { hillstonePakBufferEntry 1 }
+
+hillstonePakBufferSize OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "The pak buffer size ."
+::= { hillstonePakBufferEntry 2 }
+
+hillstonePakBufferCurrentTotal OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The pak buffer current total ."
+::= { hillstonePakBufferEntry 3 }
+
+hillstonePakBufferCurrentUsed OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The pak buffer current used ."
+::= { hillstonePakBufferEntry 4 }
+
+
+
+END

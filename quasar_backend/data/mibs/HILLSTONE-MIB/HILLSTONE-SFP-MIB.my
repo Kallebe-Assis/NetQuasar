@@ -1,0 +1,114 @@
+-- **************************************************************************
+-- HILLSTONE-SFP-MIB
+--
+-- Copyright (c) 2009 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V1
+-- Description:	 Hillstone Networks SFP MIB Object Identifier Assignments
+-- **************************************************************************
+--
+
+HILLSTONE-SFP-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneSfp
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+        RowStatus
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+
+          DisplayString ::=
+              OCTET STRING
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+
+hillstoneSfpObjects OBJECT IDENTIFIER ::= { hillstoneSfp 1 }
+
+hillstoneSfpNumber OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The number of Sfps."
+    ::= { hillstoneSfpObjects 1 }
+
+hillstoneSfpTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hillstoneSfpEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	    "This table contains all the Sfp data."
+::= { hillstoneSfpObjects 2 }
+
+hillstoneSfpEntry OBJECT-TYPE
+	SYNTAX hillstoneSfpEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+		"Define the parameters of Sfp."
+INDEX { hillstoneSfpIndex }
+::= { hillstoneSfpTable 1 }
+
+hillstoneSfpEntry ::=
+SEQUENCE {
+	hillstoneSfpIndex
+		INTEGER,
+	hillstoneSfpName
+		DisplayString,
+	hillstoneSfpPN
+		DisplayString,
+	hillstoneSfpSN
+		DisplayString,
+	hillstoneSfpManufacturer
+		DisplayString
+	}
+
+hillstoneSfpIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The index of the Sfp."
+::= { hillstoneSfpEntry 1 }
+
+hillstoneSfpName OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The name of the Sfp."
+::= { hillstoneSfpEntry 2 }
+
+hillstoneSfpPN OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The part number of the Sfp."
+::= { hillstoneSfpEntry 3 }
+
+hillstoneSfpSN OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+	    "The serial number of the Sfp."
+::= { hillstoneSfpEntry 4 }
+
+hillstoneSfpManufacturer OBJECT-TYPE
+	SYNTAX DisplayString
+	ACCESS  read-only
+	STATUS current
+	DESCRIPTION
+	    "The Sfp Manufacturer."
+::= { hillstoneSfpEntry 5 }
+
+
+END

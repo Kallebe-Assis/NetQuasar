@@ -1,0 +1,584 @@
+-- **********************************************************************
+-- HILLSTONE-SLB-MIB
+--
+-- Copyright (c) 2019 by Hillstone Networks, Inc.
+-- All rights reserved.
+--
+-- Version:      V7
+-- Description:	 Hillstone Networks SLB MIB Object Identifier Assignments
+-- **********************************************************************
+--
+
+HILLSTONE-SLB-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+	hillstoneSlb
+		FROM HILLSTONE-SMI
+	OBJECT-TYPE
+		FROM RFC-1212
+    RowStatus,DisplayString
+		FROM SNMPv2-TC;
+
+          -- textual conventions
+          -- This data type is used to model textual information taken
+          -- from the NVT ASCII character set.  By convention, objects
+          -- with this syntax are declared as having
+          --
+          --      SIZE (0..255)
+SlbObjName ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "95t"
+    STATUS       current
+    DESCRIPTION  "A slb object name of SNMPv2-TC::DisplayString."
+    SYNTAX       OCTET STRING (SIZE (0..95))
+
+hillstoneSlbObjects OBJECT IDENTIFIER ::= { hillstoneSlb 1 }
+
+-- hillstone slb
+hillstoneSlbTotal OBJECT-GROUP
+	OBJECTS {
+		hillstoneSLBVirtualServerTotal,
+		hillstoneSLBVirtualServerAvailableTotal,
+		hillstoneSLBServerPoolTotal,
+		hillstoneSLBServerPoolAvailableTotal,
+		hillstoneSLBRealServerTotal,
+		hillstoneSLBRealServerAvailableTotal
+	}
+	STATUS current
+    DESCRIPTION
+	"The total number of slb virtual servers."
+	::= { hillstoneSlbObjects 1 }
+
+hillstoneSLBVirtualServerTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The total number of slb virtual servers."
+	::= { hillstoneSlbTotal 1 }
+
+hillstoneSLBVirtualServerAvailableTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The total number of slb available virtual servers."
+	::= { hillstoneSlbTotal 2 }
+
+hillstoneSLBServerPoolTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The total number of slb service pools."
+	::= { hillstoneSlbTotal 3 }
+
+hillstoneSLBServerPoolAvailableTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The total number of slb available service pools."
+	::= { hillstoneSlbTotal 4 }
+
+hillstoneSLBRealServerTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The max number of slb real services."
+	::= { hillstoneSlbTotal 5 }
+
+hillstoneSLBRealServerAvailableTotal OBJECT-TYPE
+    SYNTAX Integer32
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION
+	"The max number of slb available real services."
+	::= { hillstoneSlbTotal 6 }
+
+hillstoneSLBVirtualServerTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF HillstoneSLBVirtualServerEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the slb Vs statistics."
+::= { hillstoneSlbObjects 2 }
+
+hillstoneSLBVirtualServerEntry OBJECT-TYPE
+	SYNTAX HillstoneSLBVirtualServerEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"Define the parameters of Vs."
+INDEX { hillstoneSLBVirtualServerIndex }
+::= { hillstoneSLBVirtualServerTable 1 }
+
+HillstoneSLBVirtualServerEntry ::=
+    SEQUENCE {
+	hillstoneSLBVirtualServerIndex INTEGER,
+	hillstoneSLBVirtualServerName SlbObjName,
+	hillstoneSLBVirtualServerStatus  INTEGER,
+	hillstoneSLBVirtualServerConnTotal  Counter64,
+	hillstoneSLBVirtualServerCPSTotal  Counter64,
+	hillstoneSLBVirtualServerInBit  Counter64,
+	hillstoneSLBVirtualServerOutBit  Counter64,
+	hillstoneSLBVirtualServerInPacket  Counter64,
+	hillstoneSLBVirtualServerOutPacket  Counter64,
+	hillstoneSLBVirtualServerInBandWidth  Counter64,
+	hillstoneSLBVirtualServerOutBandWidth  Counter64
+	}
+hillstoneSLBVirtualServerIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Vs Index"
+::= { hillstoneSLBVirtualServerEntry 1 }
+
+hillstoneSLBVirtualServerName OBJECT-TYPE
+	SYNTAX SlbObjName
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"name of Vs"
+::= { hillstoneSLBVirtualServerEntry 2 }
+
+hillstoneSLBVirtualServerStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		none(0),
+		up(1),
+		unknown(2),
+		off_line(3),
+		disabled(4),
+		wait_down(5),
+		maintain(6)
+	}
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Vs status"
+::= { hillstoneSLBVirtualServerEntry 3 }
+
+hillstoneSLBVirtualServerConnTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Vs ConnTotal"
+::= { hillstoneSLBVirtualServerEntry 4 }
+
+hillstoneSLBVirtualServerCPSTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Vs CPSTotal"
+::= { hillstoneSLBVirtualServerEntry 5 }
+
+hillstoneSLBVirtualServerInBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bits of Vs"
+::= { hillstoneSLBVirtualServerEntry 6 }
+
+hillstoneSLBVirtualServerOutBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bits of Vs"
+::= { hillstoneSLBVirtualServerEntry 7 }
+
+hillstoneSLBVirtualServerInPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In Packets of Vs"
+::= { hillstoneSLBVirtualServerEntry 8 }
+
+hillstoneSLBVirtualServerOutPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out Packets of Vs"
+::= { hillstoneSLBVirtualServerEntry 9 }
+
+hillstoneSLBVirtualServerInBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bandwidth of Vs"
+::= { hillstoneSLBVirtualServerEntry 10 }
+
+hillstoneSLBVirtualServerOutBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bandwidth of Sp"
+::= { hillstoneSLBVirtualServerEntry 11 }
+
+hillstoneSLBServerPoolTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF HillstoneSLBServerPoolEntry
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the slb Sp statistics."
+	::= { hillstoneSlbObjects 3 }
+
+hillstoneSLBServerPoolEntry OBJECT-TYPE
+	SYNTAX HillstoneSLBServerPoolEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"Define the parameters of Sp."
+	INDEX { hillstoneSLBServerPoolIndex }
+	::= { hillstoneSLBServerPoolTable 1 }
+
+HillstoneSLBServerPoolEntry ::=
+    SEQUENCE {
+	hillstoneSLBServerPoolIndex INTEGER,
+	hillstoneSLBServerPoolName SlbObjName,
+	hillstoneSLBServerPoolStatus  INTEGER,
+	hillstoneSLBServerPoolConnTotal  Counter64,
+	hillstoneSLBServerPoolInBit  Counter64,
+	hillstoneSLBServerPoolOutBit  Counter64,
+	hillstoneSLBServerPoolInPacket  Counter64,
+	hillstoneSLBServerPoolOutPacket  Counter64
+	}
+
+hillstoneSLBServerPoolIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Sp Index"
+::= { hillstoneSLBServerPoolEntry 1 }
+
+hillstoneSLBServerPoolName OBJECT-TYPE
+	SYNTAX SlbObjName
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"name of Sp"
+::= { hillstoneSLBServerPoolEntry 2 }
+
+hillstoneSLBServerPoolStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		none(0),
+		up(1),
+		unknown(2),
+		off_line(3),
+		disabled(4),
+		wait_down(5),
+		maintain(6)
+	}
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Sp status"
+::= { hillstoneSLBServerPoolEntry 3 }
+
+hillstoneSLBServerPoolConnTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Sp ConnTotal"
+::= { hillstoneSLBServerPoolEntry 4 }
+
+hillstoneSLBServerPoolInBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bits of Sp"
+::= { hillstoneSLBServerPoolEntry 5 }
+
+hillstoneSLBServerPoolOutBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bits of Sp"
+::= { hillstoneSLBServerPoolEntry 6 }
+
+hillstoneSLBServerPoolInPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In Packets of Sp"
+::= { hillstoneSLBServerPoolEntry 7 }
+
+hillstoneSLBServerPoolOutPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out Packets of Sp"
+::= { hillstoneSLBServerPoolEntry 8 }
+
+hillstoneSLBRealServerTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF HillstoneSLBRealServerEntry
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the slb Rs statistics."
+::= { hillstoneSlbObjects 4 }
+
+hillstoneSLBRealServerEntry OBJECT-TYPE
+	SYNTAX HillstoneSLBRealServerEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"Define the parameters of Rs."
+INDEX { hillstoneSLBRealServerIndex }
+::= { hillstoneSLBRealServerTable 1 }
+
+HillstoneSLBRealServerEntry ::=
+    SEQUENCE {
+	hillstoneSLBRealServerIndex INTEGER,
+	hillstoneSLBRealServerName SlbObjName,
+	hillstoneSLBRealServerStatus  INTEGER,
+	hillstoneSLBRealServerConnTotal  Counter64,
+	hillstoneSLBRealServerCPSTotal  Counter64,
+	hillstoneSLBRealServerInBit  Counter64,
+	hillstoneSLBRealServerOutBit  Counter64,
+	hillstoneSLBRealServerInPacket  Counter64,
+	hillstoneSLBRealServerOutPacket  Counter64,
+	hillstoneSLBRealServerInBandWidth  Counter64,
+	hillstoneSLBRealServerOutBandWidth  Counter64
+	}
+hillstoneSLBRealServerIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Rs Index"
+::= { hillstoneSLBRealServerEntry 1 }
+
+hillstoneSLBRealServerName OBJECT-TYPE
+	SYNTAX SlbObjName
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"name of Rs"
+::= { hillstoneSLBRealServerEntry 2 }
+
+hillstoneSLBRealServerStatus OBJECT-TYPE
+	SYNTAX INTEGER
+	{
+		none(0),
+		up(1),
+		down(2),
+		wait_down(3),
+		wait_down(4)
+	}
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Rs status"
+::= { hillstoneSLBRealServerEntry 3 }
+
+hillstoneSLBRealServerConnTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Rs ConnTotal"
+::= { hillstoneSLBRealServerEntry 4 }
+
+hillstoneSLBRealServerCPSTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Rs CPSTotal"
+::= { hillstoneSLBRealServerEntry 5 }
+
+hillstoneSLBRealServerInBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bits of Rs"
+::= { hillstoneSLBRealServerEntry 6 }
+
+hillstoneSLBRealServerOutBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bits of Rs"
+::= { hillstoneSLBRealServerEntry 7 }
+
+hillstoneSLBRealServerInPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In Packets of Rs"
+::= { hillstoneSLBRealServerEntry 8 }
+
+hillstoneSLBRealServerOutPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out Packets of Rs"
+::= { hillstoneSLBRealServerEntry 9 }
+
+hillstoneSLBRealServerInBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bandwidth of Rs"
+::= { hillstoneSLBRealServerEntry 10 }
+
+hillstoneSLBRealServerOutBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bandwidth of Rs"
+::= { hillstoneSLBRealServerEntry 11 }
+
+hillstoneSLBServerPoolMemberTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF HillstoneSLBServerPoolMemberEntry
+	ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"The table for representing the slb Sp statistics."
+	::= { hillstoneSlbObjects 5 }
+
+hillstoneSLBServerPoolMemberEntry OBJECT-TYPE
+	SYNTAX HillstoneSLBServerPoolMemberEntry
+	MAX-ACCESS not-accessible
+	STATUS current
+	DESCRIPTION
+	"Define the parameters of Sp."
+	INDEX { hillstoneSLBServerPoolMemberSpIndex,
+			hillstoneSLBServerPoolMemberRsIndex}
+::= { hillstoneSLBServerPoolMemberTable 1 }
+
+HillstoneSLBServerPoolMemberEntry ::=
+    SEQUENCE {
+	hillstoneSLBServerPoolMemberSpIndex INTEGER,
+	hillstoneSLBServerPoolMemberRsIndex INTEGER,
+	hillstoneSLBServerPoolMemberName SlbObjName,
+	hillstoneSLBServerPoolMemberaddress OCTET STRING,
+	hillstoneSLBServerPoolMemberPort INTEGER,
+	hillstoneSLBServerPoolMemberConnTotal  Counter64,
+	hillstoneSLBServerPoolMemberInBit  Counter64,
+	hillstoneSLBServerPoolMemberOutBit  Counter64,
+	hillstoneSLBServerPoolMemberInPacket  Counter64,
+	hillstoneSLBServerPoolMemberOutPacket  Counter64,
+	hillstoneSLBServerPoolMemberInBandWidth  Counter64,
+	hillstoneSLBServerPoolMemberOutBandWidth  Counter64
+	}
+
+hillstoneSLBServerPoolMemberSpIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Sp Member Sp Index"
+::= { hillstoneSLBServerPoolMemberEntry 1 }
+
+hillstoneSLBServerPoolMemberRsIndex OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Slb Sp Member Rs Index"
+::= { hillstoneSLBServerPoolMemberEntry 2 }
+
+hillstoneSLBServerPoolMemberName OBJECT-TYPE
+	SYNTAX SlbObjName
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"name of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 3 }
+
+hillstoneSLBServerPoolMemberaddress OBJECT-TYPE
+	SYNTAX OCTET STRING
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"address of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 4 }
+
+hillstoneSLBServerPoolMemberPort OBJECT-TYPE
+	SYNTAX INTEGER
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"port of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 5 }
+
+hillstoneSLBServerPoolMemberConnTotal OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"ConnTotal of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 6 }
+
+hillstoneSLBServerPoolMemberInBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In bits of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 7 }
+
+hillstoneSLBServerPoolMemberOutBit OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out bits of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 8 }
+
+hillstoneSLBServerPoolMemberInPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In Packets of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 9 }
+
+hillstoneSLBServerPoolMemberOutPacket OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out Packets of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 10 }
+
+hillstoneSLBServerPoolMemberInBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"In Packets of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 11 }
+
+hillstoneSLBServerPoolMemberOutBandWidth OBJECT-TYPE
+	SYNTAX Counter64
+	ACCESS read-only
+	STATUS current
+	DESCRIPTION
+		"Out Packets of Sp Member"
+::= { hillstoneSLBServerPoolMemberEntry 12 }
+END
