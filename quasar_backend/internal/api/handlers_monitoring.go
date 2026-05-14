@@ -190,17 +190,18 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 	var mode string
 	var okC, failC int
 	var runtimeUpdated time.Time
+	var lastAlertsChange *time.Time
 	err := s.DB().QueryRow(r.Context(), `
 		SELECT is_running, last_started_at, last_stopped_at, last_internet_check_at, last_internet_check_ok, last_internet_check_detail,
 			COALESCE(monitoring_mode, 'off'), last_cycle_at,
 			last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at, last_olt_if_derived_cycle_at,
 			COALESCE(last_cycle_ok_count, 0), COALESCE(last_cycle_fail_count, 0),
 			current_activity, activity_started_at, activity_updated_at, last_activity, last_activity_finished_at,
-			updated_at
+			updated_at, last_alerts_change_at
 		FROM monitoring_runtime WHERE id = 1
 	`).Scan(&running, &started, &stopped, &lastCheck, &lastOK, &detail, &mode, &lastCycle,
 		&lastLatency, &lastTelemetry, &lastIface, &lastOlt,
-		&okC, &failC, &activity, &activityStarted, &activityUpdated, &lastActivity, &lastActivityFinished, &runtimeUpdated)
+		&okC, &failC, &activity, &activityStarted, &activityUpdated, &lastActivity, &lastActivityFinished, &runtimeUpdated, &lastAlertsChange)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -227,6 +228,7 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 		"last_activity":              lastActivity,
 		"last_activity_finished_at":  lastActivityFinished,
 		"runtime_updated_at":         runtimeUpdated,
+		"last_alerts_change_at":      lastAlertsChange,
 		"persistencia":               "O monitoramento é estado no servidor (Postgres + worker); não depende da tela aberta no cliente.",
 	}
 	writeJSON(w, http.StatusOK, out)

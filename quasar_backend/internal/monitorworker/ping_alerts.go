@@ -15,6 +15,53 @@ import (
 
 const alertTypePingUnreachable = "ping_unreachable"
 
+// repairMissingPingUnreachableAlerts cria alertas em aberto para equipamentos já offline no cache
+// (streak >= limiar) sem instância aberta — cobre falhas anteriores ao fix do limiar consecutivo.
+func repairMissingPingUnreachableAlerts(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, threshold int) {
+	if pool == nil || threshold < 1 {
+		return
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT d.id, COALESCE(TRIM(d.description), ''), host(d.ip)::text, COALESCE(c.detail::text, '{}')
+		FROM device_probe_cache c
+		JOIN devices d ON d.id = c.device_id
+		WHERE c.reach_ok = false
+		  AND COALESCE(c.ping_fail_streak, 0) >= $1
+		  AND d.ip IS NOT NULL
+		  AND TRIM(BOTH FROM host(d.ip)::text) <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM alert_instances ai
+			WHERE ai.device_id = c.device_id
+			  AND ai.alert_type = $2
+			  AND ai.closed_at IS NULL
+		  )
+	`, threshold, alertTypePingUnreachable)
+	if err != nil {
+		if log != nil {
+			log.Error().Err(err).Msg("repair ping_unreachable: query")
+		}
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var desc, ip, detailText string
+		if err := rows.Scan(&id, &desc, &ip, &detailText); err != nil {
+			continue
+		}
+		probe := map[string]any{"ok": false}
+		if strings.TrimSpace(detailText) != "" {
+			var root map[string]any
+			if json.Unmarshal([]byte(detailText), &root) == nil {
+				if rv, ok := root["reachability"].(map[string]any); ok {
+					probe = rv
+				}
+			}
+		}
+		InsertPingUnreachableIfNew(ctx, pool, log, id, desc, ip, probe, "repair_streak")
+	}
+}
+
 // InsertPingUnreachableIfNew grava alerta ping_unreachable em aberto (se ainda não existir) e notifica Telegram (monitorização) quando novo.
 func InsertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
 	metaSource = strings.TrimSpace(metaSource)

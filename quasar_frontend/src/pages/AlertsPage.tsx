@@ -51,10 +51,12 @@ type HistoryEvent = {
 type MonStateLite = {
   /** Atualiza em cada passo/ciclo do worker; usado para disparar refresh da tela de alertas. */
   runtime_updated_at?: string | null;
+  /** Dispara quando qualquer alert_instances é criado, fechado ou actualizado (trigger Postgres). */
+  last_alerts_change_at?: string | null;
 };
 
 /** Recarrega alertas periodicamente — mesma instância pode ter message/meta novos (ex.: latência 243→210). */
-const ALERTS_ACTIVE_REFRESH_MS = 5_000;
+const ALERTS_ACTIVE_REFRESH_MS = 2_500;
 const ALERTS_HISTORY_REFRESH_MS = 45_000;
 
 export function AlertsPage() {
@@ -96,12 +98,12 @@ export function AlertsPage() {
   });
 
   useEffect(() => {
-    // Quando houver nova atividade do worker (coleta OLT/PON), força atualização de alertas.
-    if (!monState.data?.runtime_updated_at) return;
+    // Worker ou alteração em alert_instances (trigger) — força lista de alertas.
+    if (!monState.data?.runtime_updated_at && !monState.data?.last_alerts_change_at) return;
     void qc.invalidateQueries({ queryKey: ["alerts-active"] });
     void qc.invalidateQueries({ queryKey: ["alerts-hist"] });
     void qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
-  }, [qc, monState.data?.runtime_updated_at]);
+  }, [qc, monState.data?.runtime_updated_at, monState.data?.last_alerts_change_at]);
 
   const active = useQuery({
     queryKey: ["alerts-active", sev, typ, limitActive],
@@ -113,14 +115,13 @@ export function AlertsPage() {
       p.set("limit", String(lim));
       return apiFetch<{ alerts: ActiveAlert[] }>(`/api/v1/alerts/active?${p.toString()}`);
     },
-    enabled: tab === "active",
     staleTime: 0,
     refetchOnMount: "always",
     /** Reverter o default global (main.tsx desactiva refetch ao foco). */
     refetchOnWindowFocus: true,
-    /** Polling mesmo com outro separador do browser em primeiro plano — a lista reflete colectas recentes. */
-    refetchInterval: tab === "active" ? ALERTS_ACTIVE_REFRESH_MS : false,
-    refetchIntervalInBackground: tab === "active",
+    /** Polling contínuo na página Alertas — lista activa actualiza mesmo no separador Histórico. */
+    refetchInterval: ALERTS_ACTIVE_REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
 
   const histRange = useMemo(() => {

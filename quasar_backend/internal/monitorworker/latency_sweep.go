@@ -95,8 +95,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				"latency_source": src,
 			}
 
-			wasReachable := !prevSnap.HasRow || prevSnap.ReachOK
-			if !reachOK && wasReachable && streakAfter >= cfg.OfflineThreshold {
+			if shouldOpenPingUnreachableAlert(reachOK, streakAfter, cfg.OfflineThreshold) {
 				InsertPingUnreachableIfNew(ctx, pool, log, id, description, host, probe, src)
 			}
 			if reachOK {
@@ -183,6 +182,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	}
 
 	resolvePingUnreachableForDevices(ctx, pool, log, recoveredPing)
+	repairMissingPingUnreachableAlerts(ctx, pool, log, cfg.OfflineThreshold)
 
 	_, err = pool.Exec(ctx, `
 		UPDATE monitoring_runtime SET

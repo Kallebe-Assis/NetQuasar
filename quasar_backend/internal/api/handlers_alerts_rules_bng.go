@@ -114,7 +114,7 @@ func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
 		WHERE a.closed_at IS NULL
 		AND a.alert_type = 'ping_unreachable'
 		AND EXISTS (
-			SELECT 1 FROM device_probe_cache c WHERE c.device_id = a.device_id AND c.ok = true
+			SELECT 1 FROM device_probe_cache c WHERE c.device_id = a.device_id AND c.reach_ok = true
 		)
 		RETURNING a.id, a.alert_type, a.message
 	`)
