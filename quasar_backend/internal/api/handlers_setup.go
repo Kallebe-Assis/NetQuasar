@@ -12,7 +12,13 @@ import (
 
 func (s *Server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	configured := s.DB() != nil
-	writeJSON(w, http.StatusOK, map[string]any{"database_configured": configured})
+	out := map[string]any{"database_configured": configured, "ui_theme": uiThemeDark}
+	if configured {
+		if theme, _, err := loadUITheme(r.Context(), s.DB()); err == nil {
+			out["ui_theme"] = theme
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) setupDatabaseTest(w http.ResponseWriter, r *http.Request) {

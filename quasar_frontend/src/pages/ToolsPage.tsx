@@ -12,6 +12,7 @@ import {
   ToolOutputError,
   WalkJobQueuedOutput,
 } from "../components/ToolsOutputViews";
+import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
 
@@ -417,11 +418,15 @@ export function ToolsPage() {
   return (
     <div className="tools-page">
       <ToolsPageToastHost toast={toast} onDismiss={dismiss} />
-      <h1>Ferramentas de rede</h1>
-      <p className="tools-page__lead">
-        Diagnóstico executado no <strong>servidor NetQuasar</strong>. Cada ação mostra um aviso no canto superior direito (em curso, sucesso ou erro). Walks SNMP
-        correm em segundo plano — guarde o identificador do job para consultar linhas e descobertas.
-      </p>
+      <h1 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+        Ferramentas de rede
+        <InfoHint label="Sobre as ferramentas de rede">
+          <p>
+            Diagnóstico executado no <strong>servidor NetQuasar</strong>. Cada ação mostra um aviso no canto superior direito (em curso, sucesso ou erro).
+            Walks SNMP correm em segundo plano — guarde o identificador do job para consultar linhas e descobertas.
+          </p>
+        </InfoHint>
+      </h1>
 
       <div className="tabs" style={{ flexWrap: "wrap", marginBottom: "0.35rem" }}>
         {(

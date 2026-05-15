@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { InfoHint } from "../components/InfoHint";
 import {
   Bar,
   BarChart,
@@ -291,12 +292,15 @@ export function DashboardPage() {
 
   return (
     <>
-      <h1>Dashboard analítico</h1>
-      <p style={{ color: "var(--muted)", marginTop: 0, maxWidth: 960 }}>
-        Visão agregada dos últimos{" "}
-        <strong>{dash.data?.days ?? days}</strong> dias (dados materializados: ping, telemetria, alertas, snapshots). Ajuste o período
-        para comparar tendências. Secções independentes — pode fazer scroll por tema.
-      </p>
+      <h1>
+        Dashboard analítico
+        <InfoHint label="Sobre o dashboard analítico">
+          <p>
+            Visão agregada dos últimos <strong>{dash.data?.days ?? days}</strong> dias (dados materializados: ping, telemetria, alertas,
+            snapshots). Ajuste o período para comparar tendências. Secções independentes — pode fazer scroll por tema.
+          </p>
+        </InfoHint>
+      </h1>
 
       <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
         <label style={{ fontSize: 12, color: "var(--muted)" }}>

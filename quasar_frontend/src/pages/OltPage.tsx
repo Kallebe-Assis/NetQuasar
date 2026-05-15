@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
+import { EM_DASH, format1f, formatNullable, formatNum } from "../lib/formatDisplay";
+import { formatBitrate } from "../lib/formatBitrate";
+import { invalidateAlertListQueries } from "../lib/queryKeys";
 import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow } from "../lib/deviceReportHelpers";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 
@@ -94,24 +98,12 @@ function IconExternalLinkSubtle({ size = 16 }: { size?: number }) {
 
 function ifDisplayLabel(r: IfRow): string {
   const s = String(r.display_name ?? r.if_name ?? r.descr ?? "").trim();
-  return s || "—";
-}
-
-function fmtNum(n: number | undefined | null): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return String(Math.round(Number(n)));
-}
-
-function fmt1f(n: number | undefined | null): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return Number(n).toFixed(1);
+  return s || EM_DASH;
 }
 
 function fmtVsolCell(v: unknown): string {
-  if (v == null) return "—";
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  const s = String(v).trim();
-  return s || "—";
+  return formatNullable(v);
 }
 
 function badgeOper(s: string | undefined): string {
@@ -122,23 +114,12 @@ function badgeOper(s: string | undefined): string {
 }
 
 function fmtOctCell(v: number | null | undefined, saturated?: boolean): string {
-  if (saturated && v == null) return "— (32b)";
-  if (v == null || !Number.isFinite(Number(v))) return "—";
+  if (saturated && v == null) return `${EM_DASH} (32b)`;
+  if (v == null || !Number.isFinite(Number(v))) return EM_DASH;
   return Number(v).toLocaleString("pt-PT");
 }
 
-function fmtBps(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(Number(v)) || Number(v) < 0) return "—";
-  const units = ["b/s", "Kb/s", "Mb/s", "Gb/s", "Tb/s"];
-  let n = Number(v);
-  let i = 0;
-  while (n >= 1000 && i < units.length - 1) {
-    n /= 1000;
-    i++;
-  }
-  const digits = n >= 100 ? 0 : n >= 10 ? 1 : 2;
-  return `${n.toFixed(digits)} ${units[i]}`;
-}
+const fmtBps = (v: number | null | undefined) => formatBitrate(v, "perSecond");
 
 function isPonRow(r: IfRow): boolean {
   const kind = String(r.olt_iface_kind ?? "").toLowerCase();
@@ -336,9 +317,7 @@ export function OltPage() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ["olt-devices"] });
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
-      qc.invalidateQueries({ queryKey: ["alerts-active"] });
-      qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-      qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+      void invalidateAlertListQueries(qc);
     },
   });
 
@@ -346,9 +325,7 @@ export function OltPage() {
     mutationFn: (id: string) => apiFetch(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} }),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
-      qc.invalidateQueries({ queryKey: ["alerts-active"] });
-      qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-      qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+      void invalidateAlertListQueries(qc);
     },
   });
 
@@ -393,9 +370,7 @@ export function OltPage() {
       setBulkLog((m) => [...m, "Concluído."]);
       await qc.invalidateQueries({ queryKey: ["olt-devices"] });
       if (sel) await qc.invalidateQueries({ queryKey: ["olt-device", sel] });
-      await qc.invalidateQueries({ queryKey: ["alerts-active"] });
-      await qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-      await qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+      await invalidateAlertListQueries(qc);
     } catch (e) {
       setBulkLog((m) => [...m, (e as Error).message || String(e)]);
     } finally {
@@ -522,7 +497,18 @@ export function OltPage() {
     <>
       <div className="row" style={{ flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <div className="page-heading" style={{ marginBottom: 0, flex: "1 1 280px" }}>
-          <h1>OLT — PONs, ONUs e interfaces</h1>
+          <h1>
+            OLT — PONs, ONUs e interfaces
+            <InfoHint label="Sobre dados OLT e PON">
+              <p>
+                Equipamentos com categoria <code className="mono">olt</code>. Os totais por PON em <code className="mono">pons</code> vêm do{" "}
+                <strong>SNMP OLT</strong> (MIB <code className="mono">gOnuAuthList</code>, refresh OLT) ou são <strong>derivados das interfaces</strong> (
+                <code className="mono">GPON0/1</code> + <code className="mono">GPON01ONU…</code>) após <strong>Actualizar interfaces</strong> — online/offline por{" "}
+                <code className="mono">ifOperStatus</code>. O walk OLT usa <code className="mono">1.3.6.1.4.1.37950.1.1.6.1.1</code>. IF-MIB + ifXTable +
+                ENTITY-SENSOR nas interfaces.
+              </p>
+            </InfoHint>
+          </h1>
           <PageCountPill label="OLTs" count={rows.length} />
         </div>
         {canMutate ? (
@@ -694,13 +680,6 @@ export function OltPage() {
           </div>
         </div>
       )}
-      <p style={{ color: "var(--muted)", marginTop: 0, maxWidth: 960 }}>
-        Equipamentos com categoria <code className="mono">olt</code>. Os totais por PON em <code className="mono">pons</code> vêm do <strong>SNMP OLT</strong> (MIB <code className="mono">gOnuAuthList</code>, refresh OLT) ou são{" "}
-        <strong>derivados das interfaces</strong> (<code className="mono">GPON0/1</code> + <code className="mono">GPON01ONU…</code>) após{" "}
-        <strong>Actualizar interfaces</strong> — online/offline por <code className="mono">ifOperStatus</code>. O walk OLT usa{" "}
-        <code className="mono">1.3.6.1.4.1.37950.1.1.6.1.1</code>. IF-MIB + ifXTable + ENTITY-SENSOR nas interfaces.
-      </p>
-
       <style>
         {`
           @keyframes olt-fade-slide-in {
@@ -717,7 +696,7 @@ export function OltPage() {
             color: inherit;
             cursor: pointer;
           }
-          .olt-update-menu__item:hover { background: rgba(255,255,255,0.08); }
+          .olt-update-menu__item:hover { background: var(--hover-bg-menu); }
           .olt-update-menu__item:disabled { opacity: 0.5; cursor: not-allowed; }
           .olt-anim-enter { animation: olt-fade-slide-in 220ms ease; }
           .olt-detail-close {
@@ -759,10 +738,10 @@ export function OltPage() {
                   <tr key={r.id} onClick={() => setSel(r.id)} style={{ cursor: "pointer" }}>
                     <td>{r.description ?? "—"}</td>
                     <td className="mono">{r.ip ?? "—"}</td>
-                    <td className="mono">{fmtNum(c?.pon_count)}</td>
-                    <td className="mono">{fmtNum(c?.onu_total_sum)}</td>
-                    <td className="mono">{fmtNum(c?.onu_online_sum)}</td>
-                    <td className="mono">{fmtNum(c?.onu_offline_sum)}</td>
+                    <td className="mono">{formatNum(c?.pon_count)}</td>
+                    <td className="mono">{formatNum(c?.onu_total_sum)}</td>
+                    <td className="mono">{formatNum(c?.onu_online_sum)}</td>
+                    <td className="mono">{formatNum(c?.onu_offline_sum)}</td>
                     <td className="mono">{formatCollectedPt(r.olt_snapshot_at)}</td>
                   </tr>
                 );
@@ -804,8 +783,8 @@ export function OltPage() {
                     <tr key={r.id} onClick={() => setSel(r.id)} style={{ cursor: "pointer", background: sel === r.id ? "var(--panel2)" : undefined }}>
                       <td>{r.description ?? "—"}</td>
                       <td className="mono">{r.ip ?? "—"}</td>
-                      <td className="mono">{fmtNum(c?.pon_count)}</td>
-                      <td className="mono">{fmtNum(c?.onu_total_sum)}</td>
+                      <td className="mono">{formatNum(c?.pon_count)}</td>
+                      <td className="mono">{formatNum(c?.onu_total_sum)}</td>
                       <td className="mono" style={{ color: "var(--muted)" }}>{formatCollectedPt(r.olt_snapshot_at)}</td>
                     </tr>
                   );
@@ -886,10 +865,10 @@ export function OltPage() {
                 {refreshIf.isError && <div className="msg msg--err">{(refreshIf.error as Error).message}</div>}
 
                 <div className="grid-cards" style={{ marginTop: 12 }}>
-                  <div className="stat"><div className="stat__k">PONs (linhas / resumo)</div><div className="stat__v">{fmtNum(comp?.pon_count)}</div></div>
-                  <div className="stat"><div className="stat__k">ONUs total (soma PONs)</div><div className="stat__v">{fmtNum(comp?.onu_total_sum)}</div></div>
-                  <div className="stat"><div className="stat__k">Online</div><div className="stat__v">{fmtNum(comp?.onu_online_sum)}</div></div>
-                  <div className="stat"><div className="stat__k">Offline</div><div className="stat__v">{fmtNum(comp?.onu_offline_sum)}</div></div>
+                  <div className="stat"><div className="stat__k">PONs (linhas / resumo)</div><div className="stat__v">{formatNum(comp?.pon_count)}</div></div>
+                  <div className="stat"><div className="stat__k">ONUs total (soma PONs)</div><div className="stat__v">{formatNum(comp?.onu_total_sum)}</div></div>
+                  <div className="stat"><div className="stat__k">Online</div><div className="stat__v">{formatNum(comp?.onu_online_sum)}</div></div>
+                  <div className="stat"><div className="stat__k">Offline</div><div className="stat__v">{formatNum(comp?.onu_offline_sum)}</div></div>
                 </div>
 
                 <h2 style={{ marginTop: 18 }}>PONs — TX e ONUs por porta</h2>
@@ -911,10 +890,10 @@ export function OltPage() {
                         <tr key={`${p.id}-${i}`}>
                           <td className="mono">{p.id || `#${i}`}</td>
                           <td>{p.name ?? "—"}</td>
-                          <td className="mono">{p.tx_dbm != null ? fmt1f(p.tx_dbm) : "—"}</td>
-                          <td className="mono">{fmtNum(p.onu_total)}</td>
-                          <td className="mono">{fmtNum(p.onu_online)}</td>
-                          <td className="mono">{fmtNum(p.onu_offline)}</td>
+                          <td className="mono">{p.tx_dbm != null ? format1f(p.tx_dbm) : "—"}</td>
+                          <td className="mono">{formatNum(p.onu_total)}</td>
+                          <td className="mono">{formatNum(p.onu_online)}</td>
+                          <td className="mono">{formatNum(p.onu_offline)}</td>
                           <td><span className={badgeOper(p.status)}>{p.status ?? "—"}</span></td>
                         </tr>
                       ))}

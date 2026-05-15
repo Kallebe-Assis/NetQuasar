@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { EquipmentMap, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
+import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
 
@@ -199,13 +200,19 @@ export function MapPage() {
         </div>
       ) : null}
       <div className="page-heading">
-        <h1>Mapa</h1>
+        <h1>
+          Mapa
+          <InfoHint label="Como usar o mapa">
+            <p>
+              Equipamentos com coordenadas. POP e categoria pedem os pontos ao servidor; <strong>Vistas</strong> escolhe agrupamento fixo,
+              desagrupado ou cores de estado. Em <strong>Agrupado</strong>, a densidade dos grupos segue o zoom (aproximar separa os pins); clique num
+              grupo para expandir.
+            </p>
+            <p>Seleccione um equipamento na lista, no mapa ou no filtro «Equipamento».</p>
+          </InfoHint>
+        </h1>
         <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Equipamentos com coordenadas. POP e categoria pedem os pontos ao servidor; <strong>Vistas</strong> escolhe agrupamento fixo, desagrupado ou cores de estado. Em <strong>Agrupado</strong>, a
-        densidade dos grupos segue o zoom (aproximar separa os pins); clique num grupo para expandir.
-      </p>
 
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
@@ -351,11 +358,11 @@ export function MapPage() {
                   {displayedPoints.map((p) => (
                     <tr
                       key={p.id}
+                      className={selId === p.id ? "row-interactive row-interactive--selected" : "row-interactive"}
                       onClick={() => {
                         setSelId(p.id);
                         setMapDeviceSelect(p.id);
                       }}
-                      style={{ cursor: "pointer", background: selId === p.id ? "var(--panel2)" : undefined }}
                     >
                       <td>{p.description}</td>
                       <td>{p.category}</td>
@@ -400,7 +407,6 @@ export function MapPage() {
 
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Detalhe</h2>
-          {!selId && <p style={{ color: "var(--muted)" }}>Seleccione um equipamento na lista, no mapa ou no filtro «Equipamento».</p>}
           {selId && detail.isLoading && <p>A carregar…</p>}
           {selId && detail.isError && <div className="msg msg--err">{(detail.error as Error).message}</div>}
           {selId && detail.data && (

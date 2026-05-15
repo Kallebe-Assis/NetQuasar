@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { clearSession, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
 import { apiFetch } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
 
 const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
   { to: "/dashboard", label: "Dashboard", icons: [ChartPie] },
@@ -42,7 +43,7 @@ const ICON_STROKE = 2;
 
 export function ShellLayout() {
   const monState = useQuery({
-    queryKey: ["mon-state-global-indicator"],
+    queryKey: queryKeys.monStateGlobal,
     queryFn: () =>
       apiFetch<{
         is_running?: boolean;

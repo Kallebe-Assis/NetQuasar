@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type CSSProperties } from "react";
 import { Blend, ClockFading, Cpu, Sun, ThermometerSun } from "lucide-react";
+import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
+import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
+import { AppearancePanel } from "./settings/AppearancePanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -9,6 +12,7 @@ type SettingsTab =
   | "logs"
   | "users"
   | "alerts"
+  | "appearance"
   | "connection"
   | "telegram"
   | "olt"
@@ -29,6 +33,7 @@ export function SettingsPage() {
             ["logs", "Auditoria"],
             ["users", "Usuários"],
             ["alerts", "Alertas"],
+            ["appearance", "Aparência"],
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
             ["olt", "OLT vendors"],
@@ -49,6 +54,7 @@ export function SettingsPage() {
           <AlertThresholdsPanel />
         </>
       )}
+      {tab === "appearance" && <AppearancePanel />}
       {tab === "connection" && <ConnectionPanel />}
       {tab === "telegram" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -353,15 +359,35 @@ function DatabasePanel() {
 
   return (
     <div className="card">
-      <h2>Base de dados (PostgreSQL)</h2>
-      <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
-        Estado: ligação em uso é <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições guardadas"}</strong>
-        {" · "}
-        Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já guardada" : "ainda não guardada"}</strong>
-      </p>
-      <p style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.45 }}>
-        Preencha os campos abaixo <strong>ou</strong> só o campo “URL completa”. Use “Testar ligação” para confirmar o acesso sem alterar o sistema; use “Guardar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
-      </p>
+      <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+        Base de dados (PostgreSQL)
+        <InfoHint label="Ligação à base de dados">
+          <p>
+            Estado: ligação em uso é{" "}
+            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições guardadas"}</strong>
+            {" · "}
+            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já guardada" : "ainda não guardada"}</strong>
+          </p>
+          <p>
+            Preencha os campos abaixo <strong>ou</strong> só o campo “URL completa”. Use “Testar ligação” para confirmar o acesso sem alterar o sistema; use
+            “Guardar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
+          </p>
+          <p>
+            O host <span className="mono">db.…supabase.co</span> pode resolver só para IPv6; no Docker use o <strong>Session pooler</strong> (ex.:{" "}
+            <span className="mono">aws-1-sa-east-1.pooler.supabase.com</span> — o painel indica <span className="mono">aws-0-</span> ou{" "}
+            <span className="mono">aws-1-</span>) em “URL completa” ou nos campos. Com <strong>require</strong>, o teste usa o certificado CA incluído para ligações{" "}
+            <span className="mono">db.*.supabase.co</span>.
+          </p>
+          <p>
+            Se preencher o campo URL completa, o teste usa só a URL (não precisa dos campos de cima para testar). Para guardar uma nova URL é necessário
+            marcar “Aplicar já esta ligação”.
+          </p>
+          <p>
+            <strong>Docker / sem IPv6:</strong> cole a URI do <strong>Session pooler</strong> (Connect → Session): host <span className="mono">aws-0-</span> ou{" "}
+            <span className="mono">aws-1-REGIÃO.pooler.supabase.com</span>, utilizador <span className="mono">postgres.SEU_REF</span>.
+          </p>
+        </InfoHint>
+      </h2>
 
       <h3 style={{ fontSize: 14, marginTop: 16, marginBottom: 8 }}>Dados da ligação</h3>
       <div className="field" style={hostFieldStyle}>
@@ -422,9 +448,6 @@ function DatabasePanel() {
             </span>
           </label>
         </div>
-        <p style={{ color: "var(--muted)", fontSize: 11, margin: "8px 0 0", lineHeight: 1.4 }}>
-          O host <span className="mono">db.…supabase.co</span> pode resolver só para IPv6; no Docker use o <strong>Session pooler</strong> (ex.: <span className="mono">aws-1-sa-east-1.pooler.supabase.com</span> — o painel indica <span className="mono">aws-0-</span> ou <span className="mono">aws-1-</span>) em “URL completa” ou nos campos. Com <strong>require</strong>, o teste usa o certificado CA incluído para ligações <span className="mono">db.*.supabase.co</span>.
-        </p>
       </div>
       <div className="field" style={fieldStyle}>
         <label htmlFor="db-pass">Palavra-passe da base de dados</label>
@@ -438,11 +461,6 @@ function DatabasePanel() {
       <div className="field" style={fieldStyle}>
         <label htmlFor="db-url">Endereço completo (connection string)</label>
         <input id="db-url" className="input mono" value={dbUrl} onChange={(e) => setDbUrl(e.target.value)} placeholder="postgres://utilizador:palavra-passe@servidor:5432/nome_da_base?sslmode=require" spellCheck={false} autoComplete="off" />
-        <p style={{ color: "var(--muted)", fontSize: 11, margin: "6px 0 0", lineHeight: 1.4 }}>
-          Se preencher este campo, o teste usa só a URL (não precisa dos campos de cima para testar). Para guardar uma nova URL é necessário marcar “Aplicar já esta ligação”.
-          <br />
-          <strong>Docker / sem IPv6:</strong> cole a URI do <strong>Session pooler</strong> (Connect → Session): host <span className="mono">aws-0-</span> ou <span className="mono">aws-1-REGIÃO.pooler.supabase.com</span>, utilizador <span className="mono">postgres.SEU_REF</span>.
-        </p>
       </div>
 
       <label className="row" style={{ gap: 10, marginTop: 16, alignItems: "flex-start", maxWidth: 560 }}>
@@ -830,7 +848,7 @@ type MonitoringIntervalsPayload = {
 function MonitoringPingIntervalsCard() {
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["mon-intervals"],
+    queryKey: queryKeys.monIntervals,
     queryFn: () => apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals"),
   });
   const [ps, setPs] = useState("");
@@ -856,7 +874,7 @@ function MonitoringPingIntervalsCard() {
     mutationFn: (body: Partial<MonitoringIntervalsPayload>) =>
       apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals", { method: "PATCH", json: body }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["mon-intervals"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.monIntervals });
       save.reset();
     },
   });
@@ -1096,11 +1114,9 @@ function AlertThresholdsPanel() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["settings-alert-threshold-rules"] });
-      qc.invalidateQueries({ queryKey: ["alert-rules"] });
-      void qc.invalidateQueries({ queryKey: ["alerts-active"] });
-      void qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-      void qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+      qc.invalidateQueries({ queryKey: queryKeys.settingsAlertThresholdRules });
+      qc.invalidateQueries({ queryKey: queryKeys.alertRules });
+      void invalidateAlertListQueries(qc);
     },
   });
 
@@ -1881,11 +1897,15 @@ function ConnectionPanel() {
         <div className="field" style={{ minWidth: 220 }}><label>Utilizador SSH</label><input className="input" value={su} onChange={(e) => setSu(e.target.value)} /></div>
         <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe SSH</label><input className="input" type="password" value={sp} onChange={(e) => setSp(e.target.value)} /></div>
       </div>
-      <h3 style={{ marginTop: 14 }}>Leituras SNMP preferidas por tipo de equipamento</h3>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Se preencher, estes endereços têm prioridade sobre a descoberta automática. Em «CPU utilizada» indique a carga; em «CPU disponível» use normalmente a
-        percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e só depois deriva a partir da disponível (100 − idle).
-      </p>
+      <h3 style={{ marginTop: 14, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+        Leituras SNMP preferidas por tipo de equipamento
+        <InfoHint label="OIDs SNMP preferidos">
+          <p>
+            Se preencher, estes endereços têm prioridade sobre a descoberta automática. Em «CPU utilizada» indique a carga; em «CPU disponível» use normalmente
+            a percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e só depois deriva a partir da disponível (100 − idle).
+          </p>
+        </InfoHint>
+      </h3>
       <div className="field"><label>OLT — CPU, memória, temperatura, tempo ligado</label></div>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="field">

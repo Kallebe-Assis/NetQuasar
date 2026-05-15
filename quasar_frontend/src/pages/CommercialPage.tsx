@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
@@ -538,10 +539,14 @@ export function CommercialPage() {
   return (
     <>
       <div className="page-heading">
-        <h1>Base comercial</h1>
+        <h1>
+          Base comercial
+          <InfoHint label="Sobre a base comercial">
+            <p>Localidades, registos mensais por localidade e totais agregados (opcionalmente filtrados por mês).</p>
+          </InfoHint>
+        </h1>
         <PageCountPill label="Registros comerciais" count={(recs.data?.records ?? []).length} />
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>Localidades, registos mensais por localidade e totais agregados (opcionalmente filtrados por mês).</p>
       {tgMsg && (
         <div className={`page-toast ${tgMsg.ok ? "page-toast--ok" : "page-toast--err"}`} role="alert">
           <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setTgMsg(null)}>

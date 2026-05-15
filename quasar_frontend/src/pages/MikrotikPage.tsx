@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
+import { EM_DASH, formatDbm } from "../lib/formatDisplay";
+import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { formatCollectedPt, parseTelemetryKPIs, snmpVarsFromMetrics } from "../lib/deviceReportHelpers";
 
@@ -35,7 +37,7 @@ type IfRow = {
 
 function ifDisplayLabel(r: IfRow): string {
   const s = String(r.display_name ?? r.if_name ?? r.descr ?? "").trim();
-  return s || "—";
+  return s || EM_DASH;
 }
 
 type SensorRow = { oid?: string; value?: string; type?: string };
@@ -44,24 +46,6 @@ function isMikrotik(d: DeviceRow): boolean {
   const c = String(d.category ?? "").toLowerCase();
   const b = String(d.brand ?? "").toLowerCase();
   return c.includes("mikrotik") || b.includes("mikrotik");
-}
-
-function fmtDbm(n: number | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return `${Number(n).toFixed(3)} dBm`;
-}
-
-function fmtBps(n: number | undefined): string {
-  if (n == null || !Number.isFinite(Number(n)) || Number(n) < 0) return "—";
-  const units = ["bps", "Kbps", "Mbps", "Gbps", "Tbps"];
-  let v = Number(n);
-  let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
-    i++;
-  }
-  const digits = v >= 100 ? 0 : v >= 10 ? 1 : 2;
-  return `${v.toFixed(digits)} ${units[i]}`;
 }
 
 function inferIfaceType(r: IfRow): string {
@@ -92,8 +76,8 @@ function MiniTrafficChart({
       <div>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 6px 0" }}>Aguardando histórico do gráfico em tempo real.</p>
         <div className="row" style={{ gap: 12 }}>
-          <span className="mono">TX atual: {p ? fmtBps(p.tx) : "—"}</span>
-          <span className="mono">RX atual: {p ? fmtBps(p.rx) : "—"}</span>
+          <span className="mono">TX atual: {p ? formatBitrate(p.tx) : "—"}</span>
+          <span className="mono">RX atual: {p ? formatBitrate(p.rx) : "—"}</span>
         </div>
       </div>
     );
@@ -395,7 +379,7 @@ export function MikrotikPage() {
               text-decoration: none;
               background: transparent;
             }
-            .mk-options-item:hover { background: rgba(255,255,255,0.08); }
+            .mk-options-item:hover { background: var(--hover-bg-menu); }
           `}</style>
           <div className="page-heading">
             <h1>MikroTik</h1>
@@ -575,10 +559,10 @@ export function MikrotikPage() {
                             {ifaceStatus(r).toUpperCase()}
                           </span>
                         </td>
-                        <td className="mono">{fmtBps(r.out_bps)}</td>
-                        <td className="mono">{fmtBps(r.in_bps)}</td>
-                        <td className="mono">{fmtDbm(r.tx_dbm)}</td>
-                        <td className="mono">{fmtDbm(r.rx_dbm)}</td>
+                        <td className="mono">{formatBitrate(r.out_bps)}</td>
+                        <td className="mono">{formatBitrate(r.in_bps)}</td>
+                        <td className="mono">{formatDbm(r.tx_dbm)}</td>
+                        <td className="mono">{formatDbm(r.rx_dbm)}</td>
                         <td className="mono">{r.speed_bps != null && r.speed_bps > 0 ? `${(r.speed_bps / 1e6).toFixed(0)} Mbps` : "—"}</td>
                         <td>
                           <label

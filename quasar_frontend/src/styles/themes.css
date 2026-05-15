@@ -1,0 +1,101 @@
+/* Tokens de cor e tipografia — tema escuro (predefinido) e claro. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel2: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-dim: #388bfd66;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+  --on-accent: #0d1117;
+  --btn-hover-bg: #30363d;
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --focus-ring: #3fb95033;
+  --severity-info: #58a6ff;
+  --severity-warn: #d29922;
+  --severity-err: #f85149;
+  --severity-ok: #3fb950;
+  --audit-muted: #c9d1d9;
+  --row-highlight: #0f1f32;
+  --row-hover-text: #d0d7de;
+  --pill-ok-bg: #23863633;
+  --pill-muted-bg: #484f5833;
+  --pill-err-bg: #f8514933;
+  --overlay: #000a;
+  --toggle-track: #3d444d;
+  --toggle-thumb: #c9d1d9;
+  --toggle-thumb-active: #fff;
+  --login-bg: #000510;
+  --login-bg-gradient: radial-gradient(ellipse 75% 55% at 50% 38%, rgba(0, 40, 90, 0.45) 0%, #000510 62%, #00030a 100%);
+
+  --hover-transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+  --hover-bg: #2a3139;
+  --hover-bg-subtle: rgba(177, 186, 196, 0.1);
+  --hover-bg-table: #22272e;
+  --hover-bg-sidebar: #21262d;
+  --hover-bg-menu: #2d333b;
+  --hover-bg-danger: rgba(248, 81, 73, 0.14);
+  --hover-text-danger: #ffb4ad;
+  --hover-shadow-menu: 0 8px 28px rgba(0, 0, 0, 0.4);
+
+  --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", monospace;
+  --radius: 6px;
+  --sidebar-w: 232px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --panel2: #eaeef2;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #656d76;
+  --accent: #0969da;
+  --accent-dim: #0969da33;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --err: #cf222e;
+  --on-accent: #ffffff;
+  --btn-hover-bg: #d8dee4;
+  --shadow-lg: 0 12px 40px rgba(31, 35, 40, 0.12);
+  --focus-ring: #1a7f3733;
+  --severity-info: #0969da;
+  --severity-warn: #9a6700;
+  --severity-err: #cf222e;
+  --severity-ok: #1a7f37;
+  --audit-muted: #424a53;
+  --row-highlight: #ddf4ff;
+  --row-hover-text: #1f2328;
+  --pill-ok-bg: #dafbe1;
+  --pill-muted-bg: #eaeef2;
+  --pill-err-bg: #ffebe9;
+  --overlay: #1f23280f;
+  --toggle-track: #d0d7de;
+  --toggle-thumb: #656d76;
+  --toggle-thumb-active: #ffffff;
+  --login-bg: #f0f6fc;
+  --login-bg-gradient: linear-gradient(165deg, #f0f6fc 0%, #f6f8fa 45%, #eaeef2 100%);
+
+  --hover-transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+  --hover-bg: #e8ecf1;
+  --hover-bg-subtle: rgba(31, 35, 40, 0.06);
+  --hover-bg-table: #eef2f6;
+  --hover-bg-sidebar: #eaeef2;
+  --hover-bg-menu: #e8ebef;
+  --hover-bg-danger: #ffebe9;
+  --hover-text-danger: #a40e26;
+  --hover-shadow-menu: 0 8px 28px rgba(31, 35, 40, 0.14);
+
+  --font: "Segoe UI", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}

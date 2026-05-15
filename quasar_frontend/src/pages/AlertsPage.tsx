@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
+import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
   displayActiveRowSeverity,
@@ -85,8 +87,7 @@ export function AlertsPage() {
   }, []);
 
   useEffect(() => {
-    void qc.invalidateQueries({ queryKey: ["alerts-active"] });
-    void qc.invalidateQueries({ queryKey: ["alerts-hist"] });
+    void invalidateAlertListQueries(qc);
   }, [qc]);
 
   const monState = useQuery({
@@ -100,9 +101,7 @@ export function AlertsPage() {
   useEffect(() => {
     // Worker ou alteração em alert_instances (trigger) — força lista de alertas.
     if (!monState.data?.runtime_updated_at && !monState.data?.last_alerts_change_at) return;
-    void qc.invalidateQueries({ queryKey: ["alerts-active"] });
-    void qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-    void qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+    void invalidateAlertListQueries(qc);
   }, [qc, monState.data?.runtime_updated_at, monState.data?.last_alerts_change_at]);
 
   const active = useQuery({
@@ -238,7 +237,15 @@ export function AlertsPage() {
   return (
     <div className="alerts-page">
       <div className="page-heading">
-        <h1>Alertas</h1>
+        <h1>
+          Alertas
+          <InfoHint label="Sobre a lista de alertas">
+            <p>
+              Valores (latência, dBm, etc.) actualizam quando o worker grava na BD; renovação automática a cada ~
+              {Math.round(ALERTS_ACTIVE_REFRESH_MS / 1000)} s com esta página aberta.
+            </p>
+          </InfoHint>
+        </h1>
       </div>
 
       <div className="alerts-stat-grid">
@@ -323,9 +330,6 @@ export function AlertsPage() {
           <div className="alerts-panel">
             <div className="alerts-panel__head">
               <strong style={{ fontSize: 14 }}>Lista de alertas</strong>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                Valores (latência, dBm, etc.) actualizam quando o worker grava na BD; renovação automática a cada ~{Math.round(ALERTS_ACTIVE_REFRESH_MS / 1000)} s com esta página aberta.
-              </span>
             </div>
             {active.isLoading && <p style={{ padding: 16 }}>A carregar…</p>}
             {active.isError && <div className="msg msg--err margin m-14">{(active.error as Error).message}</div>}

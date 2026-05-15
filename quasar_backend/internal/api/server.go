@@ -87,11 +87,13 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/settings", func(r chi.Router) {
 			r.Get("/monitoring-intervals", s.getMonitoringIntervals)
 			r.Get("/monitoring", s.getMonitoringSettings)
+			r.Get("/ui-appearance", s.getUIAppearance)
 			r.Get("/connection/defaults", s.getConnectionDefaults)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
 				r.Patch("/monitoring-intervals", s.patchMonitoringIntervals)
 				r.Patch("/monitoring", s.patchMonitoringSettings)
+				r.Patch("/ui-appearance", s.patchUIAppearance)
 				r.Get("/database", s.getDatabaseMeta)
 				r.Patch("/database", s.patchDatabaseMeta)
 				r.Post("/database/test", s.testDatabaseConnection)

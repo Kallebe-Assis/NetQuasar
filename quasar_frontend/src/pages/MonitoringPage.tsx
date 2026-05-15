@@ -3,8 +3,11 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
+import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
+import { EM_DASH } from "../lib/formatDisplay";
+import { queryKeys } from "../lib/queryKeys";
 
 type ActiveEquipRow = {
   id: string;
@@ -107,9 +110,9 @@ function badgeClassFromStatus(status: "Online" | "Offline" | "Desconhecido"): st
 /** Atualiza textos “Xs atrás” na aba Equipamentos. `_tick` força re-render periódico. */
 function formatCheckedAtAgo(iso: string | null | undefined, _tick: number): string {
   void _tick;
-  if (iso == null || String(iso).trim() === "") return "—";
+  if (iso == null || String(iso).trim() === "") return EM_DASH;
   const t = Date.parse(String(iso));
-  if (Number.isNaN(t)) return "—";
+  if (Number.isNaN(t)) return EM_DASH;
   const sec = Math.floor((Date.now() - t) / 1000);
   if (sec < 5) return "agora";
   if (sec < 60) return `${sec}s atrás`;
@@ -379,14 +382,14 @@ export function MonitoringPage() {
   const [agoTick, setAgoTick] = useState(0);
 
   const state = useQuery({
-    queryKey: ["mon-state"],
+    queryKey: queryKeys.monState,
     queryFn: () => apiFetch<MonState>("/api/v1/monitoring/state"),
     refetchInterval: 1000,
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
   const intervals = useQuery({
-    queryKey: ["mon-intervals"],
+    queryKey: queryKeys.monIntervals,
     queryFn: () =>
       apiFetch<{
         ping_seconds: number;
@@ -515,7 +518,7 @@ export function MonitoringPage() {
     enabled: !!snmpModalDeviceId,
   });
   const offlineAlerts = useQuery({
-    queryKey: ["alerts-ping-unreachable"],
+    queryKey: queryKeys.alertsPingUnreachable,
     queryFn: () => apiFetch<{ alerts: OfflineAlertRow[] }>("/api/v1/alerts/active?type=ping_unreachable&limit=50"),
     enabled: tab === "overview",
     refetchInterval: tab === "overview" ? 6000 : false,
@@ -523,7 +526,7 @@ export function MonitoringPage() {
 
   const invalidateActiveList = () => {
     qc.invalidateQueries({ queryKey: ["monitoring-active-equipment"] });
-    qc.invalidateQueries({ queryKey: ["alerts-ping-unreachable"] });
+    qc.invalidateQueries({ queryKey: queryKeys.alertsPingUnreachable });
   };
 
   useEffect(() => {
@@ -604,7 +607,7 @@ export function MonitoringPage() {
   const checkNet = useMutation({
     mutationFn: () => apiFetch<NetCheck>("/api/v1/monitoring/internet-check"),
     onSuccess: (data) => {
-      void qc.invalidateQueries({ queryKey: ["mon-state"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.monState });
       void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(data.ok, formatNetCheckToast(data));
     },
@@ -615,7 +618,7 @@ export function MonitoringPage() {
     mutationFn: (args: { mode: string }) =>
       apiFetch("/api/v1/monitoring/start", { method: "POST", json: args }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["mon-state"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.monState });
       void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(true, "Monitoramento iniciado.");
     },
@@ -625,7 +628,7 @@ export function MonitoringPage() {
   const stopMon = useMutation({
     mutationFn: () => apiFetch("/api/v1/monitoring/stop", { method: "POST", json: {} }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["mon-state"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.monState });
       void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(true, "Monitoramento parado.");
     },
@@ -789,17 +792,28 @@ export function MonitoringPage() {
         </div>
       ) : null}
       <div className="page-heading">
-        <h1>Monitoramento</h1>
+        <h1>
+          Monitoramento
+          {canMutate ? (
+            <InfoHint label="Dicas de monitoramento">
+              <p>
+                Inicie o monitoramento só depois de validar a rede, se precisar. Os ícones à direita permitem verificar internet e recarregar a
+                lista em memória no serviço.
+              </p>
+            </InfoHint>
+          ) : null}
+        </h1>
         <PageCountPill
           label={tab === "overview" ? "Equipamentos monitorados" : tab === "ops" ? "Registros de auditoria" : "Itens"}
           count={tab === "overview" ? filteredActiveEquipment.length : tab === "ops" ? (audit.data?.items ?? []).length : 0}
         />
       </div>
-      <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        {canMutate
-          ? "Inicie o monitoramento só depois de validar a rede, se precisar. Os ícones à direita permitem verificar internet e recarregar a lista em memória no serviço."
-          : "Modo só leitura: pode acompanhar o estado do motor e da lista de equipamentos; iniciar/parar monitoramento e outras acções ficam reservadas a administradores."}
-      </p>
+      {!canMutate ? (
+        <p style={{ color: "var(--muted)", marginTop: 0 }}>
+          Modo só leitura: pode acompanhar o estado do motor e da lista de equipamentos; iniciar/parar monitoramento e outras acções ficam reservadas a
+          administradores.
+        </p>
+      ) : null}
 
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
@@ -1012,10 +1026,10 @@ export function MonitoringPage() {
                           <td className="mono" style={{ color: reachable === false ? "var(--err)" : undefined }}>
                             {row.latency_ms != null ? `${row.latency_ms} ms` : "—"}
                           </td>
-                          <td className="mono">{row.cpu_percent != null ? `${row.cpu_percent.toFixed(1)}%` : "—"}</td>
-                          <td className="mono">{row.memory_percent != null ? `${row.memory_percent.toFixed(0)}%` : "—"}</td>
-                          <td className="mono">{row.uptime ?? "—"}</td>
-                          <td className="mono">{row.temperature_c != null ? `${row.temperature_c.toFixed(0)} °C` : "—"}</td>
+                          <td className="mono">{row.cpu_percent != null ? `${row.cpu_percent.toFixed(1)}%` : EM_DASH}</td>
+                          <td className="mono">{row.memory_percent != null ? `${row.memory_percent.toFixed(0)}%` : EM_DASH}</td>
+                          <td className="mono">{row.uptime ?? EM_DASH}</td>
+                          <td className="mono">{row.temperature_c != null ? `${row.temperature_c.toFixed(0)} °C` : EM_DASH}</td>
                           {canMutate ? (
                             <td>
                               <button type="button" className="btn btn--icon" aria-label="Opções do equipamento" title="Opções" onClick={() => setActionMenuRow(row)}>
