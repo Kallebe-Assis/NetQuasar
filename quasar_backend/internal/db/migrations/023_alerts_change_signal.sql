@@ -4,6 +4,7 @@ ALTER TABLE monitoring_runtime
 
 UPDATE monitoring_runtime SET last_alerts_change_at = COALESCE(last_alerts_change_at, updated_at, now()) WHERE id = 1;
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION bump_monitoring_alerts_change_at() RETURNS trigger AS $$
 BEGIN
     UPDATE monitoring_runtime
@@ -12,6 +13,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 DROP TRIGGER IF EXISTS trg_alert_instances_bump_alerts_change ON alert_instances;
 CREATE TRIGGER trg_alert_instances_bump_alerts_change
