@@ -102,7 +102,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 		unlock := snmpdevicelock.Acquire(row.id)
 		func() {
 			defer unlock()
-			sctx, scancel := context.WithTimeout(ctx, 120*time.Second)
+			sctx, scancel := context.WithTimeout(ctx, cfg.telemetryTimeout())
 			defer scancel()
 
 			invEmptyBefore, invQErr := snmpInventoryEmpty(sctx, pool, row.id)
@@ -227,11 +227,7 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 		unlock := snmpdevicelock.Acquire(row.id)
 		func() {
 			defer unlock()
-			perDeviceTimeout := 120 * time.Second
-			if ph == InterfacePhaseOLT {
-				// Fase 4/5 precisa girar rápido OLT a OLT para não "congelar" a UI.
-				perDeviceTimeout = 75 * time.Second
-			}
+			perDeviceTimeout := cfg.interfaceTimeout(ph == InterfacePhaseOLT)
 			sctx, scancel := context.WithTimeout(ctx, perDeviceTimeout)
 			defer scancel()
 			t0 := time.Now()
@@ -348,7 +344,7 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 		func() {
 			defer unlock()
 			// Mantém limite curto por OLT para não bloquear ciclo por muitos minutos.
-			sctx, scancel := context.WithTimeout(ctx, 180*time.Second)
+			sctx, scancel := context.WithTimeout(ctx, cfg.oltIfDerivedTimeout())
 			defer scancel()
 
 			invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)

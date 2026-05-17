@@ -9,6 +9,8 @@ export const queryKeys = {
   monState: ["mon-state"] as const,
   monStateGlobal: ["mon-state-global-indicator"] as const,
   monIntervals: ["mon-intervals"] as const,
+  automationOnu: ["automation-onu"] as const,
+  automationOnuRuns: ["automation-onu-runs"] as const,
   alertsActive: ["alerts-active"] as const,
   alertsHist: ["alerts-hist"] as const,
   alertsResolvedWindow: ["alerts-resolved-window"] as const,

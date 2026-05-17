@@ -8,13 +8,16 @@ import (
 )
 
 type intervalConfig struct {
-	PingTimeoutMs       int
-	ICMPPayloadBytes    int
-	OfflineThreshold    int
-	PingSeconds         int
-	TelemetrySeconds    int
-	IfaceSeconds        int
-	OltDerivedSeconds   int
+	PingTimeoutMs          int
+	TelemetryTimeoutMs     int
+	InterfaceTimeoutMs     int
+	OltIfDerivedTimeoutMs  int
+	ICMPPayloadBytes       int
+	OfflineThreshold       int
+	PingSeconds            int
+	TelemetrySeconds       int
+	IfaceSeconds           int
+	OltDerivedSeconds      int
 }
 
 // ResolveTelemetrySeconds devolve segundos de telemetria a usar (evita COALESCE em SQL por compatibilidade).
@@ -40,10 +43,12 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		SELECT ping_timeout_ms, icmp_payload_bytes, offline_ping_fail_threshold,
 			ping_seconds,
 			telemetry_seconds, telemetry_minutes,
-			interface_snapshot_seconds, olt_if_derived_pon_seconds
+			interface_snapshot_seconds, olt_if_derived_pon_seconds,
+			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
-		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds); err != nil {
+		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
+		&c.TelemetryTimeoutMs, &c.InterfaceTimeoutMs, &c.OltIfDerivedTimeoutMs); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { clearSession, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
 import { apiFetch } from "../lib/api";
+import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { queryKeys } from "../lib/queryKeys";
 
 const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
@@ -71,6 +72,7 @@ export function ShellLayout() {
 
   return (
     <div className="layout">
+      <OnuReportGlobalToast />
       {showIndicator ? (
         <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
           <span className="runtime-indicator__dot" />

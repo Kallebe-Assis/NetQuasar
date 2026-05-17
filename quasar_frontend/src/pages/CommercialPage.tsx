@@ -92,6 +92,7 @@ export function CommercialPage() {
   });
   const [month, setMonth] = useState(seed);
   const [tgSendConfirmOpen, setTgSendConfirmOpen] = useState(false);
+  const [aggRefreshConfirmOpen, setAggRefreshConfirmOpen] = useState(false);
   const agg = useQuery({
     queryKey: ["commercial-agg", month],
     queryFn: () => apiFetch<AggregatesResponse>(`/api/v1/commercial/aggregates?month=${encodeURIComponent(month)}`),
@@ -904,17 +905,7 @@ export function CommercialPage() {
               ))}
             </select>
           </div>
-          <button
-            type="button"
-            className="btn"
-            disabled={agg.isFetching}
-            onClick={() => {
-              void agg.refetch().then((r) => {
-                if (r.error) setTgMsg({ ok: false, text: (r.error as Error).message });
-                else setTgMsg({ ok: true, text: `Totais actualizados (${formatYearMonthPt(month)}).` });
-              });
-            }}
-          >
+          <button type="button" className="btn" disabled={agg.isFetching} onClick={() => setAggRefreshConfirmOpen(true)}>
             {agg.isFetching ? "A actualizar…" : "Atualizar totais"}
           </button>
           <button type="button" className="btn" onClick={() => exportCsv().catch((e) => setTgMsg({ ok: false, text: String(e) }))}>
@@ -1500,6 +1491,43 @@ export function CommercialPage() {
                 {(createLoc.error as Error).message}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {aggRefreshConfirmOpen && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="agg-refresh-title"
+          onClick={(e) => e.target === e.currentTarget && !agg.isFetching && setAggRefreshConfirmOpen(false)}
+        >
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <h3 id="agg-refresh-title">Actualizar totais agregados?</h3>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 0 }}>
+              Serão recalculados os totais de clientes para <strong>{formatYearMonthPt(month)}</strong> a partir dos registos mensais já guardados na base
+              comercial (não altera dados nas OLTs).
+            </p>
+            <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+              <button type="button" className="btn" disabled={agg.isFetching} onClick={() => setAggRefreshConfirmOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={agg.isFetching}
+                onClick={() => {
+                  void agg.refetch().then((r) => {
+                    if (r.error) setTgMsg({ ok: false, text: (r.error as Error).message });
+                    else setTgMsg({ ok: true, text: `Totais actualizados (${formatYearMonthPt(month)}).` });
+                    setAggRefreshConfirmOpen(false);
+                  });
+                }}
+              >
+                {agg.isFetching ? "A actualizar…" : "Confirmar"}
+              </button>
+            </div>
           </div>
         </div>
       )}

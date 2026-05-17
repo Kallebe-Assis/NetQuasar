@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/connectivity"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 )
@@ -248,42 +247,51 @@ func (s *Server) monitoringReloadDevices(w http.ResponseWriter, r *http.Request)
 func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec int
+	var telTimeout, ifaceTimeout, oltTimeout int
 	var icmpPB, offTh, uptimeRestart int
 	if err := s.DB().QueryRow(r.Context(), `
 		SELECT ping_seconds, telemetry_minutes, ping_timeout_ms,
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
+			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
 			COALESCE(uptime_restart_alert_minutes, 0)
-		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec, &icmpPB, &offTh, &uptimeRestart); err != nil {
+		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
+		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	telSec := monitorworker.ResolveTelemetrySeconds(telSecRaw, tm)
 	writeJSON(w, http.StatusOK, map[string]int{
-		"ping_seconds":                  ps,
-		"telemetry_seconds":             telSec,
-		"interface_snapshot_seconds":    ifaceSec,
-		"olt_if_derived_pon_seconds":    oltDerivedSec,
-		"telemetry_minutes":             tm,
-		"ping_timeout_ms":               pto,
-		"icmp_payload_bytes":            icmpPB,
-		"offline_ping_fail_threshold":   offTh,
-		"uptime_restart_alert_minutes": uptimeRestart,
+		"ping_seconds":                    ps,
+		"telemetry_seconds":               telSec,
+		"interface_snapshot_seconds":      ifaceSec,
+		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"telemetry_minutes":               tm,
+		"ping_timeout_ms":                 pto,
+		"telemetry_timeout_ms":            telTimeout,
+		"interface_snapshot_timeout_ms":   ifaceTimeout,
+		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"icmp_payload_bytes":              icmpPB,
+		"offline_ping_fail_threshold":     offTh,
+		"uptime_restart_alert_minutes":    uptimeRestart,
 	})
 }
 
 func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		PingSeconds                 *int `json:"ping_seconds"`
-		TelemetryMinutes            *int `json:"telemetry_minutes"`
-		TelemetrySeconds            *int `json:"telemetry_seconds"`
-		InterfaceSnapshotSeconds    *int `json:"interface_snapshot_seconds"`
-		OltIfDerivedPonSeconds      *int `json:"olt_if_derived_pon_seconds"`
-		PingTimeoutMs               *int `json:"ping_timeout_ms"`
-		IcmpPayloadBytes            *int `json:"icmp_payload_bytes"`
-		OfflinePingFailThreshold  *int `json:"offline_ping_fail_threshold"`
-		UptimeRestartAlertMinutes *int `json:"uptime_restart_alert_minutes"`
+		PingSeconds                   *int `json:"ping_seconds"`
+		TelemetryMinutes              *int `json:"telemetry_minutes"`
+		TelemetrySeconds              *int `json:"telemetry_seconds"`
+		InterfaceSnapshotSeconds      *int `json:"interface_snapshot_seconds"`
+		OltIfDerivedPonSeconds        *int `json:"olt_if_derived_pon_seconds"`
+		PingTimeoutMs                 *int `json:"ping_timeout_ms"`
+		TelemetryTimeoutMs            *int `json:"telemetry_timeout_ms"`
+		InterfaceSnapshotTimeoutMs  *int `json:"interface_snapshot_timeout_ms"`
+		OltIfDerivedPonTimeoutMs    *int `json:"olt_if_derived_pon_timeout_ms"`
+		IcmpPayloadBytes              *int `json:"icmp_payload_bytes"`
+		OfflinePingFailThreshold      *int `json:"offline_ping_fail_threshold"`
+		UptimeRestartAlertMinutes     *int `json:"uptime_restart_alert_minutes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -291,14 +299,17 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	}
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec int
+	var telTimeout, ifaceTimeout, oltTimeout int
 	var icmpPB, offTh, uptimeRestart int
 	if err := s.DB().QueryRow(r.Context(), `
 		SELECT ping_seconds, telemetry_minutes, ping_timeout_ms,
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
+			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
 			COALESCE(uptime_restart_alert_minutes, 0)
-		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec, &icmpPB, &offTh, &uptimeRestart); err != nil {
+		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
+		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
@@ -323,6 +334,15 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	if body.PingTimeoutMs != nil {
 		pto = *body.PingTimeoutMs
 	}
+	if body.TelemetryTimeoutMs != nil {
+		telTimeout = *body.TelemetryTimeoutMs
+	}
+	if body.InterfaceSnapshotTimeoutMs != nil {
+		ifaceTimeout = *body.InterfaceSnapshotTimeoutMs
+	}
+	if body.OltIfDerivedPonTimeoutMs != nil {
+		oltTimeout = *body.OltIfDerivedPonTimeoutMs
+	}
 	if body.IcmpPayloadBytes != nil {
 		icmpPB = *body.IcmpPayloadBytes
 	}
@@ -343,6 +363,15 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "ping_timeout_ms entre 1000 e 30000 (1–30 s por sonda ICMP+TCP)", map[string]any{"ping_timeout_ms": pto})
 		return
 	}
+	for _, pair := range []struct {
+		name string
+		val  int
+	}{{"telemetry_timeout_ms", telTimeout}, {"interface_snapshot_timeout_ms", ifaceTimeout}, {"olt_if_derived_pon_timeout_ms", oltTimeout}} {
+		if pair.val < 5000 || pair.val > 600000 {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", pair.name+" entre 5000 e 600000 (5 s – 10 min)", map[string]any{pair.name: pair.val})
+			return
+		}
+	}
 	if icmpPB < 0 || icmpPB > 65507 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "icmp_payload_bytes entre 0 e 65507 (0 usa defeito de 32 B no servidor)", map[string]any{"icmp_payload_bytes": icmpPB})
 		return
@@ -360,24 +389,28 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			ping_seconds=$1, telemetry_minutes=$2, telemetry_seconds=$3,
 			interface_snapshot_seconds=$4, olt_if_derived_pon_seconds=$5,
 			ping_timeout_ms=$6,
-			icmp_payload_bytes=$7, offline_ping_fail_threshold=$8,
-			uptime_restart_alert_minutes=$9,
+			telemetry_timeout_ms=$7, interface_snapshot_timeout_ms=$8, olt_if_derived_pon_timeout_ms=$9,
+			icmp_payload_bytes=$10, offline_ping_fail_threshold=$11,
+			uptime_restart_alert_minutes=$12,
 			updated_at=now() WHERE id=1`,
-		ps, tm, telSec, ifaceSec, oltDerivedSec, pto, icmpPB, offTh, uptimeRestart)
+		ps, tm, telSec, ifaceSec, oltDerivedSec, pto, telTimeout, ifaceTimeout, oltTimeout, icmpPB, offTh, uptimeRestart)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{
-		"ping_seconds":               ps,
-		"telemetry_seconds":          telSec,
-		"interface_snapshot_seconds": ifaceSec,
-		"olt_if_derived_pon_seconds": oltDerivedSec,
-		"telemetry_minutes":          tm,
-		"ping_timeout_ms":            pto,
-		"icmp_payload_bytes":         icmpPB,
-		"offline_ping_fail_threshold": offTh,
-		"uptime_restart_alert_minutes": uptimeRestart,
+		"ping_seconds":                    ps,
+		"telemetry_seconds":               telSec,
+		"interface_snapshot_seconds":      ifaceSec,
+		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"telemetry_minutes":               tm,
+		"ping_timeout_ms":                 pto,
+		"telemetry_timeout_ms":            telTimeout,
+		"interface_snapshot_timeout_ms":   ifaceTimeout,
+		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"icmp_payload_bytes":              icmpPB,
+		"offline_ping_fail_threshold":     offTh,
+		"uptime_restart_alert_minutes":    uptimeRestart,
 	})
 }
 
@@ -451,122 +484,4 @@ func (s *Server) patchMonitoringSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) getAutomationONU(w http.ResponseWriter, r *http.Request) {
-	row := s.DB().QueryRow(r.Context(), `
-		SELECT enabled, mode, day_of_month, day_of_week, time_hhmm, last_run_at, last_status, last_error
-		FROM automation_onu_report WHERE id=1
-	`)
-	var en bool
-	var mode, th string
-	var dom, dow *int
-	var lr *time.Time
-	var ls, le *string
-	if err := row.Scan(&en, &mode, &dom, &dow, &th, &lr, &ls, &le); err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": en, "mode": mode, "day_of_month": dom, "day_of_week": dow,
-		"time_hhmm": th, "last_run_at": lr, "last_status": ls, "last_error": le,
-	})
-}
-
-func (s *Server) patchAutomationONU(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Enabled    *bool   `json:"enabled"`
-		Mode       *string `json:"mode"`
-		DayOfMonth *int    `json:"day_of_month"`
-		DayOfWeek  *int    `json:"day_of_week"`
-		TimeHHMM   *string `json:"time_hhmm"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
-		return
-	}
-	tx, err := s.DB().Begin(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	_, err = tx.Exec(r.Context(), `
-		UPDATE automation_onu_report SET
-			enabled = COALESCE($1, enabled),
-			mode = COALESCE($2, mode),
-			day_of_month = COALESCE($3, day_of_month),
-			day_of_week = COALESCE($4, day_of_week),
-			time_hhmm = COALESCE($5, time_hhmm),
-			updated_at = now()
-		WHERE id = 1
-	`, body.Enabled, body.Mode, body.DayOfMonth, body.DayOfWeek, body.TimeHHMM)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	s.getAutomationONU(w, r)
-}
-
-func (s *Server) runAutomationONU(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var jid uuid.UUID
-	summary := map[string]any{"note": "relatório ONU agendado; pipeline OLT+Telegram pode ser estendido"}
-	sj, _ := json.Marshal(summary)
-	err := s.DB().QueryRow(ctx, `
-		INSERT INTO onu_report_runs (status, summary) VALUES ('running', $1::jsonb) RETURNING id
-	`, sj).Scan(&jid)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	_, _ = s.DB().Exec(ctx, `
-		UPDATE automation_onu_report SET last_run_at = now(), last_status = 'completed', last_error = null, updated_at = now() WHERE id=1
-	`)
-	fin := map[string]any{"run_id": jid.String(), "finished": true}
-	fj, _ := json.Marshal(fin)
-	_, err = s.DB().Exec(ctx, `
-		UPDATE onu_report_runs SET finished_at = now(), status = 'completed', summary = $2::jsonb WHERE id = $1
-	`, jid, fj)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": jid.String(), "status": "completed", "run_id": jid})
-}
-
-func (s *Server) listAutomationRuns(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, started_at, finished_at, status, error_message, summary
-		FROM onu_report_runs ORDER BY started_at DESC LIMIT 100
-	`)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	defer rows.Close()
-	var runs []map[string]any
-	for rows.Next() {
-		var id uuid.UUID
-		var st, em *string
-		var started time.Time
-		var finished *time.Time
-		var sum []byte
-		if err := rows.Scan(&id, &started, &finished, &st, &em, &sum); err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-			return
-		}
-		var sm any
-		if len(sum) > 0 {
-			_ = json.Unmarshal(sum, &sm)
-		}
-		runs = append(runs, map[string]any{
-			"id": id, "started_at": started, "finished_at": finished, "status": st, "error_message": em, "summary": sm,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }

@@ -550,5 +550,8 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	if pool := s.DB(); pool != nil {
+		recordOLTOnuSample(r.Context(), pool, id, sb, pb)
+	}
 	s.getOLTDevice(w, r)
 }

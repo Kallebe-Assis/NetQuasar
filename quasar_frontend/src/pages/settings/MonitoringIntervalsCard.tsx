@@ -12,6 +12,9 @@ type MonitoringIntervalsPayload = {
   olt_if_derived_pon_seconds: number;
   telemetry_minutes: number;
   ping_timeout_ms: number;
+  telemetry_timeout_ms?: number;
+  interface_snapshot_timeout_ms?: number;
+  olt_if_derived_pon_timeout_ms?: number;
   icmp_payload_bytes?: number;
   offline_ping_fail_threshold?: number;
   uptime_restart_alert_minutes?: number;
@@ -37,6 +40,9 @@ export function MonitoringPingIntervalsCard() {
   const [ifaceS, setIfaceS] = useState("");
   const [oltDerivedS, setOltDerivedS] = useState("");
   const [pto, setPto] = useState("");
+  const [telTimeout, setTelTimeout] = useState("");
+  const [ifaceTimeout, setIfaceTimeout] = useState("");
+  const [oltTimeout, setOltTimeout] = useState("");
   const [icmpSz, setIcmpSz] = useState("");
   const [offTh, setOffTh] = useState("");
   const [uptimeRestart, setUptimeRestart] = useState("");
@@ -47,6 +53,9 @@ export function MonitoringPingIntervalsCard() {
     setIfaceS((v) => (v === "" ? String(q.data.interface_snapshot_seconds ?? 300) : v));
     setOltDerivedS((v) => (v === "" ? String(q.data.olt_if_derived_pon_seconds ?? 240) : v));
     setPto((v) => (v === "" ? String(q.data.ping_timeout_ms ?? 5500) : v));
+    setTelTimeout((v) => (v === "" ? String(q.data.telemetry_timeout_ms ?? 120000) : v));
+    setIfaceTimeout((v) => (v === "" ? String(q.data.interface_snapshot_timeout_ms ?? 120000) : v));
+    setOltTimeout((v) => (v === "" ? String(q.data.olt_if_derived_pon_timeout_ms ?? 180000) : v));
     setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
     setOffTh((v) => (v === "" ? String(q.data.offline_ping_fail_threshold ?? 3) : v));
     setUptimeRestart((v) => (v === "" ? String(q.data.uptime_restart_alert_minutes ?? 0) : v));
@@ -163,6 +172,45 @@ export function MonitoringPingIntervalsCard() {
         </div>
       </section>
 
+      <section className="settings-intervals-section" aria-labelledby="mon-intervals-timeout-heading">
+        <h3 id="mon-intervals-timeout-heading">Timeouts por tipo de coleta (ms)</h3>
+        <div className="settings-fields-grid">
+          <SettingsField
+            label="Telemetria SNMP (ms)"
+            hintLabel="Timeout da coleta de telemetria"
+            hint={
+              <p>
+                Tempo máximo por ciclo de coleta SNMP de <strong>CPU, memória e uptime</strong>. Intervalo válido: <strong>5000–600000</strong> ms.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Timeout telemetria em ms" value={telTimeout} onChange={(e) => setTelTimeout(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="Interfaces SNMP (ms)"
+            hintLabel="Timeout do snapshot de interfaces"
+            hint={
+              <p>
+                Tempo máximo do walk IF-MIB e gravação de snapshots. Intervalo válido: <strong>5000–600000</strong> ms.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Timeout interfaces em ms" value={ifaceTimeout} onChange={(e) => setIfaceTimeout(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="OLT PON IF (ms)"
+            hintLabel="Timeout PON derivada IF-MIB"
+            hint={
+              <p>
+                Tempo máximo da colecta ONUs/PON por derive IF-MIB nas OLT compatíveis. Intervalo válido: <strong>5000–600000</strong> ms.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Timeout OLT PON IF em ms" value={oltTimeout} onChange={(e) => setOltTimeout(e.target.value)} />
+          </SettingsField>
+        </div>
+      </section>
+
       <section className="settings-intervals-section" aria-labelledby="mon-intervals-icmp-heading">
         <h3 id="mon-intervals-icmp-heading">Sondagem ICMP e equipamento offline</h3>
         <div className="settings-fields-grid">
@@ -245,6 +293,9 @@ export function MonitoringPingIntervalsCard() {
               interface_snapshot_seconds: ifaceS ? Number(ifaceS) : undefined,
               olt_if_derived_pon_seconds: oltDerivedS ? Number(oltDerivedS) : undefined,
               ping_timeout_ms: pto ? Number(pto) : undefined,
+              telemetry_timeout_ms: telTimeout ? Number(telTimeout) : undefined,
+              interface_snapshot_timeout_ms: ifaceTimeout ? Number(ifaceTimeout) : undefined,
+              olt_if_derived_pon_timeout_ms: oltTimeout ? Number(oltTimeout) : undefined,
               icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
               offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,
               uptime_restart_alert_minutes: uptimeRestart !== "" ? Number(uptimeRestart) : undefined,

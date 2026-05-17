@@ -22,7 +22,8 @@ type Server struct {
 	Cfg               *config.Config
 	DBHolder          *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
 	WorkerCtx         context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
-	ensureMonitorOnce sync.Once
+	ensureMonitorOnce   sync.Once
+	automationONUOnce   sync.Once
 }
 
 // DB retorna o pool PostgreSQL ativo ou nil (testes sem holder).
@@ -258,6 +259,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/olt", func(r chi.Router) {
 			r.Get("/devices", s.listOLTDevices)
 			r.Get("/devices/{id}", s.getOLTDevice)
+			r.Get("/reports/history", s.getOLTReportsHistory)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
 				r.Post("/devices/{id}/refresh", s.refreshOLTDevice)
@@ -301,6 +303,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 
 	if s.DB() != nil {
 		s.ensureMonitoringWorker()
+		s.ensureAutomationONUScheduler()
 	}
 
 	return chain(cfg, log, r)

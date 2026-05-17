@@ -578,7 +578,8 @@ func formatCommercialGrowthParen(cur, prev int64) string {
 }
 
 // commercialTelegramCompose gera HTML (bloco <pre>) com todos os registos mensais do mês (tópicos vs mês anterior).
-func (s *Server) commercialTelegramCompose(ctx context.Context, month string) (string, error) {
+// automatic altera apenas a linha de rodapé (relatório agendado vs envio manual).
+func (s *Server) commercialTelegramCompose(ctx context.Context, month string, automatic bool) (string, error) {
 	month = strings.TrimSpace(month)
 	if !yearMonthCommercialRe.MatchString(month) {
 		return "", fmt.Errorf("month deve estar em AAAA-MM")
@@ -671,7 +672,11 @@ func (s *Server) commercialTelegramCompose(ctx context.Context, month string) (s
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\nEnviado manualmente pela aplicação NetQuasar.\n")
+	if automatic {
+		sb.WriteString("\nEnviado automaticamente pelo NetQuasar (relatório ONU mensal / base comercial).\n")
+	} else {
+		sb.WriteString("\nEnviado manualmente pela aplicação NetQuasar.\n")
+	}
 
 	plain := clipCommercialPlain(sb.String(), telegramCommercialPlainMax)
 	return wrapCommercialTelegramPre(plain), nil
@@ -704,7 +709,7 @@ func (s *Server) commercialReportsSendTelegram(w http.ResponseWriter, r *http.Re
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "month é obrigatório (formato AAAA-MM) para montar o relatório.", nil)
 		return
 	}
-	text, compErr := s.commercialTelegramCompose(r.Context(), month)
+	text, compErr := s.commercialTelegramCompose(r.Context(), month, false)
 	if compErr != nil {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", compErr.Error(), nil)
 		return
