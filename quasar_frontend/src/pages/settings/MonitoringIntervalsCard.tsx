@@ -1,0 +1,261 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { InfoHint } from "../../components/InfoHint";
+import { SettingsField } from "../../components/SettingsField";
+import { apiFetch } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
+
+type MonitoringIntervalsPayload = {
+  ping_seconds: number;
+  telemetry_seconds: number;
+  interface_snapshot_seconds: number;
+  olt_if_derived_pon_seconds: number;
+  telemetry_minutes: number;
+  ping_timeout_ms: number;
+  icmp_payload_bytes?: number;
+  offline_ping_fail_threshold?: number;
+  uptime_restart_alert_minutes?: number;
+};
+
+function effectiveMonitoringCycleSeconds(d: MonitoringIntervalsPayload): number {
+  return Math.min(
+    d.ping_seconds,
+    d.telemetry_seconds ?? d.telemetry_minutes * 60,
+    d.interface_snapshot_seconds ?? 300,
+    d.olt_if_derived_pon_seconds ?? 240,
+  );
+}
+
+export function MonitoringPingIntervalsCard() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: queryKeys.monIntervals,
+    queryFn: () => apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals"),
+  });
+  const [ps, setPs] = useState("");
+  const [telS, setTelS] = useState("");
+  const [ifaceS, setIfaceS] = useState("");
+  const [oltDerivedS, setOltDerivedS] = useState("");
+  const [pto, setPto] = useState("");
+  const [icmpSz, setIcmpSz] = useState("");
+  const [offTh, setOffTh] = useState("");
+  const [uptimeRestart, setUptimeRestart] = useState("");
+  useEffect(() => {
+    if (!q.data) return;
+    setPs((v) => (v === "" ? String(q.data.ping_seconds) : v));
+    setTelS((v) => (v === "" ? String(q.data.telemetry_seconds ?? q.data.telemetry_minutes * 60) : v));
+    setIfaceS((v) => (v === "" ? String(q.data.interface_snapshot_seconds ?? 300) : v));
+    setOltDerivedS((v) => (v === "" ? String(q.data.olt_if_derived_pon_seconds ?? 240) : v));
+    setPto((v) => (v === "" ? String(q.data.ping_timeout_ms ?? 5500) : v));
+    setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
+    setOffTh((v) => (v === "" ? String(q.data.offline_ping_fail_threshold ?? 3) : v));
+    setUptimeRestart((v) => (v === "" ? String(q.data.uptime_restart_alert_minutes ?? 0) : v));
+  }, [q.data]);
+  const save = useMutation({
+    mutationFn: (body: Partial<MonitoringIntervalsPayload>) =>
+      apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals", { method: "PATCH", json: body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.monIntervals });
+      save.reset();
+    },
+  });
+
+  if (q.isLoading) return <div className="card"><p>A carregar intervalos de sondagem…</p></div>;
+  if (q.isError)
+    return (
+      <div className="card">
+        <div className="msg msg--err">{(q.error as Error).message}</div>
+      </div>
+    );
+  if (!q.data) return null;
+
+  const d = q.data;
+  const telSec = d.telemetry_seconds ?? d.telemetry_minutes * 60;
+  const ifaceSec = d.interface_snapshot_seconds ?? 300;
+  const oltSec = d.olt_if_derived_pon_seconds ?? 240;
+  const minCycle = effectiveMonitoringCycleSeconds(d);
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 0 }}>
+        Intervalos globais e sondagem ICMP
+        <InfoHint label="Funcionamento do worker de monitorização">
+          <p>
+            O worker acorda pelo <strong>menor</strong> intervalo entre latência/ping, telemetria, snapshots de interfaces e PON derivada IF-MIB. O ciclo
+            efectivo actual é de até ~<strong>{minCycle} s</strong> (o mínimo entre os quatro intervalos de coleta).
+          </p>
+          <p>
+            Valores gravados neste momento: ping (ICMP/TCP) <strong>{d.ping_seconds} s</strong>; tempo máximo da sonda{" "}
+            <strong>{d.ping_timeout_ms ?? 5500} ms</strong>; pacote ICMP <strong>{d.icmp_payload_bytes ?? 32} B</strong>; falhas consecutivas até alerta
+            offline <strong>{d.offline_ping_fail_threshold ?? 3}</strong>; telemetria <strong>{telSec} s</strong>; interfaces <strong>{ifaceSec} s</strong>;
+            OLT/PON IF <strong>{oltSec} s</strong>; alarme de possível reinício (uptime) <strong>{d.uptime_restart_alert_minutes ?? 0}</strong> min (
+            <strong>0</strong> = desligado).
+          </p>
+        </InfoHint>
+      </h2>
+
+      <section className="settings-intervals-section" aria-labelledby="mon-intervals-collect-heading">
+        <h3 id="mon-intervals-collect-heading">Intervalos de coleta</h3>
+        <div className="settings-fields-grid">
+          <SettingsField
+            label="Intervalo entre pings (s)"
+            hintLabel="Intervalo de latência e ping ICMP/TCP"
+            hint={
+              <p>
+                Tempo mínimo entre ciclos de <strong>latência/ping</strong> para todos os equipamentos activos no monitoramento. Valores típicos: 30–60 s.
+                Este intervalo entra no cálculo do ciclo efectivo do worker (o menor entre ping, telemetria, interfaces e PON).
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Intervalo entre pings em segundos" value={ps} onChange={(e) => setPs(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="Telemetria SNMP (s)"
+            hintLabel="Intervalo de telemetria SNMP"
+            hint={
+              <p>
+                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria activa.
+                Ex.: 180 s = 3 minutos entre amostras.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo entre ciclos de telemetria em segundos"
+              value={telS}
+              onChange={(e) => setTelS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="Interfaces SNMP (s)"
+            hintLabel="Intervalo de snapshots de interfaces"
+            hint={
+              <p>
+                Intervalo do walk <strong>IF-MIB</strong> e gravação de <code className="mono">interface_snapshots</code> (MikroTik, OLT, etc.). Afecta
+                tráfego, estados admin/oper e dados de interface na UI.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo de snapshots de interfaces em segundos"
+              value={ifaceS}
+              onChange={(e) => setIfaceS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="OLT PON IF (s)"
+            hintLabel="Intervalo PON derivada IF-MIB"
+            hint={
+              <p>
+                Colecta de totais <strong>ONU/PON</strong> por derive IF-MIB (ex.: VSOL, fibre MikroTik). Só aplica a OLT compatíveis; fabricantes como
+                ZTE/DATACOM usam outro fluxo (refresh OLT / API) e este passo pode ser omitido pelo worker.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo entre colectas ONUs/PON derive IF-MIB em segundos"
+              value={oltDerivedS}
+              onChange={(e) => setOltDerivedS(e.target.value)}
+            />
+          </SettingsField>
+        </div>
+      </section>
+
+      <section className="settings-intervals-section" aria-labelledby="mon-intervals-icmp-heading">
+        <h3 id="mon-intervals-icmp-heading">Sondagem ICMP e equipamento offline</h3>
+        <div className="settings-fields-grid">
+          <SettingsField
+            label="Tempo máximo da sonda (ms)"
+            hintLabel="Timeout da sonda de ping"
+            hint={
+              <p>
+                Tempo máximo que cada tentativa de <strong>ping ICMP/TCP</strong> espera resposta antes de contar como falha. Intervalo válido na API:{" "}
+                <strong>1000–30000</strong> ms. Valor mais baixo = detecção mais rápida, mas mais falsos positivos em redes lentas.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Tempo máximo da sonda em milissegundos" value={pto} onChange={(e) => setPto(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="Pacote ICMP (bytes)"
+            hintLabel="Tamanho do payload ICMP"
+            hint={
+              <p>
+                Tamanho do payload ICMP enviado em cada ping (predefinição <strong>32</strong> bytes). Alguns equipamentos ou firewalls reagem de forma
+                diferente a tamanhos maiores.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Tamanho do pacote ICMP em bytes" value={icmpSz} onChange={(e) => setIcmpSz(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="Falhas até alertar offline"
+            hintLabel="Limiar de falhas consecutivas de ping"
+            hint={
+              <p>
+                Número de ciclos do worker <strong>sem resposta</strong> antes de abrir o alerta «equipamento offline». No ping manual na UI, o sistema pode
+                repetir tentativas na mesma acção até atingir este limiar. Ex.: <strong>3</strong> = três falhas seguidas.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Número de falhas de ping consecutivas antes de alertar"
+              value={offTh}
+              onChange={(e) => setOffTh(e.target.value)}
+            />
+          </SettingsField>
+        </div>
+      </section>
+
+      <section className="settings-intervals-section" aria-labelledby="mon-intervals-uptime-heading">
+        <h3 id="mon-intervals-uptime-heading">Alerta de reinício</h3>
+        <div className="settings-fields-grid">
+          <SettingsField
+            label="Uptime mínimo para alerta (min)"
+            hintLabel="Alerta de possível reinício por uptime"
+            hint={
+              <p>
+                Se o <strong>sysUpTime</strong> reportado por SNMP (em minutos) for <strong>inferior</strong> a este valor, o sistema cria um alerta de
+                possível reinício do equipamento. Use <strong>0</strong> para desactivar este tipo de alerta.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Minutos de uptime abaixo dos quais alertar possível reinício"
+              value={uptimeRestart}
+              onChange={(e) => setUptimeRestart(e.target.value)}
+            />
+          </SettingsField>
+        </div>
+      </section>
+
+      <div className="settings-intervals-actions">
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={save.isPending}
+          onClick={() =>
+            save.mutate({
+              ping_seconds: ps ? Number(ps) : undefined,
+              telemetry_seconds: telS ? Number(telS) : undefined,
+              interface_snapshot_seconds: ifaceS ? Number(ifaceS) : undefined,
+              olt_if_derived_pon_seconds: oltDerivedS ? Number(oltDerivedS) : undefined,
+              ping_timeout_ms: pto ? Number(pto) : undefined,
+              icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
+              offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,
+              uptime_restart_alert_minutes: uptimeRestart !== "" ? Number(uptimeRestart) : undefined,
+            })
+          }
+        >
+          Guardar intervalos / ICMP
+        </button>
+      </div>
+      {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
+      {save.isSuccess && <div className="msg msg--ok">Definições guardadas.</div>}
+    </div>
+  );
+}

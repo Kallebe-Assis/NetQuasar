@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type CSSProperties } from "react";
 import { Blend, ClockFading, Cpu, Sun, ThermometerSun } from "lucide-react";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { AppearancePanel } from "./settings/AppearancePanel";
+import { MonitoringPingIntervalsCard } from "./settings/MonitoringIntervalsCard";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -22,22 +23,22 @@ export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("database");
   return (
     <>
-      <h1>Configurações</h1>
+      <h1>ConfiguraÃ§Ãµes</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, utilizadores, credenciais de rede, Telegram (alertas e relatórios), fabricantes OLT e relatórios automáticos.
+        Base de dados, utilizadores, credenciais de rede, Telegram (alertas e relatÃ³rios), fabricantes OLT e relatÃ³rios automÃ¡ticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
           [
             ["database", "Base de dados"],
             ["logs", "Auditoria"],
-            ["users", "Usuários"],
+            ["users", "UsuÃ¡rios"],
             ["alerts", "Alertas"],
-            ["appearance", "Aparência"],
+            ["appearance", "AparÃªncia"],
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
             ["olt", "OLT vendors"],
-            ["automation", "Relatório ONU"],
+            ["automation", "RelatÃ³rio ONU"],
           ] as const
         ).map(([k, lab]) => (
           <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
@@ -58,8 +59,8 @@ export function SettingsPage() {
       {tab === "connection" && <ConnectionPanel />}
       {tab === "telegram" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <TelegramPanel id="monitoring" title="Monitorização (alertas)" />
-          <TelegramPanel id="reports" title="Relatórios" />
+          <TelegramPanel id="monitoring" title="MonitorizaÃ§Ã£o (alertas)" />
+          <TelegramPanel id="reports" title="RelatÃ³rios" />
         </div>
       )}
       {tab === "olt" && <OltVendorsPanel />}
@@ -90,15 +91,15 @@ function hasMaskedDbUser(meta: DbMeta | undefined): boolean {
 function friendlyDbTestSuccessMessage(serverMessage: string): string {
   const m = serverMessage.toLowerCase();
   if (m.includes("url") && (m.includes("informada") || m.includes("bem-suced"))) {
-    return "Ligação bem-sucedida com o endereço completo (URL) que indicou.";
+    return "LigaÃ§Ã£o bem-sucedida com o endereÃ§o completo (URL) que indicou.";
   }
-  if (m.includes("parâmetros") || m.includes("parametros")) {
-    return "Ligação bem-sucedida: o servidor aceitou os dados de acesso que preencheu.";
+  if (m.includes("parÃ¢metros") || m.includes("parametros")) {
+    return "LigaÃ§Ã£o bem-sucedida: o servidor aceitou os dados de acesso que preencheu.";
   }
   if (m.includes("ping") || m.includes("pool atual")) {
-    return "A base de dados que está em uso neste momento respondeu corretamente.";
+    return "A base de dados que estÃ¡ em uso neste momento respondeu corretamente.";
   }
-  return "Ligação à base de dados bem-sucedida.";
+  return "LigaÃ§Ã£o Ã  base de dados bem-sucedida.";
 }
 
 /** Texto extra devolvido pelo backend em `details.hint` (ex.: Supabase + Docker + IPv6). */
@@ -112,7 +113,7 @@ function dbErrorDetailsHint(err: unknown): string | null {
 
 function friendlyDbConnectionError(err: unknown): string {
   if (!(err instanceof ApiError)) {
-    return "Não foi possível concluir o pedido. Verifique a ligação à internet e tente novamente.";
+    return "NÃ£o foi possÃ­vel concluir o pedido. Verifique a ligaÃ§Ã£o Ã  internet e tente novamente.";
   }
   const hint = dbErrorDetailsHint(err);
   if (hint) return hint;
@@ -120,47 +121,47 @@ function friendlyDbConnectionError(err: unknown): string {
   const code = (err.code || "").toUpperCase();
 
   if (code === "VALIDATION" || raw.includes("informe host") || raw.includes("db_password")) {
-    return "Falta informação para testar: são necessários o servidor, a porta, o nome da base, o utilizador e a palavra-passe. Se já guardou a palavra-passe antes, pode deixar esse campo vazio e voltar a testar. Pode também usar só o campo “URL completa”.";
+    return "Falta informaÃ§Ã£o para testar: sÃ£o necessÃ¡rios o servidor, a porta, o nome da base, o utilizador e a palavra-passe. Se jÃ¡ guardou a palavra-passe antes, pode deixar esse campo vazio e voltar a testar. Pode tambÃ©m usar sÃ³ o campo â€œURL completaâ€.";
   }
   if (code === "NO_DB") {
-    return "O serviço de base de dados não está disponível neste momento. Tente reiniciar a aplicação.";
+    return "O serviÃ§o de base de dados nÃ£o estÃ¡ disponÃ­vel neste momento. Tente reiniciar a aplicaÃ§Ã£o.";
   }
   if (raw.includes("authentication failed") || raw.includes("password authentication")) {
     return "O servidor recusou o utilizador ou a palavra-passe. Confirme as credenciais da base de dados.";
   }
   if (raw.includes("connection refused")) {
-    return "O servidor recusou a ligação na porta indicada. Verifique se o PostgreSQL está a correr e se a porta está correta.";
+    return "O servidor recusou a ligaÃ§Ã£o na porta indicada. Verifique se o PostgreSQL estÃ¡ a correr e se a porta estÃ¡ correta.";
   }
   if (raw.includes("no such host") || raw.includes("name or service not known")) {
-    return "Não encontrámos esse endereço de servidor. Confirme o nome ou o IP.";
+    return "NÃ£o encontrÃ¡mos esse endereÃ§o de servidor. Confirme o nome ou o IP.";
   }
   if (raw.includes("timeout") || raw.includes("deadline exceeded") || raw.includes("i/o timeout")) {
-    return "A ligação demorou demasiado. Verifique rede, firewall e se o servidor está acessível.";
+    return "A ligaÃ§Ã£o demorou demasiado. Verifique rede, firewall e se o servidor estÃ¡ acessÃ­vel.";
   }
   if (raw.includes("does not exist") && raw.includes("database")) {
-    return "Essa base de dados não existe neste servidor. Confirme o nome da base.";
+    return "Essa base de dados nÃ£o existe neste servidor. Confirme o nome da base.";
   }
   if (raw.includes("ssl") || raw.includes("tls") || raw.includes("certificate")) {
-    return "Há um problema com a ligação segura (SSL). Experimente “require” ou “disable” no modo SSL, conforme o seu fornecedor de base de dados.";
+    return "HÃ¡ um problema com a ligaÃ§Ã£o segura (SSL). Experimente â€œrequireâ€ ou â€œdisableâ€ no modo SSL, conforme o seu fornecedor de base de dados.";
   }
   if (
     (code === "TEST_FAILED" || code === "PING_FAILED" || code === "MIGRATE_FAILED" || code === "CONNECT_FAILED") &&
     (raw.includes("network is unreachable") || raw.includes("no route to host")) &&
     (raw.includes("dial tcp [") || raw.includes("dial tcp6 ["))
   ) {
-    return "Falha de rede IPv6 até ao Postgres. Use o Session pooler (….pooler.supabase.com) no painel Supabase ou ative IPv6 no Docker.";
+    return "Falha de rede IPv6 atÃ© ao Postgres. Use o Session pooler (â€¦.pooler.supabase.com) no painel Supabase ou ative IPv6 no Docker.";
   }
   if (code === "TEST_FAILED" || code === "PING_FAILED" || code === "MIGRATE_FAILED" || code === "CONNECT_FAILED") {
-    return "Não foi possível ligar. Confirme servidor, porta, utilizador, palavra-passe e nome da base.";
+    return "NÃ£o foi possÃ­vel ligar. Confirme servidor, porta, utilizador, palavra-passe e nome da base.";
   }
-  return "Não foi possível ligar à base de dados. Revise os dados e tente novamente.";
+  return "NÃ£o foi possÃ­vel ligar Ã  base de dados. Revise os dados e tente novamente.";
 }
 
 function friendlyDbPatchError(err: unknown): string {
-  if (!(err instanceof ApiError)) return "Não foi possível guardar. Tente novamente.";
+  if (!(err instanceof ApiError)) return "NÃ£o foi possÃ­vel guardar. Tente novamente.";
   const raw = (err.message || "").toLowerCase();
   if (raw.includes("database_url") && raw.includes("apply_connection")) {
-    return "Para usar uma URL completa tem de marcar a opção “Aplicar já esta ligação”.";
+    return "Para usar uma URL completa tem de marcar a opÃ§Ã£o â€œAplicar jÃ¡ esta ligaÃ§Ã£oâ€.";
   }
   return friendlyDbConnectionError(err);
 }
@@ -169,12 +170,12 @@ function validateDbUrlFormat(url: string): string | null {
   const t = url.trim();
   if (!t) return null;
   if (!/^postgres(ql)?:\/\//i.test(t)) {
-    return "O endereço completo (URL) deve começar por postgres:// ou postgresql://.";
+    return "O endereÃ§o completo (URL) deve comeÃ§ar por postgres:// ou postgresql://.";
   }
   return null;
 }
 
-/** db.<ref> sem domínio completo .supabase.co (ex.: …truncado em …s) — a validação antiga não apanha porque falta a palavra "supabase". */
+/** db.<ref> sem domÃ­nio completo .supabase.co (ex.: â€¦truncado em â€¦s) â€” a validaÃ§Ã£o antiga nÃ£o apanha porque falta a palavra "supabase". */
 function supabaseDbHostIncompleteMessage(host: string): string | null {
   const t = host.trim().toLowerCase();
   if (!t.startsWith("db.")) return null;
@@ -182,22 +183,22 @@ function supabaseDbHostIncompleteMessage(host: string): string | null {
   const withoutDb = t.slice(3);
   const parts = withoutDb.split(".");
   if (parts.length < 2) {
-    return "O servidor está incompleto: o host da Supabase tem de ser db.SEU_REF.supabase.co (com .supabase.co no fim). Copie o valor completo do painel.";
+    return "O servidor estÃ¡ incompleto: o host da Supabase tem de ser db.SEU_REF.supabase.co (com .supabase.co no fim). Copie o valor completo do painel.";
   }
   if (parts.length === 2 && parts[1].length <= 3 && parts[1] !== "supabase") {
-    return "O servidor parece truncado (falta supabase.co). Confirme db.SEU_REF.supabase.co inteiro. A partir do Docker, use a URI do Session pooler em “URL completa” (Connect → Session).";
+    return "O servidor parece truncado (falta supabase.co). Confirme db.SEU_REF.supabase.co inteiro. A partir do Docker, use a URI do Session pooler em â€œURL completaâ€ (Connect â†’ Session).";
   }
   return null;
 }
 
-/** Host Supabase aceite nos campos: ligação direta ou pooler de sessão. */
+/** Host Supabase aceite nos campos: ligaÃ§Ã£o direta ou pooler de sessÃ£o. */
 function isAllowedSupabasePostgresHost(host: string): boolean {
   const h = host.trim().toLowerCase();
   if (!h.includes("supabase")) return true;
   return h.endsWith(".supabase.co") || h.endsWith(".pooler.supabase.com");
 }
 
-/** Campos em falta para um teste por dados (sem URL); considera o que já está gravado no sistema. */
+/** Campos em falta para um teste por dados (sem URL); considera o que jÃ¡ estÃ¡ gravado no sistema. */
 function missingDbFieldsForTest(opts: {
   host: string;
   port: string;
@@ -208,7 +209,7 @@ function missingDbFieldsForTest(opts: {
   userKnownInSettings: boolean;
 }): string[] {
   const missing: string[] = [];
-  if (!opts.host.trim()) missing.push("servidor (endereço ou IP)");
+  if (!opts.host.trim()) missing.push("servidor (endereÃ§o ou IP)");
   const p = opts.port.trim();
   if (!p || Number.isNaN(Number(p)) || Number(p) <= 0) missing.push("porta (em geral 5432)");
   if (!opts.dbName.trim()) missing.push("nome da base de dados");
@@ -265,7 +266,7 @@ function DatabasePanel() {
     onError: (e) => setDbToast({ ok: false, text: friendlyDbConnectionError(e) }),
   });
 
-  if (meta.isLoading) return <p>A carregar metadados…</p>;
+  if (meta.isLoading) return <p>A carregar metadadosâ€¦</p>;
   if (meta.isError) return <div className="msg msg--err">{(meta.error as Error).message}</div>;
 
   const buildPatchBody = (): Record<string, unknown> => {
@@ -301,7 +302,7 @@ function DatabasePanel() {
     if (hostNorm.includes("supabase") && !isAllowedSupabasePostgresHost(hostNorm)) {
       setDbToast({
         ok: false,
-        text: "Para Supabase use um host completo: db.…supabase.co (direto) ou ….pooler.supabase.com (session pooler). Copie do painel Connect.",
+        text: "Para Supabase use um host completo: db.â€¦supabase.co (direto) ou â€¦.pooler.supabase.com (session pooler). Copie do painel Connect.",
       });
       return;
     }
@@ -314,7 +315,7 @@ function DatabasePanel() {
     ) {
       setDbToast({
         ok: false,
-        text: "Na URL, o host Supabase deve incluir db.….supabase.co ou ….pooler.supabase.com (copie do painel). Não use o URL https:// do painel.",
+        text: "Na URL, o host Supabase deve incluir db.â€¦.supabase.co ou â€¦.pooler.supabase.com (copie do painel). NÃ£o use o URL https:// do painel.",
       });
       return;
     }
@@ -345,7 +346,7 @@ function DatabasePanel() {
     if (missing.length > 0) {
       setDbToast({
         ok: false,
-        text: `Falta preencher: ${missing.join(", ")}. Depois volte a carregar em “Testar ligação”.`,
+        text: `Falta preencher: ${missing.join(", ")}. Depois volte a carregar em â€œTestar ligaÃ§Ã£oâ€.`,
       });
       return;
     }
@@ -361,35 +362,35 @@ function DatabasePanel() {
     <div className="card">
       <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
         Base de dados (PostgreSQL)
-        <InfoHint label="Ligação à base de dados">
+        <InfoHint label="LigaÃ§Ã£o Ã  base de dados">
           <p>
-            Estado: ligação em uso é{" "}
-            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições guardadas"}</strong>
-            {" · "}
-            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já guardada" : "ainda não guardada"}</strong>
+            Estado: ligaÃ§Ã£o em uso Ã©{" "}
+            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variÃ¡vel de ambiente" : "definiÃ§Ãµes guardadas"}</strong>
+            {" Â· "}
+            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "jÃ¡ guardada" : "ainda nÃ£o guardada"}</strong>
           </p>
           <p>
-            Preencha os campos abaixo <strong>ou</strong> só o campo “URL completa”. Use “Testar ligação” para confirmar o acesso sem alterar o sistema; use
-            “Guardar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
+            Preencha os campos abaixo <strong>ou</strong> sÃ³ o campo â€œURL completaâ€. Use â€œTestar ligaÃ§Ã£oâ€ para confirmar o acesso sem alterar o sistema; use
+            â€œGuardarâ€ para gravar (e â€œAplicar jÃ¡â€ apenas se souber o que faz â€” troca a ligaÃ§Ã£o ativa).
           </p>
           <p>
-            O host <span className="mono">db.…supabase.co</span> pode resolver só para IPv6; no Docker use o <strong>Session pooler</strong> (ex.:{" "}
-            <span className="mono">aws-1-sa-east-1.pooler.supabase.com</span> — o painel indica <span className="mono">aws-0-</span> ou{" "}
-            <span className="mono">aws-1-</span>) em “URL completa” ou nos campos. Com <strong>require</strong>, o teste usa o certificado CA incluído para ligações{" "}
+            O host <span className="mono">db.â€¦supabase.co</span> pode resolver sÃ³ para IPv6; no Docker use o <strong>Session pooler</strong> (ex.:{" "}
+            <span className="mono">aws-1-sa-east-1.pooler.supabase.com</span> â€” o painel indica <span className="mono">aws-0-</span> ou{" "}
+            <span className="mono">aws-1-</span>) em â€œURL completaâ€ ou nos campos. Com <strong>require</strong>, o teste usa o certificado CA incluÃ­do para ligaÃ§Ãµes{" "}
             <span className="mono">db.*.supabase.co</span>.
           </p>
           <p>
-            Se preencher o campo URL completa, o teste usa só a URL (não precisa dos campos de cima para testar). Para guardar uma nova URL é necessário
-            marcar “Aplicar já esta ligação”.
+            Se preencher o campo URL completa, o teste usa sÃ³ a URL (nÃ£o precisa dos campos de cima para testar). Para guardar uma nova URL Ã© necessÃ¡rio
+            marcar â€œAplicar jÃ¡ esta ligaÃ§Ã£oâ€.
           </p>
           <p>
-            <strong>Docker / sem IPv6:</strong> cole a URI do <strong>Session pooler</strong> (Connect → Session): host <span className="mono">aws-0-</span> ou{" "}
-            <span className="mono">aws-1-REGIÃO.pooler.supabase.com</span>, utilizador <span className="mono">postgres.SEU_REF</span>.
+            <strong>Docker / sem IPv6:</strong> cole a URI do <strong>Session pooler</strong> (Connect â†’ Session): host <span className="mono">aws-0-</span> ou{" "}
+            <span className="mono">aws-1-REGIÃƒO.pooler.supabase.com</span>, utilizador <span className="mono">postgres.SEU_REF</span>.
           </p>
         </InfoHint>
       </h2>
 
-      <h3 style={{ fontSize: 14, marginTop: 16, marginBottom: 8 }}>Dados da ligação</h3>
+      <h3 style={{ fontSize: 14, marginTop: 16, marginBottom: 8 }}>Dados da ligaÃ§Ã£o</h3>
       <div className="field" style={hostFieldStyle}>
         <label htmlFor="db-host">Servidor (host ou IP)</label>
         <input
@@ -405,13 +406,13 @@ function DatabasePanel() {
           }}
           value={host}
           onChange={(e) => setHost(e.target.value)}
-          placeholder="db.….supabase.co ou aws-1-….pooler.supabase.com"
+          placeholder="db.â€¦.supabase.co ou aws-1-â€¦.pooler.supabase.com"
           autoComplete="off"
           spellCheck={false}
           title={host ? host : "Host completo"}
         />
         <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0", lineHeight: 1.45 }}>
-          Ligação direta: acaba em <span className="mono">.supabase.co</span>. Session pooler: acaba em{" "}
+          LigaÃ§Ã£o direta: acaba em <span className="mono">.supabase.co</span>. Session pooler: acaba em{" "}
           <span className="mono">.pooler.supabase.com</span>. Copie o valor completo do painel (Connect).
         </p>
       </div>
@@ -423,7 +424,7 @@ function DatabasePanel() {
         <label htmlFor="db-user">Utilizador da base de dados</label>
         <input id="db-user" className="input" value={dbUser} onChange={(e) => setDbUser(e.target.value)} placeholder="nome de utilizador PostgreSQL" autoComplete="off" />
         {hasMaskedDbUser(meta.data) && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe um utilizador guardado; pode deixar em branco para manter o atual.</p>
+          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>JÃ¡ existe um utilizador guardado; pode deixar em branco para manter o atual.</p>
         )}
       </div>
       <div className="field" style={fieldStyle}>
@@ -438,51 +439,51 @@ function DatabasePanel() {
           <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 14 }}>
             <input type="radio" name="db-ssl-mode" checked={sslChoice === "require"} onChange={() => setSslMode("require")} />
             <span>
-              <strong>require</strong> — encriptado (Supabase, nuvem, Internet)
+              <strong>require</strong> â€” encriptado (Supabase, nuvem, Internet)
             </span>
           </label>
           <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 14 }}>
             <input type="radio" name="db-ssl-mode" checked={sslChoice === "disable"} onChange={() => setSslMode("disable")} />
             <span>
-              <strong>disable</strong> — sem TLS (Postgres local / rede de confiança)
+              <strong>disable</strong> â€” sem TLS (Postgres local / rede de confianÃ§a)
             </span>
           </label>
         </div>
       </div>
       <div className="field" style={fieldStyle}>
         <label htmlFor="db-pass">Palavra-passe da base de dados</label>
-        <input id="db-pass" className="input" type="password" autoComplete="new-password" value={dbPass} onChange={(e) => setDbPass(e.target.value)} placeholder="não é mostrada depois de guardar" />
+        <input id="db-pass" className="input" type="password" autoComplete="new-password" value={dbPass} onChange={(e) => setDbPass(e.target.value)} placeholder="nÃ£o Ã© mostrada depois de guardar" />
         {meta.data?.password_configured && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe palavra-passe guardada; pode deixar em branco para testar com a guardada.</p>
+          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>JÃ¡ existe palavra-passe guardada; pode deixar em branco para testar com a guardada.</p>
         )}
       </div>
 
       <h3 style={{ fontSize: 14, marginTop: 20, marginBottom: 8 }}>URL completa (opcional)</h3>
       <div className="field" style={fieldStyle}>
-        <label htmlFor="db-url">Endereço completo (connection string)</label>
+        <label htmlFor="db-url">EndereÃ§o completo (connection string)</label>
         <input id="db-url" className="input mono" value={dbUrl} onChange={(e) => setDbUrl(e.target.value)} placeholder="postgres://utilizador:palavra-passe@servidor:5432/nome_da_base?sslmode=require" spellCheck={false} autoComplete="off" />
       </div>
 
       <label className="row" style={{ gap: 10, marginTop: 16, alignItems: "flex-start", maxWidth: 560 }}>
         <input type="checkbox" checked={apply} onChange={(e) => setApply(e.target.checked)} style={{ marginTop: 4 }} />
         <span style={{ fontSize: 13, lineHeight: 1.45 }}>
-          <strong>Aplicar já esta ligação</strong> — valida, corre migrações no destino e passa a usar esta base em todo o sistema. Só marque se tiver a certeza dos dados.
+          <strong>Aplicar jÃ¡ esta ligaÃ§Ã£o</strong> â€” valida, corre migraÃ§Ãµes no destino e passa a usar esta base em todo o sistema. SÃ³ marque se tiver a certeza dos dados.
         </span>
       </label>
 
       <div className="row" style={{ marginTop: 16, flexWrap: "wrap", gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate(buildPatchBody())}>
-          Guardar definições
+          Guardar definiÃ§Ãµes
         </button>
         <button type="button" className="btn" disabled={testConn.isPending} onClick={runTestConnection}>
-          Testar ligação
+          Testar ligaÃ§Ã£o
         </button>
       </div>
 
       {dbToast && (
         <div className={`page-toast ${dbToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 14, maxWidth: 560 }}>
           <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setDbToast(null)}>
-            ×
+            Ã—
           </button>
           {dbToast.text}
         </div>
@@ -499,11 +500,11 @@ function LogsPanel() {
       `/api/v1/settings/database/logs?limit=${encodeURIComponent(lim)}`,
     ),
   });
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
   return (
     <div className="card">
-      <h2>Auditoria de ligações</h2>
+      <h2>Auditoria de ligaÃ§Ãµes</h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input className="input" style={{ width: 80 }} value={lim} onChange={(e) => setLim(e.target.value)} />
         <button type="button" className="btn" onClick={() => q.refetch()}>
@@ -526,7 +527,7 @@ function LogsPanel() {
               <tr key={l.id}>
                 <td>{l.id}</td>
                 <td className="mono">{l.created_at}</td>
-                <td>{l.ok ? "sim" : "não"}</td>
+                <td>{l.ok ? "sim" : "nÃ£o"}</td>
                 <td>{l.phase}</td>
                 <td>{l.message}</td>
               </tr>
@@ -607,7 +608,7 @@ function UsersPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-users"] }),
   });
 
-  if (list.isLoading) return <p>A carregar…</p>;
+  if (list.isLoading) return <p>A carregarâ€¦</p>;
   if (list.isError) {
     const ae = list.error as ApiError;
     if (ae?.status === 403) {
@@ -619,7 +620,7 @@ function UsersPanel() {
   return (
     <>
       <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
-        Novos utilizadores só podem ser criados aqui (não existe registo público). Campos: nome, e-mail, <strong>telefone com DDD</strong> (10 ou 11 dígitos), palavra-passe e nível{" "}
+        Novos utilizadores sÃ³ podem ser criados aqui (nÃ£o existe registo pÃºblico). Campos: nome, e-mail, <strong>telefone com DDD</strong> (10 ou 11 dÃ­gitos), palavra-passe e nÃ­vel{" "}
         <strong>administrador</strong> ou <strong>visitante (viewer)</strong>.
       </p>
       <div className="card">
@@ -676,7 +677,7 @@ function UsersPanel() {
               <th>Nome</th>
               <th>E-mail</th>
               <th>Telefone</th>
-              <th>Nível</th>
+              <th>NÃ­vel</th>
               <th />
             </tr>
           </thead>
@@ -765,7 +766,7 @@ function UsersPanel() {
           {saveToast && (
             <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 8 }}>
               <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                ×
+                Ã—
               </button>
               {saveToast.text}
             </div>
@@ -786,7 +787,7 @@ type AlertThresholdMetric = {
   green_min: string;
   warning_min: string;
   critical_min: string;
-  /** Categorias de equipamento (base de dados) em minúsculas; vazio = todos. */
+  /** Categorias de equipamento (base de dados) em minÃºsculas; vazio = todos. */
   apply_categories?: string[];
 };
 
@@ -817,206 +818,20 @@ function categoriesFromEquipScope(scope: "*" | "olt" | "mikrotik" | "servidor"):
 function defaultAlertMetrics(): AlertThresholdMetric[] {
   return [
     { id: "cpu_usage_pct", label: "CPU utilizada", unit: "%", scope: "equipamento", enabled: true, operator: "gte", green_min: "50", warning_min: "75", critical_min: "90", apply_categories: [] },
-    { id: "memory_usage_pct", label: "Memória utilizada", unit: "%", scope: "equipamento", enabled: true, operator: "gte", green_min: "55", warning_min: "75", critical_min: "90", apply_categories: [] },
-    { id: "latency_ms", label: "Latência de resposta", unit: "ms", scope: "equipamento", enabled: true, operator: "gte", green_min: "50", warning_min: "120", critical_min: "220", apply_categories: [] },
-    { id: "temperature_c", label: "Temperatura do equipamento", unit: "°C", scope: "equipamento", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: [] },
+    { id: "memory_usage_pct", label: "MemÃ³ria utilizada", unit: "%", scope: "equipamento", enabled: true, operator: "gte", green_min: "55", warning_min: "75", critical_min: "90", apply_categories: [] },
+    { id: "latency_ms", label: "LatÃªncia de resposta", unit: "ms", scope: "equipamento", enabled: true, operator: "gte", green_min: "50", warning_min: "120", critical_min: "220", apply_categories: [] },
+    { id: "temperature_c", label: "Temperatura do equipamento", unit: "Â°C", scope: "equipamento", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: [] },
     { id: "uptime_minutes", label: "Uptime (minutos)", unit: "min", scope: "equipamento", enabled: true, operator: "lte", green_min: "120", warning_min: "60", critical_min: "15", apply_categories: [] },
     { id: "olt_pon_tx_dbm", label: "PON TX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-14", critical_min: "-20", apply_categories: ["olt"] },
     { id: "olt_pon_rx_dbm", label: "PON RX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-10", warning_min: "-16", critical_min: "-22", apply_categories: ["olt"] },
-    { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
+    { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "Â°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
     { id: "olt_onu_drop_count", label: "Queda de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
     { id: "olt_onu_drop_percent", label: "Queda de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
-    { id: "iface_down_count", label: "Mudança de interface UP→DOWN", unit: "evento", scope: "interface", enabled: true, operator: "gte", green_min: "0", warning_min: "1", critical_min: "1", apply_categories: [] },
-    { id: "mikrotik_sfp_tx_dbm", label: "SFP — potência TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
-    { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "-20", apply_categories: ["mikrotik"] },
-    { id: "mikrotik_sfp_temp_c", label: "Temperatura do módulo SFP", unit: "°C", scope: "mikrotik_sfp", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["mikrotik"] },
+    { id: "iface_down_count", label: "MudanÃ§a de interface UPâ†’DOWN", unit: "evento", scope: "interface", enabled: true, operator: "gte", green_min: "0", warning_min: "1", critical_min: "1", apply_categories: [] },
+    { id: "mikrotik_sfp_tx_dbm", label: "SFP â€” potÃªncia TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
+    { id: "mikrotik_sfp_rx_dbm", label: "SFP â€” potÃªncia RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "-20", apply_categories: ["mikrotik"] },
+    { id: "mikrotik_sfp_temp_c", label: "Temperatura do mÃ³dulo SFP", unit: "Â°C", scope: "mikrotik_sfp", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["mikrotik"] },
   ];
-}
-
-type MonitoringIntervalsPayload = {
-  ping_seconds: number;
-  telemetry_seconds: number;
-  interface_snapshot_seconds: number;
-  olt_if_derived_pon_seconds: number;
-  telemetry_minutes: number;
-  ping_timeout_ms: number;
-  icmp_payload_bytes?: number;
-  offline_ping_fail_threshold?: number;
-  uptime_restart_alert_minutes?: number;
-};
-
-function MonitoringPingIntervalsCard() {
-  const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: queryKeys.monIntervals,
-    queryFn: () => apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals"),
-  });
-  const [ps, setPs] = useState("");
-  const [telS, setTelS] = useState("");
-  const [ifaceS, setIfaceS] = useState("");
-  const [oltDerivedS, setOltDerivedS] = useState("");
-  const [pto, setPto] = useState("");
-  const [icmpSz, setIcmpSz] = useState("");
-  const [offTh, setOffTh] = useState("");
-  const [uptimeRestart, setUptimeRestart] = useState("");
-  useEffect(() => {
-    if (!q.data) return;
-    setPs((v) => (v === "" ? String(q.data.ping_seconds) : v));
-    setTelS((v) => (v === "" ? String(q.data.telemetry_seconds ?? q.data.telemetry_minutes * 60) : v));
-    setIfaceS((v) => (v === "" ? String(q.data.interface_snapshot_seconds ?? 300) : v));
-    setOltDerivedS((v) => (v === "" ? String(q.data.olt_if_derived_pon_seconds ?? 240) : v));
-    setPto((v) => (v === "" ? String(q.data.ping_timeout_ms ?? 5500) : v));
-    setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
-    setOffTh((v) => (v === "" ? String(q.data.offline_ping_fail_threshold ?? 3) : v));
-    setUptimeRestart((v) => (v === "" ? String(q.data.uptime_restart_alert_minutes ?? 0) : v));
-  }, [q.data]);
-  const save = useMutation({
-    mutationFn: (body: Partial<MonitoringIntervalsPayload>) =>
-      apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals", { method: "PATCH", json: body }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.monIntervals });
-      save.reset();
-    },
-  });
-
-  if (q.isLoading) return <div className="card"><p>A carregar intervalos de sondagem…</p></div>;
-  if (q.isError)
-    return (
-      <div className="card">
-        <div className="msg msg--err">{(q.error as Error).message}</div>
-      </div>
-    );
-  if (!q.data) return null;
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <h2>Intervalos globais e sondagem ICMP</h2>
-      <p style={{ fontSize: 13, color: "var(--muted)" }}>
-        O worker acorda pelo <strong>menor</strong> intervalo entre latência/ping, telemetria, snapshots de interfaces e PON derivada IF-MIB.
-        Ciclo efectivo atualmente até ~{" "}
-        <strong>
-          {Math.min(
-            q.data.ping_seconds,
-            q.data.telemetry_seconds ?? q.data.telemetry_minutes * 60,
-            q.data.interface_snapshot_seconds ?? 300,
-            q.data.olt_if_derived_pon_seconds ?? 240,
-          )}{" "}
-          s
-        </strong>
-        ; ping (ICMP/TCP) <strong>{q.data.ping_seconds} s</strong>, tempo máximo da sonda{" "}
-        <strong>{q.data.ping_timeout_ms ?? 5500} ms</strong>, ICMP <strong>{q.data.icmp_payload_bytes ?? 32} B</strong>, falhas offline{" "}
-        <strong>{q.data.offline_ping_fail_threshold ?? 3}</strong>, telemetria <strong>{q.data.telemetry_seconds ?? q.data.telemetry_minutes * 60} s</strong>, interfaces{" "}
-        <strong>{q.data.interface_snapshot_seconds ?? 300} s</strong>, OLT/PON IF <strong>{q.data.olt_if_derived_pon_seconds ?? 240} s</strong>. Alarme uptime reinício{" "}
-        <strong>{q.data.uptime_restart_alert_minutes ?? 0}</strong> min (0 = desligado).
-      </p>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-        <label style={{ fontSize: 12 }}>
-          Intervalo entre pings do worker (s)
-          <input
-            className="input mono"
-            aria-label="Intervalo entre pings em segundos"
-            value={ps}
-            onChange={(e) => setPs(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }}>
-          Tempo máximo da sonda (ms, 1000–30000)
-          <input
-            className="input mono"
-            aria-label="Tempo máximo da sonda em milissegundos"
-            value={pto}
-            onChange={(e) => setPto(e.target.value)}
-            style={{ width: 140, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }}>
-          Pacote ICMP (bytes, padrão 32)
-          <input
-            className="input mono"
-            aria-label="Tamanho do pacote ICMP em bytes"
-            value={icmpSz}
-            onChange={(e) => setIcmpSz(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }} title="Ciclos do worker falhados antes de criar alerta; no ping manual, tentativas na mesma ação até declarar falha total.">
-          Falhas até alertar offline
-          <input
-            className="input mono"
-            aria-label="Número de falhas de ping consecutivas antes de alertar"
-            value={offTh}
-            onChange={(e) => setOffTh(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }} title="CPU, memória, temperatura, uptime (via telemetria SNMP do worker).">
-          Telemetria SNMP (s)
-          <input
-            className="input mono"
-            aria-label="Intervalo entre ciclos de telemetria em segundos"
-            value={telS}
-            onChange={(e) => setTelS(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }} title="Walk IF-MIB e gravação de interface_snapshots.">
-          Interfaces SNMP (s)
-          <input
-            className="input mono"
-            aria-label="Intervalo de snapshots de interfaces"
-            value={ifaceS}
-            onChange={(e) => setIfaceS(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label
-          style={{ fontSize: 12 }}
-          title="Apenas OLT onde a contagem por PON vem do derive IF-MIB (ex.: VSOL/Mikrotik fibre). Omitido para ZTE/DATACOM."
-        >
-          OLT PON IF (s)
-          <input
-            className="input mono"
-            aria-label="Intervalo entre colectas ONUs/PON derive IF-MIB"
-            value={oltDerivedS}
-            onChange={(e) => setOltDerivedS(e.target.value)}
-            style={{ width: 100, display: "block" }}
-          />
-        </label>
-        <label style={{ fontSize: 12 }} title="Se o sysUpTime (minutos) for inferior a este valor, cria-se um alerta «Equipamento reiniciou». 0 desactiva.">
-          Uptime mín. alerta reinício (min)
-          <input
-            className="input mono"
-            aria-label="Minutos de uptime abaixo dos quais alertar possível reinício"
-            value={uptimeRestart}
-            onChange={(e) => setUptimeRestart(e.target.value)}
-            style={{ width: 120, display: "block" }}
-          />
-        </label>
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={save.isPending}
-          onClick={() =>
-            save.mutate({
-              ping_seconds: ps ? Number(ps) : undefined,
-              telemetry_seconds: telS ? Number(telS) : undefined,
-              interface_snapshot_seconds: ifaceS ? Number(ifaceS) : undefined,
-              olt_if_derived_pon_seconds: oltDerivedS ? Number(oltDerivedS) : undefined,
-              ping_timeout_ms: pto ? Number(pto) : undefined,
-              icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
-              offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,
-              uptime_restart_alert_minutes: uptimeRestart !== "" ? Number(uptimeRestart) : undefined,
-            })
-          }
-        >
-          Guardar intervalos / ICMP
-        </button>
-      </div>
-      {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
-      {save.isSuccess && <div className="msg msg--ok">Definições guardadas.</div>}
-    </div>
-  );
 }
 
 function AlertThresholdsPanel() {
@@ -1163,11 +978,11 @@ function AlertThresholdsPanel() {
     { value: "mikrotik", label: "Somente Mikrotik (Categoria)" },
     { value: "servidor", label: "Servidor e outros" },
   ];
-  const unitOptions = ["%", "ms", "°C", "dBm", "min", "ONUs", "evt", "Mbps"];
+  const unitOptions = ["%", "ms", "Â°C", "dBm", "min", "ONUs", "evt", "Mbps"];
   const [selectedCatalog, setSelectedCatalog] = useState("");
 
   const scopeLabel = (scope: string): string => scopeOptions.find((s) => s.value === scope)?.label ?? scope;
-  const saveHint = "Salvo em banco na regra «Limiar global de alertas» (tabela alert_rules).";
+  const saveHint = "Salvo em banco na regra Â«Limiar global de alertasÂ» (tabela alert_rules).";
   const metricIcon = (id: string) => {
     const k = String(id).toLowerCase();
     if (k.includes("mikrotik")) return <img src="/MT_Symbol_Black.svg" alt="" width={14} height={14} />;
@@ -1179,17 +994,17 @@ function AlertThresholdsPanel() {
     return <Cpu size={14} aria-hidden />;
   };
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
     <div className="card alert-rules-card">
       <div className="alert-rules-head">
         <div>
-          <h2 style={{ marginBottom: 6 }}>Configuração de Alertas</h2>
+          <h2 style={{ marginBottom: 6 }}>ConfiguraÃ§Ã£o de Alertas</h2>
           <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
-            Defina por linha: tipo de equipamento, métrica, operador (maior/menor) e faixas <span style={{ color: "#3fb950" }}>Normal</span>,{" "}
-            <span style={{ color: "#d29922" }}>Atenção</span> e <span style={{ color: "#f85149" }}>Crítico</span>.
+            Defina por linha: tipo de equipamento, mÃ©trica, operador (maior/menor) e faixas <span style={{ color: "#3fb950" }}>Normal</span>,{" "}
+            <span style={{ color: "#d29922" }}>AtenÃ§Ã£o</span> e <span style={{ color: "#f85149" }}>CrÃ­tico</span>.
           </p>
         </div>
         <label className="row" style={{ gap: 8 }}>
@@ -1200,7 +1015,7 @@ function AlertThresholdsPanel() {
 
       <div className="alert-rules-toolbar">
         <div className="field" style={{ margin: 0, minWidth: 320 }}>
-          <label style={{ fontSize: 12, color: "var(--muted)" }}>Adicionar métrica padrão</label>
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>Adicionar mÃ©trica padrÃ£o</label>
           <select
             className="input"
             value={selectedCatalog}
@@ -1213,7 +1028,7 @@ function AlertThresholdsPanel() {
               }
             }}
           >
-            <option value="">Selecionar…</option>
+            <option value="">Selecionarâ€¦</option>
             {metricCatalog.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label} ({scopeLabel(m.scope)})
@@ -1222,7 +1037,7 @@ function AlertThresholdsPanel() {
           </select>
         </div>
         <button type="button" className="btn" onClick={addRow}>
-          Novo critério
+          Novo critÃ©rio
         </button>
       </div>
 
@@ -1230,15 +1045,15 @@ function AlertThresholdsPanel() {
         <table className="alert-rules-grid">
           <thead>
             <tr>
-              <th>Métrica</th>
+              <th>MÃ©trica</th>
               <th>Equipamento</th>
               <th>Tipo de dado</th>
-              <th>Condição</th>
+              <th>CondiÃ§Ã£o</th>
               <th>Normal</th>
-              <th>Atenção</th>
-              <th>Crítico</th>
+              <th>AtenÃ§Ã£o</th>
+              <th>CrÃ­tico</th>
               <th>Habilitado</th>
-              <th>Ações</th>
+              <th>AÃ§Ãµes</th>
             </tr>
           </thead>
           <tbody>
@@ -1247,7 +1062,7 @@ function AlertThresholdsPanel() {
                 <td>
                   <div className="alert-rules-metric-wrap">
                     <span className="alert-rules-metric-icon">{metricIcon(r.id)}</span>
-                    <input className="input alert-rules-input-metric" value={r.label} onChange={(e) => updateRow(idx, { label: e.target.value })} placeholder="Nome da métrica" />
+                    <input className="input alert-rules-input-metric" value={r.label} onChange={(e) => updateRow(idx, { label: e.target.value })} placeholder="Nome da mÃ©trica" />
                   </div>
                 </td>
                 <td>
@@ -1283,8 +1098,8 @@ function AlertThresholdsPanel() {
                       ))}
                     </select>
                     <select className="input alert-rules-input-op" value={r.operator} onChange={(e) => updateRow(idx, { operator: e.target.value as "gte" | "lte" })}>
-                      <option value="gte">≥</option>
-                      <option value="lte">≤</option>
+                      <option value="gte">â‰¥</option>
+                      <option value="lte">â‰¤</option>
                     </select>
                   </div>
                 </td>
@@ -1330,14 +1145,14 @@ function AlertThresholdsPanel() {
 
       <div className="row" style={{ marginTop: 16, gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <button type="button" className="btn btn--primary" disabled={upsert.isPending} onClick={() => upsert.mutate()}>
-          Salvar alterações
+          Salvar alteraÃ§Ãµes
         </button>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>{saveHint}</span>
       </div>
       {upsert.isError && <div className="msg msg--err">{(upsert.error as Error).message}</div>}
       {upsert.isSuccess && (
         <div className="msg msg--ok">
-          Critérios guardados com sucesso. O monitoramento consulta estes valores para decidir se abre, atualiza ou resolve alertas.
+          CritÃ©rios guardados com sucesso. O monitoramento consulta estes valores para decidir se abre, atualiza ou resolve alertas.
         </div>
       )}
     </div>
@@ -1358,7 +1173,7 @@ function ConnectionPanel() {
     onu_oids?: string[];
     bridge_oids?: string[];
     traffic_oids?: string[];
-    /** OID normalizado (sem ponto inicial) → descrição mostrada no relatório. */
+    /** OID normalizado (sem ponto inicial) â†’ descriÃ§Ã£o mostrada no relatÃ³rio. */
     oid_labels?: Record<string, string>;
   };
   type OverridesDoc = {
@@ -1373,8 +1188,8 @@ function ConnectionPanel() {
 
   const OID_KIND_OPTIONS: { value: OidExtraKind; label: string }[] = [
     { value: "interface", label: "Interface" },
-    { value: "traffic", label: "Tráfego (banda RX/TX etc.)" },
-    { value: "optical", label: "Óptica / SFP" },
+    { value: "traffic", label: "TrÃ¡fego (banda RX/TX etc.)" },
+    { value: "optical", label: "Ã“ptica / SFP" },
     { value: "pon", label: "PON" },
     { value: "onu", label: "ONU" },
     { value: "bridge", label: "Bridge" },
@@ -1449,7 +1264,7 @@ function ConnectionPanel() {
     bridge: [],
   });
 
-  /** Junta OIDs extra por tipo; mantém ordem e remove duplicados vazios. */
+  /** Junta OIDs extra por tipo; mantÃ©m ordem e remove duplicados vazios. */
   const mergeOidsByKind = (rows: ExtraOidRow[]): Record<OidExtraKind, string[]> => {
     const acc: Record<OidExtraKind, string[]> = {
       interface: [],
@@ -1478,8 +1293,8 @@ function ConnectionPanel() {
   };
 
   /**
-   * Lê o JSON guardado e separa (a) campos reservados dos cartões OLT/Mikrotik
-   * e (b) restantes em linhas editáveis por categoria.
+   * LÃª o JSON guardado e separa (a) campos reservados dos cartÃµes OLT/Mikrotik
+   * e (b) restantes em linhas editÃ¡veis por categoria.
    */
   const extraRowsFromOverridesDoc = (doc: OverridesDoc): Record<OidExtraCategory, ExtraOidRow[]> => {
     const out = emptyExtraRows();
@@ -1591,7 +1406,7 @@ function ConnectionPanel() {
   const [mkBandwidthTxOid, setMkBandwidthTxOid] = useState("");
   const [mkSfpTxOid, setMkSfpTxOid] = useState("");
   const [mkSfpRxOid, setMkSfpRxOid] = useState("");
-  /** Base vinda do servidor (preserva scalars/hand-edits não cobertos pela UI). */
+  /** Base vinda do servidor (preserva scalars/hand-edits nÃ£o cobertos pela UI). */
   const [overridesBaseline, setOverridesBaseline] = useState<OverridesDoc>({});
   const [extraOidRows, setExtraOidRows] = useState<Record<OidExtraCategory, ExtraOidRow[]>>(emptyExtraRows);
   const [showGeneratedJson, setShowGeneratedJson] = useState(false);
@@ -1771,17 +1586,17 @@ function ConnectionPanel() {
       <div className="card" style={{ marginTop: 8 }}>
         <h4 style={{ marginTop: 0 }}>{title}</h4>
         <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-          Um identificador SNMP por linha, com descrição para o relatório (ex.: «CPU 02»). Escolha o tipo de métrica para o sistema organizar os dados ao guardar.
+          Um identificador SNMP por linha, com descriÃ§Ã£o para o relatÃ³rio (ex.: Â«CPU 02Â»). Escolha o tipo de mÃ©trica para o sistema organizar os dados ao guardar.
         </p>
         {rows.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum extra â€” use Â«AdicionarÂ» para incluir mais leituras.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((r) => (
               <div key={r.id} className="row" style={{ flexWrap: "wrap", gap: 6, alignItems: "flex-end" }}>
                 <select
-                  title="Tipo de métrica"
-                  aria-label="Tipo de métrica SNMP"
+                  title="Tipo de mÃ©trica"
+                  aria-label="Tipo de mÃ©trica SNMP"
                   className="select"
                   style={{ minWidth: 200, fontSize: 11, padding: "4px 6px", minHeight: 32 }}
                   value={r.kind}
@@ -1794,7 +1609,7 @@ function ConnectionPanel() {
                   ))}
                 </select>
                 <input
-                  title="Identificador numérico SNMP"
+                  title="Identificador numÃ©rico SNMP"
                   aria-label="Identificador SNMP"
                   className="input mono"
                   style={{ flex: "1 1 160px", minWidth: 140, fontSize: 11, padding: "4px 6px", minHeight: 32 }}
@@ -1802,16 +1617,16 @@ function ConnectionPanel() {
                   onChange={(e) => updateExtraRow(cat, r.id, { oid: e.target.value })}
                 />
                 <input
-                  title="Descrição no relatório"
-                  aria-label="Descrição da leitura SNMP extra"
+                  title="DescriÃ§Ã£o no relatÃ³rio"
+                  aria-label="DescriÃ§Ã£o da leitura SNMP extra"
                   className="input"
-                  placeholder="Descrição (relatório)"
+                  placeholder="DescriÃ§Ã£o (relatÃ³rio)"
                   style={{ flex: "1 1 140px", minWidth: 120, fontSize: 11, padding: "4px 6px", minHeight: 32 }}
                   value={r.label}
                   onChange={(e) => updateExtraRow(cat, r.id, { label: e.target.value })}
                 />
                 <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeExtraRow(cat, r.id)}>
-                  −
+                  âˆ’
                 </button>
               </div>
             ))}
@@ -1863,29 +1678,29 @@ function ConnectionPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-conn-def"] }),
   });
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
     <div className="card">
       <h2>Credenciais e leituras SNMP por defeito</h2>
       <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Valores aplicados quando o equipamento não traz credenciais próprias. Palavras-passe não são mostradas ao abrir esta página.
-        {q.data?.updated_at ? ` Última alteração: ${q.data.updated_at}` : ""}
+        Valores aplicados quando o equipamento nÃ£o traz credenciais prÃ³prias. Palavras-passe nÃ£o sÃ£o mostradas ao abrir esta pÃ¡gina.
+        {q.data?.updated_at ? ` Ãšltima alteraÃ§Ã£o: ${q.data.updated_at}` : ""}
       </p>
       <div className="row" style={{ gap: 10, marginBottom: 8 }}>
         <span className={q.data?.snmp_community_configured ? "badge badge--ok" : "badge badge--off"}>
-          Comunidade SNMP: {q.data?.snmp_community_configured ? "definida" : "não definida"}
+          Comunidade SNMP: {q.data?.snmp_community_configured ? "definida" : "nÃ£o definida"}
         </span>
         <span className={q.data?.telnet_password_configured ? "badge badge--ok" : "badge badge--off"}>
-          Palavra-passe Telnet: {q.data?.telnet_password_configured ? "definida" : "não definida"}
+          Palavra-passe Telnet: {q.data?.telnet_password_configured ? "definida" : "nÃ£o definida"}
         </span>
         <span className={q.data?.ssh_password_configured ? "badge badge--ok" : "badge badge--off"}>
-          Palavra-passe SSH: {q.data?.ssh_password_configured ? "definida" : "não definida"}
+          Palavra-passe SSH: {q.data?.ssh_password_configured ? "definida" : "nÃ£o definida"}
         </span>
       </div>
       <div className="field">
-        <label>Comunidade SNMP padrão</label>
+        <label>Comunidade SNMP padrÃ£o</label>
         <input className="input" value={snmp} onChange={(e) => setSnmp(e.target.value)} />
       </div>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -1901,58 +1716,58 @@ function ConnectionPanel() {
         Leituras SNMP preferidas por tipo de equipamento
         <InfoHint label="OIDs SNMP preferidos">
           <p>
-            Se preencher, estes endereços têm prioridade sobre a descoberta automática. Em «CPU utilizada» indique a carga; em «CPU disponível» use normalmente
-            a percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e só depois deriva a partir da disponível (100 − idle).
+            Se preencher, estes endereÃ§os tÃªm prioridade sobre a descoberta automÃ¡tica. Em Â«CPU utilizadaÂ» indique a carga; em Â«CPU disponÃ­velÂ» use normalmente
+            a percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e sÃ³ depois deriva a partir da disponÃ­vel (100 âˆ’ idle).
           </p>
         </InfoHint>
       </h3>
-      <div className="field"><label>OLT — CPU, memória, temperatura, tempo ligado</label></div>
+      <div className="field"><label>OLT â€” CPU, memÃ³ria, temperatura, tempo ligado</label></div>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="field">
           <label>CPU utilizada (uso / carga)</label>
           <input className="input mono" value={oltCpu} onChange={(e) => setOltCpu(e.target.value)} />
         </div>
         <div className="field">
-          <label>CPU disponível (% idle)</label>
+          <label>CPU disponÃ­vel (% idle)</label>
           <input className="input mono" value={oltCpuAvail} onChange={(e) => setOltCpuAvail(e.target.value)} placeholder="opcional" />
         </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={oltMemUsed} onChange={(e) => setOltMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={oltMemSize} onChange={(e) => setOltMemSize(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria em uso</label><input className="input mono" value={oltMemUsed} onChange={(e) => setOltMemUsed(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria total</label><input className="input mono" value={oltMemSize} onChange={(e) => setOltMemSize(e.target.value)} /></div>
         <div className="field"><label>Temperatura</label><input className="input mono" value={oltTemp} onChange={(e) => setOltTemp(e.target.value)} /></div>
         <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={oltUptime} onChange={(e) => setOltUptime(e.target.value)} /></div>
       </div>
-      <div className="field"><label>MikroTik — CPU, memória, temperatura, tempo ligado</label></div>
+      <div className="field"><label>MikroTik â€” CPU, memÃ³ria, temperatura, tempo ligado</label></div>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="field">
           <label>CPU utilizada (uso / carga)</label>
           <input className="input mono" value={mkCpu} onChange={(e) => setMkCpu(e.target.value)} />
         </div>
         <div className="field">
-          <label>CPU disponível (% idle)</label>
+          <label>CPU disponÃ­vel (% idle)</label>
           <input className="input mono" value={mkCpuAvail} onChange={(e) => setMkCpuAvail(e.target.value)} placeholder="opcional" />
         </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={mkMemUsed} onChange={(e) => setMkMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={mkMemSize} onChange={(e) => setMkMemSize(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria em uso</label><input className="input mono" value={mkMemUsed} onChange={(e) => setMkMemUsed(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria total</label><input className="input mono" value={mkMemSize} onChange={(e) => setMkMemSize(e.target.value)} /></div>
         <div className="field"><label>Temperatura</label><input className="input mono" value={mkTemp} onChange={(e) => setMkTemp(e.target.value)} /></div>
         <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={mkUptime} onChange={(e) => setMkUptime(e.target.value)} /></div>
       </div>
-      <div className="field"><label>Servidor — CPU, memória, temperatura, tempo ligado</label></div>
+      <div className="field"><label>Servidor â€” CPU, memÃ³ria, temperatura, tempo ligado</label></div>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="field">
           <label>CPU utilizada (uso / carga)</label>
           <input className="input mono" value={svCpu} onChange={(e) => setSvCpu(e.target.value)} />
         </div>
         <div className="field">
-          <label>CPU disponível (% idle)</label>
+          <label>CPU disponÃ­vel (% idle)</label>
           <input className="input mono" value={svCpuAvail} onChange={(e) => setSvCpuAvail(e.target.value)} placeholder="opcional" />
         </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={svMemUsed} onChange={(e) => setSvMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={svMemSize} onChange={(e) => setSvMemSize(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria em uso</label><input className="input mono" value={svMemUsed} onChange={(e) => setSvMemUsed(e.target.value)} /></div>
+        <div className="field"><label>MemÃ³ria total</label><input className="input mono" value={svMemSize} onChange={(e) => setSvMemSize(e.target.value)} /></div>
         <div className="field"><label>Temperatura</label><input className="input mono" value={svTemp} onChange={(e) => setSvTemp(e.target.value)} /></div>
         <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={svUptime} onChange={(e) => setSvUptime(e.target.value)} /></div>
       </div>
       <h3 style={{ marginTop: 14 }}>Telemetria OLT e MikroTik (PON, interfaces, SFP)</h3>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>Campos rápidos para métricas frequentes; o restante pode ir na secção seguinte.</p>
+      <p style={{ color: "var(--muted)", fontSize: 12 }}>Campos rÃ¡pidos para mÃ©tricas frequentes; o restante pode ir na secÃ§Ã£o seguinte.</p>
       <div className="card" style={{ marginTop: 8 }}>
         <h4 style={{ marginTop: 0 }}>OLT (PON / GBIC / ONU)</h4>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -1961,7 +1776,7 @@ function ConnectionPanel() {
             <input className="input mono" value={oltOnuTotalOid} onChange={(e) => setOltOnuTotalOid(e.target.value)} />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência TX da PON</label>
+            <label>PotÃªncia TX da PON</label>
             <input className="input mono" value={oltPonTxOid} onChange={(e) => setOltPonTxOid(e.target.value)} />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
@@ -1973,8 +1788,8 @@ function ConnectionPanel() {
       <div className="card" style={{ marginTop: 8 }}>
         <h4 style={{ marginTop: 0 }}>MikroTik (Interfaces / SFP)</h4>
         <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-          A página de interfaces faz walk em <span className="mono">mtxrOpticalTable</span> (<span className="mono">1.3.6.1.4.1.14988.1.1.19</span>, MIB MIKROTIK) e em <span className="mono">mtxrInterfaceStatsName</span> (
-          <span className="mono">1.3.6.1.4.1.14988.1.1.14.1.1.2</span>) para obter o nome igual ao <span className="mono">ifName</span>. Potências: colunas <strong>9</strong> (TX) e <strong>10</strong> (RX), tipo <strong>IDiv1000</strong> (milésimos de dBm). O índice da linha mtxr não é o ifIndex; o cruzamento usa o nome de <span className="mono">…14.1.1.2</span>, o valor de <span className="mono">mtxrOpticalIndex</span> (col.1) quando coincidir com um ifIndex, e heurísticas sobre <span className="mono">mtxrOpticalName</span> (col.2). Os campos abaixo são OIDs <strong>opcionais</strong> para telemetria SNMP GET.
+          A pÃ¡gina de interfaces faz walk em <span className="mono">mtxrOpticalTable</span> (<span className="mono">1.3.6.1.4.1.14988.1.1.19</span>, MIB MIKROTIK) e em <span className="mono">mtxrInterfaceStatsName</span> (
+          <span className="mono">1.3.6.1.4.1.14988.1.1.14.1.1.2</span>) para obter o nome igual ao <span className="mono">ifName</span>. PotÃªncias: colunas <strong>9</strong> (TX) e <strong>10</strong> (RX), tipo <strong>IDiv1000</strong> (milÃ©simos de dBm). O Ã­ndice da linha mtxr nÃ£o Ã© o ifIndex; o cruzamento usa o nome de <span className="mono">â€¦14.1.1.2</span>, o valor de <span className="mono">mtxrOpticalIndex</span> (col.1) quando coincidir com um ifIndex, e heurÃ­sticas sobre <span className="mono">mtxrOpticalName</span> (col.2). Os campos abaixo sÃ£o OIDs <strong>opcionais</strong> para telemetria SNMP GET.
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
           <div className="field" style={{ minWidth: 260 }}>
@@ -1990,7 +1805,7 @@ function ConnectionPanel() {
             <input className="input mono" value={mkBandwidthTxOid} onChange={(e) => setMkBandwidthTxOid(e.target.value)} />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência SFP (TX) — telemetria GET opcional</label>
+            <label>PotÃªncia SFP (TX) â€” telemetria GET opcional</label>
             <input
               className="input mono"
               value={mkSfpTxOid}
@@ -1999,7 +1814,7 @@ function ConnectionPanel() {
             />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência SFP (RX) — telemetria GET opcional</label>
+            <label>PotÃªncia SFP (RX) â€” telemetria GET opcional</label>
             <input
               className="input mono"
               value={mkSfpRxOid}
@@ -2011,12 +1826,12 @@ function ConnectionPanel() {
       </div>
       <h3 style={{ marginTop: 14 }}>Outras leituras SNMP por categoria</h3>
       <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Use quando precisar de mais objetos além dos cartões acima. Ao guardar, tudo é enviado para o servidor de forma estruturada (sem editar JSON à mão).
+        Use quando precisar de mais objetos alÃ©m dos cartÃµes acima. Ao guardar, tudo Ã© enviado para o servidor de forma estruturada (sem editar JSON Ã  mÃ£o).
       </p>
-      {renderOidExtrasBlock("olt", "OLT — leituras extra")}
-      {renderOidExtrasBlock("mikrotik", "MikroTik — leituras extra")}
-      {renderOidExtrasBlock("servidor", "Servidor — leituras extra")}
-      {renderOidExtrasBlock("bridge", "Pontes — leituras extra")}
+      {renderOidExtrasBlock("olt", "OLT â€” leituras extra")}
+      {renderOidExtrasBlock("mikrotik", "MikroTik â€” leituras extra")}
+      {renderOidExtrasBlock("servidor", "Servidor â€” leituras extra")}
+      {renderOidExtrasBlock("bridge", "Pontes â€” leituras extra")}
       <div className="card" style={{ marginTop: 10 }}>
         <h4 style={{ marginTop: 0 }}>Extras atualmente configurados</h4>
         {(["olt", "mikrotik", "servidor", "bridge"] as const).map((cat) => {
@@ -2050,7 +1865,7 @@ function ConnectionPanel() {
       <div className="field" style={{ marginTop: 12 }}>
         <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={showGeneratedJson} onChange={(e) => setShowGeneratedJson(e.target.checked)} />
-          Mostrar pré-visualização técnica (JSON)
+          Mostrar prÃ©-visualizaÃ§Ã£o tÃ©cnica (JSON)
         </label>
         {showGeneratedJson && (
           <pre className="mono" style={{ fontSize: 10, marginTop: 8, padding: 8, overflow: "auto", maxHeight: 240, background: "var(--panel2, #161b22)", borderRadius: 6 }}>
@@ -2062,7 +1877,7 @@ function ConnectionPanel() {
         Guardar credenciais e SNMP
       </button>
       {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
-      {patch.isSuccess && <div className="msg msg--ok">Alterações guardadas.</div>}
+      {patch.isSuccess && <div className="msg msg--ok">AlteraÃ§Ãµes guardadas.</div>}
     </div>
   );
 }
@@ -2095,7 +1910,7 @@ function TelegramTestOutcome({ data, error }: { data: unknown; error: Error | nu
     if (d.ok === true) {
       return (
         <div className="msg msg--ok" style={{ marginTop: 10 }}>
-          Pedido de teste concluído.
+          Pedido de teste concluÃ­do.
         </div>
       );
     }
@@ -2148,14 +1963,14 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
     mutationFn: () => apiFetch(`/api/v1/settings/notifications/telegram/${path}/test`, { method: "POST", json: {} }),
   });
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
     <div className="card">
-      <h2>Telegram — {title}</h2>
+      <h2>Telegram â€” {title}</h2>
       <p style={{ fontSize: 12, color: "var(--muted)" }}>
-        Para alterar o bot, introduza um novo token abaixo. O valor já guardado não é mostrado por segurança.
+        Para alterar o bot, introduza um novo token abaixo. O valor jÃ¡ guardado nÃ£o Ã© mostrado por seguranÃ§a.
       </p>
       <div className="field">
         <label>Token do bot (novo)</label>
@@ -2163,7 +1978,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       </div>
       <div className="row" style={{ gap: 8 }}>
         <input className="input" placeholder="ID do chat" value={chat} onChange={(e) => setChat(e.target.value)} />
-        <input className="input" placeholder="ID do tópico (opcional)" value={topic} onChange={(e) => setTopic(e.target.value)} />
+        <input className="input" placeholder="ID do tÃ³pico (opcional)" value={topic} onChange={(e) => setTopic(e.target.value)} />
       </div>
       <div className="row" style={{ marginTop: 12, gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
@@ -2176,7 +1991,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       {saveToast && (
         <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
           <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-            ×
+            Ã—
           </button>
           {saveToast.text}
         </div>
@@ -2232,7 +2047,7 @@ function OltVendorsPanel() {
     },
   });
 
-  if (brands.isLoading) return <p>A carregar…</p>;
+  if (brands.isLoading) return <p>A carregarâ€¦</p>;
   if (brands.isError) return <div className="msg msg--err">{(brands.error as Error).message}</div>;
 
   return (
@@ -2240,7 +2055,7 @@ function OltVendorsPanel() {
       <h2>Perfis por fabricante</h2>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <select className="input" value={brand} onChange={(e) => setBrand(e.target.value)} style={{ minWidth: 200 }}>
-          <option value="">— escolher —</option>
+          <option value="">â€” escolher â€”</option>
           {(brands.data?.brands ?? []).map((b) => (
             <option key={b} value={b}>
               {b}
@@ -2248,7 +2063,7 @@ function OltVendorsPanel() {
           ))}
         </select>
       </div>
-      {brand && vendor.isLoading && <p>A carregar perfil…</p>}
+      {brand && vendor.isLoading && <p>A carregar perfilâ€¦</p>}
       {brand && vendor.isError && <div className="msg msg--err">{(vendor.error as Error).message}</div>}
       {brand && vendor.data && (
         <>
@@ -2266,7 +2081,7 @@ function OltVendorsPanel() {
           </div>
           <div className="field">
             <label>Prefixo SNMP do fabricante</label>
-            <input className="input mono" value={base} onChange={(e) => setBase(e.target.value)} title="Árvore SNMP base para este fabricante" />
+            <input className="input mono" value={base} onChange={(e) => setBase(e.target.value)} title="Ãrvore SNMP base para este fabricante" />
           </div>
           <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
             Guardar perfil
@@ -2274,7 +2089,7 @@ function OltVendorsPanel() {
           {saveToast && (
             <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
               <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                ×
+                Ã—
               </button>
               {saveToast.text}
             </div>
@@ -2349,16 +2164,16 @@ function AutomationPanel() {
     },
   });
 
-  if (cfg.isLoading) return <p>A carregar…</p>;
+  if (cfg.isLoading) return <p>A carregarâ€¦</p>;
   if (cfg.isError) return <div className="msg msg--err">{(cfg.error as Error).message}</div>;
 
   return (
     <>
       <div className="card">
-        <h2>Relatório ONU mensal</h2>
+        <h2>RelatÃ³rio ONU mensal</h2>
         <p style={{ fontSize: 12, color: "var(--muted)" }}>
-          Último estado: {cfg.data?.last_status ?? "—"}
-          {cfg.data?.last_error ? ` · ${cfg.data.last_error}` : ""}
+          Ãšltimo estado: {cfg.data?.last_status ?? "â€”"}
+          {cfg.data?.last_error ? ` Â· ${cfg.data.last_error}` : ""}
         </p>
         <label className="row" style={{ gap: 8 }}>
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -2366,8 +2181,8 @@ function AutomationPanel() {
         </label>
         <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
           <input className="input" placeholder="Modo (ex.: monthly)" value={mode} onChange={(e) => setMode(e.target.value)} />
-          <input className="input" style={{ width: 80 }} placeholder="Dia do mês" value={dom} onChange={(e) => setDom(e.target.value)} />
-          <input className="input" style={{ width: 80 }} placeholder="Dia da semana (0–6)" value={dow} onChange={(e) => setDow(e.target.value)} />
+          <input className="input" style={{ width: 80 }} placeholder="Dia do mÃªs" value={dom} onChange={(e) => setDom(e.target.value)} />
+          <input className="input" style={{ width: 80 }} placeholder="Dia da semana (0â€“6)" value={dow} onChange={(e) => setDow(e.target.value)} />
           <input className="input" style={{ width: 90 }} placeholder="Hora HH:MM" value={th} onChange={(e) => setTh(e.target.value)} />
         </div>
         <div className="row" style={{ marginTop: 12, gap: 8 }}>
@@ -2381,7 +2196,7 @@ function AutomationPanel() {
         {saveToast && (
           <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
             <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-              ×
+              Ã—
             </button>
             {saveToast.text}
           </div>
@@ -2389,7 +2204,7 @@ function AutomationPanel() {
         {run.data !== undefined && <pre className="mono" style={{ marginTop: 8 }}>{JSON.stringify(run.data)}</pre>}
       </div>
       <div className="table-wrap" style={{ marginTop: 12 }}>
-        <h2>Últimas execuções</h2>
+        <h2>Ãšltimas execuÃ§Ãµes</h2>
         <button type="button" className="btn" style={{ marginBottom: 8 }} onClick={() => runs.refetch()}>
           Atualizar runs
         </button>
@@ -2398,7 +2213,7 @@ function AutomationPanel() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Início</th>
+              <th>InÃ­cio</th>
               <th>Estado</th>
             </tr>
           </thead>
