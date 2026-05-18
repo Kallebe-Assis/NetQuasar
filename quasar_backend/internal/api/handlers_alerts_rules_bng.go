@@ -263,6 +263,7 @@ func (s *Server) createAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "alert_rule", id.String(), "create", actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -347,6 +348,7 @@ func (s *Server) patchAlertRule(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn().Err(cerr).Msg("fechar olt_onu_drop após desactivar limiar")
 		}
 	}
+	s.appendAuditLog(r.Context(), "alert_rule", id.String(), "patch", actorFromRequest(r), nil, body)
 	s.getAlertRule(w, r)
 }
 
@@ -365,6 +367,7 @@ func (s *Server) deleteAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "alert_rule", id.String(), "delete", actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

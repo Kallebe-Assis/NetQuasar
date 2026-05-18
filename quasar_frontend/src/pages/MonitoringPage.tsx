@@ -7,6 +7,7 @@ import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
+import { prettyAuditDiff } from "../lib/auditDisplay";
 import { queryKeys } from "../lib/queryKeys";
 
 type ActiveEquipRow = {
@@ -198,20 +199,6 @@ function readInvProfile(data: Record<string, unknown> | undefined): InventoryPro
     memory_size_oid: typeof cp.memory_size_oid === "string" ? cp.memory_size_oid : undefined,
     temp_primary_oid: typeof cp.temp_primary_oid === "string" ? cp.temp_primary_oid : undefined,
   };
-}
-
-function prettyAuditDiff(beforeData: Record<string, unknown> | null | undefined, afterData: Record<string, unknown> | null | undefined): string {
-  const b = beforeData ?? {};
-  const a = afterData ?? {};
-  const keys = Array.from(new Set([...Object.keys(b), ...Object.keys(a)])).sort();
-  const rows: string[] = [];
-  for (const k of keys) {
-    const bv = JSON.stringify((b as Record<string, unknown>)[k]);
-    const av = JSON.stringify((a as Record<string, unknown>)[k]);
-    if (bv === av) continue;
-    rows.push(`${k}: ${bv ?? "∅"} -> ${av ?? "∅"}`);
-  }
-  return rows.length ? rows.join("\n") : "Sem diferença legível (ou ação sem payload).";
 }
 
 function IconMonPlay({ size = 20 }: { size?: number }) {

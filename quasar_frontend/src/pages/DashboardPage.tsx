@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { DashboardPageLoader } from "../components/DashboardPageLoader";
 import { InfoHint } from "../components/InfoHint";
 import {
   Bar,
@@ -168,6 +169,7 @@ function ChartBox({ h, children }: { h: number; children: React.ReactElement }) 
 export function DashboardPage() {
   const [days, setDays] = useState(30);
   const [catViz, setCatViz] = useState<"pie" | "bar">("pie");
+  const [pageIn, setPageIn] = useState(false);
 
   const dash = useQuery({
     queryKey: ["dashboard-analytics", days],
@@ -285,13 +287,25 @@ export function DashboardPage() {
     }));
   }, [dash.data?.devices_by_network_status]);
 
-  if (dash.isLoading) return <p className="muted">A carregar painel analítico…</p>;
+  useEffect(() => {
+    if (dash.isLoading && !dash.data) {
+      setPageIn(false);
+      return;
+    }
+    if (dash.data && !dash.isError) {
+      const id = requestAnimationFrame(() => setPageIn(true));
+      return () => cancelAnimationFrame(id);
+    }
+    setPageIn(false);
+  }, [dash.isLoading, dash.data, dash.isError]);
+
+  if (dash.isLoading && !dash.data) return <DashboardPageLoader />;
   if (dash.isError) return <div className="msg msg--err">{(dash.error as Error).message}</div>;
 
   const pw = dash.data?.ping_window;
 
   return (
-    <>
+    <div className={`dashboard-page${pageIn ? " dashboard-page--in" : ""}`}>
       <h1>
         Dashboard analítico
         <InfoHint label="Sobre o dashboard analítico">
@@ -858,6 +872,6 @@ export function DashboardPage() {
         )}
       </Section>
 
-    </>
+    </div>
   );
 }

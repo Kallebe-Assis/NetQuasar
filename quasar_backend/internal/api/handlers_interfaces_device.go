@@ -214,7 +214,8 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	}
 	unlockSNMP := snmpdevicelock.Acquire(id)
 	defer unlockSNMP()
-	ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
+	ifRefreshTO := s.loadCollectionTimeouts(r.Context()).InterfaceRefreshTotal()
+	ctx, cancel := context.WithTimeout(r.Context(), ifRefreshTO)
 	defer cancel()
 	host := strings.TrimSpace(*ip)
 	isMikrotik := isLikelyMikrotikDevice(devCat, devBrand, devModel, devDesc)
@@ -374,6 +375,9 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
+	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_interfaces", actorFromRequest(r), nil, map[string]any{
+		"ok": ok, "timeout_ms": ifRefreshTO.Milliseconds(), "rows_if_mib": len(walkIF),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device_id":                  id,
 		"collected_at":               collectedAt.UTC().Format(time.RFC3339),

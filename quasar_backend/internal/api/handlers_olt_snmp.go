@@ -212,21 +212,26 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 			c = strings.TrimSpace(*comm)
 		}
 	}
+	collTO := s.loadCollectionTimeouts(r.Context())
+	oltRefreshTotal := collTO.OltRefreshTotal()
+	snmpWalkTO := collTO.SnmpPerWalkTimeout(oltRefreshTotal)
+	telnetTO := collTO.TelnetPhaseTimeout(oltRefreshTotal)
+	oltCtx, oltCancel := context.WithTimeout(r.Context(), oltRefreshTotal)
+	defer oltCancel()
+
 	m := strings.ToLower(model)
 	isVsol := strings.Contains(brand, "vsol") || strings.Contains(model, "vsol") ||
 		strings.Contains(m, "v1600") || strings.Contains(m, "1600g")
 	isZTE := strings.Contains(brand, "zte") || strings.Contains(model, "zte") || strings.Contains(m, "zxa10")
 	isDatacom := strings.Contains(brand, "datacom") || strings.Contains(model, "datacom") || strings.Contains(m, "dm46")
 	if isVsol && host != "" && c != "" {
-		ctx, cancel := context.WithTimeout(r.Context(), 70*time.Second)
-		defer cancel()
-		walk, trunc, note := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+		walk, trunc, note := probing.SNMPWalk(oltCtx, probing.SNMPWalkParams{
 			Host: host, Port: 161, Community: c, RootOID: vsolparse.OIDGOnuAuthList,
-			Version: "2c", Timeout: 50 * time.Second, Retries: 0, MaxRows: 48000,
+			Version: "2c", Timeout: snmpWalkTO, Retries: 0, MaxRows: 48000,
 		})
-		walk2, trunc2, note2 := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+		walk2, trunc2, note2 := probing.SNMPWalk(oltCtx, probing.SNMPWalkParams{
 			Host: host, Port: 161, Community: c, RootOID: vsolparse.OIDLegacyGOnuOptical,
-			Version: "2c", Timeout: 25 * time.Second, Retries: 0, MaxRows: 12000,
+			Version: "2c", Timeout: snmpWalkTO / 2, Retries: 0, MaxRows: 12000,
 		})
 		walk = append(walk, walk2...)
 		trunc = trunc || trunc2
@@ -262,22 +267,20 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 				"snmp_base_oid":   cleanSNMPOID(prof.SNMPBaseOID),
 			},
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 70*time.Second)
-		defer cancel()
 		var notes []string
-		onuRows, truncOnu, noteOnu := walkRootRows(ctx, host, c, prof.OnuOnlineOID)
+		onuRows, truncOnu, noteOnu := walkRootRows(oltCtx, host, c, prof.OnuOnlineOID)
 		if len(onuRows) > 0 {
 			zteSummary["zte_onu_online_table"] = onuRows
 		} else {
 			zteSummary["zte_onu_online_table"] = []any{}
 		}
-		ponRows, truncPon, notePon := walkRootRows(ctx, host, c, prof.PonStatusOID)
+		ponRows, truncPon, notePon := walkRootRows(oltCtx, host, c, prof.PonStatusOID)
 		if len(ponRows) > 0 {
 			zteSummary["zte_pon_status_table"] = ponRows
 		} else {
 			zteSummary["zte_pon_status_table"] = []any{}
 		}
-		trxRows, truncTrx, noteTrx := walkRootRows(ctx, host, c, prof.TransceiverOID)
+		trxRows, truncTrx, noteTrx := walkRootRows(oltCtx, host, c, prof.TransceiverOID)
 		if len(trxRows) > 0 {
 			zteSummary["zte_transceiver_table"] = trxRows
 		} else {
@@ -313,10 +316,8 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		zteTelnetApplied := false
 		if tu != "" && tp != "" {
-			tctx, tcancel := context.WithTimeout(r.Context(), 45*time.Second)
-			defer tcancel()
-			tel := probing.TelnetRunCommand(tctx, probing.TelnetRunParams{
-				Host: host, Port: "23", Timeout: 35 * time.Second,
+			tel := probing.TelnetRunCommand(oltCtx, probing.TelnetRunParams{
+				Host: host, Port: "23", Timeout: telnetTO,
 				User: tu, Password: tp, Enable: te,
 				Command:      "show gpon onu state",
 				PreCommands:  []string{"terminal length 0", "terminal page-break disable", "scroll 512"},
@@ -386,10 +387,8 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 				"snmp_base_oid":   cleanSNMPOID(prof.SNMPBaseOID),
 			},
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 70*time.Second)
-		defer cancel()
 		var notes []string
-		onuRows, truncOnu, noteOnu := walkRootRows(ctx, host, c, prof.OnuOnlineOID)
+		onuRows, truncOnu, noteOnu := walkRootRows(oltCtx, host, c, prof.OnuOnlineOID)
 		if len(onuRows) > 0 {
 			datacomSummary["datacom_onu_online_table"] = onuRows
 			dRows := buildDatacomPonRowsFromTable(onuRows)
@@ -403,13 +402,13 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		} else {
 			datacomSummary["datacom_onu_online_table"] = []any{}
 		}
-		ponRows, truncPon, notePon := walkRootRows(ctx, host, c, prof.PonStatusOID)
+		ponRows, truncPon, notePon := walkRootRows(oltCtx, host, c, prof.PonStatusOID)
 		if len(ponRows) > 0 {
 			datacomSummary["datacom_pon_status_table"] = ponRows
 		} else {
 			datacomSummary["datacom_pon_status_table"] = []any{}
 		}
-		trxRows, truncTrx, noteTrx := walkRootRows(ctx, host, c, prof.TransceiverOID)
+		trxRows, truncTrx, noteTrx := walkRootRows(oltCtx, host, c, prof.TransceiverOID)
 		if len(trxRows) > 0 {
 			datacomSummary["datacom_transceiver_table"] = trxRows
 		} else {
@@ -553,5 +552,9 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 	if pool := s.DB(); pool != nil {
 		recordOLTOnuSample(r.Context(), pool, id, sb, pb)
 	}
+	comp := oltparse.SnapshotComputed(sb, pb)
+	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_olt", actorFromRequest(r), nil, map[string]any{
+		"timeout_ms": oltRefreshTotal.Milliseconds(), "computed": comp,
+	})
 	s.getOLTDevice(w, r)
 }

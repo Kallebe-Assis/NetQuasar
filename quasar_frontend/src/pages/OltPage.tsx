@@ -271,6 +271,7 @@ export function OltPage() {
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const [sel, setSel] = useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkPhase, setBulkPhase] = useState<"select" | "running" | "results">("select");
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkLog, setBulkLog] = useState<string[]>([]);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
@@ -334,6 +335,7 @@ export function OltPage() {
   });
 
   async function runBulkSnapshotAndInterfaces() {
+    setBulkPhase("running");
     setBulkRunning(true);
     setBulkLog([]);
     setBulkCollectedRows([]);
@@ -371,7 +373,8 @@ export function OltPage() {
         setBulkProgress((p) => ({ ...p, done: Math.min(p.total, p.done + 1) }));
       }
       setBulkCollectedRows(collected);
-      setBulkLog((m) => [...m, "Concluído."]);
+      setBulkPhase("results");
+      setBulkLog((m) => [...m.slice(-12), "Concluído."]);
       await qc.invalidateQueries({ queryKey: ["olt-devices"] });
       if (sel) await qc.invalidateQueries({ queryKey: ["olt-device", sel] });
       await invalidateAlertListQueries(qc);
@@ -550,6 +553,7 @@ export function OltPage() {
             onClick={() => {
               setBulkSelectedIds((list.data?.olts ?? []).map((o) => o.id));
               setBulkOltFilter("");
+              setBulkPhase("select");
               setBulkOpen(true);
             }}
           >
@@ -560,19 +564,23 @@ export function OltPage() {
       {bulkOpen && canMutate && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !bulkRunning && setBulkOpen(false)}>
           <div
-            className="card"
+            className="modal modal--wide olt-bulk-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="bulk-olt-title"
-            style={{ maxWidth: 560, width: "100%", margin: "10vh auto", position: "relative", zIndex: 1 }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <h2 id="bulk-olt-title" style={{ marginTop: 0 }}>
-              Actualizar OLTs em massa
-            </h2>
-            <p style={{ fontSize: 13, color: "var(--muted)" }}>
-              Marque as OLTs a incluir. Por cada uma seleccionada será executado <strong>snapshot OLT</strong> (walk MIB ONU) e depois <strong>actualização de interfaces</strong>. Pode demorar vários minutos e aumentar a carga SNMP nos equipamentos.
-            </p>
+            <div className="olt-bulk-modal__head">
+              <h2 id="bulk-olt-title" style={{ marginTop: 0 }}>
+                Actualizar OLTs em massa
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}>
+                {bulkPhase === "results" ? "Colecta concluída. Revise os totais abaixo." : "Snapshot OLT e interfaces por OLT seleccionada."}
+              </p>
+            </div>
+            <div className="olt-bulk-modal__body">
+            {bulkPhase !== "results" && (
+            <>
             <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <input
                 className="input"
@@ -633,18 +641,22 @@ export function OltPage() {
               {bulkSelectedIds.length} de {rows.length} OLTs seleccionadas
               {bulkOltFilterNorm ? ` · ${bulkListFiltered.length} visíveis com o filtro` : ""}
             </p>
-            <p className="mono" style={{ fontSize: 12, marginTop: 0 }}>
+            </>
+            )}
+            {(bulkRunning || bulkPhase === "results") && (
+            <p className="mono" style={{ fontSize: 12, marginTop: 8 }}>
               Progresso: {bulkProgress.done}/{bulkProgress.total} concluídas
             </p>
+            )}
             {bulkLog.length > 0 && (
-              <pre className="mono" style={{ fontSize: 11, maxHeight: 160, overflow: "auto", background: "var(--panel2)", padding: 8, borderRadius: "var(--radius)" }}>
-                {bulkLog.join("\n")}
+              <pre className="mono" style={{ fontSize: 11, maxHeight: 100, overflow: "auto", background: "var(--panel2)", padding: 8, borderRadius: "var(--radius)" }}>
+                {bulkLog.slice(-15).join("\n")}
               </pre>
             )}
             {bulkCollectedRows.length > 0 && (
               <>
-                <h3 style={{ marginBottom: 6 }}>Conferência para Base comercial</h3>
-                <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto" }}>
+                <h3 style={{ marginBottom: 6, fontSize: 14 }}>Conferência para Base comercial</h3>
+                <div className="table-wrap" style={{ maxHeight: 180, overflow: "auto" }}>
                   <table style={{ fontSize: 11 }}>
                     <thead>
                       <tr>
@@ -695,10 +707,21 @@ export function OltPage() {
                 )}
               </>
             )}
-            <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-              <button type="button" className="btn" disabled={bulkRunning} onClick={() => setBulkOpen(false)}>
-                {bulkRunning ? "…" : "Cancelar"}
+            </div>
+            <div className="olt-bulk-modal__foot">
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={bulkRunning}
+                onClick={() => {
+                  setBulkOpen(false);
+                  setBulkPhase("select");
+                }}
+              >
+                {bulkRunning ? "…" : "Fechar"}
               </button>
+              {bulkPhase !== "results" && (
               <button
                 type="button"
                 className="btn btn--primary"
@@ -707,6 +730,8 @@ export function OltPage() {
               >
                 Confirmar e iniciar
               </button>
+              )}
+            </div>
             </div>
           </div>
         </div>

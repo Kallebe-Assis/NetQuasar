@@ -10,6 +10,11 @@ const (
 	maxCollectionTimeoutMs        = 600_000
 )
 
+// ClampCollectionTimeoutMsPublic expõe o clamp de timeouts de coleta para o pacote api.
+func ClampCollectionTimeoutMsPublic(ms, defaultMs int) int {
+	return clampCollectionTimeoutMs(ms, defaultMs)
+}
+
 func clampCollectionTimeoutMs(ms, defaultMs int) int {
 	if ms < minCollectionTimeoutMs {
 		return defaultMs

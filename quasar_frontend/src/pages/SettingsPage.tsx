@@ -6,6 +6,7 @@ import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { AppearancePanel } from "./settings/AppearancePanel";
 import { MonitoringPingIntervalsCard } from "./settings/MonitoringIntervalsCard";
+import { AuditingPanel } from "./settings/AuditingPanel";
 import { OnuMonthlyReportPanel } from "./settings/OnuMonthlyReportPanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
@@ -48,7 +49,7 @@ export function SettingsPage() {
         ))}
       </div>
       {tab === "database" && <DatabasePanel />}
-      {tab === "logs" && <LogsPanel />}
+      {tab === "logs" && <AuditingPanel />}
       {tab === "users" && <UsersPanel />}
       {tab === "alerts" && (
         <>
@@ -489,53 +490,6 @@ function DatabasePanel() {
           {dbToast.text}
         </div>
       )}
-    </div>
-  );
-}
-
-function LogsPanel() {
-  const [lim, setLim] = useState("100");
-  const q = useQuery({
-    queryKey: ["settings-db-logs", lim],
-    queryFn: () => apiFetch<{ logs: { id: number; created_at: string; ok: boolean; phase: string; message: string }[] }>(
-      `/api/v1/settings/database/logs?limit=${encodeURIComponent(lim)}`,
-    ),
-  });
-  if (q.isLoading) return <p>A carregar…</p>;
-  if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
-  return (
-    <div className="card">
-      <h2>Auditoria de ligações</h2>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <input className="input" style={{ width: 80 }} value={lim} onChange={(e) => setLim(e.target.value)} />
-        <button type="button" className="btn" onClick={() => q.refetch()}>
-          Atualizar
-        </button>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Quando</th>
-              <th>OK</th>
-              <th>Fase</th>
-              <th>Mensagem</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(q.data?.logs ?? []).map((l) => (
-              <tr key={l.id}>
-                <td>{l.id}</td>
-                <td className="mono">{l.created_at}</td>
-                <td>{l.ok ? "sim" : "não"}</td>
-                <td>{l.phase}</td>
-                <td>{l.message}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

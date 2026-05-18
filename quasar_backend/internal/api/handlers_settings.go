@@ -487,6 +487,28 @@ func (s *Server) patchConnectionDefaults(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	auditAfter := map[string]any{}
+	auditSetMasked(auditAfter, "snmp_community", body.SNMPCommunity)
+	auditSetStr(auditAfter, "telnet_user", body.TelnetUser)
+	auditSetSecret(auditAfter, "telnet_password", body.TelnetPassword)
+	auditSetSecret(auditAfter, "telnet_enable", body.TelnetEnable)
+	auditSetStr(auditAfter, "ssh_user", body.SSHUser)
+	auditSetSecret(auditAfter, "ssh_password", body.SSHPassword)
+	auditSetOIDFields(auditAfter, map[string]*string{
+		"olt_cpu_oid": body.OltCPUOID, "olt_cpu_available_oid": body.OltCPUAvailOID,
+		"olt_memory_used_oid": body.OltMemoryUsedOID, "olt_memory_size_oid": body.OltMemorySizeOID,
+		"olt_temp_oid": body.OltTempOID, "olt_uptime_oid": body.OltUptimeOID,
+		"mikrotik_cpu_oid": body.MikrotikCPUOID, "mikrotik_cpu_available_oid": body.MikrotikCPUAvailOID,
+		"mikrotik_memory_used_oid": body.MikrotikMemoryUsedOID, "mikrotik_memory_size_oid": body.MikrotikMemorySizeOID,
+		"mikrotik_temp_oid": body.MikrotikTempOID, "mikrotik_uptime_oid": body.MikrotikUptimeOID,
+		"server_cpu_oid": body.ServerCPUOID, "server_cpu_available_oid": body.ServerCPUAvailOID,
+		"server_memory_used_oid": body.ServerMemoryUsedOID, "server_memory_size_oid": body.ServerMemorySizeOID,
+		"server_temp_oid": body.ServerTempOID, "server_uptime_oid": body.ServerUptimeOID,
+	})
+	if len(body.SNMPOIDOverrides) > 0 {
+		auditAfter["snmp_oid_overrides"] = true
+	}
+	s.appendAuditLog(r.Context(), "settings_connection_defaults", "1", "patch", actorFromRequest(r), nil, auditAfter)
 	s.getConnectionDefaults(w, r)
 }
 
@@ -546,6 +568,7 @@ func (s *Server) patchTelegram(w http.ResponseWriter, r *http.Request, id string
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "settings_telegram", id, "patch", actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -568,6 +591,10 @@ func (s *Server) testTelegramByID(w http.ResponseWriter, r *http.Request, id, ti
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "settings_telegram", id, "test_send", actorFromRequest(r), nil, map[string]any{
+		"title": title,
+		"sent":  true,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": true})
 }
 
@@ -625,6 +652,7 @@ func (s *Server) patchOltVendor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "olt_vendor_profile", b, "patch", actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -741,6 +769,9 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "user", id.String(), "create", actorFromRequest(r), nil, map[string]any{
+		"email": email, "role": body.Role, "display_name": strings.TrimSpace(body.DisplayName),
+	})
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -852,6 +883,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.appendAuditLog(r.Context(), "user", id.String(), "patch", actorFromRequest(r), nil, body)
 	s.getUser(w, r)
 }
 
@@ -898,5 +930,6 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "user", id.String(), "delete", actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }

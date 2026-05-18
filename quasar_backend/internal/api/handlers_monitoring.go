@@ -147,6 +147,9 @@ func (s *Server) monitoringStart(w http.ResponseWriter, r *http.Request) {
 		"available_modes": []string{monitorworker.ModeSimplePing, monitorworker.ModeFull},
 	})
 	s.setMonitoringActivity(ctx, "Monitoramento iniciado")
+	s.appendAuditLog(ctx, "monitoring_runtime", "1", "start", actorFromRequest(r), nil, map[string]any{
+		"monitoring_mode": mode, "was_running": wasRunning, "refresh_snmp_inventory": refreshSnmpInv,
+	})
 	if !wasRunning && mode == monitorworker.ModeFull {
 		go s.runFullMonitoringBootstrap()
 	}
@@ -167,6 +170,9 @@ func (s *Server) monitoringStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setMonitoringActivity(r.Context(), "")
+	s.appendAuditLog(r.Context(), "monitoring_runtime", "1", "stop", actorFromRequest(r), nil, map[string]any{
+		"monitoring_mode": monitorworker.ModeOff,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "stopped",
 		"monitoring_mode": monitorworker.ModeOff,
@@ -241,6 +247,9 @@ func (s *Server) monitoringReloadDevices(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "monitoring_runtime", "1", "reload_devices", actorFromRequest(r), nil, map[string]any{
+		"device_count": n,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"reloaded": true, "device_count": n})
 }
 
@@ -398,7 +407,7 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{
+	payload := map[string]int{
 		"ping_seconds":                    ps,
 		"telemetry_seconds":               telSec,
 		"interface_snapshot_seconds":      ifaceSec,
@@ -411,7 +420,9 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		"icmp_payload_bytes":              icmpPB,
 		"offline_ping_fail_threshold":     offTh,
 		"uptime_restart_alert_minutes":    uptimeRestart,
-	})
+	}
+	s.appendAuditLog(r.Context(), "monitoring_intervals", "1", "patch", actorFromRequest(r), nil, payload)
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) getMonitoringSettings(w http.ResponseWriter, r *http.Request) {
@@ -483,5 +494,8 @@ func (s *Server) patchMonitoringSettings(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "monitoring_settings", "1", "patch", actorFromRequest(r), nil, map[string]any{
+		"vps_latency_offset_ms": vps, "internet_check_timeout_ms": timeout,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

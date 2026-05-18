@@ -1919,6 +1919,166 @@ h3 .info-hint {
   }
 }
 
+/* Dashboard loading */
+.dashboard-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: min(72vh, 640px);
+  padding: 2rem 1rem;
+  animation: dashboardLoaderFadeIn 0.5s ease;
+}
+.dashboard-loader__orb {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--accent), transparent 70%);
+  opacity: 0.85;
+  animation: dashboardOrbPulse 1.8s ease-in-out infinite;
+  margin-bottom: 1rem;
+}
+.dashboard-loader__rings {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  margin: -4rem auto 1.25rem;
+}
+.dashboard-loader__rings span {
+  position: absolute;
+  inset: 0;
+  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 50%;
+  animation: dashboardRingSpin 2.4s linear infinite;
+}
+.dashboard-loader__rings span:nth-child(2) {
+  inset: 12px;
+  animation-duration: 1.8s;
+  animation-direction: reverse;
+}
+.dashboard-loader__rings span:nth-child(3) {
+  inset: 24px;
+  animation-duration: 1.2s;
+}
+.dashboard-loader__title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+.dashboard-loader__step {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0 0 1.25rem;
+  min-height: 1.25em;
+  transition: opacity 0.35s ease;
+}
+.dashboard-loader__bars {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  height: 32px;
+  margin-bottom: 1.75rem;
+}
+.dashboard-loader__bars span {
+  width: 6px;
+  height: 8px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 55%, var(--border));
+  animation: dashboardBarBounce 1s ease-in-out infinite;
+}
+.dashboard-loader__bars span:nth-child(3n) {
+  background: var(--accent);
+}
+.dashboard-loader__skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  width: min(720px, 100%);
+}
+.dashboard-loader__skel-card {
+  height: 72px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--panel2) 25%, var(--hover-bg-menu) 50%, var(--panel2) 75%);
+  background-size: 200% 100%;
+  animation: dashboardShimmer 1.4s ease-in-out infinite;
+}
+.dashboard-page {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dashboard-page--in {
+  opacity: 1;
+  transform: translateY(0);
+}
+@keyframes dashboardLoaderFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes dashboardOrbPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+@keyframes dashboardRingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes dashboardBarBounce {
+  0%,
+  100% {
+    height: 8px;
+  }
+  50% {
+    height: 28px;
+  }
+}
+@keyframes dashboardShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* OLT bulk modal */
+.olt-bulk-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 720px);
+  padding: 0;
+  overflow: hidden;
+}
+.olt-bulk-modal__head {
+  padding: 1rem 1rem 0.5rem;
+  flex-shrink: 0;
+}
+.olt-bulk-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1rem;
+}
+.olt-bulk-modal__foot {
+  flex-shrink: 0;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
 /* Secções recolhíveis (ONUs MIB OLT / interface por assinante) */
 details.collapsible-section {
   border: 1px solid var(--border);
