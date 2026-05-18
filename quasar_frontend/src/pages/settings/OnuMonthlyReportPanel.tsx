@@ -161,7 +161,11 @@ export function OnuMonthlyReportPanel() {
           <SettingsField label="Hora">
             <input className="input" type="time" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} disabled={busy || !enabled} />
           </SettingsField>
-          <SettingsField label="Fuso horário" hintLabel="IANA timezone">
+          <SettingsField
+            label="Fuso horário"
+            hintLabel="Fuso horário IANA"
+            hint={<p>Identificador IANA, por exemplo <code>America/Sao_Paulo</code>.</p>}
+          >
             <input
               className="input mono"
               value={tz}

@@ -507,10 +507,10 @@ export function OltPage() {
           <h1>OLT</h1>
         </div>
         <div className="tabs" style={{ marginBottom: 16 }}>
-          <button type="button" className={pageTab === "equipamentos" ? "active" : ""} onClick={() => setPageTab("equipamentos")}>
+          <button type="button" className="" onClick={() => setPageTab("equipamentos")}>
             Equipamentos
           </button>
-          <button type="button" className={pageTab === "relatorios" ? "active" : ""} onClick={() => setPageTab("relatorios")}>
+          <button type="button" className="active" onClick={() => setPageTab("relatorios")}>
             Relatórios
           </button>
         </div>

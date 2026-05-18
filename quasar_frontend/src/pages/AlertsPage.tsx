@@ -3,7 +3,7 @@ import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
-import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
+import { invalidateAlertListQueries } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
   displayActiveRowSeverity,
