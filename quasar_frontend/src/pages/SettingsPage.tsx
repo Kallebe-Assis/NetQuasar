@@ -7,7 +7,7 @@ import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { AppearancePanel } from "./settings/AppearancePanel";
 import { MonitoringPingIntervalsCard } from "./settings/MonitoringIntervalsCard";
 import { AuditingPanel } from "./settings/AuditingPanel";
-import { OnuMonthlyReportPanel } from "./settings/OnuMonthlyReportPanel";
+import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -40,7 +40,7 @@ export function SettingsPage() {
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
             ["olt", "OLT vendors"],
-            ["automation", "Relatório ONU"],
+            ["automation", "Relatórios agendados"],
           ] as const
         ).map(([k, lab]) => (
           <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
@@ -66,7 +66,7 @@ export function SettingsPage() {
         </div>
       )}
       {tab === "olt" && <OltVendorsPanel />}
-      {tab === "automation" && <OnuMonthlyReportPanel />}
+      {tab === "automation" && <ScheduledReportsPanel />}
     </>
   );
 }

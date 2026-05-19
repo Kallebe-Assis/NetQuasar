@@ -28,11 +28,11 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 	}
 	// Abertos + instâncias fechadas há pouco (grace de 1 min na UI antes de sumirem desta lista).
 	q := `
-		SELECT u.id, u.device_id, u.severity, u.alert_type, u.message, u.ip, u.device_name, u.active_since, u.closed_at, u.meta::text
+		SELECT u.id, u.device_id, u.severity, u.alert_type, u.message, u.ip, u.device_name, u.active_since, u.closed_at, u.meta::text, u.incident_id
 		FROM (
 			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip,
 				COALESCE(NULLIF(trim(a.device_name), ''), NULLIF(trim(d.description), '')) AS device_name,
-				a.active_since, a.closed_at, a.meta
+				a.active_since, a.closed_at, a.meta, a.incident_id
 			FROM alert_instances a
 			LEFT JOIN devices d ON d.id = a.device_id
 			WHERE a.closed_at IS NULL
@@ -53,7 +53,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 				  AND m.status IN ('planned', 'running')
 			)
 			UNION ALL
-			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip, a.device_name, a.active_since, a.closed_at, a.meta
+			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip, a.device_name, a.active_since, a.closed_at, a.meta, a.incident_id
 			FROM alert_instances a
 			WHERE a.closed_at IS NOT NULL AND a.closed_at >= now() - interval '1 minute'
 		) u
@@ -85,7 +85,8 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		var since time.Time
 		var closed *time.Time
 		var meta []byte
-		if err := rows.Scan(&id, &devID, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta); err != nil {
+		var incidentID *uuid.UUID
+		if err := rows.Scan(&id, &devID, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta, &incidentID); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -95,6 +96,9 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		item := map[string]any{
 			"id": id, "device_id": devID, "severity": sev, "type": typ, "message": msg,
 			"ip": ip, "device_name": dname, "active_since": since, "meta": json.RawMessage(meta),
+		}
+		if incidentID != nil {
+			item["incident_id"] = *incidentID
 		}
 		if closed != nil {
 			item["closed_at"] = *closed

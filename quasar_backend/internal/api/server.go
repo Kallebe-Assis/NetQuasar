@@ -23,7 +23,8 @@ type Server struct {
 	DBHolder          *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
 	WorkerCtx         context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
 	ensureMonitorOnce   sync.Once
-	automationONUOnce   sync.Once
+	automationONUOnce      sync.Once
+	automationReportsOnce  sync.Once
 }
 
 // DB retorna o pool PostgreSQL ativo ou nil (testes sem holder).
@@ -118,6 +119,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Patch("/automation/onu-monthly-report", s.patchAutomationONU)
 				r.Post("/automation/onu-monthly-report/run", s.runAutomationONU)
 				r.Get("/automation/onu-monthly-report/runs", s.listAutomationRuns)
+				r.Get("/automation/alerts-digest", s.getAutomationAlertsDigest)
+				r.Patch("/automation/alerts-digest", s.patchAutomationAlertsDigest)
+				r.Post("/automation/alerts-digest/run", s.runAutomationAlertsDigest)
+				r.Get("/automation/commercial-report", s.getAutomationCommercialReport)
+				r.Patch("/automation/commercial-report", s.patchAutomationCommercialReport)
+				r.Post("/automation/commercial-report/run", s.runAutomationCommercialReport)
+				r.Get("/notifications/smtp", s.getSMTPSettings)
+				r.Patch("/notifications/smtp", s.patchSMTPSettings)
+				r.Post("/notifications/smtp/test", s.testSMTPSettings)
 			})
 		})
 
@@ -188,10 +198,13 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/alerts", func(r chi.Router) {
 			r.Get("/active", s.alertsActive)
 			r.Get("/history", s.alertsHistory)
+			r.Get("/incidents/active", s.incidentsActive)
+			r.Get("/incidents/{id}", s.incidentDetail)
 			r.Get("/suppressions", s.listSuppressions)
 			r.Get("/suppressions/{id}", s.getSuppression)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
+				r.Post("/incidents/reconcile", s.incidentsReconcile)
 				r.Post("/revalidate", s.alertsRevalidate)
 				r.Post("/suppressions", s.createSuppression)
 				r.Patch("/suppressions/{id}", s.patchSuppression)
@@ -304,6 +317,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 	if s.DB() != nil {
 		s.ensureMonitoringWorker()
 		s.ensureAutomationONUScheduler()
+		s.ensureReportSchedulers()
 	}
 
 	return chain(cfg, log, r)

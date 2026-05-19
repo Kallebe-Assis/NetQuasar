@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
 )
@@ -226,6 +227,15 @@ func WithStatusTransition(base map[string]any, previousStatus, newStatus string,
 // SendMonitoringTelegramAndPatchMeta envia via settings «monitoring» e grava em meta.telegram (ok, erro, tentativa).
 func SendMonitoringTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, alertID uuid.UUID, level, title, message string) {
 	if pool == nil || alertID == uuid.Nil {
+		return
+	}
+	if alertcorrelation.ShouldSkipMonitoringTelegram(ctx, pool, alertID) {
+		patchMeta(ctx, pool, alertID, map[string]any{
+			"telegram": map[string]any{
+				"skipped": true,
+				"reason":  "incident_cascade",
+			},
+		})
 		return
 	}
 	attempted := time.Now().UTC().Format(time.RFC3339Nano)

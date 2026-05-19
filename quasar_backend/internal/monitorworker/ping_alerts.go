@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -100,6 +101,7 @@ func InsertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *ze
 		return
 	}
 	log.Warn().Str("device", deviceID.String()).Str("host", addr).Msg("alerta criado: equipamento inalcançável (ICMP/TCP) — mudança de estado")
+	alertcorrelation.Reconcile(ctx, pool, log)
 	alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, alertID, "CRITICAL", "Equipamento offline", msg)
 }
 

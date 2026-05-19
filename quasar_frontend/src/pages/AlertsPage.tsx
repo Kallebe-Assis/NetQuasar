@@ -3,7 +3,7 @@ import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
-import { invalidateAlertListQueries } from "../lib/queryKeys";
+import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
   displayActiveRowSeverity,
@@ -34,8 +34,30 @@ type ActiveAlert = {
   active_since: string;
   /** Preenchido ~1 min após fecho: linha mostrada como «Resolvido» na lista Ativos. */
   closed_at?: string | null;
+  incident_id?: string | null;
   meta?: unknown;
 };
+
+type OpenIncident = {
+  id: string;
+  root_cause: string;
+  title: string;
+  summary?: string | null;
+  alert_count: number;
+  open_alert_count: number;
+  opened_at: string;
+};
+
+function incidentCauseLabel(cause: string): string {
+  switch (cause) {
+    case "pop_offline":
+      return "POP offline";
+    case "olt_offline":
+      return "OLT offline";
+    default:
+      return cause;
+  }
+}
 
 type HistoryEvent = {
   id: string;
@@ -103,6 +125,13 @@ export function AlertsPage() {
     if (!monState.data?.runtime_updated_at && !monState.data?.last_alerts_change_at) return;
     void invalidateAlertListQueries(qc);
   }, [qc, monState.data?.runtime_updated_at, monState.data?.last_alerts_change_at]);
+
+  const incidents = useQuery({
+    queryKey: queryKeys.alertsIncidents,
+    queryFn: () => apiFetch<{ incidents: OpenIncident[] }>("/api/v1/alerts/incidents/active"),
+    refetchInterval: ALERTS_ACTIVE_REFRESH_MS,
+    enabled: tab === "active",
+  });
 
   const active = useQuery({
     queryKey: ["alerts-active", sev, typ, limitActive],
@@ -279,6 +308,43 @@ export function AlertsPage() {
           Histórico
         </button>
       </div>
+
+      {tab === "active" && (incidents.data?.incidents?.length ?? 0) > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h2 style={{ fontSize: 15, marginTop: 0 }}>Incidentes correlacionados</h2>
+          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+            Alertas agrupados por causa provável (POP com vários equipamentos offline, OLT offline com efeito em cascata).
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Incidente</th>
+                  <th>Causa</th>
+                  <th>Alertas</th>
+                  <th>Abertos</th>
+                  <th>Desde</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incidents.data!.incidents.map((inc) => (
+                  <tr key={inc.id}>
+                    <td>{inc.title}</td>
+                    <td>
+                      <span className="badge badge--off">{incidentCauseLabel(inc.root_cause)}</span>
+                    </td>
+                    <td className="mono">{inc.alert_count}</td>
+                    <td className="mono">{inc.open_alert_count}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {formatAlertDateTimePt(inc.opened_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {tab === "active" && (
         <>

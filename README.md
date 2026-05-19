@@ -45,6 +45,14 @@ Plataforma de **monitoramento e operação de rede** voltada a provedores ISP (N
 - **Perfis** — rotas administrativas (configurações) restritas a administradores.
 - **Auditoria** — registo de alterações relevantes (equipamentos, utilizadores, Telegram, intervalos, base comercial, etc.) consultável em Configurações.
 
+### Relatórios agendados e incidentes
+
+- **Relatório ONU mensal** — recolha OLT + Telegram (já existente).
+- **Resumo de alertas** — envio diário/semanal por Telegram e/ou e-mail (contagens, tipos, incidentes).
+- **Base comercial** — envio mensal só dos totais (sem recolher OLT).
+- **SMTP** — configuração em Configurações → Relatórios agendados.
+- **Correlação de alertas** — incidentes automáticos para POP com múltiplos offline e OLT offline em cascata; lista em Alertas → Ativos; Telegram de cascata suprimido para evitar spam.
+
 ---
 
 ## Estrutura do repositório

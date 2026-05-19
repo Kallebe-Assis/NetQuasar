@@ -11,6 +11,10 @@ export const queryKeys = {
   monIntervals: ["mon-intervals"] as const,
   automationOnu: ["automation-onu"] as const,
   automationOnuRuns: ["automation-onu-runs"] as const,
+  automationAlertsDigest: ["automation-alerts-digest"] as const,
+  automationCommercial: ["automation-commercial"] as const,
+  smtpSettings: ["smtp-settings"] as const,
+  alertsIncidents: ["alerts-incidents"] as const,
   alertsActive: ["alerts-active"] as const,
   alertsHist: ["alerts-hist"] as const,
   alertsResolvedWindow: ["alerts-resolved-window"] as const,
@@ -25,5 +29,6 @@ export function invalidateAlertListQueries(qc: QueryClient): Promise<void> {
     qc.invalidateQueries({ queryKey: queryKeys.alertsActive }),
     qc.invalidateQueries({ queryKey: queryKeys.alertsHist }),
     qc.invalidateQueries({ queryKey: queryKeys.alertsResolvedWindow }),
+    qc.invalidateQueries({ queryKey: queryKeys.alertsIncidents }),
   ]).then(() => undefined);
 }
