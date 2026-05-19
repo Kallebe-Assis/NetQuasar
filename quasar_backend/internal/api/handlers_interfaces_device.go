@@ -158,6 +158,13 @@ func (s *Server) listDeviceInterfaces(w http.ResponseWriter, r *http.Request) {
 	for k, v := range payload {
 		out[k] = v
 	}
+	if tab, ok := out["interface_table"].([]map[string]any); ok {
+		out["interface_count"] = len(tab)
+	}
+	out["walk_truncated"] = snapshotWalkTruncated(useRaw)
+	if note, ok := out["note"].(string); ok && strings.Contains(strings.ToLower(note), "truncad") {
+		out["walk_truncated"] = true
+	}
 	if pool := s.DB(); pool != nil {
 		var devCat string
 		_ = pool.QueryRow(r.Context(), `SELECT coalesce(lower(trim(category)),'') FROM devices WHERE id=$1`, id).Scan(&devCat)
@@ -219,38 +226,15 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	host := strings.TrimSpace(*ip)
 	isMikrotik := isLikelyMikrotikDevice(devCat, devBrand, devModel, devDesc)
-	var walkMk []probing.SNMPVar
-	var truncMk bool
-	var noteMk string
-	var walkMkIf []probing.SNMPVar
-	var truncMkIf bool
-	var noteMkIf string
-	if isMikrotik {
-		walkMk, truncMk, noteMk = probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-			Host: host, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
-			Version: "2c", Timeout: 22 * time.Second, Retries: 0, MaxRows: 12000,
-		})
-		walkMkIf, truncMkIf, noteMkIf = probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-			Host: host, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
-			Version: "2c", Timeout: 16 * time.Second, Retries: 0, MaxRows: 4000,
-		})
-	}
-	walkIF, truncIF, noteIF := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: host, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.2.2.1",
-		Version: "2c", Timeout: 38 * time.Second, Retries: 0, MaxRows: 14000,
-	})
-	walkX, truncX, noteX := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: host, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.31.1.1.1",
-		Version: "2c", Timeout: 32 * time.Second, Retries: 0, MaxRows: 20000,
-	})
-	walkSen, truncSen, noteSen := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: host, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.99.1.1.1.4",
-		Version: "2c", Timeout: 18 * time.Second, Retries: 0, MaxRows: 800,
-	})
-	merged := append(append(append(append(append([]probing.SNMPVar{}, walkIF...), walkX...), walkMk...), walkMkIf...), walkSen...)
-	arr := make([]map[string]any, 0, len(merged))
+	walkRes := collectInterfaceSNMPWalks(ctx, host, c, ifRefreshTO, isMikrotik)
+	merged := walkRes.Merged
+	note := walkRes.Note
+	arr := make([]map[string]any, 0, len(merged)+1)
 	for _, v := range merged {
 		arr = append(arr, map[string]any{"oid": v.OID, "value": v.Value, "type": v.Type})
+	}
+	if walkRes.Truncated {
+		arr = append(arr, map[string]any{"oid": "__netquasar.walk", "value": "truncated", "type": "meta"})
 	}
 	b, _ := json.Marshal(arr)
 	latestBeforeInsertRaw, latestBeforeInsertAt, _, _, loadPrevErr := loadLatestTwoInterfaceSnapshots(r.Context(), s.DB(), id)
@@ -264,11 +248,7 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	note := strings.TrimSpace(strings.Join([]string{noteIF, noteX, noteMk, noteMkIf, noteSen}, " "))
-	if truncIF || truncX || truncMk || truncMkIf || truncSen {
-		note = strings.TrimSpace(note + " (walk truncado)")
-	}
-	ok := len(walkIF) > 0 || len(walkX) > 0 || len(walkSen) > 0 || len(walkMk) > 0 || len(walkMkIf) > 0
+	ok := len(merged) > 0
 	payload := buildInterfaceMonitorPayload(b, &collectedAt, latestBeforeInsertRaw, latestBeforeInsertAt)
 	if isMikrotik {
 		if tab, ok := payload["interface_table"].([]map[string]any); ok {
@@ -375,22 +355,25 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
+	ifaceCount := 0
+	if tab, ok := payload["interface_table"].([]map[string]any); ok {
+		ifaceCount = len(tab)
+	}
 	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_interfaces", actorFromRequest(r), nil, map[string]any{
-		"ok": ok, "timeout_ms": ifRefreshTO.Milliseconds(), "rows_if_mib": len(walkIF),
+		"ok": ok, "timeout_ms": ifRefreshTO.Milliseconds(), "snmp_rows": len(merged), "interface_count": ifaceCount,
+		"walk_truncated": walkRes.Truncated,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"device_id":                  id,
-		"collected_at":               collectedAt.UTC().Format(time.RFC3339),
-		"ok":                         ok,
-		"walk_note":                  note,
-		"rows_if_mib":                len(walkIF),
-		"rows_if_x_mib":              len(walkX),
-		"rows_mikrotik_optical":      len(walkMk),
-		"rows_mikrotik_ifstats_name": len(walkMkIf),
-		"rows_sensors":               len(walkSen),
-		"interfaces":                 json.RawMessage(b),
-		"interface_table":            payload["interface_table"],
-		"optical_sensors":            payload["optical_sensors"],
+		"device_id":        id,
+		"collected_at":     collectedAt.UTC().Format(time.RFC3339),
+		"ok":               ok,
+		"walk_note":        note,
+		"walk_truncated":   walkRes.Truncated,
+		"interface_count":  ifaceCount,
+		"snmp_rows":        len(merged),
+		"interfaces":       json.RawMessage(b),
+		"interface_table":  payload["interface_table"],
+		"optical_sensors":  payload["optical_sensors"],
 	})
 }
 
@@ -465,11 +448,11 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 	rates, dtSec := instantTrafficRatesByOID(ctx, host, community, 2*time.Second)
 	walkMk, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 		Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
-		Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: 12000,
+		Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: snmpMkOpticalMaxRows,
 	})
 	walkMkIf, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 		Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
-		Version: "2c", Timeout: 12 * time.Second, Retries: 0, MaxRows: 4000,
+		Version: "2c", Timeout: 12 * time.Second, Retries: 0, MaxRows: snmpMkIfStatsMaxRows,
 	})
 	parsedVars := append([]probing.SNMPVar{}, walkJSONToSNMPVars(latestRaw)...)
 	parsedVars = append(parsedVars, walkMk...)

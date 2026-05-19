@@ -713,9 +713,29 @@ func walkJSONToSNMPVars(raw []byte) []probing.SNMPVar {
 	}
 	out := make([]probing.SNMPVar, 0, len(arr))
 	for _, v := range arr {
+		oid := strings.TrimSpace(v.OID)
+		if strings.HasPrefix(oid, "__netquasar.") {
+			continue
+		}
 		out = append(out, probing.SNMPVar{OID: v.OID, Value: v.Value, Type: v.Type})
 	}
 	return out
+}
+
+func snapshotWalkTruncated(raw []byte) bool {
+	var arr []struct {
+		OID   string `json:"oid"`
+		Value string `json:"value"`
+	}
+	if json.Unmarshal(raw, &arr) != nil {
+		return false
+	}
+	for _, v := range arr {
+		if strings.TrimSpace(v.OID) == "__netquasar.walk" && strings.TrimSpace(v.Value) == "truncated" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildInterfaceMonitorPayload(ifaces []byte, collectedAt *time.Time, prevIfaces []byte, prevCollectedAt *time.Time) map[string]any {

@@ -143,6 +143,9 @@ export function MikrotikPage() {
         device_id: string;
         collected_at?: string;
         interface_table?: IfRow[];
+        interface_count?: number;
+        walk_truncated?: boolean;
+        walk_note?: string;
         optical_sensors?: SensorRow[];
         note?: string;
       }>(`/api/v1/interfaces/devices/${sel}`),
@@ -160,6 +163,9 @@ export function MikrotikPage() {
         device_id: string;
         collected_at?: string;
         interface_table?: IfRow[];
+        interface_count?: number;
+        walk_truncated?: boolean;
+        walk_note?: string;
         optical_sensors?: SensorRow[];
         note?: string;
       }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} }),
@@ -229,6 +235,8 @@ export function MikrotikPage() {
   });
 
   const table = liveTable;
+  const interfaceTotal = iface.data?.interface_count ?? table.length;
+  const walkTruncated = Boolean(iface.data?.walk_truncated) || /truncad/i.test(String(iface.data?.walk_note ?? iface.data?.note ?? ""));
   const telemetryKpis = useMemo(() => {
     if (!telemetry.data?.metrics) return { cpu: null, memory: null, temp: null };
     return parseTelemetryKPIs({
@@ -524,7 +532,19 @@ export function MikrotikPage() {
               <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
                 Últ. interfaces: <span className="mono">{formatCollectedPt(iface.data?.collected_at)}</span> · Últ. telemetria:{" "}
                 <span className="mono">{formatCollectedPt(telemetry.data?.collected_at)}</span>
+                {" · "}
+                <strong>{interfaceTotal}</strong> interface{interfaceTotal === 1 ? "" : "s"} no snapshot
+                {interfaceRowsFiltered.length !== table.length
+                  ? ` · a mostrar ${interfaceRowsFiltered.length} com filtros`
+                  : " · todas listadas abaixo"}
               </p>
+              {walkTruncated && (
+                <div className="msg" style={{ fontSize: 12, marginBottom: 8, borderColor: "var(--warn)", color: "var(--text)" }}>
+                  A coleta SNMP foi truncada antes de obter todas as interfaces. Aumente o timeout de snapshot de interfaces em Configurações →
+                  Alertas e execute <strong>Atualizar</strong> novamente.
+                  {iface.data?.walk_note ? <span className="mono" style={{ display: "block", marginTop: 4, fontSize: 10 }}>{iface.data.walk_note}</span> : null}
+                </div>
+              )}
               {(iface.isLoading || refreshIf.isPending || (realtimeOn && realtimeTick.isPending)) && (
                 <p style={{ fontSize: 11, color: "var(--muted)" }}>Coletando dados de interface...</p>
               )}
@@ -532,7 +552,7 @@ export function MikrotikPage() {
               {refreshIf.isError && <div className="msg msg--err">{(refreshIf.error as Error).message}</div>}
               {realtimeTick.isError && <div className="msg msg--err">{(realtimeTick.error as Error).message}</div>}
 
-              <div className="table-wrap" style={{ maxHeight: 480, overflowY: "auto", overflowX: "hidden", maxWidth: "100%" }}>
+              <div className="table-wrap" style={{ maxHeight: "min(75vh, 720px)", overflowY: "auto", overflowX: "auto", maxWidth: "100%" }}>
                 <table style={{ fontSize: 9, width: "100%", tableLayout: "fixed" }}>
                   <thead>
                     <tr>
@@ -610,7 +630,11 @@ export function MikrotikPage() {
                   </tbody>
                 </table>
               </div>
-              {interfaceRowsFiltered.length === 0 && !iface.isLoading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Nenhuma interface encontrada para os filtros.</p>}
+              {interfaceRowsFiltered.length === 0 && !iface.isLoading && (
+                <p style={{ color: "var(--muted)", fontSize: 12 }}>
+                  {table.length === 0 ? "Nenhuma interface no snapshot — use Atualizar para coletar via SNMP." : "Nenhuma interface encontrada para os filtros."}
+                </p>
+              )}
               {selectedChartRows.length > 0 && (
                 <div ref={chartsRef} style={{ marginTop: 10 }}>
                   <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>

@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
-	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/rs/zerolog"
 )
 
@@ -26,34 +24,8 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	}
 	h := strings.TrimSpace(host)
 	c := strings.TrimSpace(community)
-	walkIF, _, noteIF := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.2.2.1",
-		Version: "2c", Timeout: 34 * time.Second, Retries: 0, MaxRows: 14000,
-	})
-	walkX, _, noteX := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.31.1.1.1",
-		Version: "2c", Timeout: 28 * time.Second, Retries: 0, MaxRows: 20000,
-	})
-	var merged []probing.SNMPVar
-	merged = append(merged, walkIF...)
-	merged = append(merged, walkX...)
-	if workerLikelyMikrotik(cat, brand, model, description) {
-		walkMk, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-			Host: h, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
-			Version: "2c", Timeout: 20 * time.Second, Retries: 0, MaxRows: 12000,
-		})
-		walkMkIf, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-			Host: h, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
-			Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: 4000,
-		})
-		merged = append(merged, walkMk...)
-		merged = append(merged, walkMkIf...)
-	}
-	walkSen, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.99.1.1.1.4",
-		Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: 800,
-	})
-	merged = append(merged, walkSen...)
+	total := 120 * time.Second
+	merged := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description))
 	if len(merged) == 0 {
 		if log != nil {
 			log.Debug().Str("device", deviceID.String()).Str("host", h).Msg("interface snapshot worker: walk vazio")
@@ -73,7 +45,7 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	`, deviceID, b)
 	if err != nil {
 		if log != nil {
-			log.Warn().Err(err).Str("device", deviceID.String()).Str("notes", strings.TrimSpace(noteIF+" "+noteX)).Msg("interface_snapshots insert (worker)")
+			log.Warn().Err(err).Str("device", deviceID.String()).Msg("interface_snapshots insert (worker)")
 		}
 		return
 	}
