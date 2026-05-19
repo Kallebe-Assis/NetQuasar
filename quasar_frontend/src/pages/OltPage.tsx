@@ -10,6 +10,7 @@ import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateAlertListQueries } from "../lib/queryKeys";
 import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow } from "../lib/deviceReportHelpers";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
+import { DropdownMenu } from "../components/DropdownMenu";
 import { OltReportsTab } from "./olt/OltReportsTab";
 
 type OltRow = {
@@ -285,7 +286,6 @@ export function OltPage() {
   });
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
   const [bulkOltFilter, setBulkOltFilter] = useState("");
-  const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
   const [sortKey, setSortKey] = useState<OltSortKey>("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -861,7 +861,6 @@ export function OltPage() {
                   title="Fechar detalhe da OLT"
                   aria-label="Fechar detalhe da OLT"
                   onClick={() => {
-                    setUpdateMenuOpen(false);
                     setSel(null);
                   }}
                 >
@@ -882,36 +881,39 @@ export function OltPage() {
                     </span>
                   </Link>
                   {canMutate ? (
-                    <div className="dropdown" style={{ position: "relative", display: "inline-block" }}>
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        disabled={refresh.isPending || refreshIf.isPending}
-                        onClick={() => setUpdateMenuOpen((v) => !v)}
-                        style={{ display: "flex", alignItems: "center", gap: 6 }}
-                      >
-                        <span>{refresh.isPending || refreshIf.isPending ? "Atualizando…" : "Atualizar"}</span>
-                        <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, opacity: 0.8 }}>▾</span>
-                      </button>
-                      <div
-                        style={{
-                          position: "absolute", right: 0, marginTop: 4, minWidth: 200, background: "var(--panel2, #161b22)",
-                          border: "1px solid var(--border)", borderRadius: 4, boxShadow: "0 4px 12px rgba(0,0,0,0.35)",
-                          zIndex: 10, display: updateMenuOpen ? "block" : "none",
-                        }}
-                        onMouseLeave={() => setUpdateMenuOpen(false)}
-                      >
-                        <button type="button" className="olt-update-menu__item" disabled={refresh.isPending} onClick={() => { setUpdateMenuOpen(false); refresh.mutate(sel); }}>
-                          Atualizar snapshot
+                    <DropdownMenu
+                      key={sel ?? "olt-update"}
+                      align="end"
+                      className="dropdown"
+                      trigger={({ toggle, open }) => (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={refresh.isPending || refreshIf.isPending}
+                          aria-haspopup="menu"
+                          aria-expanded={open}
+                          onClick={toggle}
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span>{refresh.isPending || refreshIf.isPending ? "Atualizando…" : "Atualizar"}</span>
+                          <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, opacity: 0.8 }}>▾</span>
                         </button>
-                        <button type="button" className="olt-update-menu__item" disabled={refreshIf.isPending} onClick={() => { setUpdateMenuOpen(false); refreshIf.mutate(sel); }}>
-                          Atualizar interfaces
-                        </button>
-                        <button type="button" className="olt-update-menu__item" disabled={refresh.isPending || refreshIf.isPending} onClick={() => { setUpdateMenuOpen(false); refresh.mutate(sel); refreshIf.mutate(sel); }}>
-                          Atualizar snapshot e interfaces
-                        </button>
-                      </div>
-                    </div>
+                      )}
+                    >
+                      {({ close }) => (
+                        <>
+                          <button type="button" className="olt-update-menu__item" disabled={refresh.isPending} onClick={() => { close(); refresh.mutate(sel); }}>
+                            Atualizar snapshot
+                          </button>
+                          <button type="button" className="olt-update-menu__item" disabled={refreshIf.isPending} onClick={() => { close(); refreshIf.mutate(sel); }}>
+                            Atualizar interfaces
+                          </button>
+                          <button type="button" className="olt-update-menu__item" disabled={refresh.isPending || refreshIf.isPending} onClick={() => { close(); refresh.mutate(sel); refreshIf.mutate(sel); }}>
+                            Atualizar snapshot e interfaces
+                          </button>
+                        </>
+                      )}
+                    </DropdownMenu>
                   ) : null}
                 </div>
                 <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, marginBottom: 0 }}>

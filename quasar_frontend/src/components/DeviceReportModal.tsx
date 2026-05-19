@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { DropdownMenu } from "./DropdownMenu";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { displayAlertType, displaySeverity } from "../lib/alertLabels";
 import {
@@ -192,7 +193,6 @@ export function DeviceReportModal({ device, onClose }: Props) {
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("7d");
   const [reportTab, setReportTab] = useState<"dados" | "interface" | "graficos" | "outros">("dados");
   const [copyCadastroNote, setCopyCadastroNote] = useState<string | null>(null);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const id = device?.id ?? "";
 
   const fullReport = useMutation({
@@ -215,7 +215,6 @@ export function DeviceReportModal({ device, onClose }: Props) {
       void reportInventory.refetch();
       void reportAlertsHistory.refetch();
       void reportAlertsHistoryPrev.refetch();
-      setExportMenuOpen(false);
       void devId;
     },
   });
@@ -462,18 +461,24 @@ export function DeviceReportModal({ device, onClose }: Props) {
           <button type="button" className="btn btn--icon-menu" title="Recarregar dados da tela" aria-label="Recarregar dados da tela" onClick={() => refetchAll()}>
             ⟳
           </button>
-          <div className="action-menu">
-            <button
-              type="button"
-              className="btn"
-              aria-haspopup="menu"
-              aria-expanded={exportMenuOpen}
-              onClick={() => setExportMenuOpen((v) => !v)}
-            >
-              Exportar ▾
-            </button>
-            {exportMenuOpen && (
-              <div className="action-menu__panel action-menu__panel--align-start" role="menu">
+          <DropdownMenu
+            key={id || "export"}
+            align="start"
+            className="action-menu"
+            trigger={({ toggle, open }) => (
+              <button
+                type="button"
+                className="btn"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+              >
+                Exportar ▾
+              </button>
+            )}
+          >
+            {({ close }) => (
+              <>
                 <button
                   type="button"
                   className="action-menu__item"
@@ -501,7 +506,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                       `relatorio_equipamento_${device.id.slice(0, 8)}_${reportPeriod}.csv`,
                       new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }),
                     );
-                    setExportMenuOpen(false);
+                    close();
                   }}
                 >
                   CSV
@@ -511,7 +516,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                   className="action-menu__item"
                   role="menuitem"
                   onClick={() => {
-                    setExportMenuOpen(false);
+                    close();
                     document.body.classList.add("print-device-report");
                     requestAnimationFrame(() => {
                       window.print();
@@ -521,9 +526,9 @@ export function DeviceReportModal({ device, onClose }: Props) {
                 >
                   PDF / Imprimir
                 </button>
-              </div>
+              </>
             )}
-          </div>
+          </DropdownMenu>
         </div>
         {fullReport.data && (
           <div className="msg msg--ok" style={{ marginBottom: 8 }}>

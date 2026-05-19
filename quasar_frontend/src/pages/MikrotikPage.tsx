@@ -6,6 +6,7 @@ import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
+import { DropdownMenu } from "../components/DropdownMenu";
 import { formatCollectedPt, parseTelemetryKPIs, snmpVarsFromMetrics } from "../lib/deviceReportHelpers";
 
 type DeviceRow = {
@@ -115,7 +116,6 @@ export function MikrotikPage() {
   const [realtimeDraft, setRealtimeDraft] = useState("3000");
   const [liveTable, setLiveTable] = useState<IfRow[]>([]);
   const [selectedChartIfs, setSelectedChartIfs] = useState<number[]>([]);
-  const [optionsOpen, setOptionsOpen] = useState(false);
   const [trafficHistory, setTrafficHistory] = useState<Record<number, Array<{ ts: number; tx: number; rx: number }>>>({});
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
@@ -320,7 +320,6 @@ export function MikrotikPage() {
 
   useEffect(() => {
     setRealtimeOn(false);
-    setOptionsOpen(false);
     setSelectedChartIfs([]);
   }, [sel]);
 
@@ -362,18 +361,6 @@ export function MikrotikPage() {
             }
             .mk-switch--on .mk-switch__knob {
               transform: translateX(16px);
-            }
-            .mk-options-menu {
-              position: absolute;
-              right: 0;
-              top: calc(100% + 6px);
-              min-width: 210px;
-              background: var(--panel2);
-              border: 1px solid var(--border);
-              border-radius: 8px;
-              box-shadow: 0 8px 22px rgba(0,0,0,0.28);
-              z-index: 15;
-              padding: 6px;
             }
             .mk-options-item {
               display: flex;
@@ -452,19 +439,23 @@ export function MikrotikPage() {
             <div className="card" style={{ minWidth: 0, maxWidth: "100%", overflowX: "hidden" }}>
               <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <h2 style={{ margin: 0 }}>Interfaces</h2>
-                <div style={{ position: "relative" }}>
-                  <button type="button" className="btn" onClick={() => setOptionsOpen((v) => !v)} title="Opções">
-                    ⚙
-                  </button>
-                  {optionsOpen && (
-                    <div className="mk-options-menu" onMouseLeave={() => setOptionsOpen(false)}>
-                      <Link to="/devices" className="mk-options-item" onClick={() => setOptionsOpen(false)}>
-                        <span>Ir para equipamentos</span>
-                        <span aria-hidden style={{ opacity: 0.7 }}>↗</span>
-                      </Link>
-                    </div>
+                <DropdownMenu
+                  key={sel ?? "mk-options"}
+                  align="end"
+                  minWidth={210}
+                  trigger={({ toggle, open }) => (
+                    <button type="button" className="btn" onClick={toggle} title="Opções" aria-haspopup="menu" aria-expanded={open}>
+                      ⚙
+                    </button>
                   )}
-                </div>
+                >
+                  {({ close }) => (
+                    <Link to="/devices" className="mk-options-item" onClick={() => close()}>
+                      <span>Ir para equipamentos</span>
+                      <span aria-hidden style={{ opacity: 0.7 }}>↗</span>
+                    </Link>
+                  )}
+                </DropdownMenu>
               </div>
               <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                 <select className="input" style={{ minWidth: 260 }} value={sel ?? ""} onChange={(e) => setSel(e.target.value || null)}>

@@ -775,9 +775,26 @@ tr:hover td {
   padding: 4px;
   box-shadow: var(--hover-shadow-menu);
 }
+/* Portal em document.body — não é cortado por overflow em .table-wrap */
+.action-menu__panel--portal {
+  position: fixed;
+  right: auto;
+  top: auto;
+  margin-top: 0;
+  z-index: 10050;
+}
 .action-menu__panel--align-start {
   left: 0;
   right: auto;
+}
+.action-menu__panel--portal.action-menu__panel--align-start {
+  left: auto;
+}
+.action-menu__panel--portal .mk-options-item,
+.action-menu__panel--portal .olt-update-menu__item {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-pill-field {

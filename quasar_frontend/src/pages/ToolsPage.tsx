@@ -99,7 +99,7 @@ export function ToolsPage() {
 
   const [mxIps, setMxIps] = useState("1.1.1.1\n8.8.8.8");
   const [mxPorts, setMxPorts] = useState("2265\n80\n8080\n8888\n443\n8443");
-  const [mxTo, setMxTo] = useState("3000");
+  const [mxTo, setMxTo] = useState("300");
   const [mxInsecure, setMxInsecure] = useState(true);
   type HttpMatrixFilter = "all" | "ok" | "blocked";
   const [httpMatrixFilter, setHttpMatrixFilter] = useState<HttpMatrixFilter>("all");

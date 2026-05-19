@@ -25,16 +25,22 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	h := strings.TrimSpace(host)
 	c := strings.TrimSpace(community)
 	total := 120 * time.Second
-	merged := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description))
-	if len(merged) == 0 {
+	if cfg, err := loadClampMonitoringIntervals(ctx, pool); err == nil {
+		total = cfg.interfaceTimeout(false)
+	}
+	walkRes := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description))
+	if len(walkRes.Merged) == 0 {
 		if log != nil {
 			log.Debug().Str("device", deviceID.String()).Str("host", h).Msg("interface snapshot worker: walk vazio")
 		}
 		return
 	}
-	arr := make([]map[string]any, 0, len(merged))
-	for _, v := range merged {
+	arr := make([]map[string]any, 0, len(walkRes.Merged)+1)
+	for _, v := range walkRes.Merged {
 		arr = append(arr, map[string]any{"oid": v.OID, "value": v.Value, "type": v.Type})
+	}
+	if walkRes.Truncated {
+		arr = append(arr, map[string]any{"oid": "__netquasar.walk", "value": "truncated", "type": "meta"})
 	}
 	b, err := json.Marshal(arr)
 	if err != nil {

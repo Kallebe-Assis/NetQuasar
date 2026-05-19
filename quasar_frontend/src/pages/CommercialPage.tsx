@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
 import { formatAlertDateTimePt } from "../lib/alertLabels";
+import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
+import { useFloatingMenu } from "../hooks/useFloatingMenu";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 
 type Locality = { id: string; name: string; region_code?: string | null; created_at?: string };
@@ -181,8 +183,7 @@ export function CommercialPage() {
 
   const [locModalOpen, setLocModalOpen] = useState(false);
   const [mainTab, setMainTab] = useState<"resumo" | "localidades" | "registros">("resumo");
-  const [newRecMenuOpen, setNewRecMenuOpen] = useState(false);
-  const newRecMenuRef = useRef<HTMLDivElement>(null);
+  const newRecMenu = useFloatingMenu("start", 260);
   const [singleRecModalOpen, setSingleRecModalOpen] = useState(false);
   const [recEditOpen, setRecEditOpen] = useState(false);
   const [editRecRow, setEditRecRow] = useState<MonthlyRecord | null>(null);
@@ -335,15 +336,6 @@ export function CommercialPage() {
     if (oltPreSelectedIds.length > 0) return;
     setOltPreSelectedIds(oltCandidates.map((o) => o.id));
   }, [oltCollectModalOpen, oltCandidates, oltPreSelectedIds.length]);
-
-  useEffect(() => {
-    if (!newRecMenuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (newRecMenuRef.current && !newRecMenuRef.current.contains(e.target as Node)) setNewRecMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [newRecMenuOpen]);
 
   const selectedRows = useMemo(() => oltCollectRows.filter((r) => oltSelectedIds.includes(r.olt_id) && !r.error), [oltCollectRows, oltSelectedIds]);
   const byLocalitySelected = useMemo(() => {
@@ -587,43 +579,29 @@ export function CommercialPage() {
               >
                 Coletar ONUs das OLTs por localidade
               </button>
-              <div ref={newRecMenuRef} style={{ position: "relative" }}>
+              <div ref={newRecMenu.anchorRef}>
                 <button
                   type="button"
                   className="btn"
                   aria-haspopup="menu"
-                  aria-expanded={newRecMenuOpen}
-                  onClick={() => setNewRecMenuOpen((o) => !o)}
+                  aria-expanded={newRecMenu.open}
+                  onClick={newRecMenu.toggle}
                 >
                   Novo Registro ▾
                 </button>
-                {newRecMenuOpen && (
-                  <div
-                    role="menu"
-                    style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      marginTop: 4,
-                      zIndex: 50,
-                      minWidth: 260,
-                      background: "var(--panel)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius)",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-                      padding: 6,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                    }}
-                  >
+                <FloatingMenuPanel
+                  open={newRecMenu.open}
+                  panelRef={newRecMenu.panelRef}
+                  panelStyle={newRecMenu.panelStyle}
+                  className="action-menu__panel action-menu__panel--portal action-menu__panel--align-start"
+                >
                     <button
                       type="button"
                       role="menuitem"
                       className="btn"
                       style={{ width: "100%", justifyContent: "flex-start" }}
                       onClick={() => {
-                        setNewRecMenuOpen(false);
+                        newRecMenu.close();
                         setLid("");
                         setYm(/^\d{4}-\d{2}$/.test(month) ? month : seed);
                         setCnt("0");
@@ -638,14 +616,13 @@ export function CommercialPage() {
                       className="btn"
                       style={{ width: "100%", justifyContent: "flex-start" }}
                       onClick={() => {
-                        setNewRecMenuOpen(false);
+                        newRecMenu.close();
                         openCommercialBulkModal();
                       }}
                     >
                       Novo registro em massa
                     </button>
-                  </div>
-                )}
+                </FloatingMenuPanel>
               </div>
             </div>
           ) : (
