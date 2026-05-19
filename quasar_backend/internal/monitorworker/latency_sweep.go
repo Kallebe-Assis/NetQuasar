@@ -58,13 +58,12 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 		}
 
 		WithDeviceProbeRowLock(id, func() {
-			prevSnap := loadPreviousPingSnapshot(ctx, pool, id)
-
 			var snmpPrev sql.NullBool
 			_ = pool.QueryRow(ctx, `SELECT snmp_ok FROM device_probe_cache WHERE device_id=$1`, id).Scan(&snmpPrev)
 
 			var streak int
-			_ = pool.QueryRow(ctx, `SELECT COALESCE(ping_fail_streak, 0) FROM device_probe_cache WHERE device_id=$1`, id).Scan(&streak)
+			var latHighStreak int
+			_ = pool.QueryRow(ctx, `SELECT COALESCE(ping_fail_streak, 0), COALESCE(latency_high_streak, 0) FROM device_probe_cache WHERE device_id=$1`, id).Scan(&streak, &latHighStreak)
 
 			pctx, cancel := context.WithTimeout(ctx, perProbe+300*time.Millisecond)
 			devLabel := monitoringDeviceLabel(description, host)
@@ -101,13 +100,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			if reachOK {
 				recoveredPing = append(recoveredPing, id)
 			}
-			if reachOK {
-				patchOpenLatencyHighMeta(ctx, pool, id, lat)
-			}
-			if !syncLatencyAlertByGlobalThreshold(ctx, pool, log, id, row.category, description, host, reachOK, lat) {
-				insertLatencyHighIfNew(ctx, pool, log, id, description, host, prevSnap, lat, reachOK)
-				resolveLatencyHighIfCalm(ctx, pool, log, id, reachOK, lat)
-			}
+			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, reachOK, lat, latHighStreak)
 
 			overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
 			if overallOK {
@@ -141,9 +134,9 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			}
 			_, err = tx.Exec(ctx, `
 			INSERT INTO device_probe_cache (
-				device_id, checked_at, monitoring_mode, ok, reach_ok, latency_ms, method, snmp_ok, detail, ping_fail_streak
+				device_id, checked_at, monitoring_mode, ok, reach_ok, latency_ms, method, snmp_ok, detail, ping_fail_streak, latency_high_streak
 			)
-			VALUES ($1, now(), $2, $3, $4, $5, $6, $7, ($8::jsonb), $9)
+			VALUES ($1, now(), $2, $3, $4, $5, $6, $7, ($8::jsonb), $9, $10)
 			ON CONFLICT (device_id) DO UPDATE SET
 				checked_at = EXCLUDED.checked_at,
 				monitoring_mode = EXCLUDED.monitoring_mode,
@@ -152,9 +145,10 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				method = EXCLUDED.method,
 				detail = COALESCE(device_probe_cache.detail, '{}'::jsonb) || EXCLUDED.detail,
 				ping_fail_streak = EXCLUDED.ping_fail_streak,
+				latency_high_streak = EXCLUDED.latency_high_streak,
 				snmp_ok = device_probe_cache.snmp_ok,
 				ok = (EXCLUDED.reach_ok AND COALESCE(device_probe_cache.snmp_ok, true))
-		`, id, mode, overallOK, reachOK, lat, method, snmpStored, string(dj), streakAfter)
+		`, id, mode, overallOK, reachOK, lat, method, snmpStored, string(dj), streakAfter, latHighStreakAfter)
 			if err != nil {
 				_ = tx.Rollback(ctx)
 				if log != nil {
@@ -230,7 +224,6 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 			lat = int64(v)
 		}
 
-		prevSnap := loadPreviousPingSnapshot(ctx, pool, deviceID)
 		host := strings.TrimSpace(ip)
 
 		detail := map[string]any{"reachability": probe, "latency_source": source}
@@ -238,14 +231,11 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 			detail[k] = v
 		}
 
-		if reachOK {
-			patchOpenLatencyHighMeta(ctx, pool, deviceID, lat)
-		}
+		var latHighStreak int
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(latency_high_streak, 0) FROM device_probe_cache WHERE device_id=$1`, deviceID).Scan(&latHighStreak)
+		latHighStreakAfter := latHighStreak
 		if host != "" {
-			if !syncLatencyAlertByGlobalThreshold(ctx, pool, log, deviceID, cat, description, host, reachOK, lat) {
-				insertLatencyHighIfNew(ctx, pool, log, deviceID, description, host, prevSnap, lat, reachOK)
-				resolveLatencyHighIfCalm(ctx, pool, log, deviceID, reachOK, lat)
-			}
+			latHighStreakAfter = EvaluateLatencyHighAlerts(ctx, pool, log, deviceID, cat, description, host, reachOK, lat, latHighStreak)
 		}
 
 		overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
@@ -264,9 +254,9 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 
 		_, err = pool.Exec(ctx, `
 		INSERT INTO device_probe_cache (
-			device_id, checked_at, monitoring_mode, ok, reach_ok, latency_ms, method, snmp_ok, detail, ping_fail_streak
+			device_id, checked_at, monitoring_mode, ok, reach_ok, latency_ms, method, snmp_ok, detail, ping_fail_streak, latency_high_streak
 		)
-		VALUES ($1::uuid, now(), $2::text, $3, $4, $5, $6, $7, ($8)::jsonb, $9)
+		VALUES ($1::uuid, now(), $2::text, $3, $4, $5, $6, $7, ($8)::jsonb, $9, $10)
 		ON CONFLICT (device_id) DO UPDATE SET
 			checked_at = EXCLUDED.checked_at,
 			monitoring_mode = EXCLUDED.monitoring_mode,
@@ -275,9 +265,10 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 			method = EXCLUDED.method,
 			detail = COALESCE(device_probe_cache.detail, '{}'::jsonb) || EXCLUDED.detail,
 			ping_fail_streak = EXCLUDED.ping_fail_streak,
+			latency_high_streak = EXCLUDED.latency_high_streak,
 			snmp_ok = device_probe_cache.snmp_ok,
 			ok = (EXCLUDED.reach_ok AND COALESCE(device_probe_cache.snmp_ok, true))
-	`, deviceID, mode, overallOK, reachOK, lat, method, snmpStored, string(dj), streakAfter)
+	`, deviceID, mode, overallOK, reachOK, lat, method, snmpStored, string(dj), streakAfter, latHighStreakAfter)
 		if err != nil {
 			outerErr = err
 			return

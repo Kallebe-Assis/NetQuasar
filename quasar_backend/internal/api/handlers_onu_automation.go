@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
 )
@@ -37,15 +37,12 @@ func (s *Server) ensureAutomationONUScheduler() {
 
 func (s *Server) runAutomationONUScheduler(ctx context.Context) {
 	l := s.Log.With().Str("component", "onu_monthly_scheduler").Logger()
-	s.tryScheduledONUReport(ctx, &l)
-	align := time.Until(time.Now().Truncate(time.Hour).Add(time.Hour))
-	if align > 0 {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(align):
-		}
+	check := func(trigger string) {
+		l.Debug().Str("trigger", trigger).Msg("verificação agendamento relatório ONU")
+		s.tryScheduledONUReport(ctx, &l)
 	}
+	// Ao arranque: recupera execuções perdidas se o serviço estava parado na hora agendada.
+	check("startup")
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
@@ -54,7 +51,7 @@ func (s *Server) runAutomationONUScheduler(ctx context.Context) {
 			l.Info().Msg("agendador relatório ONU encerrado")
 			return
 		case <-ticker.C:
-			s.tryScheduledONUReport(ctx, &l)
+			check("hourly")
 		}
 	}
 }
@@ -64,6 +61,7 @@ func (s *Server) tryScheduledONUReport(ctx context.Context, log *zerolog.Logger)
 	if pool == nil {
 		return
 	}
+	s.clearStaleONUAutomationRunning(ctx, pool)
 	cfg, err := loadONUAutomationConfig(ctx, pool)
 	if err != nil {
 		if log != nil {
@@ -73,11 +71,37 @@ func (s *Server) tryScheduledONUReport(ctx context.Context, log *zerolog.Logger)
 	}
 	period, due := onuReportDue(cfg, time.Now())
 	if !due {
+		if log != nil {
+			log.Debug().
+				Bool("enabled", cfg.Enabled).
+				Str("mode", cfg.Mode).
+				Str("period", period).
+				Str("last_run_period", strOpt(cfg.LastRunPeriod)).
+				Bool("running", cfg.Running).
+				Msg("relatório ONU: ainda não devido")
+		}
 		return
+	}
+	if log != nil {
+		log.Info().Str("period", period).Str("time_hhmm", cfg.TimeHHMM).Int("day_of_month", cfg.DayOfMonth).Msg("relatório ONU mensal devido — a executar")
 	}
 	if err := s.executeONUMonthlyReport(ctx, period, "scheduler", true); err != nil && log != nil {
 		log.Warn().Err(err).Str("period", period).Msg("relatório ONU agendado falhou")
 	}
+}
+
+func (s *Server) clearStaleONUAutomationRunning(ctx context.Context, pool *pgxpool.Pool) {
+	_, _ = pool.Exec(ctx, `
+		UPDATE automation_onu_report SET running = false, updated_at = now()
+		WHERE id = 1 AND running = true AND updated_at < now() - interval '2 hours'
+	`)
+}
+
+func strOpt(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
 }
 
 func loadONUAutomationConfig(ctx context.Context, pool *pgxpool.Pool) (onuAutomationConfig, error) {
@@ -85,7 +109,7 @@ func loadONUAutomationConfig(ctx context.Context, pool *pgxpool.Pool) (onuAutoma
 	var dom *int
 	var lrp, ls *string
 	err := pool.QueryRow(ctx, `
-		SELECT enabled, mode, day_of_month, time_hhmm, timezone,
+		SELECT enabled, COALESCE(NULLIF(trim(mode), ''), 'monthly'), day_of_month, time_hhmm, timezone,
 			last_run_period, last_status, running
 		FROM automation_onu_report WHERE id=1
 	`).Scan(&c.Enabled, &c.Mode, &dom, &c.TimeHHMM, &c.Timezone, &lrp, &ls, &c.Running)
@@ -108,58 +132,16 @@ func loadONUAutomationConfig(ctx context.Context, pool *pgxpool.Pool) (onuAutoma
 	return c, nil
 }
 
-// onuReportDue indica se o relatório do mês (period YYYY-MM) ainda não foi feito e já passou o dia/hora agendados.
+// onuReportDue indica se o relatório do mês (period YYYY-MM) ainda não foi concluído com sucesso e já passou o dia/hora agendados.
 func onuReportDue(cfg onuAutomationConfig, now time.Time) (period string, due bool) {
-	if !cfg.Enabled {
+	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if !cfg.Enabled || mode == "disabled" {
 		return "", false
 	}
-	loc, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		loc = time.UTC
+	if mode != "" && mode != "monthly" {
+		return "", false
 	}
-	now = now.In(loc)
-	period = now.Format("2006-01")
-	if cfg.LastRunPeriod != nil && strings.TrimSpace(*cfg.LastRunPeriod) == period {
-		return period, false
-	}
-	if cfg.Running {
-		return period, false
-	}
-	day := effectiveDOM(cfg.DayOfMonth, now.Year(), int(now.Month()))
-	hour, min := parseHHMM(cfg.TimeHHMM)
-	scheduled := time.Date(now.Year(), now.Month(), day, hour, min, 0, 0, loc)
-	if now.Before(scheduled) {
-		return period, false
-	}
-	return period, true
-}
-
-func effectiveDOM(dom, year, month int) int {
-	last := time.Date(year, time.Month(month+1), 0, 0, 0, 0, 0, time.UTC).Day()
-	if dom > last {
-		return last
-	}
-	if dom < 1 {
-		return 1
-	}
-	return dom
-}
-
-func parseHHMM(hhmm string) (hour, min int) {
-	parts := strings.Split(strings.TrimSpace(hhmm), ":")
-	if len(parts) >= 1 {
-		hour, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
-	}
-	if len(parts) >= 2 {
-		min, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
-	}
-	if hour < 0 || hour > 23 {
-		hour = 8
-	}
-	if min < 0 || min > 59 {
-		min = 0
-	}
-	return hour, min
+	return scheduleutil.MonthlyDue(true, cfg.Timezone, cfg.TimeHHMM, cfg.DayOfMonth, cfg.LastRunPeriod, cfg.Running, now)
 }
 
 func (s *Server) setONUAutomationStatus(ctx context.Context, status string, errMsg *string) {
@@ -290,16 +272,28 @@ func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period strin
 	_, _ = s.DB().Exec(ctx, `
 		UPDATE onu_report_runs SET finished_at = now(), status = $2, error_message = $3, summary = $4::jsonb WHERE id = $1
 	`, runID, status, em, string(sb))
-	_, _ = s.DB().Exec(ctx, `
-		UPDATE automation_onu_report SET
-			last_run_at = now(),
-			last_run_period = $1,
-			last_status = $2,
-			last_error = $3,
-			running = false,
-			updated_at = now()
-		WHERE id = 1
-	`, period, stAuto, em)
+	if ok {
+		_, _ = s.DB().Exec(ctx, `
+			UPDATE automation_onu_report SET
+				last_run_at = now(),
+				last_run_period = $1,
+				last_status = $2,
+				last_error = NULL,
+				running = false,
+				updated_at = now()
+			WHERE id = 1
+		`, period, stAuto)
+	} else {
+		_, _ = s.DB().Exec(ctx, `
+			UPDATE automation_onu_report SET
+				last_run_at = now(),
+				last_status = $2,
+				last_error = $3,
+				running = false,
+				updated_at = now()
+			WHERE id = 1
+		`, stAuto, em)
+	}
 	s.setMonitoringActivity(ctx, "")
 }
 

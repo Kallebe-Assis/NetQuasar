@@ -44,6 +44,16 @@ func (s *Server) ensureMonitoringWorker() {
 	})
 }
 
+// ensureBackgroundSchedulers inicia worker de monitorização e verificações horárias de relatórios (ONU, etc.).
+func (s *Server) ensureBackgroundSchedulers() {
+	if s.DB() == nil {
+		return
+	}
+	s.ensureMonitoringWorker()
+	s.ensureAutomationONUScheduler()
+	s.ensureReportSchedulers()
+}
+
 func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[pgxpool.Pool], workerCtx context.Context) http.Handler {
 	s := &Server{Log: log, Cfg: cfg, DBHolder: dbHolder, WorkerCtx: workerCtx}
 	r := chi.NewRouter()
@@ -227,10 +237,31 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			})
 		})
 
+		r.Route("/integrations", func(r chi.Router) {
+			r.Get("/", s.listIntegrations)
+			r.Get("/{id}", s.getIntegration)
+			r.Get("/{id}/logs", s.listIntegrationLogs)
+			r.Post("/{id}/test", s.integrationTest)
+			r.Post("/{id}/login", s.integrationLogin)
+			r.Post("/{id}/run-all", s.integrationRunAll)
+			r.Post("/{id}/requests/{requestId}/run", s.integrationRunRequest)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdminMiddleware)
+				r.Post("/", s.createIntegration)
+				r.Patch("/{id}", s.patchIntegration)
+				r.Delete("/{id}", s.deleteIntegration)
+				r.Post("/{id}/requests", s.createIntegrationRequest)
+				r.Patch("/{id}/requests/{requestId}", s.patchIntegrationRequest)
+				r.Delete("/{id}/requests/{requestId}", s.deleteIntegrationRequest)
+			})
+		})
+
 		r.Route("/tools", func(r chi.Router) {
 			r.Post("/dns/run", s.toolsDNSRun)
 			r.Post("/http-https-probe", s.toolsHTTPProbeStub)
 			r.Post("/icmp/ping", s.toolsICMPPing)
+			r.Post("/tracert", s.toolsTracert)
+			r.Post("/nmap", s.toolsNmap)
 			r.Post("/snmp/get", s.toolsSNMPGet)
 			r.Post("/snmp/bulk-get", s.toolsSNMPBulkGet)
 			r.Post("/telnet/test", s.toolsTelnetTest)
@@ -318,9 +349,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 	}
 
 	if s.DB() != nil {
-		s.ensureMonitoringWorker()
-		s.ensureAutomationONUScheduler()
-		s.ensureReportSchedulers()
+		s.ensureBackgroundSchedulers()
 	}
 
 	return chain(cfg, log, r)

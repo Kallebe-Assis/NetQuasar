@@ -21,15 +21,11 @@ const alertTypeLatencyHigh = "latency_high"
 const latencyHealthyMaxMS = int64(120)
 const latencyDegradedMinMS = int64(280)
 
-type prevPingSnapshot struct {
-	HasRow    bool
-	ReachOK   bool
-	LatencyMS int64
-}
+// latencyHighConsecutiveRequired — alerta só após N leituras consecutivas acima do limiar.
+const latencyHighConsecutiveRequired = 3
 
 // patchOpenLatencyHighMeta grava a latência mais recente do probe em meta (curr_latency_ms / value)
-// para a lista de alertas acompanhar device_probe_cache, mesmo no caminho legado em que
-// insertLatencyHighIfNew devolve cedo (ex.: ping anterior já > 120 ms).
+// para alertas latency_high abertos acompanharem device_probe_cache.
 func patchOpenLatencyHighMeta(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, currLat int64) {
 	if pool == nil {
 		return
@@ -48,61 +44,56 @@ func patchOpenLatencyHighMeta(ctx context.Context, pool *pgxpool.Pool, deviceID 
 	`, deviceID, alertTypeLatencyHigh, patch)
 }
 
-func loadPreviousPingSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) prevPingSnapshot {
-	var latMs *int64
-	var detail []byte
-	err := pool.QueryRow(ctx, `
-		SELECT latency_ms, COALESCE(detail::text, '{}') FROM ping_history
-		WHERE device_id = $1
-		ORDER BY checked_at DESC
-		LIMIT 1
-	`, deviceID).Scan(&latMs, &detail)
-	if err == pgx.ErrNoRows {
-		return prevPingSnapshot{}
+func latencyReadingIsHigh(ctx context.Context, pool *pgxpool.Pool, deviceCategory string, reachOK bool, lat int64) bool {
+	if !reachOK || lat <= 0 {
+		return false
 	}
-	if err != nil {
-		return prevPingSnapshot{}
+	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "latency_ms", deviceCategory)
+	if ok {
+		return thresholdSeverity(float64(lat), th) != "ok"
 	}
-	out := prevPingSnapshot{HasRow: true, ReachOK: true, LatencyMS: 0}
-	if latMs != nil {
-		out.LatencyMS = *latMs
-	}
-	if len(detail) > 0 {
-		var m map[string]any
-		if json.Unmarshal(detail, &m) == nil {
-			if rv, ok := m["reachability"].(map[string]any); ok {
-				if b, ok := rv["ok"].(bool); ok {
-					out.ReachOK = b
-				}
-			}
-		}
-	}
-	return out
+	return lat >= latencyDegradedMinMS
 }
 
-func insertLatencyHighIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, prev prevPingSnapshot, currLat int64, reachOK bool) {
-	if !reachOK {
-		return
+func latencyHighStreakAfter(prev int, isHigh bool) int {
+	if isHigh {
+		return prev + 1
 	}
-	if !prev.HasRow {
-		return
+	return 0
+}
+
+// EvaluateLatencyHighAlerts actualiza o streak de latência alta e só abre alerta após N leituras consecutivas.
+func EvaluateLatencyHighAlerts(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceCategory, description, ip string, reachOK bool, currLat int64, prevHighStreak int) int {
+	streakAfter := latencyHighStreakAfter(prevHighStreak, latencyReadingIsHigh(ctx, pool, deviceCategory, reachOK, currLat))
+
+	if reachOK {
+		patchOpenLatencyHighMeta(ctx, pool, deviceID, currLat)
 	}
-	if !prev.ReachOK {
-		return
+
+	if streakAfter >= latencyHighConsecutiveRequired {
+		if syncLatencyAlertByGlobalThreshold(ctx, pool, log, deviceID, deviceCategory, description, ip, reachOK, currLat) {
+			return streakAfter
+		}
+		openLatencyHighAfterStreak(ctx, pool, log, deviceID, description, ip, currLat)
+	} else if streakAfter == 0 {
+		resolveLatencyHighIfCalm(ctx, pool, log, deviceID, reachOK, currLat)
 	}
-	if prev.LatencyMS > latencyHealthyMaxMS {
-		return
-	}
+	return streakAfter
+}
+
+func openLatencyHighAfterStreak(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, currLat int64) {
 	if currLat < latencyDegradedMinMS {
 		return
 	}
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
-	msg := fmt.Sprintf("%s (%s): latência ICMP/TCP subiu de ~%d ms para %d ms (limiar de degradação).", descOr(desc, "?"), addrOr(addr, "?"), prev.LatencyMS, currLat)
+	msg := fmt.Sprintf("%s (%s): latência ICMP/TCP em %d ms (≥ %d ms em %d leituras consecutivas).",
+		descOr(desc, "?"), addrOr(addr, "?"), currLat, latencyDegradedMinMS, latencyHighConsecutiveRequired)
 	meta := alertnotify.WithStatusTransition(map[string]any{
-		"source":          "monitor_worker",
-		"prev_latency_ms": prev.LatencyMS,
-		"curr_latency_ms": currLat,
+		"source":                    "monitor_worker",
+		"curr_latency_ms":           currLat,
+		"latency_high_streak":       latencyHighConsecutiveRequired,
+		"consecutive_high_required": latencyHighConsecutiveRequired,
 	}, "latency_normal", "latency_degraded", nil)
 	metaRaw, _ := json.Marshal(meta)
 	var alertID uuid.UUID
@@ -118,10 +109,9 @@ func insertLatencyHighIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 	`, deviceID, alertTypeLatencyHigh, msg, addr, desc, metaRaw).Scan(&alertID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			updMsg := fmt.Sprintf("%s (%s): latência ICMP/TCP em %d ms (acima do limiar de degradação).", descOr(desc, "?"), addrOr(addr, "?"), currLat)
+			updMsg := fmt.Sprintf("%s (%s): latência ICMP/TCP em %d ms (acima do limiar).", descOr(desc, "?"), addrOr(addr, "?"), currLat)
 			patch, _ := json.Marshal(map[string]any{
 				"source":          "monitor_worker",
-				"prev_latency_ms": prev.LatencyMS,
 				"curr_latency_ms": currLat,
 				"value":           currLat,
 				"value_text":      strconv.FormatInt(currLat, 10),
@@ -137,7 +127,7 @@ func insertLatencyHighIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 		log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances insert latency_high")
 		return
 	}
-	log.Warn().Str("device", deviceID.String()).Int64("ms", currLat).Msg("alerta criado: latência elevada (mudança de estado)")
+	log.Warn().Str("device", deviceID.String()).Int64("ms", currLat).Int("streak", latencyHighConsecutiveRequired).Msg("alerta criado: latência elevada")
 	alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, alertID, "WARNING", "Latência elevada", msg)
 }
 
@@ -209,14 +199,17 @@ func syncLatencyAlertByGlobalThreshold(ctx context.Context, pool *pgxpool.Pool, 
 	}
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
-	msg := fmt.Sprintf("%s (%s): %s em %d ms (limiar %s).", descOr(desc, "?"), addrOr(addr, "?"), label, currLat, sev)
+	msg := fmt.Sprintf("%s (%s): %s em %d ms (limiar %s; %d leituras consecutivas).",
+		descOr(desc, "?"), addrOr(addr, "?"), label, currLat, sev, latencyHighConsecutiveRequired)
 	meta := alertnotify.WithStatusTransition(map[string]any{
-		"source":           "monitor_worker",
-		"metric_id":        "latency_ms",
-		"value":            currLat,
-		"value_text":       strconv.FormatInt(currLat, 10),
-		"curr_latency_ms":  currLat,
-		"probe_latency_ms": currLat,
+		"source":                    "monitor_worker",
+		"metric_id":                 "latency_ms",
+		"value":                     currLat,
+		"value_text":                strconv.FormatInt(currLat, 10),
+		"curr_latency_ms":           currLat,
+		"probe_latency_ms":          currLat,
+		"latency_high_streak":       latencyHighConsecutiveRequired,
+		"consecutive_high_required": latencyHighConsecutiveRequired,
 	}, "latency_normal", "threshold_"+sev, nil)
 	metaRaw, _ := json.Marshal(meta)
 	var aid uuid.UUID

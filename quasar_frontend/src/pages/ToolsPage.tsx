@@ -11,6 +11,7 @@ import {
   TelnetTestOutput,
   ToolOutputError,
   WalkJobQueuedOutput,
+  NetworkToolTextOutput,
 } from "../components/ToolsOutputViews";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
@@ -51,7 +52,9 @@ type Tab =
   | "telnet"
   | "ssh"
   | "snmp_walk"
-  | "mikrotik";
+  | "mikrotik"
+  | "tracert"
+  | "nmap";
 
 export function ToolsPage() {
   const [tab, setTab] = useState<Tab>("host_ping");
@@ -164,6 +167,50 @@ export function ToolsPage() {
 
   const [icmpHost, setIcmpHost] = useState("127.0.0.1");
   const [icmpTo, setIcmpTo] = useState("3000");
+  const [tracertHost, setTracertHost] = useState("8.8.8.8");
+  const [tracertHops, setTracertHops] = useState("30");
+  const [tracertTo, setTracertTo] = useState("60000");
+  const tracertRun = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/tools/tracert", {
+        method: "POST",
+        json: {
+          host: tracertHost.trim(),
+          max_hops: Number(tracertHops) || 30,
+          timeout_ms: Number(tracertTo) || 60000,
+        },
+      }),
+    onMutate: () => show("info", `A executar tracert para ${tracertHost.trim() || "…"}…`),
+    onSuccess: (d) => {
+      const rec = d as Record<string, unknown>;
+      if (rec.ok === true) show("ok", "Tracert concluído.");
+      else show("err", typeof rec.error === "string" && rec.error ? rec.error : "Tracert terminou com avisos — veja a saída.");
+    },
+    onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
+  });
+
+  const [nmapHost, setNmapHost] = useState("127.0.0.1");
+  const [nmapMode, setNmapMode] = useState("sn");
+  const [nmapTo, setNmapTo] = useState("60000");
+  const nmapRun = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/tools/nmap", {
+        method: "POST",
+        json: {
+          host: nmapHost.trim(),
+          scan_mode: nmapMode,
+          timeout_ms: Number(nmapTo) || 60000,
+        },
+      }),
+    onMutate: () => show("info", `A executar nmap em ${nmapHost.trim() || "…"}…`),
+    onSuccess: (d) => {
+      const rec = d as Record<string, unknown>;
+      if (rec.ok === true) show("ok", "Nmap concluído.");
+      else show("err", typeof rec.error === "string" && rec.error ? rec.error : "Nmap terminou com avisos — veja a saída.");
+    },
+    onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
+  });
+
   const icmpRun = useMutation({
     mutationFn: () =>
       apiFetch("/api/v1/tools/icmp/ping", {
@@ -434,6 +481,8 @@ export function ToolsPage() {
             ["host_ping", "Domínios"],
             ["http_matrix", "HTTP/HTTPS"],
             ["icmp", "ICMP"],
+            ["tracert", "Tracert"],
+            ["nmap", "Nmap"],
             ["snmp", "SNMP get"],
             ["snmp_bulk", "SNMP bulk"],
             ["telnet", "Telnet"],
@@ -613,6 +662,75 @@ export function ToolsPage() {
           <div className="tools-panel__actions">
             <button type="button" className="btn btn--primary" disabled={httpMatrixRun.isPending} onClick={() => httpMatrixRun.mutate()}>
               {httpMatrixRun.isPending ? "A testar…" : "Executar matriz"}
+            </button>
+          </div>
+        </ToolsPanel>
+      )}
+
+      {tab === "tracert" && (
+        <ToolsPanel
+          title="Tracert / traceroute"
+          description="Rastreia o caminho até ao destino a partir do servidor NetQuasar (tracert no Windows, traceroute/tracepath no Linux)."
+          results={
+            <>
+              <ToolOutputError err={tracertRun.error as Error | null} />
+              {tracertRun.data !== undefined ? <NetworkToolTextOutput data={tracertRun.data} /> : null}
+            </>
+          }
+        >
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="tools-tracert-host">Host ou IP</label>
+            <input id="tools-tracert-host" className="input mono" value={tracertHost} onChange={(e) => setTracertHost(e.target.value)} />
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            <div className="field" style={{ marginBottom: 0, maxWidth: 120 }}>
+              <label htmlFor="tools-tracert-hops">Saltos máx.</label>
+              <input id="tools-tracert-hops" className="input mono" value={tracertHops} onChange={(e) => setTracertHops(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 0, maxWidth: 140 }}>
+              <label htmlFor="tools-tracert-to">Timeout total (ms)</label>
+              <input id="tools-tracert-to" className="input mono" value={tracertTo} onChange={(e) => setTracertTo(e.target.value)} />
+            </div>
+          </div>
+          <div className="tools-panel__actions">
+            <button type="button" className="btn btn--primary" disabled={tracertRun.isPending || !tracertHost.trim()} onClick={() => tracertRun.mutate()}>
+              {tracertRun.isPending ? "A rastrear…" : "Executar tracert"}
+            </button>
+          </div>
+        </ToolsPanel>
+      )}
+
+      {tab === "nmap" && (
+        <ToolsPanel
+          title="Nmap (varredura rápida)"
+          description="Requer nmap instalado no servidor. Modo «ping» (-sn): descobre se o host está activo; «rápida» (-F): portas mais comuns."
+          results={
+            <>
+              <ToolOutputError err={nmapRun.error as Error | null} />
+              {nmapRun.data !== undefined ? <NetworkToolTextOutput data={nmapRun.data} /> : null}
+            </>
+          }
+        >
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="tools-nmap-host">Host ou IP</label>
+            <input id="tools-nmap-host" className="input mono" value={nmapHost} onChange={(e) => setNmapHost(e.target.value)} />
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
+            <div className="field" style={{ marginBottom: 0, minWidth: 140 }}>
+              <label htmlFor="tools-nmap-mode">Modo</label>
+              <select id="tools-nmap-mode" className="input" value={nmapMode} onChange={(e) => setNmapMode(e.target.value)}>
+                <option value="sn">Ping / host up (-sn)</option>
+                <option value="quick">Portas comuns (-F)</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0, maxWidth: 140 }}>
+              <label htmlFor="tools-nmap-to">Timeout (ms)</label>
+              <input id="tools-nmap-to" className="input mono" value={nmapTo} onChange={(e) => setNmapTo(e.target.value)} />
+            </div>
+          </div>
+          <div className="tools-panel__actions">
+            <button type="button" className="btn btn--primary" disabled={nmapRun.isPending || !nmapHost.trim()} onClick={() => nmapRun.mutate()}>
+              {nmapRun.isPending ? "A varrer…" : "Executar nmap"}
             </button>
           </div>
         </ToolsPanel>

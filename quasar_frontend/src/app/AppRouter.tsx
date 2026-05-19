@@ -38,8 +38,11 @@ const MikrotikPage = lazy(() =>
 const EventsPage = lazy(() =>
   import("../pages/EventsPage").then((m) => ({ default: m.EventsPage })),
 );
-const MetricsPage = lazy(() =>
-  import("../pages/MetricsPage").then((m) => ({ default: m.MetricsPage })),
+const IntegrationsHubPage = lazy(() =>
+  import("../pages/IntegrationsHubPage").then((m) => ({ default: m.IntegrationsHubPage })),
+);
+const IntegrationDetailPage = lazy(() =>
+  import("../pages/IntegrationDetailPage").then((m) => ({ default: m.IntegrationDetailPage })),
 );
 const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
@@ -155,13 +158,22 @@ export function AppRouter() {
             }
           />
           <Route
-            path="metrics"
+            path="integrations"
             element={
               <Suspense fallback={<DelayedGlobeFallback />}>
-                <MetricsPage />
+                <IntegrationsHubPage />
               </Suspense>
             }
           />
+          <Route
+            path="integrations/:slug"
+            element={
+              <Suspense fallback={<DelayedGlobeFallback />}>
+                <IntegrationDetailPage />
+              </Suspense>
+            }
+          />
+          <Route path="metrics" element={<Navigate to="/integrations" replace />} />
           <Route
             path="realtime"
             element={

@@ -4,7 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Bolt,
   CalendarDays,
-  ChartBarBig,
+  Plug,
   ChartPie,
   ClockCheck,
   Cpu,
@@ -26,7 +26,7 @@ const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
   { to: "/dashboard", label: "Dashboard", icons: [ChartPie] },
   { to: "/monitoring", label: "Monitoramento", icons: [ShieldCheck] },
   { to: "/realtime", label: "Tempo real", icons: [ClockCheck] },
-  { to: "/metrics", label: "Métricas", icons: [ChartBarBig] },
+  { to: "/integrations", label: "Integrações", icons: [Plug] },
   { to: "/pops", label: "POPs", icons: [Warehouse] },
   { to: "/devices", label: "Equipamentos", icons: [MonitorSmartphone] },
   { to: "/commercial", label: "Base comercial", icons: [UsersRound] },

@@ -27,21 +27,17 @@ func (s *Server) ensureReportSchedulers() {
 
 func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 	l := s.Log.With().Str("component", "report_schedulers").Logger()
+	runHourly := func(trigger string) {
+		l.Debug().Str("trigger", trigger).Msg("verificação relatórios agendados (alertas/comercial)")
+		s.tryScheduledAlertsDigest(ctx, &l)
+		s.tryScheduledCommercialReport(ctx, &l)
+	}
 	corr := time.NewTicker(5 * time.Minute)
 	defer corr.Stop()
 	alertcorrelation.Reconcile(ctx, s.DB(), &l)
-	align := time.Until(time.Now().Truncate(time.Hour).Add(time.Hour))
-	if align > 0 {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(align):
-		}
-	}
+	runHourly("startup")
 	hourly := time.NewTicker(time.Hour)
 	defer hourly.Stop()
-	s.tryScheduledAlertsDigest(ctx, &l)
-	s.tryScheduledCommercialReport(ctx, &l)
 	for {
 		select {
 		case <-ctx.Done():
@@ -50,8 +46,7 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 		case <-corr.C:
 			alertcorrelation.Reconcile(ctx, s.DB(), &l)
 		case <-hourly.C:
-			s.tryScheduledAlertsDigest(ctx, &l)
-			s.tryScheduledCommercialReport(ctx, &l)
+			runHourly("hourly")
 		}
 	}
 }
@@ -336,11 +331,19 @@ func (s *Server) setAlertsDigestStatus(ctx context.Context, status string, errMs
 	if errMsg != nil {
 		em = *errMsg
 	}
+	if status == "completed" {
+		_, _ = s.DB().Exec(ctx, `
+			UPDATE automation_alerts_digest SET
+				last_status = $1, last_error = NULL, last_run_key = $2, last_run_at = now(), updated_at = now()
+			WHERE id = 1
+		`, status, runKey)
+		return
+	}
 	_, _ = s.DB().Exec(ctx, `
 		UPDATE automation_alerts_digest SET
-			last_status = $1, last_error = $2, last_run_key = $3, last_run_at = now(), updated_at = now()
+			last_status = $1, last_error = $2, last_run_at = now(), updated_at = now()
 		WHERE id = 1
-	`, status, em, runKey)
+	`, status, em)
 }
 
 func (s *Server) setCommercialReportStatus(ctx context.Context, status string, errMsg *string, period string) {
@@ -348,11 +351,19 @@ func (s *Server) setCommercialReportStatus(ctx context.Context, status string, e
 	if errMsg != nil {
 		em = *errMsg
 	}
+	if status == "completed" {
+		_, _ = s.DB().Exec(ctx, `
+			UPDATE automation_commercial_report SET
+				last_status = $1, last_error = NULL, last_run_period = $2, last_run_at = now(), updated_at = now()
+			WHERE id = 1
+		`, status, period)
+		return
+	}
 	_, _ = s.DB().Exec(ctx, `
 		UPDATE automation_commercial_report SET
-			last_status = $1, last_error = $2, last_run_period = $3, last_run_at = now(), updated_at = now()
+			last_status = $1, last_error = $2, last_run_at = now(), updated_at = now()
 		WHERE id = 1
-	`, status, em, period)
+	`, status, em)
 }
 
 func ptrStr(p *string) string {

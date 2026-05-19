@@ -108,6 +108,6 @@ func (s *Server) setupDatabaseApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB_META", err.Error(), nil)
 		return
 	}
-	s.ensureMonitoringWorker()
+	s.ensureBackgroundSchedulers()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "base de dados configurada; credenciais gravadas localmente para o próximo arranque."})
 }

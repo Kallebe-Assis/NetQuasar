@@ -472,3 +472,59 @@ export function SnmpWalkDiscoveriesOutput({ data }: { data: unknown }) {
     </div>
   );
 }
+
+export function NetworkToolTextOutput({ data }: { data: unknown }) {
+  if (!isRecord(data)) return null;
+  const cmd = str(data.command);
+  const output = str(data.output);
+  const err = str(data.error);
+  const ok = data.ok === true;
+  const hops = Array.isArray(data.hops) ? data.hops : null;
+  return (
+    <div style={panelStyle}>
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Resultado</span>
+        {ok ? <span className="badge badge--ok">Concluído</span> : <span className="badge badge--off">Com avisos</span>}
+      </div>
+      {cmd ? (
+        <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
+          Comando: <span className="mono">{cmd}</span>
+        </p>
+      ) : null}
+      {err ? (
+        <div className="msg msg--err" style={{ marginTop: 8, fontSize: 12 }}>
+          {err}
+        </div>
+      ) : null}
+      {hops && hops.length > 0 ? (
+        <div className="table-wrap" style={{ marginTop: 10 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Salto</th>
+                <th>Detalhe</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hops.map((h, i) => {
+                if (!isRecord(h)) return null;
+                return (
+                  <tr key={i}>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {str(h.hop) || "—"}
+                    </td>
+                    <td className="mono" style={{ fontSize: 10, wordBreak: "break-all" }}>
+                      {str(h.detail) || str(h.raw)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {output ? <pre className="mono" style={preBox}>{output}</pre> : !err ? <p style={{ marginTop: 8, color: "var(--muted)", fontSize: 12 }}>Sem saída.</p> : null}
+      <CollapsibleRawJson data={data} />
+    </div>
+  );
+}
