@@ -440,12 +440,26 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.DB().Query(r.Context(), `
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	q := `
 		SELECT e.id, e.created_at, e.event_type, e.severity, e.device_id, e.payload::text, d.pop_id::text
 		FROM events e
 		LEFT JOIN devices d ON d.id = e.device_id
-		ORDER BY e.created_at DESC LIMIT $1
-	`, limit)
+		WHERE 1=1`
+	args := []any{}
+	n := 1
+	if deviceID != "" {
+		did, err := uuid.Parse(deviceID)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_QUERY", "device_id inválido", nil)
+			return
+		}
+		q += ` AND e.device_id = $` + strconv.Itoa(n)
+		args = append(args, did)
+		n++
+	}
+	q += ` ORDER BY e.created_at DESC LIMIT ` + strconv.Itoa(limit)
+	rows, err := s.DB().Query(r.Context(), q, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

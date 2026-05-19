@@ -150,6 +150,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/", s.listDevices)
 			r.Get("/export", s.devicesExport)
 			r.Get("/{id}/snmp-inventory", s.getDeviceSNMPInventory)
+			r.Get("/{id}/config-backup", s.getDeviceConfigBackup)
+			r.Get("/{id}/config-backup/export", s.exportDeviceConfigBackup)
 			r.Get("/{id}/status", s.deviceStatusStub)
 			r.Get("/{id}", s.getDevice)
 			r.Group(func(r chi.Router) {
@@ -159,6 +161,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/{id}/checks", s.deviceChecks)
 				r.Post("/{id}/telemetry/discover", s.snmpWalkDeviceRun)
 				r.Patch("/{id}", s.patchDevice)
+				r.Put("/{id}/config-backup", s.putDeviceConfigBackup)
 				r.Delete("/{id}", s.deleteDevice)
 			})
 		})

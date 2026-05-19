@@ -6,6 +6,8 @@ import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
+import { DeviceEditBackupTab } from "../components/device/DeviceEditBackupTab";
+import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistoricoTab";
 
 type Device = {
   id: string;
@@ -336,6 +338,7 @@ export function DevicesPage() {
   const [mibBrowseNote, setMibBrowseNote] = useState<string | null>(null);
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
+  const [editTab, setEditTab] = useState<"cadastro" | "historico" | "backup">("cadastro");
   const [reportModalDevice, setReportModalDevice] = useState<DeviceReportTarget | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Device>>(emptyForm());
@@ -345,7 +348,10 @@ export function DevicesPage() {
   }, [modal]);
 
   useEffect(() => {
-    if (!modal) setMibBrowseNote(null);
+    if (!modal) {
+      setMibBrowseNote(null);
+      setEditTab("cadastro");
+    }
   }, [modal]);
 
   function openMibFolderPicker() {
@@ -396,6 +402,7 @@ export function DevicesPage() {
         ? { ping_enabled: false, telemetry_enabled: false }
         : {}),
     });
+    setEditTab("cadastro");
     setModal("edit");
   }, []);
 
@@ -1041,6 +1048,31 @@ export function DevicesPage() {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
             <h3>{modal === "create" ? "Novo equipamento" : "Editar equipamento"}</h3>
+            {modal === "edit" && editingId && (
+              <div className="tabs" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+                <button type="button" className={editTab === "cadastro" ? "active" : ""} onClick={() => setEditTab("cadastro")}>
+                  Cadastro
+                </button>
+                <button type="button" className={editTab === "historico" ? "active" : ""} onClick={() => setEditTab("historico")}>
+                  Histórico
+                </button>
+                <button type="button" className={editTab === "backup" ? "active" : ""} onClick={() => setEditTab("backup")}>
+                  Backup
+                </button>
+              </div>
+            )}
+            {modal === "edit" && editTab === "historico" && editingId && <DeviceEditHistoricoTab deviceId={editingId} />}
+
+            {modal === "edit" && editTab === "backup" && editingId && (
+              <DeviceEditBackupTab
+                deviceId={editingId}
+                deviceLabel={form.description ?? "equipamento"}
+                canMutate={canMutate}
+              />
+            )}
+
+            {(modal === "create" || editTab === "cadastro") && (
+            <>
             <p style={{ color: "var(--muted)", fontSize: 12 }}>
               Com telemetria ativa, o ping precisa estar ligado. Em modo <strong>Bridge</strong>, o IP é opcional e ping/telemetria ficam desativados — o servidor ajusta ao guardar, se necessário.
             </p>
@@ -1431,6 +1463,14 @@ export function DevicesPage() {
                 Salvar
               </button>
             </div>
+            </>
+            )}
+
+            {modal === "edit" && editTab !== "cadastro" && (
+              <div className="row" style={{ marginTop: 12 }}>
+                <button type="button" className="btn" onClick={() => setModal(null)}>Fechar</button>
+              </div>
+            )}
           </div>
         </div>
       )}
