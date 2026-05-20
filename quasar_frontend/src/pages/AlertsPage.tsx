@@ -381,8 +381,14 @@ export function AlertsPage() {
             <button type="button" className="btn" onClick={() => void active.refetch()}>
               Actualizar lista
             </button>
-            <button type="button" className="btn btn--primary" disabled={reval.isPending} onClick={() => reval.mutate()}>
-              Recalcular estado (probes OK)
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={reval.isPending}
+              title="Fecha alertas de equipamento offline quando o ping está OK ou quando o equipamento não está em monitorização activa (inativo, ping desligado, etc.)"
+              onClick={() => reval.mutate()}
+            >
+              Recalcular estado
             </button>
           </div>
           {reval.isSuccess && reval.data?.note && (

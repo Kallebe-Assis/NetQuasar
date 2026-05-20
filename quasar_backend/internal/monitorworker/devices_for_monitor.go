@@ -27,7 +27,8 @@ func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUI
 			coalesce(d.category, ''), coalesce(d.brand, ''), coalesce(d.model, '')
 		FROM devices d
 		WHERE d.ping_enabled AND d.ip IS NOT NULL AND trim(host(d.ip)::text) <> ''
-		  AND trim(both from coalesce(d.network_status, '')) <> 'Bridge'
+		  AND trim(both from coalesce(d.network_status, '')) = 'Normal'
+		  AND trim(both from coalesce(d.operational_mode, '')) = 'Ativo'
 	`
 	args := []any{}
 	if only != nil {

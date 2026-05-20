@@ -28,8 +28,7 @@ func repairMissingPingUnreachableAlerts(ctx context.Context, pool *pgxpool.Pool,
 		JOIN devices d ON d.id = c.device_id
 		WHERE c.reach_ok = false
 		  AND COALESCE(c.ping_fail_streak, 0) >= $1
-		  AND d.ip IS NOT NULL
-		  AND TRIM(BOTH FROM host(d.ip)::text) <> ''
+		  AND ` + SQLDeviceEligibleForPingAlerts + `
 		  AND NOT EXISTS (
 			SELECT 1 FROM alert_instances ai
 			WHERE ai.device_id = c.device_id
@@ -59,12 +58,33 @@ func repairMissingPingUnreachableAlerts(ctx context.Context, pool *pgxpool.Pool,
 				}
 			}
 		}
-		InsertPingUnreachableIfNew(ctx, pool, log, id, desc, ip, probe, "repair_streak")
+		insertPingUnreachableIfNew(ctx, pool, log, id, desc, ip, probe, "repair_streak")
 	}
 }
 
 // InsertPingUnreachableIfNew grava alerta ping_unreachable em aberto (se ainda não existir) e notifica Telegram (monitorização) quando novo.
+// Verifica elegibilidade do equipamento (ex.: ping manual em inativo).
 func InsertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
+	eligible, err := DeviceEligibleForPingAlerts(ctx, pool, deviceID)
+	if err != nil {
+		if log != nil {
+			log.Error().Err(err).Str("device", deviceID.String()).Msg("ping_unreachable: elegibilidade")
+		}
+		return
+	}
+	if !eligible {
+		return
+	}
+	insertPingUnreachableIfNew(ctx, pool, log, deviceID, description, ip, probe, metaSource)
+}
+
+// InsertPingUnreachableIfNewForMonitoredDevice skips the eligibility query — use only when the device
+// was already loaded via loadPingableDevices or equivalent filter.
+func InsertPingUnreachableIfNewForMonitoredDevice(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
+	insertPingUnreachableIfNew(ctx, pool, log, deviceID, description, ip, probe, metaSource)
+}
+
+func insertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
 	metaSource = strings.TrimSpace(metaSource)
 	if metaSource == "" {
 		metaSource = "monitor_worker"

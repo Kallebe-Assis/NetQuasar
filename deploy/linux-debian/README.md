@@ -101,6 +101,8 @@ git pull
 docker compose up -d --build
 ```
 
+A imagem `netquasar` inclui **traceroute** e **nmap** (Ferramentas → Tracert / Nmap). Se aparecer «não encontrado no PATH», reconstrua a imagem com o comando acima — não basta reiniciar o contentor sem `--build`.
+
 ## 7. Backup
 
 - Listar volumes: `docker volume ls | grep netquasar`

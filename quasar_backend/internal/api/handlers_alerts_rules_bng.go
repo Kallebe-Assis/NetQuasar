@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 )
 
 func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +52,11 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 						OR (m.scope_type = 'pop' AND m.pop_id IN (SELECT d.pop_id FROM devices d WHERE d.id = a.device_id))
 				  )
 				  AND m.status IN ('planned', 'running')
+			)
+			AND (
+				a.alert_type <> 'ping_unreachable'
+				OR a.device_id IS NULL
+				OR (d.id IS NOT NULL AND `+monitorworker.SQLDeviceEligibleForPingAlerts+`)
 			)
 			UNION ALL
 			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip, a.device_name, a.active_since, a.closed_at, a.meta, a.incident_id
@@ -109,16 +115,23 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
-	// Apenas ping_unreachable é inferível a partir de probe OK — potências RX/SFP,
-	// latência, ONU, interfaces e telemetria exigem reavaliação da própria métrica.
+	// ping_unreachable: fecha se o probe está OK ou se o equipamento não entra na monitorização activa
+	// (ex.: inativo, ping desligado, rede Bridge) — evita alertas por ping manual acidental.
 	rows, err := s.DB().Query(r.Context(), `
 		UPDATE alert_instances a SET
 			closed_at = now(),
-			meta = COALESCE(a.meta, '{}'::jsonb) || '{"resolved":"revalidate_probe_ok","source":"alerts_revalidate"}'::jsonb
-		WHERE a.closed_at IS NULL
+			meta = COALESCE(a.meta, '{}'::jsonb) || CASE
+				WHEN COALESCE(c.reach_ok, false) THEN '{"resolved":"revalidate_probe_ok","source":"alerts_revalidate"}'::jsonb
+				ELSE '{"resolved":"revalidate_device_not_monitored","source":"alerts_revalidate"}'::jsonb
+			END
+		FROM devices d
+		LEFT JOIN device_probe_cache c ON c.device_id = d.id
+		WHERE a.device_id = d.id
+		AND a.closed_at IS NULL
 		AND a.alert_type = 'ping_unreachable'
-		AND EXISTS (
-			SELECT 1 FROM device_probe_cache c WHERE c.device_id = a.device_id AND c.reach_ok = true
+		AND (
+			COALESCE(c.reach_ok, false)
+			OR `+monitorworker.SQLDeviceEligibleForPingAlertsNotMet+`
 		)
 		RETURNING a.id, a.alert_type, a.message
 	`)
@@ -146,7 +159,7 @@ func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"closed_count": n,
-		"note":         "Fechar só alertas ping_unreachable quando o último probe do equipamento está ok. Outros tipos (ex.: RX SFP, latência, OLT) não são alterados aqui.",
+		"note":         "Fecha alertas ping_unreachable quando o probe está OK ou quando o equipamento não está em monitorização activa (Ativo, ping ligado, rede Normal). Outros tipos de alerta não são alterados.",
 	})
 }
 

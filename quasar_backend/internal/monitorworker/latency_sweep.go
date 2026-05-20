@@ -95,7 +95,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			}
 
 			if shouldOpenPingUnreachableAlert(reachOK, streakAfter, cfg.OfflineThreshold) {
-				InsertPingUnreachableIfNew(ctx, pool, log, id, description, host, probe, src)
+				InsertPingUnreachableIfNewForMonitoredDevice(ctx, pool, log, id, description, host, probe, src)
 			}
 			if reachOK {
 				recoveredPing = append(recoveredPing, id)

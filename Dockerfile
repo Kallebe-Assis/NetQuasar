@@ -21,7 +21,11 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/netquasar ./cmd/netquasar
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates tzdata \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    traceroute \
+    nmap \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend /out/netquasar .

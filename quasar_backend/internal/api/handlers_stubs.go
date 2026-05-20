@@ -363,9 +363,20 @@ func (s *Server) pingRunStub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var prevStreak int
-	_ = s.DB().QueryRow(ctxBase, `SELECT COALESCE(ping_fail_streak, 0) FROM device_probe_cache WHERE device_id=$1`, id).Scan(&prevStreak)
+	var eligibleForAlerts bool
+	_ = s.DB().QueryRow(ctxBase, `
+		SELECT COALESCE(c.ping_fail_streak, 0),
+			(d.ping_enabled = true
+			 AND TRIM(BOTH FROM COALESCE(d.operational_mode, '')) = 'Ativo'
+			 AND TRIM(BOTH FROM COALESCE(d.network_status, '')) = 'Normal'
+			 AND d.ip IS NOT NULL
+			 AND TRIM(BOTH FROM host(d.ip)::text) <> '')
+		FROM devices d
+		LEFT JOIN device_probe_cache c ON c.device_id = d.id
+		WHERE d.id = $1
+	`, id).Scan(&prevStreak, &eligibleForAlerts)
 	streakAfter := 0
-	if !okb {
+	if !okb && eligibleForAlerts {
 		streakAfter = prevStreak + 1
 	}
 
@@ -397,9 +408,9 @@ func (s *Server) pingRunStub(w http.ResponseWriter, r *http.Request) {
 		`, id).Scan(&aid, &msg, &at); err == nil {
 			alertnotify.SendResolutionTelegramAndPatchMeta(ctxBase, s.DB(), &s.Log, aid, alertnotify.ResolutionHeadlineForAlertType(at), msg)
 		}
-	} else if attemptsUsed >= offlineThreshold {
+	} else if attemptsUsed >= offlineThreshold && eligibleForAlerts {
 		l := s.Log.With().Str("route", "ping_run").Logger()
-		monitorworker.InsertPingUnreachableIfNew(ctxBase, s.DB(), &l, id, deviceDesc, host, probe, "api_ping")
+		monitorworker.InsertPingUnreachableIfNewForMonitoredDevice(ctxBase, s.DB(), &l, id, deviceDesc, host, probe, "api_ping")
 	}
 
 	writeJSON(w, http.StatusOK, resp)
