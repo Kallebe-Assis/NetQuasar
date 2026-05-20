@@ -36,7 +36,7 @@ function isAllowedSupabasePostgresHost(host: string): boolean {
 
 function setupErrMessage(err: unknown): string {
   if (!(err instanceof ApiError)) {
-    return "Não foi possível concluir o pedido. Verifique a ligação e tente novamente.";
+    return "Não foi possível concluir a requisição. Verifique a ligação e tente novamente.";
   }
   const body = err.body;
   if (body != null && typeof body === "object") {

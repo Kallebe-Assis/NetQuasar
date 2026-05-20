@@ -1,28 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Plus, Save, Trash2, Zap } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { Braces, Play, Plus, Save, Trash2, X, Zap } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { IntegrationNav } from "../components/IntegrationNav";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
 import {
   AUTH_TYPES,
   HTTP_METHODS,
+  type ConsumerConfig,
   type IntegrationDetail,
   type IntegrationRequest,
+  type OAuth2PasswordAuthConfig,
   type PathParam,
   type QueryParam,
+  type IntegrationRunLog,
   type RunResult,
   parseHeaders,
   parsePathParams,
   parseQueryParams,
 } from "../integrations/types";
+import { PageToastHost, usePageToast } from "../lib/pageToast";
 
-type Tab = "geral" | "auth" | "requests" | "testes";
+type Tab = "operacao" | "geral" | "auth" | "requests" | "testes";
 
 const emptyRequest = (): Omit<IntegrationRequest, "id" | "integration_id" | "last_run_at" | "last_run_ok" | "last_run_status" | "last_run_message"> => ({
-  name: "Novo pedido",
+  name: "Nova requisição",
   method: "GET",
   path: "/",
   path_params: [],
@@ -40,12 +46,19 @@ export function IntegrationDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const qc = useQueryClient();
   const admin = isAdminUser();
-  const [tab, setTab] = useState<Tab>("geral");
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [tab, setTab] = useState<Tab>("operacao");
+  const { toast, show: showToast, dismiss: dismissToast } = usePageToast();
   const [editingReq, setEditingReq] = useState<IntegrationRequest | null>(null);
   const [deleteReqId, setDeleteReqId] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<RunResult | null>(null);
   const [runAllResults, setRunAllResults] = useState<RunResult[] | null>(null);
+  const [showVarsModal, setShowVarsModal] = useState(false);
+  const [varsDraft, setVarsDraft] = useState<Record<string, string>>({});
+  const [runPanel, setRunPanel] = useState<{
+    result: RunResult;
+    requestName: string;
+    requestId: string;
+  } | null>(null);
 
   const detailQ = useQuery({
     queryKey: queryKeys.integrationDetail(slug ?? ""),
@@ -67,6 +80,7 @@ export function IntegrationDetailPage() {
         auth_config: { ...d.auth_config },
         default_headers: parseHeaders(d.default_headers),
         variables: parseVariablesRecord(d.variables),
+        consumer_config: parseConsumerConfig(d.consumer_config),
         timeout_ms: d.timeout_ms,
         tls_insecure: d.tls_insecure,
       });
@@ -89,6 +103,7 @@ export function IntegrationDetailPage() {
           auth_type: form.auth_type,
           default_headers: headersObj,
           variables: varsObj,
+          consumer_config: form.consumer_config ?? { client_search: { enabled: false } },
           auth_config: authCfg,
           timeout_ms: form.timeout_ms,
           tls_insecure: form.tls_insecure,
@@ -98,9 +113,9 @@ export function IntegrationDetailPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
       void qc.invalidateQueries({ queryKey: queryKeys.integrations });
-      setMsg({ kind: "ok", text: "Configuração guardada." });
+      showToast("ok", "Guardado com sucesso.");
     },
-    onError: (e) => setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const testM = useMutation({
@@ -108,9 +123,9 @@ export function IntegrationDetailPage() {
     onSuccess: (r) => {
       setLastRun(r);
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
-      setMsg({ kind: r.ok ? "ok" : "err", text: r.ok ? "Teste de conexão OK." : r.error || "Teste falhou." });
+      showToast(r.ok ? "ok" : "err", r.ok ? "Teste de conexão OK." : r.error || "Teste falhou.");
     },
-    onError: (e) => setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const loginM = useMutation({
@@ -118,12 +133,12 @@ export function IntegrationDetailPage() {
     onSuccess: (r) => {
       setLastRun(r);
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
-      setMsg({
-        kind: r.ok ? "ok" : "err",
-        text: r.token_received ? "Login OK — token guardado na sessão." : r.ok ? "Login OK." : r.error || "Login falhou.",
-      });
+      showToast(
+        r.ok ? "ok" : "err",
+        r.token_received ? "Token obtido e salvo na sessão." : r.ok ? "Autenticação OK." : r.error || "Falha ao obter token.",
+      );
     },
-    onError: (e) => setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const runAllM = useMutation({
@@ -131,9 +146,9 @@ export function IntegrationDetailPage() {
     onSuccess: (r) => {
       setRunAllResults(r.results ?? []);
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
-      setMsg({ kind: "ok", text: `Colecta concluída: ${r.results?.length ?? 0} pedido(s).` });
+      showToast("ok", `Colecta concluída: ${r.results?.length ?? 0} requisição(ões).`);
     },
-    onError: (e) => setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const saveReqM = useMutation({
@@ -161,9 +176,9 @@ export function IntegrationDetailPage() {
     onSuccess: () => {
       setEditingReq(null);
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
-      setMsg({ kind: "ok", text: "Pedido guardado." });
+      showToast("ok", "Requisição salva com sucesso.");
     },
-    onError: (e) => setMsg({ kind: "err", text: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const deleteReqM = useMutation({
@@ -172,21 +187,49 @@ export function IntegrationDetailPage() {
       setDeleteReqId(null);
       setEditingReq(null);
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
+      showToast("ok", "Requisição eliminada.");
     },
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const runReqM = useMutation({
-    mutationFn: (id: string) => apiFetch<RunResult>(`/api/v1/integrations/${slug}/requests/${id}/run`, { method: "POST" }),
-    onSuccess: (r) => {
-      setLastRun(r);
+    mutationFn: ({ id }: { id: string; name: string }) =>
+      apiFetch<RunResult>(`/api/v1/integrations/${slug}/requests/${id}/run`, { method: "POST" }),
+    onSuccess: (r, { id, name }) => {
+      const result = { ...r, request_id: r.request_id ?? id, request_name: r.request_name ?? name };
+      setLastRun(result);
+      setRunPanel({ result, requestName: name, requestId: id });
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
+      void qc.invalidateQueries({ queryKey: queryKeys.integrationLogs(slug ?? "", id) });
+      showToast(result.ok ? "ok" : "err", result.ok ? `Requisição «${name}» executada.` : result.error || "Requisição falhou.");
     },
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
+  });
+
+  const saveVarsM = useMutation({
+    mutationFn: async (variables: Record<string, string>) => {
+      if (!slug) return;
+      return apiFetch(`/api/v1/integrations/${slug}`, {
+        method: "PATCH",
+        json: { variables },
+      });
+    },
+    onSuccess: (_data, variables) => {
+      setForm((f) => ({ ...f, variables }));
+      setShowVarsModal(false);
+      void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
+      showToast("ok", "Variáveis globais salvas.");
+    },
+    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
 
   const logsQ = useQuery({
-    queryKey: queryKeys.integrationLogs(slug ?? ""),
-    queryFn: () => apiFetch<{ logs: { id: string; run_kind: string; ok: boolean; status_code?: number; request_url?: string; error_message?: string; created_at: string }[] }>(`/api/v1/integrations/${slug}/logs`),
-    enabled: !!slug && tab === "testes",
+    queryKey: queryKeys.integrationLogs(slug ?? "", runPanel?.requestId),
+    queryFn: () => {
+      const q = runPanel?.requestId ? `?request_id=${encodeURIComponent(runPanel.requestId)}&limit=15` : "?limit=50";
+      return apiFetch<{ logs: IntegrationRunLog[] }>(`/api/v1/integrations/${slug}/logs${q}`);
+    },
+    enabled: !!slug && (tab === "testes" || !!runPanel),
   });
 
   const requests = useMemo(() => {
@@ -194,7 +237,11 @@ export function IntegrationDetailPage() {
     return [...d.requests].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
   }, [d?.requests]);
 
-  const authCfg = (form.auth_config ?? {}) as Record<string, string>;
+  const authCfg = (form.auth_config ?? {}) as OAuth2PasswordAuthConfig & Record<string, string>;
+  const isOAuth2 = form.auth_type === "oauth2_password";
+  const oauthKeysInHeaders = Object.keys((form.default_headers as Record<string, string>) ?? {}).filter((k) =>
+    /^(client_id|client_secret|username|password|grant_type)$/i.test(k.trim()),
+  );
 
   if (detailQ.isLoading) return <p style={{ padding: 24, color: "var(--muted)" }}>A carregar integração…</p>;
   if (detailQ.isError || !d) {
@@ -210,29 +257,31 @@ export function IntegrationDetailPage() {
     );
   }
 
+  const consumerCfg = (form.consumer_config ?? { client_search: { enabled: false } }) as ConsumerConfig;
+
   return (
     <div>
-      <div className="row" style={{ alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Link to="/integrations" className="btn" style={{ textDecoration: "none" }}>
-          <ArrowLeft size={14} style={{ marginRight: 4 }} /> Integrações
-        </Link>
-        <h1 style={{ margin: 0, flex: 1 }}>{d.name}</h1>
+      <IntegrationNav slug={slug!} name={d.name} />
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Activa" : "Inactiva"}</span>
         {d.session_active ? <span className="badge">Sessão activa</span> : null}
+        {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta activa</span> : null}
       </div>
 
-      {msg ? (
-        <div className={`msg msg--${msg.kind === "ok" ? "ok" : "err"}`} style={{ marginTop: 12 }}>
-          {msg.text}
-        </div>
-      ) : null}
+      <PageToastHost toast={toast} onDismiss={dismissToast} />
 
-      <div className="tabs" style={{ marginTop: 16, flexWrap: "wrap" }}>
+      <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+        Configuração técnica da API (URL, autenticação, requisições HTTP). Utilizadores do NOC usam o separador{" "}
+        <strong>Consulta</strong> para pesquisar clientes.
+      </p>
+
+      <div className="tabs" style={{ marginTop: 8, flexWrap: "wrap" }}>
         {(
           [
+            ["operacao", "Operação (UI)"],
             ["geral", "Geral"],
             ["auth", "Autenticação"],
-            ["requests", "Pedidos HTTP"],
+            ["requests", "Requisições HTTP"],
             ["testes", "Testes e logs"],
           ] as const
         ).map(([k, lab]) => (
@@ -241,6 +290,68 @@ export function IntegrationDetailPage() {
           </button>
         ))}
       </div>
+
+      {tab === "operacao" && (
+        <section className="panel" style={{ marginTop: 16, padding: 16 }}>
+          <h2 style={{ marginTop: 0, fontSize: 16 }}>Operação para utilizadores</h2>
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>
+            Define o que aparece no separador <strong>Consulta</strong>. A requisição HTTP escolhida deve ser GET{" "}
+            <code className="mono">/api/v1/integracao/cliente</code> com query <code className="mono">busca</code> e{" "}
+            <code className="mono">termo_busca</code> (a consulta substitui estes valores automaticamente).
+          </p>
+          <label className="row" style={{ gap: 8, marginTop: 12 }}>
+            <input
+              type="checkbox"
+              disabled={!admin}
+              checked={!!consumerCfg.client_search?.enabled}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    client_search: {
+                      ...consumerCfg.client_search,
+                      enabled: e.target.checked,
+                    },
+                  },
+                }))
+              }
+            />
+            Activar consulta de cliente na UI
+          </label>
+          <div className="field" style={{ maxWidth: 420, marginTop: 12 }}>
+            <label>Requisição HTTP de consulta</label>
+            <select
+              className="input"
+              disabled={!admin}
+              value={consumerCfg.client_search?.request_id ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    client_search: {
+                      ...consumerCfg.client_search,
+                      enabled: consumerCfg.client_search?.enabled ?? false,
+                      request_id: e.target.value || undefined,
+                    },
+                  },
+                }))
+              }
+            >
+              <option value="">Detectar automaticamente (GET …/integracao/cliente)</option>
+              {requests.map((req) => (
+                <option key={req.id} value={req.id}>
+                  {req.name} — {req.method} {req.path}
+                </option>
+              ))}
+            </select>
+          </div>
+          {admin ? (
+            <button type="button" className="btn btn--primary" style={{ marginTop: 12 }} disabled={saveM.isPending} onClick={() => saveM.mutate()}>
+              Salvar operação
+            </button>
+          ) : null}
+        </section>
+      )}
 
       {tab === "geral" && (
         <section className="panel" style={{ marginTop: 16, padding: 16 }}>
@@ -271,21 +382,37 @@ export function IntegrationDetailPage() {
             <label>Timeout (ms)</label>
             <input className="input mono" type="number" disabled={!admin} value={form.timeout_ms ?? 15000} onChange={(e) => setForm((f) => ({ ...f, timeout_ms: Number(e.target.value) }))} />
           </div>
-          <VariablesEditor
-            disabled={!admin}
-            variables={(form.variables as Record<string, string>) ?? {}}
-            onChange={(variables) => setForm((f) => ({ ...f, variables }))}
-          />
-          <HeadersEditor
-            disabled={!admin}
-            title="Headers por defeito"
-            headers={(form.default_headers as Record<string, string>) ?? {}}
-            onChange={(default_headers) => setForm((f) => ({ ...f, default_headers }))}
-          />
+          {oauthKeysInHeaders.length > 0 ? (
+            <div className="msg msg--err" style={{ marginTop: 12, fontSize: 12 }}>
+              Remova das <strong>Headers por defeito</strong>: {oauthKeysInHeaders.join(", ")}. Esses dados não são cabeçalhos HTTP —
+              configure-os na aba <strong>Autenticação</strong> (tipo OAuth2) ou em <strong>Variáveis globais</strong> se usar login manual.
+            </div>
+          ) : null}
+          {!isOAuth2 ? (
+            <>
+              <VariablesEditor
+                disabled={!admin}
+                variables={(form.variables as Record<string, string>) ?? {}}
+                onChange={(variables) => setForm((f) => ({ ...f, variables }))}
+              />
+              <HeadersEditor
+                disabled={!admin}
+                title="Headers por defeito"
+                headers={(form.default_headers as Record<string, string>) ?? {}}
+                onChange={(default_headers) => setForm((f) => ({ ...f, default_headers }))}
+              />
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
+              Com OAuth2, o token é aplicado automaticamente nos requisições. Headers e variáveis extra só são necessários se a API
+              exigir algo além do <code className="mono">Authorization: Bearer …</code> — configure na aba Autenticação ou nos
+              requisições HTTP.
+            </p>
+          )}
           {admin ? (
             <button type="button" className="btn btn--primary" style={{ marginTop: 12 }} disabled={saveM.isPending} onClick={() => saveM.mutate()}>
               <Save size={14} style={{ marginRight: 6 }} />
-              {saveM.isPending ? "A guardar…" : "Guardar"}
+              {saveM.isPending ? "A salvar…" : "Salvar"}
             </button>
           ) : null}
         </section>
@@ -294,9 +421,30 @@ export function IntegrationDetailPage() {
       {tab === "auth" && (
         <section className="panel" style={{ marginTop: 16, padding: 16 }}>
           <h2 style={{ marginTop: 0, fontSize: 16 }}>Autenticação</h2>
-          <div className="field" style={{ maxWidth: 280 }}>
+          <div className="field" style={{ maxWidth: 360 }}>
             <label>Tipo</label>
-            <select className="input" disabled={!admin} value={form.auth_type ?? "none"} onChange={(e) => setForm((f) => ({ ...f, auth_type: e.target.value }))}>
+            <select
+              className="input"
+              disabled={!admin}
+              value={form.auth_type ?? "none"}
+              onChange={(e) => {
+                const auth_type = e.target.value;
+                setForm((f) => {
+                  const next = { ...f, auth_type };
+                  if (auth_type === "oauth2_password") {
+                    const ac = { ...(f.auth_config as OAuth2PasswordAuthConfig) };
+                    if (!ac.login_path?.trim()) ac.login_path = "/oauth/token";
+                    if (!ac.grant_type?.trim()) ac.grant_type = "password";
+                    if (!ac.token_json_path?.trim()) ac.token_json_path = "access_token";
+                    if (!ac.token_prefix?.trim()) ac.token_prefix = "Bearer";
+                    if (!ac.login_method?.trim()) ac.login_method = "POST";
+                    if (!ac.login_body_type) ac.login_body_type = "form";
+                    next.auth_config = ac;
+                  }
+                  return next;
+                });
+              }}
+            >
               {AUTH_TYPES.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.label}
@@ -304,6 +452,113 @@ export function IntegrationDetailPage() {
               ))}
             </select>
           </div>
+          {form.auth_type === "oauth2_password" && (
+            <>
+              <div className="msg" style={{ marginBottom: 12, fontSize: 12 }}>
+                <strong>Não coloque client_id, password, etc. em «Headers por defeito».</strong> Esses valores vão no corpo do POST
+                (como no Postman). Headers só para coisas como <code className="mono">Accept</code>.
+              </div>
+              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+                Preencha os campos abaixo (iguais ao Postman). Por defeito a requisição usa{" "}
+                <code className="mono">application/x-www-form-urlencoded</code>, formato habitual em <code className="mono">/oauth/token</code>.
+              </p>
+              <div className="field">
+                <label>Caminho do token (relativo à URL base)</label>
+                <input
+                  className="input mono"
+                  disabled={!admin}
+                  value={authCfg.login_path ?? "/oauth/token"}
+                  placeholder="/oauth/token"
+                  onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, login_path: e.target.value } }))}
+                />
+              </div>
+              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                  <label>Client ID</label>
+                  <input
+                    className="input mono"
+                    disabled={!admin}
+                    value={authCfg.client_id ?? ""}
+                    onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, client_id: e.target.value } }))}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                  <label>
+                    Client secret{" "}
+                    {authCfg.client_secret_configured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — vazio mantém)</span> : null}
+                  </label>
+                  <input
+                    className="input mono"
+                    type="password"
+                    disabled={!admin}
+                    placeholder={authCfg.client_secret_configured ? "••••••" : ""}
+                    onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, client_secret: e.target.value } }))}
+                  />
+                </div>
+              </div>
+              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                  <label>Username</label>
+                  <input
+                    className="input"
+                    disabled={!admin}
+                    value={authCfg.username ?? ""}
+                    onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, username: e.target.value } }))}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                  <label>
+                    Password{" "}
+                    {authCfg.password_configured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurada — vazio mantém)</span> : null}
+                  </label>
+                  <input
+                    className="input"
+                    type="password"
+                    disabled={!admin}
+                    placeholder={authCfg.password_configured ? "••••••" : ""}
+                    onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, password: e.target.value } }))}
+                  />
+                </div>
+              </div>
+              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                <div className="field" style={{ maxWidth: 240 }}>
+                  <label>Grant type</label>
+                  <input
+                    className="input mono"
+                    disabled={!admin}
+                    value={authCfg.grant_type ?? "password"}
+                    onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, grant_type: e.target.value } }))}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 280 }}>
+                  <label>Formato do body (como no Postman)</label>
+                  <select
+                    className="input"
+                    disabled={!admin}
+                    value={authCfg.login_body_type ?? "form"}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        auth_config: { ...authCfg, login_body_type: e.target.value as "json" | "form" },
+                      }))
+                    }
+                  >
+                    <option value="form">Form urlencoded (recomendado)</option>
+                    <option value="json">JSON</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <label>Campo do token na resposta JSON</label>
+                <input
+                  className="input mono"
+                  disabled={!admin}
+                  value={authCfg.token_json_path ?? "access_token"}
+                  onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, token_json_path: e.target.value } }))}
+                />
+              </div>
+            </>
+          )}
           {form.auth_type === "bearer" && (
             <>
               <div className="field">
@@ -342,8 +597,13 @@ export function IntegrationDetailPage() {
           )}
           {form.auth_type === "login" && (
             <>
+              <div className="msg msg--err" style={{ marginBottom: 12, fontSize: 12 }}>
+                Credenciais em <strong>Variáveis globais</strong> (aba Geral), não em Headers. Cada{" "}
+                <code className="mono">{"{{client_id}}"}</code> precisa de uma variável com o mesmo nome e valor real. Prefira o tipo{" "}
+                <strong>OAuth2 — obter token</strong> para evitar este modo manual.
+              </div>
               <p style={{ fontSize: 12, color: "var(--muted)" }}>
-                Opção A: marque um pedido HTTP como «Login». Opção B: preencha o caminho de login abaixo.
+                Opção A: marque uma requisição HTTP como «Login». Opção B: preencha o caminho de login abaixo.
               </p>
               <div className="field">
                 <label>Caminho login (relativo à URL base)</label>
@@ -359,9 +619,39 @@ export function IntegrationDetailPage() {
                   ))}
                 </select>
               </div>
+              <div className="field" style={{ maxWidth: 280 }}>
+                <label>Formato do body</label>
+                <select
+                  className="input"
+                  disabled={!admin}
+                  value={authCfg.login_body_type ?? "json"}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      auth_config: { ...authCfg, login_body_type: e.target.value as "json" | "form" },
+                    }))
+                  }
+                >
+                  <option value="form">Form urlencoded</option>
+                  <option value="json">JSON</option>
+                </select>
+              </div>
               <div className="field">
-                <label>Body JSON (suporta {"{{variavel}}"})</label>
-                <textarea className="textarea mono" rows={4} disabled={!admin} defaultValue={authCfg.login_body || '{"username":"{{user}}","password":"{{pass}}"}'} onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, login_body: e.target.value } }))} />
+                <label>
+                  {authCfg.login_body_type === "form" ? "Body form (uma linha: chave=valor, use {{variavel}})" : "Body JSON (suporta {{variavel}})"}
+                </label>
+                <textarea
+                  className="textarea mono"
+                  rows={5}
+                  disabled={!admin}
+                  value={
+                    authCfg.login_body ??
+                    (authCfg.login_body_type === "form"
+                      ? "client_id={{client_id}}\nclient_secret={{client_secret}}\nusername={{username}}\npassword={{password}}\ngrant_type={{grant_type}}"
+                      : '{"client_id":"{{client_id}}","client_secret":"{{client_secret}}","username":"{{username}}","password":"{{password}}","grant_type":"{{grant_type}}"}')
+                  }
+                  onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, login_body: e.target.value } }))}
+                />
               </div>
               <div className="field">
                 <label>Caminho JSON do token (ex. access_token)</label>
@@ -372,7 +662,7 @@ export function IntegrationDetailPage() {
           {admin ? (
             <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" disabled={saveM.isPending} onClick={() => saveM.mutate()}>
-                Guardar auth
+                Salvar auth
               </button>
               <button type="button" className="btn" disabled={loginM.isPending} onClick={() => loginM.mutate()}>
                 {loginM.isPending ? "A autenticar…" : "Testar login"}
@@ -384,26 +674,45 @@ export function IntegrationDetailPage() {
 
       {tab === "requests" && (
         <section style={{ marginTop: 16 }}>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>Pedidos de coleta</h2>
-            {admin ? (
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <h2 style={{ margin: 0, fontSize: 16 }}>Requisições de coleta</h2>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
-                className="btn btn--primary"
-                onClick={() =>
-                  setEditingReq({
-                    ...emptyRequest(),
-                    id: `new-${Date.now()}`,
-                    integration_id: d.id,
-                    path_params: [],
-                    query_params: [],
-                    headers: {},
-                  } as IntegrationRequest)
-                }
+                className="btn"
+                title="Variáveis globais ({{nome}})"
+                onClick={() => {
+                  setVarsDraft({ ...((form.variables as Record<string, string>) ?? {}) });
+                  setShowVarsModal(true);
+                }}
               >
-                <Plus size={14} style={{ marginRight: 4 }} /> Novo pedido
+                <Braces size={14} style={{ marginRight: 4 }} />
+                Variáveis
+                {Object.keys((form.variables as Record<string, string>) ?? {}).length > 0 ? (
+                  <span className="badge" style={{ marginLeft: 6 }}>
+                    {Object.keys((form.variables as Record<string, string>) ?? {}).length}
+                  </span>
+                ) : null}
               </button>
-            ) : null}
+              {admin ? (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() =>
+                    setEditingReq({
+                      ...emptyRequest(),
+                      id: `new-${Date.now()}`,
+                      integration_id: d.id,
+                      path_params: [],
+                      query_params: [],
+                      headers: {},
+                    } as IntegrationRequest)
+                  }
+                >
+                  <Plus size={14} style={{ marginRight: 4 }} /> Nova requisição
+                </button>
+              ) : null}
+            </div>
           </div>
           <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
             Use <code className="mono">{"{param}"}</code> no path, query com chave/valor, e variáveis <code className="mono">{"{{nome}}"}</code> no body.
@@ -425,7 +734,13 @@ export function IntegrationDetailPage() {
                         <button type="button" className="btn" onClick={() => setEditingReq(normalizeRequest(req))}>
                           Editar
                         </button>
-                        <button type="button" className="btn" disabled={runReqM.isPending} onClick={() => runReqM.mutate(req.id)}>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={runReqM.isPending}
+                          title="Executar e ver resultado"
+                          onClick={() => runReqM.mutate({ id: req.id, name: req.name })}
+                        >
                           <Play size={12} />
                         </button>
                         <button type="button" className="btn btn--danger" onClick={() => setDeleteReqId(req.id)}>
@@ -433,7 +748,12 @@ export function IntegrationDetailPage() {
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="btn" disabled={runReqM.isPending} onClick={() => runReqM.mutate(req.id)}>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={runReqM.isPending}
+                        onClick={() => runReqM.mutate({ id: req.id, name: req.name })}
+                      >
                         Executar
                       </button>
                     )}
@@ -447,7 +767,7 @@ export function IntegrationDetailPage() {
               </div>
             ))}
           </div>
-          {requests.length === 0 ? <p style={{ color: "var(--muted)" }}>Nenhum pedido configurado.</p> : null}
+          {requests.length === 0 ? <p style={{ color: "var(--muted)" }}>Nenhuma requisição configurada.</p> : null}
 
           {editingReq ? (
             <RequestEditorModal
@@ -473,7 +793,7 @@ export function IntegrationDetailPage() {
                 Testar login
               </button>
               <button type="button" className="btn" disabled={runAllM.isPending} onClick={() => runAllM.mutate()}>
-                {runAllM.isPending ? "A colectar…" : "Executar todos os pedidos"}
+                {runAllM.isPending ? "A colectar…" : "Executar todos os requisições"}
               </button>
             </div>
             <RunOutput result={lastRun} />
@@ -521,10 +841,31 @@ export function IntegrationDetailPage() {
         </section>
       )}
 
+      {showVarsModal ? (
+        <VariablesModal
+          variables={varsDraft}
+          disabled={!admin}
+          busy={saveVarsM.isPending}
+          onChange={setVarsDraft}
+          onClose={() => setShowVarsModal(false)}
+          onSave={() => (admin ? saveVarsM.mutate(varsDraft) : setShowVarsModal(false))}
+        />
+      ) : null}
+
+      {runPanel ? (
+        <RequestRunResultModal
+          requestName={runPanel.requestName}
+          result={runPanel.result}
+          logs={logsQ.data?.logs ?? []}
+          logsLoading={logsQ.isLoading}
+          onClose={() => setRunPanel(null)}
+        />
+      ) : null}
+
       <ConfirmModal
         open={!!deleteReqId}
-        title="Eliminar pedido"
-        message="Eliminar este pedido HTTP?"
+        title="Eliminar requisição"
+        message="Eliminar esta requisição HTTP?"
         danger
         busy={deleteReqM.isPending}
         onCancel={() => setDeleteReqId(null)}
@@ -532,6 +873,19 @@ export function IntegrationDetailPage() {
       />
     </div>
   );
+}
+
+function parseConsumerConfig(raw: unknown): ConsumerConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { client_search: { enabled: false } };
+  }
+  const o = raw as ConsumerConfig;
+  return {
+    client_search: {
+      enabled: !!o.client_search?.enabled,
+      request_id: o.client_search?.request_id,
+    },
+  };
 }
 
 function parseVariablesRecord(raw: unknown): Record<string, string> {
@@ -556,25 +910,68 @@ function VariablesEditor({
   variables,
   onChange,
   disabled,
+  allowRenameKeys,
+  compact,
 }: {
   variables: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
   disabled?: boolean;
+  allowRenameKeys?: boolean;
+  compact?: boolean;
 }) {
   const entries = Object.entries(variables);
   return (
-    <div className="field" style={{ marginTop: 12 }}>
-      <label>Variáveis globais (use {"{{chave}}"} no path/body)</label>
+    <div className="field" style={{ marginTop: compact ? 0 : 12 }}>
+      {!compact ? (
+        <>
+          <label>Variáveis globais</label>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 8px" }}>
+            Use <code className="mono">{"{{nome}}"}</code> em query, path ou body (ex.: <code className="mono">{"{{termo_busca}}"}</code>
+            ).
+          </p>
+        </>
+      ) : null}
+      {entries.length === 0 ? (
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>Nenhuma variável definida.</p>
+      ) : null}
       {entries.map(([k, v]) => (
         <div key={k} className="row" style={{ gap: 6, marginBottom: 6 }}>
-          <input className="input mono" style={{ width: 120 }} disabled={disabled} value={k} readOnly />
-          <input className="input mono" style={{ flex: 1 }} disabled={disabled} value={v} onChange={(e) => onChange({ ...variables, [k]: e.target.value })} />
-          {!disabled ? (
-            <button type="button" className="btn" onClick={() => {
-              const next = { ...variables };
-              delete next[k];
+          <input
+            className="input mono"
+            style={{ width: 140 }}
+            disabled={disabled || !allowRenameKeys}
+            readOnly={!allowRenameKeys}
+            value={k}
+            placeholder="nome"
+            onChange={(e) => {
+              const newKey = e.target.value;
+              const next: Record<string, string> = {};
+              for (const [kk, vv] of Object.entries(variables)) {
+                if (kk === k) next[newKey] = vv;
+                else next[kk] = vv;
+              }
               onChange(next);
-            }}>
+            }}
+          />
+          <input
+            className="input mono"
+            style={{ flex: 1 }}
+            disabled={disabled}
+            value={v}
+            placeholder="valor"
+            onChange={(e) => onChange({ ...variables, [k]: e.target.value })}
+          />
+          {!disabled ? (
+            <button
+              type="button"
+              className="btn"
+              aria-label="Remover"
+              onClick={() => {
+                const next = { ...variables };
+                delete next[k];
+                onChange(next);
+              }}
+            >
               ×
             </button>
           ) : null}
@@ -585,11 +982,152 @@ function VariablesEditor({
           type="button"
           className="btn"
           style={{ fontSize: 12 }}
-          onClick={() => onChange({ ...variables, [`var${entries.length + 1}`]: "" })}
+          onClick={() => {
+            let n = 1;
+            let key = "termo_busca";
+            while (key in variables) {
+              n += 1;
+              key = `var${n}`;
+            }
+            onChange({ ...variables, [key]: "" });
+          }}
         >
           + Variável
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function VariablesModal({
+  variables,
+  onChange,
+  onClose,
+  onSave,
+  disabled,
+  busy,
+}: {
+  variables: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+  onClose: () => void;
+  onSave: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal"
+        style={{ maxWidth: 560, maxHeight: "85vh", overflow: "auto" }}
+        role="dialog"
+        aria-labelledby="vars-modal-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <h3 id="vars-modal-title" style={{ margin: 0 }}>
+            Variáveis globais
+          </h3>
+          <button type="button" className="btn" aria-label="Fechar" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
+          Valores usados nos requisições com <code className="mono">{"{{chave}}"}</code>. Salve antes de executar requisições que dependem
+          destes valores (ex. <code className="mono">busca</code>, <code className="mono">termo_busca</code> na Hubsoft).
+        </p>
+        <VariablesEditor variables={variables} onChange={onChange} disabled={disabled} allowRenameKeys compact />
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button type="button" className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          {disabled ? null : (
+            <button type="button" className="btn btn--primary" disabled={busy} onClick={onSave}>
+              {busy ? "A salvar…" : "Salvar variáveis"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RequestRunResultModal({
+  requestName,
+  result,
+  logs,
+  logsLoading,
+  onClose,
+}: {
+  requestName: string;
+  result: RunResult;
+  logs: IntegrationRunLog[];
+  logsLoading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal"
+        style={{ maxWidth: 900, width: "min(96vw, 900px)", maxHeight: "90vh", overflow: "auto" }}
+        role="dialog"
+        aria-labelledby="run-result-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <div>
+            <h3 id="run-result-title" style={{ margin: 0 }}>
+              Resultado — {requestName}
+            </h3>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>Execução actual e registos recentes desta requisição</p>
+          </div>
+          <button type="button" className="btn" aria-label="Fechar" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <h4 style={{ fontSize: 13, marginTop: 16, marginBottom: 8 }}>Resposta</h4>
+        <RunOutput result={result} />
+
+        <h4 style={{ fontSize: 13, marginTop: 20, marginBottom: 8 }}>Logs da requisição</h4>
+        {logsLoading ? (
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar logs…</p>
+        ) : logs.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>Sem registos salvos para esta requisição.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {logs.map((log) => (
+              <div
+                key={log.id}
+                style={{
+                  padding: 10,
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "var(--panel2)",
+                }}
+              >
+                <div className="row" style={{ gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+                  <span>{new Date(log.created_at).toLocaleString()}</span>
+                  <span className="mono">{log.run_kind}</span>
+                  {log.ok ? <span className="badge badge--ok">OK</span> : <span className="badge badge--err">Erro</span>}
+                  {log.status_code != null ? <span className="mono">HTTP {log.status_code}</span> : null}
+                  {log.latency_ms != null ? <span>{log.latency_ms} ms</span> : null}
+                </div>
+                {log.request_url ? (
+                  <p className="mono" style={{ margin: "6px 0 0", fontSize: 11, wordBreak: "break-all" }}>
+                    {log.request_url}
+                  </p>
+                ) : null}
+                {log.error_message ? <p style={{ margin: "6px 0 0", color: "var(--err)", fontSize: 12 }}>{log.error_message}</p> : null}
+                {log.response_preview ? (
+                  <pre className="mono" style={{ margin: "8px 0 0", maxHeight: 200, overflow: "auto", fontSize: 11, whiteSpace: "pre-wrap" }}>
+                    {log.response_preview}
+                  </pre>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -609,6 +1147,10 @@ function HeadersEditor({
   return (
     <div className="field" style={{ marginTop: 12 }}>
       <label>{title}</label>
+      <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 8px" }}>
+        Cabeçalhos HTTP enviados em <strong>todos</strong> os requisições desta integração (ex.: <code className="mono">Accept: application/json</code>
+        ). O <code className="mono">Authorization</code> é preenchido automaticamente após obter o token.
+      </p>
       {entries.map(([k, v]) => (
         <div key={k} className="row" style={{ gap: 6, marginBottom: 6 }}>
           <input className="input mono" style={{ width: 140 }} disabled={disabled} value={k} onChange={(e) => {
@@ -654,7 +1196,7 @@ function RequestEditorModal({
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div className="modal" style={{ maxWidth: 720, maxHeight: "90vh", overflow: "auto" }} role="dialog" onMouseDown={(e) => e.stopPropagation()}>
-        <h3>{req.id.startsWith("new-") ? "Novo pedido" : "Editar pedido"}</h3>
+        <h3>{req.id.startsWith("new-") ? "Nova requisição" : "Editar requisição"}</h3>
         <div className="field">
           <label>Nome</label>
           <input className="input" value={local.name} onChange={(e) => setLocal((r) => ({ ...r, name: e.target.value }))} />
@@ -677,7 +1219,7 @@ function RequestEditorModal({
         </div>
         <PathParamsEditor params={local.path_params} onChange={(path_params) => setLocal((r) => ({ ...r, path_params }))} />
         <QueryParamsEditor params={local.query_params} onChange={(query_params) => setLocal((r) => ({ ...r, query_params }))} />
-        <HeadersEditor title="Headers deste pedido" headers={local.headers} onChange={(headers) => setLocal((r) => ({ ...r, headers }))} />
+        <HeadersEditor title="Headers desta requisição" headers={local.headers} onChange={(headers) => setLocal((r) => ({ ...r, headers }))} />
         <div className="field">
           <label>Tipo de body</label>
           <select className="input" value={local.body_type} onChange={(e) => setLocal((r) => ({ ...r, body_type: e.target.value }))}>
@@ -700,7 +1242,7 @@ function RequestEditorModal({
         <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
           <label className="row" style={{ gap: 6 }}>
             <input type="checkbox" checked={local.is_login} onChange={(e) => setLocal((r) => ({ ...r, is_login: e.target.checked }))} />
-            Este pedido é o login
+            Esta requisição é o login
           </label>
           <label className="row" style={{ gap: 6 }}>
             <input type="checkbox" checked={local.enabled} onChange={(e) => setLocal((r) => ({ ...r, enabled: e.target.checked }))} />
@@ -716,7 +1258,7 @@ function RequestEditorModal({
             Cancelar
           </button>
           <button type="button" className="btn btn--primary" disabled={busy} onClick={() => onSave(local)}>
-            {busy ? "…" : "Guardar pedido"}
+            {busy ? "…" : "Salvar requisição"}
           </button>
         </div>
       </div>

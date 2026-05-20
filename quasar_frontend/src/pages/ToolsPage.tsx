@@ -508,7 +508,7 @@ export function ToolsPage() {
       {tab === "host_ping" && (
         <ToolsPanel
           title="Ping a hosts ou domínios"
-          description="Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até 100 por execução). Timeout por pedido: 500–15000 ms."
+          description="Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até 100 por execução). Timeout por requisição: 500–15000 ms."
           results={
             <>
               <ToolOutputError err={hostPingRun.error as Error | null} />
@@ -550,7 +550,7 @@ export function ToolsPage() {
                 style={{ width: 90 }}
                 value={hostPingTimeout}
                 onChange={(e) => setHostPingTimeout(e.target.value)}
-                title="500–15000 ms por pedido ICMP"
+                title="500–15000 ms por requisição ICMP"
               />
             </label>
           </div>
@@ -739,7 +739,7 @@ export function ToolsPage() {
       {tab === "icmp" && (
         <ToolsPanel
           title="ICMP ping (único alvo)"
-          description="Um host ou IP por pedido. Útil para teste rápido com o mesmo motor ICMP usado noutras partes do sistema."
+          description="Um host ou IP por requisição. Útil para teste rápido com o mesmo motor ICMP usado noutras partes do sistema."
           results={
             <>
               <ToolOutputError err={icmpRun.error as Error | null} />
@@ -766,7 +766,7 @@ export function ToolsPage() {
       {tab === "snmp" && (
         <ToolsPanel
           title="SNMP GET"
-          description="Leitura de um ou mais OIDs (v1/v2c) no agente indicado. A comunidade pode ser preenchida a partir das definições de rede se existir padrão guardado."
+          description="Leitura de um ou mais OIDs (v1/v2c) no agente indicado. A comunidade pode ser preenchida a partir das definições de rede se existir padrão salvo."
           results={
             <>
               <ToolOutputError err={snmpRun.error as Error | null} />
@@ -822,7 +822,7 @@ export function ToolsPage() {
       {tab === "snmp_bulk" && (
         <ToolsPanel
           title="SNMP bulk-get (v2c)"
-          description="Vários OIDs num único pedido GET-BULK. Indique host, comunidade, timeout e lista de OIDs (um por linha)."
+          description="Vários OIDs num única requisição GET-BULK. Indique host, comunidade, timeout e lista de OIDs (um por linha)."
           results={
             <>
               <ToolOutputError err={bulkRun.error as Error | null} />

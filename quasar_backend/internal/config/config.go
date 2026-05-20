@@ -40,7 +40,7 @@ type Config struct {
 	EmbeddedUI bool
 }
 
-// RequireAuth indica se pedidos /api/* exigem X-API-Key ou JWT de utilizador (ambiente de produção típico).
+// RequireAuth indica se requisições /api/* exigem X-API-Key ou JWT de utilizador (ambiente de produção típico).
 func (c *Config) RequireAuth() bool {
 	return len(c.APIKeys) > 0 || strings.TrimSpace(c.SessionSecret) != ""
 }

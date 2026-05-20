@@ -90,7 +90,7 @@ export function friendlyHttpProbeError(raw: string): string {
   if (low.includes("eof") || low.includes("unexpected eof")) return "Conexão fechada de forma inesperada.";
   if (low.includes("no such host") || low.includes("name or service not known")) return "Nome de host não encontrado (DNS).";
   if (s.length > 160) return `${s.slice(0, 157)}…`;
-  return s || "Pedido falhou.";
+  return s || "Requisição falhou.";
 }
 
 /** Probe considerado acessível: resposta OK sem campo de erro. */

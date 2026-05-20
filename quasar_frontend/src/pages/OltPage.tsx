@@ -405,7 +405,7 @@ export function OltPage() {
       setBulkLog((m) => [...m, `Base comercial actualizada para ${formatYearMonthPt(bulkMonth)}.`]);
       setSaveToast({ ok: true, text: `Guardado com sucesso (Base comercial: ${formatYearMonthPt(bulkMonth)}).` });
     },
-    onError: (err: Error) => setSaveToast({ ok: false, text: err.message || "Falha ao guardar (Base comercial)." }),
+    onError: (err: Error) => setSaveToast({ ok: false, text: err.message || "Falha ao salvar (Base comercial)." }),
   });
 
   const rows = list.data?.olts ?? [];

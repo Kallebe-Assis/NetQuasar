@@ -276,7 +276,7 @@ function friendlyApiMessage(raw: string): string {
   if (!t) return "Ocorreu um erro inesperado.";
   const lower = t.toLowerCase();
   if (lower.includes("context deadline exceeded") || lower.includes("deadline exceeded")) {
-    return "O pedido demorou demasiado ou o servidor não respondeu a tempo. Tente novamente.";
+    return "A requisição demorou demasiado ou o servidor não respondeu a tempo. Tente novamente.";
   }
   if (lower.includes("connection reset") || lower.includes("econnreset")) {
     return "A ligação foi interrompida. Verifique a rede e tente novamente.";
@@ -572,7 +572,7 @@ export function MonitoringPage() {
       apiFetch(`/api/v1/monitoring/full-report/devices/${id}`, { method: "POST", json: {} }),
     onSuccess: () => {
       invalidateActiveList();
-      showPageToastRef.current(true, "Relatório completo pedido ao servidor.");
+      showPageToastRef.current(true, "Relatório completo solicitado ao servidor.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
   });
@@ -646,7 +646,7 @@ export function MonitoringPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["mon-settings"] });
       patchMset.reset();
-      showPageToastRef.current(true, "Definições de internet guardadas.");
+      showPageToastRef.current(true, "Definições de internet salvas.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
   });
@@ -1052,7 +1052,7 @@ export function MonitoringPage() {
         <div className="card">
           <h2>Alvos HTTPS + offset VPS</h2>
           <p style={{ fontSize: 12, color: "var(--muted)" }}>
-            Ajuste o atraso medido no VPS e a lista de URLs usadas para testar a internet. Os valores são guardados no servidor.
+            Ajuste o atraso medido no VPS e a lista de URLs usadas para testar a internet. Os valores são salvos no servidor.
             Intervalos globais do worker, pacote ICMP e limiar para alertas passaram para <strong>Configurações · Alertas</strong>.
           </p>
           <div className="field">
@@ -1079,7 +1079,7 @@ export function MonitoringPage() {
               patchMset.mutate(body);
             }}
           >
-            Guardar definições de internet
+            Salvar definições de internet
           </button>
         </div>
       )}

@@ -23,7 +23,7 @@ export const queryKeys = {
   alertRules: ["alert-rules"] as const,
   integrations: ["integrations"] as const,
   integrationDetail: (slug: string) => ["integration", slug] as const,
-  integrationLogs: (slug: string) => ["integration-logs", slug] as const,
+  integrationLogs: (slug: string, requestId?: string) => ["integration-logs", slug, requestId ?? ""] as const,
 } as const;
 
 /** Invalida listas de alertas usadas em Alertas, OLT e Configurações. */

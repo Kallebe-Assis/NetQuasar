@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { LoginCircuitBackdrop } from "../components/LoginCircuitBackdrop";
 import { getApiBase, markClientConfigured, saveSession } from "../lib/auth";
 
-/** Valida /api/v1/health com a URL e chave guardadas em memória (antes de persistir). */
+/** Valida /api/v1/health com a URL e chave salvas em memória (antes de persistir). */
 async function pingHealth(apiBase: string, apiKey: string): Promise<void> {
   const base = apiBase.replace(/\/$/, "");
   const path = "/api/v1/health";

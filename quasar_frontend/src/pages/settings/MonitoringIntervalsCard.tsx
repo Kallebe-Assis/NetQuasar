@@ -302,11 +302,11 @@ export function MonitoringPingIntervalsCard() {
             })
           }
         >
-          Guardar intervalos / ICMP
+          Salvar intervalos / ICMP
         </button>
       </div>
       {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
-      {save.isSuccess && <div className="msg msg--ok">Definições guardadas.</div>}
+      {save.isSuccess && <div className="msg msg--ok">Definições salvas.</div>}
     </div>
   );
 }

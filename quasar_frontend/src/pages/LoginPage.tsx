@@ -10,7 +10,7 @@ type SetupStatus = { database_configured?: boolean };
 
 type AuthLoginResponse = { token?: string; email?: string; display_name?: string; role?: string };
 
-/** Duração mínima do ecrã de loading após pedido de login (ms). */
+/** Duração mínima do ecrã de loading após requisição de login (ms). */
 const LOGIN_SPLASH_MIN_MS = 2000;
 
 export function LoginPage() {

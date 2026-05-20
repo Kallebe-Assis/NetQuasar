@@ -42,9 +42,9 @@ export function DeviceEditBackupTab({ deviceId, deviceLabel, canMutate }: Props)
     onSuccess: () => {
       setDirty(false);
       void qc.invalidateQueries({ queryKey: ["device-config-backup", deviceId] });
-      setToast({ ok: true, text: "Backup guardado na base de dados." });
+      setToast({ ok: true, text: "Backup salvo na base de dados." });
     },
-    onError: (err) => setToast({ ok: false, text: (err as Error).message || "Falha ao guardar." }),
+    onError: (err) => setToast({ ok: false, text: (err as Error).message || "Falha ao salvar." }),
   });
 
   async function exportCsv() {
@@ -88,7 +88,7 @@ export function DeviceEditBackupTab({ deviceId, deviceLabel, canMutate }: Props)
       <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
         {canMutate && (
           <button type="button" className="btn btn--primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "A guardar…" : "Guardar backup"}
+            {save.isPending ? "A salvar…" : "Salvar backup"}
           </button>
         )}
         <button

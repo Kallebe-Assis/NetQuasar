@@ -573,7 +573,7 @@ export function DevicesPage() {
       if (ok === 0 && errors.length === 0) {
         setActionToast({
           ok: false,
-          text: "Nenhum pedido enviado: confirme valores (ex.: categoria escolhida) ou que os equipamentos visíveis aceitem o PATCH.",
+          text: "Nenhuma requisição enviada: confirme valores (ex.: categoria escolhida) ou que os equipamentos visíveis aceitem o PATCH.",
         });
         return;
       }
@@ -1074,7 +1074,7 @@ export function DevicesPage() {
             {(modal === "create" || editTab === "cadastro") && (
             <>
             <p style={{ color: "var(--muted)", fontSize: 12 }}>
-              Com telemetria ativa, o ping precisa estar ligado. Em modo <strong>Bridge</strong>, o IP é opcional e ping/telemetria ficam desativados — o servidor ajusta ao guardar, se necessário.
+              Com telemetria ativa, o ping precisa estar ligado. Em modo <strong>Bridge</strong>, o IP é opcional e ping/telemetria ficam desativados — o servidor ajusta ao salvar, se necessário.
             </p>
             {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
 

@@ -240,6 +240,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/integrations", func(r chi.Router) {
 			r.Get("/", s.listIntegrations)
 			r.Get("/{id}", s.getIntegration)
+			r.Get("/{id}/consumer", s.getIntegrationConsumerMeta)
+			r.Post("/{id}/consumer/client-search", s.integrationConsumerClientSearch)
 			r.Get("/{id}/logs", s.listIntegrationLogs)
 			r.Post("/{id}/test", s.integrationTest)
 			r.Post("/{id}/login", s.integrationLogin)

@@ -104,9 +104,9 @@ export function OnuMonthlyReportPanel() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.automationOnu });
-      setSaveToast({ ok: true, text: "Agendamento guardado." });
+      setSaveToast({ ok: true, text: "Agendamento salvo." });
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao guardar." }),
+    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar." }),
   });
 
   const run = useMutation({
@@ -178,7 +178,7 @@ export function OnuMonthlyReportPanel() {
 
         <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
           <button type="button" className="btn btn--primary" disabled={patch.isPending || busy} onClick={() => patch.mutate()}>
-            Guardar agendamento
+            Salvar agendamento
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => run.mutate()}>
             Executar agora

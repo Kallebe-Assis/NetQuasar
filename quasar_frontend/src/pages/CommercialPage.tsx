@@ -214,7 +214,7 @@ export function CommercialPage() {
       setEditingLocId(null);
       setTgMsg({ ok: true, text: "Guardado com sucesso (localidade)." });
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message || "Falha ao guardar (localidade)." }),
+    onError: (e: Error) => setTgMsg({ ok: false, text: e.message || "Falha ao salvar (localidade)." }),
   });
   const delLoc = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/localities/${id}`, { method: "DELETE" }),
@@ -245,7 +245,7 @@ export function CommercialPage() {
       setSingleRecModalOpen(false);
       setTgMsg({
         ok: true,
-        text: `Registo guardado: ${locLabel} — ${cnt} cliente(s) em ${formatYearMonthPt(ym)}.`,
+        text: `Registo salvo: ${locLabel} — ${cnt} cliente(s) em ${formatYearMonthPt(ym)}.`,
       });
     },
     onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
@@ -516,7 +516,7 @@ export function CommercialPage() {
       const more = replacements.length > 14 ? `\n… e mais ${replacements.length - 14} alteração(ões).` : "";
       const ok = confirm(
         `Existem ${replacements.length} localidade(s) com valores diferentes em ${formatYearMonthPt(bulkModalMonth)}. ` +
-          `Os números actuais serão substituídos pelos que indicou:\n\n${lines.join("\n")}${more}\n\nGuardar todas?`,
+          `Os números actuais serão substituídos pelos que indicou:\n\n${lines.join("\n")}${more}\n\nSalvar todas?`,
       );
       if (!ok) return;
     }
@@ -1066,7 +1066,7 @@ export function CommercialPage() {
                                 disabled={!editLocName.trim() || patchLoc.isPending}
                                 onClick={() => patchLoc.mutate({ id: l.id, name: editLocName.trim(), region_code: editLocRc.trim() || null })}
                               >
-                                Guardar
+                                Salvar
                               </button>
                               <button type="button" className="btn" onClick={() => setEditingLocId(null)}>
                                 Cancelar
@@ -1211,7 +1211,7 @@ export function CommercialPage() {
               Quantidades por localidade
             </h2>
             <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-              Mês aplicado a todas as linhas ao guardar. Ao mudar o mês, os campos recarregam com os valores já gravados nesse período (edições não guardadas são
+              Mês aplicado a todas as linhas ao salvar. Ao mudar o mês, os campos recarregam com os valores já gravados nesse período (edições não salvas são
               descartadas).
             </p>
             <div style={{ marginBottom: 12 }}>
@@ -1275,7 +1275,7 @@ export function CommercialPage() {
                 Cancelar
               </button>
               <button type="button" className="btn btn--primary" disabled={bulkFillAllLocalities.isPending} onClick={() => submitCommercialBulkModal()}>
-                {bulkFillAllLocalities.isPending ? "A guardar…" : "Guardar todas"}
+                {bulkFillAllLocalities.isPending ? "A salvar…" : "Salvar todas"}
               </button>
             </div>
           </div>
@@ -1296,7 +1296,7 @@ export function CommercialPage() {
               Novo registro individual
             </h2>
             <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
-              Um registo por localidade e mês. Guardar substitui o valor existente para essa combinação.
+              Um registo por localidade e mês. Salvar substitui o valor existente para essa combinação.
             </p>
             <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 180, flex: "1 1 160px" }}>
@@ -1353,7 +1353,7 @@ export function CommercialPage() {
                   createRec.mutate();
                 }}
               >
-                {createRec.isPending ? "A guardar…" : "Guardar registo"}
+                {createRec.isPending ? "A salvar…" : "Salvar registo"}
               </button>
               <button type="button" className="btn" disabled={createRec.isPending} onClick={() => setSingleRecModalOpen(false)}>
                 Cancelar
@@ -1420,7 +1420,7 @@ export function CommercialPage() {
                   patchRec.mutate({ id: editRecRow.id, year_month: recEditYm, client_count: n });
                 }}
               >
-                {patchRec.isPending ? "A guardar…" : "Guardar alterações"}
+                {patchRec.isPending ? "A salvar…" : "Salvar alterações"}
               </button>
               <button type="button" className="btn" disabled={patchRec.isPending} onClick={() => { setRecEditOpen(false); setEditRecRow(null); }}>
                 Cancelar
@@ -1457,7 +1457,7 @@ export function CommercialPage() {
             </div>
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
               <button type="button" className="btn btn--primary" disabled={!locName.trim() || createLoc.isPending} onClick={() => createLoc.mutate()}>
-                {createLoc.isPending ? "A guardar…" : "Guardar localidade"}
+                {createLoc.isPending ? "A salvar…" : "Salvar localidade"}
               </button>
               <button type="button" className="btn" disabled={createLoc.isPending} onClick={() => setLocModalOpen(false)}>
                 Cancelar
@@ -1483,7 +1483,7 @@ export function CommercialPage() {
           <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <h3 id="agg-refresh-title">Actualizar totais agregados?</h3>
             <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 0 }}>
-              Serão recalculados os totais de clientes para <strong>{formatYearMonthPt(month)}</strong> a partir dos registos mensais já guardados na base
+              Serão recalculados os totais de clientes para <strong>{formatYearMonthPt(month)}</strong> a partir dos registos mensais já salvos na base
               comercial (não altera dados nas OLTs).
             </p>
             <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "flex-end" }}>

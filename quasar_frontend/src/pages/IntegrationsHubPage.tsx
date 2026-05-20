@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plug, Plus, Trash2 } from "lucide-react";
+import { Plug, Plus, Search, Settings, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
@@ -36,7 +36,7 @@ export function IntegrationsHubPage() {
       setNewName("");
       setNewUrl("https://");
       setNewDesc("");
-      nav(`/integrations/${data.slug}`);
+      nav(`/integrations/${data.slug}/config`);
     },
   });
 
@@ -58,12 +58,12 @@ export function IntegrationsHubPage() {
         <InfoHint label="Sobre integrações">
           <p>
             Ligue sistemas externos por API REST. Cada integração tem a sua própria configuração: URL base, autenticação,
-            pedidos HTTP (GET com path params, query, variáveis) e testes de coleta.
+            requisições HTTP (GET com path params, query, variáveis) e testes de coleta.
           </p>
         </InfoHint>
       </h1>
       <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-        Configure N sistemas; cada um abre numa página dedicada com pedidos, login e execução de coleta.
+        Configure N sistemas; cada um abre numa página dedicada com requisições, login e execução de coleta.
       </p>
 
       {admin ? (
@@ -119,14 +119,28 @@ export function IntegrationsHubPage() {
             </div>
             <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Activa" : "Inactiva"}</span>
-              <span className="badge">{it.request_count} pedido(s)</span>
+              <span className="badge">{it.request_count} requisição(ões)</span>
               {it.last_test_ok === true ? <span className="badge badge--ok">Teste OK</span> : null}
               {it.last_test_ok === false ? <span className="badge badge--err">Teste falhou</span> : null}
             </div>
-            <div className="row" style={{ gap: 8, marginTop: "auto" }}>
-              <Link to={`/integrations/${it.slug}`} className="btn btn--primary" style={{ flex: 1, textAlign: "center", textDecoration: "none" }}>
-                Abrir
+            <div className="row" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
+              <Link
+                to={`/integrations/${it.slug}/consulta`}
+                className="btn btn--primary"
+                style={{ flex: 1, minWidth: 100, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                <Search size={14} /> Consultar
               </Link>
+              {admin ? (
+                <Link
+                  to={`/integrations/${it.slug}/config`}
+                  className="btn"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
+                  title="Configuração API"
+                >
+                  <Settings size={14} />
+                </Link>
+              ) : null}
               {admin ? (
                 <button
                   type="button"
@@ -187,7 +201,7 @@ export function IntegrationsHubPage() {
         title="Eliminar integração"
         message={
           deleteTarget
-            ? `Eliminar «${deleteTarget.name}» e todos os pedidos configurados? Esta acção não pode ser desfeita.`
+            ? `Eliminar «${deleteTarget.name}» e todos os requisições configurados? Esta acção não pode ser desfeita.`
             : ""
         }
         danger

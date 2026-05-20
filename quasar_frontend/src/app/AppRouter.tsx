@@ -44,6 +44,9 @@ const IntegrationsHubPage = lazy(() =>
 const IntegrationDetailPage = lazy(() =>
   import("../pages/IntegrationDetailPage").then((m) => ({ default: m.IntegrationDetailPage })),
 );
+const IntegrationConsultPage = lazy(() =>
+  import("../pages/IntegrationConsultPage").then((m) => ({ default: m.IntegrationConsultPage })),
+);
 const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
 );
@@ -167,10 +170,24 @@ export function AppRouter() {
           />
           <Route
             path="integrations/:slug"
+            element={<Navigate to="consulta" replace />}
+          />
+          <Route
+            path="integrations/:slug/consulta"
             element={
               <Suspense fallback={<DelayedGlobeFallback />}>
-                <IntegrationDetailPage />
+                <IntegrationConsultPage />
               </Suspense>
+            }
+          />
+          <Route
+            path="integrations/:slug/config"
+            element={
+              <AdminOnly>
+                <Suspense fallback={<DelayedGlobeFallback />}>
+                  <IntegrationDetailPage />
+                </Suspense>
+              </AdminOnly>
             }
           />
           <Route path="metrics" element={<Navigate to="/integrations" replace />} />

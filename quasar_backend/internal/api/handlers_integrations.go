@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
 )
 
@@ -31,6 +33,7 @@ type integrationDetail struct {
 	integrationSummary
 	DefaultHeaders   json.RawMessage `json:"default_headers"`
 	Variables        json.RawMessage `json:"variables"`
+	ConsumerConfig   json.RawMessage `json:"consumer_config"`
 	AuthConfig       json.RawMessage `json:"auth_config"`
 	TimeoutMs        int             `json:"timeout_ms"`
 	TLSInsecure      bool            `json:"tls_insecure"`
@@ -165,29 +168,30 @@ func (s *Server) getIntegration(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) loadIntegrationDetail(ctx context.Context, id uuid.UUID) (*integrationDetail, error) {
 	var d integrationDetail
-	var authCfg, defHdr, vars []byte
+	var authCfg, defHdr, vars, consumerCfg []byte
 	var sessionToken *string
 	var sessionExp *time.Time
 	err := s.DB().QueryRow(ctx, `
 		SELECT i.id, i.name, i.slug, i.description, i.base_url, i.enabled, i.auth_type,
 			(SELECT COUNT(*) FROM integration_requests ir WHERE ir.integration_id = i.id),
 			i.last_test_at, i.last_test_ok, i.last_test_message,
-			i.default_headers, i.variables, i.auth_config, i.timeout_ms, i.tls_insecure,
+			i.default_headers, i.variables, i.consumer_config, i.auth_config, i.timeout_ms, i.tls_insecure,
 			i.session_token, i.session_expires_at
 		FROM integrations i WHERE i.id=$1
 	`, id).Scan(
 		&d.ID, &d.Name, &d.Slug, &d.Description, &d.BaseURL, &d.Enabled, &d.AuthType,
 		&d.RequestCount, &d.LastTestAt, &d.LastTestOK, &d.LastTestMessage,
-		&defHdr, &vars, &authCfg, &d.TimeoutMs, &d.TLSInsecure, &sessionToken, &sessionExp,
+		&defHdr, &vars, &consumerCfg, &authCfg, &d.TimeoutMs, &d.TLSInsecure, &sessionToken, &sessionExp,
 	)
 	if err != nil {
 		return nil, err
 	}
 	d.DefaultHeaders = defHdr
 	d.Variables = vars
+	d.ConsumerConfig = consumerCfg
 	ac := integrationhttp.AuthConfigFromJSON(authCfg)
 	d.AuthConfig = maskAuthConfigJSON(authCfg, ac)
-	d.PasswordSet = ac.Password != "" || ac.APIKey != ""
+	d.PasswordSet = ac.Password != "" || ac.APIKey != "" || ac.ClientSecret != ""
 	d.TokenSet = ac.Token != "" || (sessionToken != nil && *sessionToken != "")
 	d.SessionActive = sessionToken != nil && *sessionToken != "" &&
 		(sessionExp == nil || sessionExp.After(time.Now()))
@@ -234,6 +238,10 @@ func maskAuthConfigJSON(raw []byte, ac integrationhttp.AuthConfig) json.RawMessa
 		m["api_key"] = ""
 		m["api_key_configured"] = true
 	}
+	if ac.ClientSecret != "" {
+		m["client_secret"] = ""
+		m["client_secret_configured"] = true
+	}
 	out, _ := json.Marshal(m)
 	return out
 }
@@ -255,12 +263,12 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 	var en bool
 	var tms int
 	var tls bool
-	var defHdr, vars, authCfg []byte
+	var defHdr, vars, authCfg, consumerCfg []byte
 
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT name, description, base_url, enabled, auth_type, default_headers, variables, auth_config, timeout_ms, tls_insecure, slug
+		SELECT name, description, base_url, enabled, auth_type, default_headers, variables, consumer_config, auth_config, timeout_ms, tls_insecure, slug
 		FROM integrations WHERE id=$1
-	`, id).Scan(&name, &desc, &baseURL, &en, &authType, &defHdr, &vars, &authCfg, &tms, &tls, &slug)
+	`, id).Scan(&name, &desc, &baseURL, &en, &authType, &defHdr, &vars, &consumerCfg, &authCfg, &tms, &tls, &slug)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "integração não encontrada", nil)
 		return
@@ -291,6 +299,9 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["variables"]; ok {
 		vars = []byte(v)
 	}
+	if v, ok := body["consumer_config"]; ok {
+		consumerCfg = []byte(v)
+	}
 	if v, ok := body["auth_config"]; ok {
 		authCfg = mergeAuthConfig(authCfg, []byte(v))
 	}
@@ -306,11 +317,12 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 			name=$2, description=$3, base_url=$4, enabled=$5, auth_type=$6,
 			default_headers=COALESCE($7::jsonb, default_headers),
 			variables=COALESCE($8::jsonb, variables),
-			auth_config=COALESCE($9::jsonb, auth_config),
-			timeout_ms=$10, tls_insecure=$11, updated_at=now()
+			consumer_config=COALESCE($9::jsonb, consumer_config),
+			auth_config=COALESCE($10::jsonb, auth_config),
+			timeout_ms=$11, tls_insecure=$12, updated_at=now()
 		WHERE id=$1
 	`, id, strings.TrimSpace(name), desc, strings.TrimSpace(baseURL), en, authType,
-		nullJSON(defHdr), nullJSON(vars), nullJSON(authCfg), tms, tls)
+		nullJSON(defHdr), nullJSON(vars), nullJSON(consumerCfg), nullJSON(authCfg), tms, tls)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -327,7 +339,7 @@ func mergeAuthConfig(prev, patch []byte) []byte {
 	}
 	for k, v := range b {
 		if s, ok := v.(string); ok && s == "" {
-			if k == "password" || k == "token" || k == "api_key" {
+			if k == "password" || k == "token" || k == "api_key" || k == "client_secret" {
 				continue
 			}
 		}
@@ -408,6 +420,19 @@ func (s *Server) integrationTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runResultPayload(res))
 }
 
+func persistIntegrationSessionToken(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, res integrationhttp.RunResult) {
+	if res.TokenFromLogin == "" || pool == nil {
+		return
+	}
+	expSec := integrationhttp.TokenExpiresInSeconds([]byte(res.ResponsePreview))
+	if expSec <= 0 {
+		expSec = 86400
+	}
+	_, _ = pool.Exec(ctx, `
+		UPDATE integrations SET session_token=$2, session_expires_at=now() + ($3::int * interval '1 second'), updated_at=now() WHERE id=$1
+	`, id, res.TokenFromLogin, expSec)
+}
+
 func (s *Server) persistIntegrationTest(ctx context.Context, id uuid.UUID, res integrationhttp.RunResult) {
 	msg := res.ErrorMessage
 	if res.OK {
@@ -433,7 +458,7 @@ func (s *Server) integrationLogin(w http.ResponseWriter, r *http.Request) {
 	var loginReq *integrationhttp.RequestConfig
 	var reqID *uuid.UUID
 
-	// Pedido marcado is_login
+	// Requisição marcado is_login
 	var rr requestRow
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
@@ -445,32 +470,51 @@ func (s *Server) integrationLogin(w http.ResponseWriter, r *http.Request) {
 		loginReq = &rc
 		rid := rr.ID
 		reqID = &rid
+	} else if strings.EqualFold(cfg.AuthType, "oauth2_password") && cfg.AuthConfig.LoginPath != "" {
+		ac := cfg.AuthConfig
+		if ac.TokenJSONPath == "" {
+			ac.TokenJSONPath = "access_token"
+			cfg.AuthConfig = ac
+		}
+		body, bt := integrationhttp.OAuth2PasswordBody(cfg.AuthConfig)
+		rc := integrationhttp.RequestConfig{
+			Method:             cfg.AuthConfig.LoginMethod,
+			Path:               cfg.AuthConfig.LoginPath,
+			BodyTemplate:       body,
+			BodyType:           bt,
+			ExtractJSONPath:    ac.TokenJSONPath,
+			OmitDefaultHeaders: true,
+		}
+		if rc.Method == "" {
+			rc.Method = "POST"
+		}
+		loginReq = &rc
 	} else if strings.EqualFold(cfg.AuthType, "login") && cfg.AuthConfig.LoginPath != "" {
-		bt := "json"
+		bt := strings.ToLower(strings.TrimSpace(cfg.AuthConfig.LoginBodyType))
+		if bt != "form" && bt != "json" {
+			bt = "json"
+		}
 		body := cfg.AuthConfig.LoginBody
 		rc := integrationhttp.RequestConfig{
-			Method:       cfg.AuthConfig.LoginMethod,
-			Path:         cfg.AuthConfig.LoginPath,
-			BodyTemplate: body,
-			BodyType:     bt,
+			Method:             cfg.AuthConfig.LoginMethod,
+			Path:               cfg.AuthConfig.LoginPath,
+			BodyTemplate:       body,
+			BodyType:           bt,
+			OmitDefaultHeaders: true,
 		}
 		if rc.Method == "" {
 			rc.Method = "POST"
 		}
 		loginReq = &rc
 	} else {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "configure auth_type=login ou um pedido marcado como login", nil)
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "configure auth_type=login/oauth2_password ou uma requisição marcada como login", nil)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res := integrationhttp.RunWithLoginRequest(ctx, cfg, *loginReq, true)
-	if res.TokenFromLogin != "" {
-		_, _ = s.DB().Exec(r.Context(), `
-			UPDATE integrations SET session_token=$2, session_expires_at=now() + interval '24 hours', updated_at=now() WHERE id=$1
-		`, id, res.TokenFromLogin)
-	}
+	persistIntegrationSessionToken(r.Context(), s.DB(), id, res)
 	if reqID != nil {
 		s.persistRequestRun(r.Context(), *reqID, res)
 	}
@@ -519,7 +563,7 @@ func (s *Server) integrationRunRequest(w http.ResponseWriter, r *http.Request) {
 		&rr.IsLogin, &rr.SortOrder, &rr.Enabled, &rr.LastRunAt, &rr.LastRunOK, &rr.LastRunStatus, &rr.LastRunMessage,
 	)
 	if err == pgx.ErrNoRows {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "pedido não encontrado", nil)
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "requisição não encontrada", nil)
 		return
 	}
 	if err != nil {
@@ -536,14 +580,18 @@ func (s *Server) integrationRunRequest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res := integrationhttp.RunWithLoginRequest(ctx, cfg, rc, rr.IsLogin)
-	if rr.IsLogin && res.TokenFromLogin != "" {
-		_, _ = s.DB().Exec(r.Context(), `
-			UPDATE integrations SET session_token=$2, session_expires_at=now() + interval '24 hours', updated_at=now() WHERE id=$1
-		`, integID, res.TokenFromLogin)
+	if rr.IsLogin {
+		persistIntegrationSessionToken(r.Context(), s.DB(), integID, res)
+		if res.TokenFromLogin != "" {
+			cfg.SessionToken = res.TokenFromLogin
+		}
 	}
 	s.persistRequestRun(r.Context(), reqID, res)
 	s.logIntegrationRun(r.Context(), integID, &reqID, "request", res)
-	writeJSON(w, http.StatusOK, runResultPayload(res))
+	payload := runResultPayload(res)
+	payload["request_id"] = reqID
+	payload["request_name"] = rr.Name
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) integrationRunAll(w http.ResponseWriter, r *http.Request) {
@@ -583,11 +631,11 @@ func (s *Server) integrationRunAll(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		res := integrationhttp.RunWithLoginRequest(ctx, cfg, rc, rr.IsLogin)
 		cancel()
-		if rr.IsLogin && res.TokenFromLogin != "" {
-			cfg.SessionToken = res.TokenFromLogin
-			_, _ = s.DB().Exec(r.Context(), `
-				UPDATE integrations SET session_token=$2, session_expires_at=now() + interval '24 hours', updated_at=now() WHERE id=$1
-			`, integID, res.TokenFromLogin)
+		if rr.IsLogin {
+			persistIntegrationSessionToken(r.Context(), s.DB(), integID, res)
+			if res.TokenFromLogin != "" {
+				cfg.SessionToken = res.TokenFromLogin
+			}
 		}
 		s.persistRequestRun(r.Context(), rr.ID, res)
 		rid := rr.ID
@@ -724,7 +772,7 @@ func (s *Server) patchIntegrationRequest(w http.ResponseWriter, r *http.Request)
 	`, reqID, integID).Scan(&name, &desc, &method, &path, &pathParams, &queryParams, &headers, &bodyTpl, &bt,
 		&extract, &isLogin, &sortOrder, &enabled)
 	if err == pgx.ErrNoRows {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "pedido não encontrado", nil)
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "requisição não encontrada", nil)
 		return
 	}
 	if err != nil {
@@ -808,7 +856,7 @@ func (s *Server) deleteIntegrationRequest(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "pedido não encontrado", nil)
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "requisição não encontrada", nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -820,30 +868,45 @@ func (s *Server) listIntegrationLogs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_ID", "integração inválida", nil)
 		return
 	}
+	limit := 50
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	var filterReqID *uuid.UUID
+	if v := strings.TrimSpace(r.URL.Query().Get("request_id")); v != "" {
+		if rid, err := uuid.Parse(v); err == nil {
+			filterReqID = &rid
+		}
+	}
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, request_id, run_kind, ok, status_code, latency_ms, request_url, error_message, created_at
-		FROM integration_run_logs WHERE integration_id=$1 ORDER BY created_at DESC LIMIT 50
-	`, integID)
+		SELECT id, request_id, run_kind, ok, status_code, latency_ms, request_url, response_preview, error_message, created_at
+		FROM integration_run_logs
+		WHERE integration_id=$1 AND ($2::uuid IS NULL OR request_id = $2)
+		ORDER BY created_at DESC LIMIT $3
+	`, integID, filterReqID, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	defer rows.Close()
 	type logRow struct {
-		ID           uuid.UUID  `json:"id"`
-		RequestID    *uuid.UUID `json:"request_id"`
-		RunKind      string     `json:"run_kind"`
-		OK           bool       `json:"ok"`
-		StatusCode   *int       `json:"status_code"`
-		LatencyMS    *int       `json:"latency_ms"`
-		RequestURL   *string    `json:"request_url"`
-		ErrorMessage *string    `json:"error_message"`
-		CreatedAt    time.Time  `json:"created_at"`
+		ID              uuid.UUID  `json:"id"`
+		RequestID       *uuid.UUID `json:"request_id"`
+		RunKind         string     `json:"run_kind"`
+		OK              bool       `json:"ok"`
+		StatusCode      *int       `json:"status_code"`
+		LatencyMS       *int       `json:"latency_ms"`
+		RequestURL      *string    `json:"request_url"`
+		ResponsePreview *string    `json:"response_preview"`
+		ErrorMessage    *string    `json:"error_message"`
+		CreatedAt       time.Time  `json:"created_at"`
 	}
 	var list []logRow
 	for rows.Next() {
 		var row logRow
-		if err := rows.Scan(&row.ID, &row.RequestID, &row.RunKind, &row.OK, &row.StatusCode, &row.LatencyMS, &row.RequestURL, &row.ErrorMessage, &row.CreatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.RequestID, &row.RunKind, &row.OK, &row.StatusCode, &row.LatencyMS, &row.RequestURL, &row.ResponsePreview, &row.ErrorMessage, &row.CreatedAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}

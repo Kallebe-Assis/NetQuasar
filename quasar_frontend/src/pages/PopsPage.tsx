@@ -140,7 +140,7 @@ export function PopsPage() {
       setEdit(null);
       setToast({ text: "Guardado com sucesso (POP).", tone: "ok" });
     },
-    onError: (err: Error) => setToast({ text: err.message || "Falha ao guardar (POP).", tone: "err" }),
+    onError: (err: Error) => setToast({ text: err.message || "Falha ao salvar (POP).", tone: "err" }),
   });
 
   const del = useMutation({
@@ -178,7 +178,7 @@ export function PopsPage() {
       setContactNotes("");
       setToast({ text: "Guardado com sucesso (responsável).", tone: "ok" });
     },
-    onError: (err: Error) => setToast({ text: err.message || "Falha ao guardar (responsável).", tone: "err" }),
+    onError: (err: Error) => setToast({ text: err.message || "Falha ao salvar (responsável).", tone: "err" }),
   });
   const delContact = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/pops/contacts/${id}`, { method: "DELETE" }),
@@ -496,7 +496,7 @@ export function PopsPage() {
                 Cancelar
               </button>
               <button type="button" className="btn btn--primary" disabled={!eDesc.trim() || !!editCoordErr || patch.isPending} onClick={() => patch.mutate()}>
-                Guardar
+                Salvar
               </button>
             </div>
           </div>

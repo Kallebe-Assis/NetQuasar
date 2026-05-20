@@ -394,7 +394,7 @@ export function AlertsPage() {
           {reval.isSuccess && reval.data?.note && (
             <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
               {typeof reval.data.closed_count === "number" ? `${reval.data.closed_count} alerta(s) fechado(s). ` : ""}
-              Pedido processado no servidor.
+              Requisição processado no servidor.
             </p>
           )}
           {reval.isError && <div className="msg msg--err margin-bottom mb-12">{(reval.error as Error).message}</div>}

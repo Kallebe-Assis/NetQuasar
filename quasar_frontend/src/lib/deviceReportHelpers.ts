@@ -265,7 +265,7 @@ export function buildDeviceReportMainTable(args: {
   return rows;
 }
 
-/** Converte o JSON guardado em `interface_snapshots` (lista { oid, value, type }) em linhas para tabela. */
+/** Converte o JSON salvo em `interface_snapshots` (lista { oid, value, type }) em linhas para tabela. */
 /** Mikrotik / rádio / OLT: mostrar interfaces no relatório pela categoria ou pela marca. */
 export function deviceShowsInterfaceMonitorSection(category: string, brand?: string | null): boolean {
   const c = (category ?? "").trim().toLowerCase();

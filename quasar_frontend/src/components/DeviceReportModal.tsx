@@ -1170,7 +1170,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
           <div className="card" style={{ flex: "1 1 420px", margin: 0 }}>
             <h4 style={{ marginTop: 0 }}>Resumo de interfaces no período</h4>
             <p style={{ fontSize: 12, color: "var(--muted)" }}>
-              Total de snapshots guardados: {reportInterfacesHistory.data?.snapshots?.length ?? 0}
+              Total de snapshots salvos: {reportInterfacesHistory.data?.snapshots?.length ?? 0}
               {!showIfaceMonitor && " · Detalhe por interface aparece no relatório para Mikrotik (categoria ou marca) e Rádio."}
             </p>
           </div>

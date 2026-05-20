@@ -115,7 +115,7 @@ function dbErrorDetailsHint(err: unknown): string | null {
 
 function friendlyDbConnectionError(err: unknown): string {
   if (!(err instanceof ApiError)) {
-    return "Não foi possível concluir o pedido. Verifique a ligação à internet e tente novamente.";
+    return "Não foi possível concluir a requisição. Verifique a ligação à internet e tente novamente.";
   }
   const hint = dbErrorDetailsHint(err);
   if (hint) return hint;
@@ -160,7 +160,7 @@ function friendlyDbConnectionError(err: unknown): string {
 }
 
 function friendlyDbPatchError(err: unknown): string {
-  if (!(err instanceof ApiError)) return "Não foi possível guardar. Tente novamente.";
+  if (!(err instanceof ApiError)) return "Não foi possível salvar. Tente novamente.";
   const raw = (err.message || "").toLowerCase();
   if (raw.includes("database_url") && raw.includes("apply_connection")) {
     return "Para usar uma URL completa tem de marcar a opção “Aplicar já esta ligação”.";
@@ -367,13 +367,13 @@ function DatabasePanel() {
         <InfoHint label="Ligação à base de dados">
           <p>
             Estado: ligação em uso é{" "}
-            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições guardadas"}</strong>
+            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições salvas"}</strong>
             {" · "}
-            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já guardada" : "ainda não guardada"}</strong>
+            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já salva" : "ainda não salva"}</strong>
           </p>
           <p>
             Preencha os campos abaixo <strong>ou</strong> só o campo “URL completa”. Use “Testar ligação” para confirmar o acesso sem alterar o sistema; use
-            “Guardar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
+            “Salvar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
           </p>
           <p>
             O host <span className="mono">db.…supabase.co</span> pode resolver só para IPv6; no Docker use o <strong>Session pooler</strong> (ex.:{" "}
@@ -382,7 +382,7 @@ function DatabasePanel() {
             <span className="mono">db.*.supabase.co</span>.
           </p>
           <p>
-            Se preencher o campo URL completa, o teste usa só a URL (não precisa dos campos de cima para testar). Para guardar uma nova URL é necessário
+            Se preencher o campo URL completa, o teste usa só a URL (não precisa dos campos de cima para testar). Para salvar uma nova URL é necessário
             marcar “Aplicar já esta ligação”.
           </p>
           <p>
@@ -426,7 +426,7 @@ function DatabasePanel() {
         <label htmlFor="db-user">Utilizador da base de dados</label>
         <input id="db-user" className="input" value={dbUser} onChange={(e) => setDbUser(e.target.value)} placeholder="nome de utilizador PostgreSQL" autoComplete="off" />
         {hasMaskedDbUser(meta.data) && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe um utilizador guardado; pode deixar em branco para manter o atual.</p>
+          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe um utilizador salvo; pode deixar em branco para manter o atual.</p>
         )}
       </div>
       <div className="field" style={fieldStyle}>
@@ -454,9 +454,9 @@ function DatabasePanel() {
       </div>
       <div className="field" style={fieldStyle}>
         <label htmlFor="db-pass">Palavra-passe da base de dados</label>
-        <input id="db-pass" className="input" type="password" autoComplete="new-password" value={dbPass} onChange={(e) => setDbPass(e.target.value)} placeholder="não é mostrada depois de guardar" />
+        <input id="db-pass" className="input" type="password" autoComplete="new-password" value={dbPass} onChange={(e) => setDbPass(e.target.value)} placeholder="não é mostrada depois de salvar" />
         {meta.data?.password_configured && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe palavra-passe guardada; pode deixar em branco para testar com a guardada.</p>
+          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe palavra-passe salva; pode deixar em branco para testar com a salva.</p>
         )}
       </div>
 
@@ -475,7 +475,7 @@ function DatabasePanel() {
 
       <div className="row" style={{ marginTop: 16, flexWrap: "wrap", gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate(buildPatchBody())}>
-          Guardar definições
+          Salvar definições
         </button>
         <button type="button" className="btn" disabled={testConn.isPending} onClick={runTestConnection}>
           Testar ligação
@@ -555,7 +555,7 @@ function UsersPanel() {
       setEditId(null);
       setSaveToast({ ok: true, text: "Guardado com sucesso (utilizador)." });
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao guardar (utilizador)." }),
+    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (utilizador)." }),
   });
 
   const del = useMutation({
@@ -711,7 +711,7 @@ function UsersPanel() {
                 patch.mutate();
               }}
             >
-              Guardar
+              Salvar
             </button>
             <button type="button" className="btn" onClick={() => setEditId(null)}>
               Cancelar
@@ -1107,7 +1107,7 @@ function AlertThresholdsPanel() {
       {upsert.isError && <div className="msg msg--err">{(upsert.error as Error).message}</div>}
       {upsert.isSuccess && (
         <div className="msg msg--ok">
-          Critérios guardados com sucesso. O monitoramento consulta estes valores para decidir se abre, atualiza ou resolve alertas.
+          Critérios salvos com sucesso. O monitoramento consulta estes valores para decidir se abre, atualiza ou resolve alertas.
         </div>
       )}
     </div>
@@ -1248,7 +1248,7 @@ function ConnectionPanel() {
   };
 
   /**
-   * Lê o JSON guardado e separa (a) campos reservados dos cartões OLT/Mikrotik
+   * Lê o JSON salvo e separa (a) campos reservados dos cartões OLT/Mikrotik
    * e (b) restantes em linhas editáveis por categoria.
    */
   const extraRowsFromOverridesDoc = (doc: OverridesDoc): Record<OidExtraCategory, ExtraOidRow[]> => {
@@ -1541,7 +1541,7 @@ function ConnectionPanel() {
       <div className="card" style={{ marginTop: 8 }}>
         <h4 style={{ marginTop: 0 }}>{title}</h4>
         <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-          Um identificador SNMP por linha, com descrição para o relatório (ex.: «CPU 02»). Escolha o tipo de métrica para o sistema organizar os dados ao guardar.
+          Um identificador SNMP por linha, com descrição para o relatório (ex.: «CPU 02»). Escolha o tipo de métrica para o sistema organizar os dados ao salvar.
         </p>
         {rows.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
@@ -1781,7 +1781,7 @@ function ConnectionPanel() {
       </div>
       <h3 style={{ marginTop: 14 }}>Outras leituras SNMP por categoria</h3>
       <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Use quando precisar de mais objetos além dos cartões acima. Ao guardar, tudo é enviado para o servidor de forma estruturada (sem editar JSON à mão).
+        Use quando precisar de mais objetos além dos cartões acima. Ao salvar, tudo é enviado para o servidor de forma estruturada (sem editar JSON à mão).
       </p>
       {renderOidExtrasBlock("olt", "OLT — leituras extra")}
       {renderOidExtrasBlock("mikrotik", "MikroTik — leituras extra")}
@@ -1829,10 +1829,10 @@ function ConnectionPanel() {
         )}
       </div>
       <button type="button" className="btn btn--primary" style={{ marginTop: 12 }} disabled={patch.isPending} onClick={() => patch.mutate()}>
-        Guardar credenciais e SNMP
+        Salvar credenciais e SNMP
       </button>
       {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
-      {patch.isSuccess && <div className="msg msg--ok">Alterações guardadas.</div>}
+      {patch.isSuccess && <div className="msg msg--ok">Alterações salvas.</div>}
     </div>
   );
 }
@@ -1865,7 +1865,7 @@ function TelegramTestOutcome({ data, error }: { data: unknown; error: Error | nu
     if (d.ok === true) {
       return (
         <div className="msg msg--ok" style={{ marginTop: 10 }}>
-          Pedido de teste concluído.
+          Requisição de teste concluído.
         </div>
       );
     }
@@ -1911,7 +1911,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       qc.invalidateQueries({ queryKey: ["settings-tg", id] });
       setSaveToast({ ok: true, text: "Guardado com sucesso (Telegram)." });
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao guardar (Telegram)." }),
+    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (Telegram)." }),
   });
 
   const test = useMutation({
@@ -1925,7 +1925,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
     <div className="card">
       <h2>Telegram — {title}</h2>
       <p style={{ fontSize: 12, color: "var(--muted)" }}>
-        Para alterar o bot, introduza um novo token abaixo. O valor já guardado não é mostrado por segurança.
+        Para alterar o bot, introduza um novo token abaixo. O valor já salvo não é mostrado por segurança.
       </p>
       <div className="field">
         <label>Token do bot (novo)</label>
@@ -1937,7 +1937,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       </div>
       <div className="row" style={{ marginTop: 12, gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
-          Guardar
+          Salvar
         </button>
         <button type="button" className="btn" disabled={test.isPending} onClick={() => test.mutate()}>
           Enviar mensagem de teste
@@ -1998,7 +1998,7 @@ function OltVendorsPanel() {
       setSaveToast({ ok: true, text: `Guardado com sucesso (perfil OLT: ${brand}).` });
     },
     onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao guardar (perfil OLT)." });
+      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao salvar (perfil OLT)." });
     },
   });
 
@@ -2039,7 +2039,7 @@ function OltVendorsPanel() {
             <input className="input mono" value={base} onChange={(e) => setBase(e.target.value)} title="Árvore SNMP base para este fabricante" />
           </div>
           <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
-            Guardar perfil
+            Salvar perfil
           </button>
           {saveToast && (
             <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>

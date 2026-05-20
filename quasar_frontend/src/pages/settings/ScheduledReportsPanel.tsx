@@ -94,7 +94,7 @@ function DigestScheduleCard() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.automationAlertsDigest });
-      setToast({ ok: true, text: "Resumo de alertas guardado." });
+      setToast({ ok: true, text: "Resumo de alertas salvo." });
     },
     onError: (err) => setToast({ ok: false, text: (err as Error).message }),
   });
@@ -172,7 +172,7 @@ function DigestScheduleCard() {
       )}
       <div className="row" style={{ marginTop: 12, gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending || busy} onClick={() => patch.mutate()}>
-          Guardar
+          Salvar
         </button>
         <button type="button" className="btn" disabled={busy} onClick={() => run.mutate()}>
           Executar agora
@@ -279,7 +279,7 @@ function CommercialScheduleCard() {
       )}
       <div className="row" style={{ marginTop: 12, gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending || busy} onClick={() => patch.mutate()}>
-          Guardar
+          Salvar
         </button>
         <button type="button" className="btn" disabled={busy} onClick={() => run.mutate()}>
           Executar agora
@@ -375,7 +375,7 @@ function SmtpPanel() {
       </label>
       <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
-          Guardar SMTP
+          Salvar SMTP
         </button>
         <input className="input" style={{ maxWidth: 280 }} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="e-mail para teste" />
         <button type="button" className="btn" disabled={test.isPending} onClick={() => test.mutate()}>

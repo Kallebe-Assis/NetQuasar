@@ -37,17 +37,85 @@ type PathParam struct {
 }
 
 type AuthConfig struct {
-	Token        string `json:"token"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
-	HeaderName   string `json:"header_name"`
-	APIKey       string `json:"api_key"`
-	TokenPrefix  string `json:"token_prefix"`
-	LoginPath    string `json:"login_path"`
-	LoginMethod  string `json:"login_method"`
-	LoginBody    string `json:"login_body"`
+	Token         string `json:"token"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	ClientID      string `json:"client_id"`
+	ClientSecret  string `json:"client_secret"`
+	GrantType     string `json:"grant_type"`
+	HeaderName    string `json:"header_name"`
+	APIKey        string `json:"api_key"`
+	TokenPrefix   string `json:"token_prefix"`
+	LoginPath     string `json:"login_path"`
+	LoginMethod   string `json:"login_method"`
+	LoginBody     string `json:"login_body"`
+	LoginBodyType string `json:"login_body_type"` // json | form (form = x-www-form-urlencoded, padrão OAuth2/Postman)
 	TokenJSONPath string `json:"token_json_path"`
-	TokenHeader  string `json:"token_header"`
+	TokenHeader   string `json:"token_header"`
+}
+
+// OAuth2PasswordBody monta corpo e tipo para requisição de token (form é o mais comum em APIs OAuth2).
+func OAuth2PasswordBody(ac AuthConfig) (body string, bodyType string) {
+	bt := strings.ToLower(strings.TrimSpace(ac.LoginBodyType))
+	if bt != "json" {
+		bt = "form"
+	}
+	if bt == "json" {
+		return BuildOAuth2PasswordLoginBody(ac), "json"
+	}
+	return BuildOAuth2PasswordFormEncoded(ac), "form"
+}
+
+// BuildOAuth2PasswordLoginBody monta o JSON típico de token OAuth2 (grant password).
+func BuildOAuth2PasswordLoginBody(ac AuthConfig) string {
+	grant := strings.TrimSpace(ac.GrantType)
+	if grant == "" {
+		grant = "password"
+	}
+	body := map[string]string{
+		"client_id":     strings.TrimSpace(ac.ClientID),
+		"client_secret": strings.TrimSpace(ac.ClientSecret),
+		"username":      strings.TrimSpace(ac.Username),
+		"password":      strings.TrimSpace(ac.Password),
+		"grant_type":    grant,
+	}
+	b, _ := json.Marshal(body)
+	return string(b)
+}
+
+// BuildOAuth2PasswordFormEncoded corpo application/x-www-form-urlencoded (como Postman OAuth2).
+func BuildOAuth2PasswordFormEncoded(ac AuthConfig) string {
+	grant := strings.TrimSpace(ac.GrantType)
+	if grant == "" {
+		grant = "password"
+	}
+	v := url.Values{}
+	v.Set("client_id", strings.TrimSpace(ac.ClientID))
+	v.Set("client_secret", strings.TrimSpace(ac.ClientSecret))
+	v.Set("username", strings.TrimSpace(ac.Username))
+	v.Set("password", strings.TrimSpace(ac.Password))
+	v.Set("grant_type", grant)
+	return v.Encode()
+}
+
+// TokenExpiresInSeconds lê expires_in da resposta de login (segundos).
+func TokenExpiresInSeconds(raw []byte) int {
+	v := extractJSONPath(raw, "expires_in")
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		var sec int
+		if _, err := fmt.Sscanf(fmt.Sprint(v), "%d", &sec); err == nil {
+			return sec
+		}
+	}
+	return 0
 }
 
 type IntegrationConfig struct {
@@ -62,14 +130,15 @@ type IntegrationConfig struct {
 }
 
 type RequestConfig struct {
-	Method          string
-	Path            string
-	PathParams      []PathParam
-	QueryParams     []ParamKV
-	Headers         map[string]string
-	BodyTemplate    string
-	BodyType        string
-	ExtractJSONPath string
+	Method             string
+	Path               string
+	PathParams         []PathParam
+	QueryParams        []ParamKV
+	Headers            map[string]string
+	BodyTemplate       string
+	BodyType           string
+	ExtractJSONPath    string
+	OmitDefaultHeaders bool // requisição de token: não enviar headers por defeito (ex. credenciais em header)
 }
 
 type RunResult struct {
@@ -191,7 +260,7 @@ func applyAuthHeaders(h map[string]string, cfg IntegrationConfig) {
 		if key != "" {
 			h[name] = key
 		}
-	case "login":
+	case "login", "oauth2_password":
 		if cfg.SessionToken != "" {
 			hdr := strings.TrimSpace(ac.TokenHeader)
 			if hdr == "" {
@@ -244,7 +313,11 @@ func Execute(ctx context.Context, integ IntegrationConfig, req RequestConfig) Ru
 		res.ErrorMessage = err.Error()
 		return res
 	}
-	headers := MergeHeaders(integ.DefaultHeaders, req.Headers, integ)
+	defHdr := integ.DefaultHeaders
+	if req.OmitDefaultHeaders {
+		defHdr = nil
+	}
+	headers := MergeHeaders(defHdr, req.Headers, integ)
 	for k, v := range headers {
 		if strings.EqualFold(k, "host") {
 			continue
@@ -315,6 +388,10 @@ func buildBody(req RequestConfig, vars map[string]string) (io.Reader, string, er
 	case "text":
 		return strings.NewReader(body), "text/plain; charset=utf-8", nil
 	case "form":
+		// Corpo já codificado (client_id=…&client_secret=…)
+		if body != "" && strings.Contains(body, "=") && !strings.Contains(body, "\n") {
+			return strings.NewReader(body), "application/x-www-form-urlencoded", nil
+		}
 		vals := url.Values{}
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
@@ -460,6 +537,7 @@ func RunWithLoginRequest(ctx context.Context, integ IntegrationConfig, req Reque
 			ac.TokenJSONPath = "access_token"
 			integ.AuthConfig = ac
 		}
+		req.OmitDefaultHeaders = true
 	}
 	res := Execute(ctx, integ, req)
 	if isLogin && res.OK {

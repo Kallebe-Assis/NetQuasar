@@ -37,7 +37,7 @@ export function AppearancePanel() {
       applyUiTheme(theme);
       qc.setQueryData(queryKeys.uiAppearance, { theme, updated_at: new Date().toISOString() });
       void qc.invalidateQueries({ queryKey: queryKeys.uiAppearance });
-      setSaveToast({ ok: true, text: `Tema «${uiThemeLabel(theme)}» guardado para todos os utilizadores.` });
+      setSaveToast({ ok: true, text: `Tema «${uiThemeLabel(theme)}» salvo para todos os utilizadores.` });
     },
     onError: (e: Error) => setSaveToast({ ok: false, text: e.message }),
   });
@@ -53,7 +53,7 @@ export function AppearancePanel() {
         Tema da interface
         <InfoHint label="Tema claro e escuro">
           <p>
-            Define o aspecto visual de todo o NetQuasar (menu, tabelas, alertas, login). A preferência fica guardada na base de dados e aplica-se a todos os
+            Define o aspecto visual de todo o NetQuasar (menu, tabelas, alertas, login). A preferência fica salva na base de dados e aplica-se a todos os
             utilizadores.
           </p>
         </InfoHint>
@@ -83,10 +83,10 @@ export function AppearancePanel() {
       </div>
       <div className="row" style={{ marginTop: 16, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button type="button" className="btn btn--primary" disabled={save.isPending || q.isLoading} onClick={() => save.mutate(draft)}>
-          Guardar tema
+          Salvar tema
         </button>
         <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-          Pré-visualização: <strong style={{ color: "var(--text)" }}>{uiThemeLabel(draft)}</strong> (restaura ao sair sem guardar)
+          Pré-visualização: <strong style={{ color: "var(--text)" }}>{uiThemeLabel(draft)}</strong> (restaura ao sair sem salvar)
         </p>
       </div>
       {saveToast ? (
