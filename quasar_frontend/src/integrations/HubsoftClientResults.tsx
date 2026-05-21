@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
-import { Eye, X } from "lucide-react";
-import type { ClientCard } from "./types";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
+import { ActionMenu } from "../components/ActionMenu";
+import type { AttendanceItem, ClientCard, WorkOrderItem } from "./types";
+
+type SupportTab = "atendimentos" | "ordens";
 
 const DETAIL_FONT = "var(--integration-detail-font-size, 11px)";
 
@@ -11,6 +15,26 @@ function labelStatus(s?: string) {
   if (low.includes("suspen") || low.includes("debito")) return "badge badge--err";
   if (low.includes("cancel")) return "badge badge--off";
   return "badge";
+}
+
+function formatServiceStatus(status?: string): string {
+  if (!status?.trim()) return "";
+  const key = status.trim().toLowerCase().replace(/\s+/g, "_");
+  const labels: Record<string, string> = {
+    servico_habilitado: "Serviço habilitado",
+    servico_desabilitado: "Serviço desabilitado",
+    servico_suspenso: "Serviço suspenso",
+    servico_cancelado: "Serviço cancelado",
+  };
+  if (labels[key]) return labels[key];
+  if (key.includes("_")) {
+    return key
+      .split("_")
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+  return status.trim();
 }
 
 function normalizeForSearch(s: string): string {
@@ -92,15 +116,33 @@ function ClientCardSummary({ c }: { c: ClientCard }) {
       ) : null}
       {c.services && c.services.length > 0 ? (
         <div className="integration-consult-card__services">
-          {c.services.map((s, si) => (
-            <div key={s.id ?? `${si}-${s.login}-${s.ipv4}`} className="integration-consult-card__service">
-              <span className="integration-consult-card__value">{s.name || s.login || "Plano / serviço"}</span>
-              <span className="integration-consult-card__label">IPv4:</span>
-              <span className="mono integration-consult-card__value">{s.ipv4 || "—"}</span>
-              {s.login ? <span className="mono integration-consult-card__label">{s.login}</span> : null}
-              {s.status ? <span className={labelStatus(s.status) ?? "badge"}>{s.status}</span> : null}
-            </div>
-          ))}
+          {c.services.map((s, si) => {
+            const statusLabel = formatServiceStatus(s.status);
+            return (
+              <div key={s.id ?? `${si}-${s.login}-${s.ipv4}`} className="integration-consult-card__service">
+                <div className="integration-consult-card__service-cell">
+                  <span className="integration-consult-card__label">Plano</span>
+                  <span className="integration-consult-card__value">{s.name || s.login || "—"}</span>
+                </div>
+                <div className="integration-consult-card__service-cell">
+                  <span className="integration-consult-card__label">IPv4</span>
+                  <span className="mono integration-consult-card__value">{s.ipv4 || "—"}</span>
+                </div>
+                <div className="integration-consult-card__service-cell">
+                  <span className="integration-consult-card__label">Login</span>
+                  <span className="mono integration-consult-card__value">{s.login || "—"}</span>
+                </div>
+                <div className="integration-consult-card__service-cell integration-consult-card__service-cell--status">
+                  <span className="integration-consult-card__label">Status</span>
+                  {statusLabel ? (
+                    <span className={labelStatus(s.status) ?? "badge"}>{statusLabel}</span>
+                  ) : (
+                    <span className="integration-consult-card__value">—</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </>
@@ -248,7 +290,7 @@ function ClientDetailModal({
   loading?: boolean;
   onClose: () => void;
 }) {
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div
         className="modal integration-detail-modal"
@@ -278,7 +320,174 @@ function ClientDetailModal({
           <ClientDetailBody raw={client.raw} />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
+  );
+}
+
+function SupportModal({
+  client,
+  tab,
+  onTabChange,
+  attendance,
+  workOrders,
+  loadingAttendance,
+  loadingWorkOrders,
+  attendanceEnabled,
+  workOrderEnabled,
+  onClose,
+}: {
+  client: ClientCard;
+  tab: SupportTab;
+  onTabChange: (t: SupportTab) => void;
+  attendance: { ok: boolean; message?: string; items: AttendanceItem[] };
+  workOrders: { ok: boolean; message?: string; items: WorkOrderItem[] };
+  loadingAttendance?: boolean;
+  loadingWorkOrders?: boolean;
+  attendanceEnabled?: boolean;
+  workOrderEnabled?: boolean;
+  onClose: () => void;
+}) {
+  const showAttTab = attendanceEnabled !== false;
+  const showWoTab = workOrderEnabled !== false;
+
+  return createPortal(
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal integration-support-modal"
+        role="dialog"
+        aria-labelledby="client-support-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="integration-support-modal__head">
+          <div className="integration-support-modal__head-text">
+            <h3 id="client-support-title" className="integration-support-modal__title">
+              Atendimentos e ordens de serviço
+            </h3>
+            <p className="integration-support-modal__client-name">{client.name || "Cliente"}</p>
+            {client.code ? (
+              <p className="integration-support-modal__subtitle mono">Código {client.code}</p>
+            ) : null}
+          </div>
+          <button type="button" className="btn" aria-label="Fechar" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="tabs integration-support-modal__tabs">
+          {showAttTab ? (
+            <button type="button" className={tab === "atendimentos" ? "active" : ""} onClick={() => onTabChange("atendimentos")}>
+              Atendimentos
+            </button>
+          ) : null}
+          {showWoTab ? (
+            <button type="button" className={tab === "ordens" ? "active" : ""} onClick={() => onTabChange("ordens")}>
+              Ordens de serviço
+            </button>
+          ) : null}
+        </div>
+
+        <div className="integration-support-modal__body">
+          {tab === "atendimentos" && showAttTab ? (
+            loadingAttendance ? (
+              <p className="integration-detail__empty">A carregar atendimentos…</p>
+            ) : !attendance.ok && attendance.message ? (
+              <div className="msg msg--err">{attendance.message}</div>
+            ) : attendance.items.length === 0 ? (
+              <div className="msg">{attendance.message || "Nenhum atendimento encontrado."}</div>
+            ) : (
+              <div className="table-wrap integration-support-table">
+                <table className="integration-support-table__grid integration-support-table__grid--att">
+                  <thead>
+                    <tr>
+                      <th>Protocolo</th>
+                      <th>Estado</th>
+                      <th>Assunto</th>
+                      <th>Descrição</th>
+                      <th>Abertura</th>
+                      <th>Fechamento</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendance.items.map((a, i) => (
+                      <tr key={a.id ?? a.protocol ?? i}>
+                        <td className="mono integration-support-table__cell">{a.protocol || "—"}</td>
+                        <td className="integration-support-table__cell">
+                          {a.status ? <span className={labelStatus(a.status) ?? "badge"}>{a.status}</span> : "—"}
+                          {a.pending === true ? <span className="badge integration-support-table__chip">Pendente</span> : null}
+                        </td>
+                        <td className="integration-support-table__cell">{a.subject || "—"}</td>
+                        <td className="integration-support-table__cell integration-support-table__cell--text">
+                          {a.description || "—"}
+                        </td>
+                        <td className="mono integration-support-table__cell integration-support-table__cell--date">
+                          {a.opened_at || "—"}
+                        </td>
+                        <td className="mono integration-support-table__cell integration-support-table__cell--date">
+                          {a.closed_at || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : null}
+
+          {tab === "ordens" && showWoTab ? (
+            loadingWorkOrders ? (
+              <p className="integration-detail__empty">A carregar ordens de serviço…</p>
+            ) : !workOrders.ok && workOrders.message ? (
+              <div className="msg msg--err">{workOrders.message}</div>
+            ) : workOrders.items.length === 0 ? (
+              <div className="msg">{workOrders.message || "Nenhuma ordem de serviço encontrada."}</div>
+            ) : (
+              <div className="table-wrap integration-support-table">
+                <table className="integration-support-table__grid integration-support-table__grid--os">
+                  <thead>
+                    <tr>
+                      <th>N.º O.S.</th>
+                      <th>Estado O.S.</th>
+                      <th>Plano / serviço</th>
+                      <th>Atendimento</th>
+                      <th>Cadastro</th>
+                      <th>Agendamento</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workOrders.items.map((o, i) => (
+                      <tr key={o.id ?? o.number ?? i}>
+                        <td className="mono integration-support-table__cell">{o.number || "—"}</td>
+                        <td className="integration-support-table__cell">
+                          <span className={labelStatus(o.status_label ?? o.status) ?? "badge"}>
+                            {o.status_label || o.status || "—"}
+                          </span>
+                        </td>
+                        <td className="integration-support-table__cell integration-support-table__cell--plan">
+                          <div className="integration-os-plan__title">{o.plan_name || o.description || "—"}</div>
+                          {o.service_status ? (
+                            <div className="integration-os-plan__meta">Estado do serviço: {o.service_status}</div>
+                          ) : null}
+                          {o.value ? <div className="integration-os-plan__meta">Valor: {o.value}</div> : null}
+                        </td>
+                        <td className="mono integration-support-table__cell">{o.attendance_protocol || "—"}</td>
+                        <td className="mono integration-support-table__cell integration-support-table__cell--date">
+                          {o.created_at || "—"}
+                        </td>
+                        <td className="mono integration-support-table__cell integration-support-table__cell--date">
+                          {o.scheduled_at || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : null}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -288,15 +497,35 @@ export function HubsoftClientResults({
   ok,
   localFilter,
   onFetchDetail,
+  onFetchAttendance,
+  onFetchWorkOrders,
+  attendanceEnabled,
+  workOrderEnabled,
 }: {
   clients: ClientCard[];
   message?: string;
   ok: boolean;
   localFilter: string;
   onFetchDetail?: (client: ClientCard) => Promise<ClientCard>;
+  onFetchAttendance?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: AttendanceItem[] }>;
+  onFetchWorkOrders?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: WorkOrderItem[] }>;
+  attendanceEnabled?: boolean;
+  workOrderEnabled?: boolean;
 }) {
+  const supportEnabled = !!(attendanceEnabled || workOrderEnabled);
+
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [supportClient, setSupportClient] = useState<ClientCard | null>(null);
+  const [supportTab, setSupportTab] = useState<SupportTab>("atendimentos");
+  const [attendanceItems, setAttendanceItems] = useState<AttendanceItem[]>([]);
+  const [workOrderItems, setWorkOrderItems] = useState<WorkOrderItem[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [workOrderLoading, setWorkOrderLoading] = useState(false);
+  const [attendanceOk, setAttendanceOk] = useState(true);
+  const [workOrderOk, setWorkOrderOk] = useState(true);
+  const [attendanceMessage, setAttendanceMessage] = useState<string | undefined>();
+  const [workOrderMessage, setWorkOrderMessage] = useState<string | undefined>();
 
   const filtered = useMemo(() => filterClientCards(clients, localFilter), [clients, localFilter]);
 
@@ -310,6 +539,55 @@ export function HubsoftClientResults({
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  const openSupport = async (c: ClientCard) => {
+    if (!onFetchAttendance && !onFetchWorkOrders) return;
+    setSupportClient(c);
+    setSupportTab(attendanceEnabled ? "atendimentos" : "ordens");
+    setAttendanceItems([]);
+    setWorkOrderItems([]);
+    setAttendanceMessage(undefined);
+    setWorkOrderMessage(undefined);
+    setAttendanceOk(true);
+    setWorkOrderOk(true);
+
+    const jobs: Promise<void>[] = [];
+    if (onFetchAttendance && attendanceEnabled) {
+      setAttendanceLoading(true);
+      jobs.push(
+        onFetchAttendance(c)
+          .then((r) => {
+            setAttendanceOk(!!r.ok);
+            setAttendanceMessage(r.message);
+            setAttendanceItems(r.items ?? []);
+          })
+          .catch((e) => {
+            setAttendanceOk(false);
+            setAttendanceMessage(e instanceof Error ? e.message : String(e));
+            setAttendanceItems([]);
+          })
+          .finally(() => setAttendanceLoading(false)),
+      );
+    }
+    if (onFetchWorkOrders && workOrderEnabled) {
+      setWorkOrderLoading(true);
+      jobs.push(
+        onFetchWorkOrders(c)
+          .then((r) => {
+            setWorkOrderOk(!!r.ok);
+            setWorkOrderMessage(r.message);
+            setWorkOrderItems(r.items ?? []);
+          })
+          .catch((e) => {
+            setWorkOrderOk(false);
+            setWorkOrderMessage(e instanceof Error ? e.message : String(e));
+            setWorkOrderItems([]);
+          })
+          .finally(() => setWorkOrderLoading(false)),
+      );
+    }
+    await Promise.all(jobs);
   };
 
   if (!ok && message) {
@@ -343,15 +621,23 @@ export function HubsoftClientResults({
               </div>
               <div className="integration-consult-card__actions">
                 {c.status ? <span className={labelStatus(c.status) ?? "badge"}>{c.status}</span> : null}
-                <button
-                  type="button"
-                  className="btn integration-consult-card__detail-btn"
-                  title="Ver detalhes completos"
-                  aria-label="Ver detalhes completos"
-                  onClick={() => openDetail(c)}
-                >
-                  <Eye size={15} />
-                </button>
+                <ActionMenu
+                  title="Opções do cliente"
+                  align="end"
+                  items={[
+                    {
+                      id: "detail",
+                      label: "Ver dados completos",
+                      onClick: () => void openDetail(c),
+                    },
+                    {
+                      id: "support",
+                      label: "Atendimentos e ordens de serviço",
+                      disabled: !supportEnabled || (!onFetchAttendance && !onFetchWorkOrders),
+                      onClick: () => void openSupport(c),
+                    },
+                  ]}
+                />
               </div>
             </div>
             <ClientCardSummary c={c} />
@@ -360,6 +646,20 @@ export function HubsoftClientResults({
       </div>
       {detailClient ? (
         <ClientDetailModal client={detailClient} loading={detailLoading} onClose={() => setDetailClient(null)} />
+      ) : null}
+      {supportClient ? (
+        <SupportModal
+          client={supportClient}
+          tab={supportTab}
+          onTabChange={setSupportTab}
+          attendance={{ ok: attendanceOk, message: attendanceMessage, items: attendanceItems }}
+          workOrders={{ ok: workOrderOk, message: workOrderMessage, items: workOrderItems }}
+          loadingAttendance={attendanceLoading}
+          loadingWorkOrders={workOrderLoading}
+          attendanceEnabled={attendanceEnabled}
+          workOrderEnabled={workOrderEnabled}
+          onClose={() => setSupportClient(null)}
+        />
       ) : null}
     </>
   );

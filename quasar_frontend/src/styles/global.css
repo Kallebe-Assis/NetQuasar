@@ -660,6 +660,58 @@ tr:hover td {
   background: var(--hover-bg-table);
 }
 
+/* Tabela overview — Equipamentos */
+.devices-overview-table table {
+  font-size: 12px;
+}
+.devices-overview-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+}
+.devices-overview-table tbody td {
+  font-size: 12px;
+  font-weight: 400;
+  font-family: inherit;
+  vertical-align: middle;
+  line-height: 1.35;
+}
+.devices-overview-table__mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+.devices-overview-table__desc {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.devices-overview-table__truncate {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.devices-overview-table__bool {
+  text-align: center;
+  width: 52px;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+.devices-overview-table__bool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.devices-overview-table__bool-icon--yes {
+  color: var(--ok);
+}
+.devices-overview-table__bool-icon--no {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
 .badge {
   display: inline-block;
   padding: 0.1rem 0.35rem;
@@ -1323,14 +1375,19 @@ h3 .info-hint {
 }
 .integration-consult-cards {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .integration-consult-cards {
+    grid-template-columns: 1fr;
+  }
 }
 .integration-consult-card {
-  padding: 10px 12px;
+  padding: 12px 14px;
   margin-bottom: 0;
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 .integration-consult-card__head {
   display: flex;
@@ -1363,16 +1420,201 @@ h3 .info-hint {
   padding: 4px 8px;
   min-width: 0;
 }
-.integration-consult-card__meta {
+.modal.integration-support-modal {
+  width: min(96vw, 1680px);
+  max-width: min(96vw, 1680px);
+  max-height: 92vh;
+  min-height: min(72vh, 640px);
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1.35rem 1.6rem 1.4rem;
+}
+.integration-support-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.integration-support-modal__head-text {
+  min-width: 0;
+}
+.integration-support-modal__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.integration-support-modal__subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.integration-support-modal__client-name {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.integration-support-modal__tabs {
+  flex-shrink: 0;
+  margin: 0 0 0.5rem;
+  gap: 0.35rem;
+}
+.integration-support-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+  padding: 0.15rem 0.1rem 0.25rem;
+}
+.integration-support-modal__body .table-wrap {
+  overflow-x: hidden;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.integration-support-table {
+  margin-top: 0;
+  width: 100%;
+  max-width: 100%;
+}
+.integration-support-table__grid {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+.integration-support-table__grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel2);
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: bottom;
+}
+.integration-support-table__grid td.integration-support-table__cell {
+  padding: 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.45;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.integration-support-table__grid td.mono {
+  font-size: 12px;
+  word-break: break-all;
+}
+.integration-support-table__grid tbody tr:hover td {
+  background: rgba(88, 166, 255, 0.04);
+}
+.integration-support-table__cell--text {
+  white-space: pre-wrap;
+}
+.integration-support-table__cell--plan {
+  min-width: 0;
+}
+.integration-support-table__cell--date {
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-word;
+}
+.integration-support-table__chip {
+  margin-left: 8px;
+  display: inline-block;
+  margin-top: 4px;
+}
+.integration-os-plan__title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.integration-os-plan__meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  word-break: break-word;
+}
+/* Atendimentos: protocolo, estado, assunto, descrição, datas */
+.integration-support-table__grid--att th:nth-child(1),
+.integration-support-table__grid--att td:nth-child(1) {
+  width: 14%;
+}
+.integration-support-table__grid--att th:nth-child(2),
+.integration-support-table__grid--att td:nth-child(2) {
+  width: 12%;
+}
+.integration-support-table__grid--att th:nth-child(3),
+.integration-support-table__grid--att td:nth-child(3) {
+  width: 14%;
+}
+.integration-support-table__grid--att th:nth-child(4),
+.integration-support-table__grid--att td:nth-child(4) {
+  width: 32%;
+}
+.integration-support-table__grid--att th:nth-child(5),
+.integration-support-table__grid--att td:nth-child(5),
+.integration-support-table__grid--att th:nth-child(6),
+.integration-support-table__grid--att td:nth-child(6) {
+  width: 14%;
+}
+/* Ordens de serviço */
+.integration-support-table__grid--os th:nth-child(1),
+.integration-support-table__grid--os td:nth-child(1) {
+  width: 16%;
+}
+.integration-support-table__grid--os th:nth-child(2),
+.integration-support-table__grid--os td:nth-child(2) {
+  width: 14%;
+}
+.integration-support-table__grid--os th:nth-child(3),
+.integration-support-table__grid--os td:nth-child(3) {
+  width: 30%;
+}
+.integration-support-table__grid--os th:nth-child(4),
+.integration-support-table__grid--os td:nth-child(4) {
+  width: 14%;
+}
+.integration-support-table__grid--os th:nth-child(5),
+.integration-support-table__grid--os td:nth-child(5),
+.integration-support-table__grid--os th:nth-child(6),
+.integration-support-table__grid--os td:nth-child(6) {
+  width: 13%;
+}
+.integration-consult-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 20px;
   margin-top: 8px;
+}
+.integration-consult-card__field {
+  min-width: 0;
+  word-break: break-word;
+}
+.integration-consult-card__line {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  word-break: break-word;
 }
 .integration-consult-card__field,
 .integration-consult-card__line {
-  font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.4;
   margin: 0;
 }
 .integration-consult-card__label {
@@ -1382,21 +1624,43 @@ h3 .info-hint {
   font-weight: 500;
 }
 .integration-consult-card__services {
-  margin-top: 8px;
+  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 220px;
+  gap: 8px;
+  max-height: 280px;
   overflow-y: auto;
 }
 .integration-consult-card__service {
-  font-size: 11px;
-  padding: 4px 8px;
+  font-size: 12px;
+  padding: 10px 12px;
   background: var(--panel2);
   border-radius: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+  align-items: start;
+  min-width: 0;
+}
+.integration-consult-card__service-cell {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  align-items: baseline;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.integration-consult-card__service-cell .integration-consult-card__label {
+  flex-shrink: 0;
+}
+.integration-consult-card__service-cell .integration-consult-card__value,
+.integration-consult-card__service-cell .badge {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.integration-consult-card__service-cell--status {
   align-items: center;
 }
 .integration-detail-modal {

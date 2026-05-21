@@ -4,7 +4,15 @@ import { Link, useParams } from "react-router-dom";
 import { Search } from "lucide-react";
 import { IntegrationNav } from "../components/IntegrationNav";
 import { HubsoftClientResults, filterClientCards } from "../integrations/HubsoftClientResults";
-import type { ClientCard, ClientSearchResponse, ConsumerMeta, IntegrationDetail } from "../integrations/types";
+import { attendanceBuscaForClient } from "../integrations/attendanceBusca";
+import type {
+  ClientAttendanceResponse,
+  ClientCard,
+  ClientSearchResponse,
+  ClientWorkOrderResponse,
+  ConsumerMeta,
+  IntegrationDetail,
+} from "../integrations/types";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { PageToastHost, usePageToast } from "../lib/pageToast";
@@ -48,7 +56,17 @@ export function IntegrationConsultPage() {
       }),
     onSuccess: (r) => {
       setResultFilter("");
-      showToast(r.ok ? "ok" : "err", r.ok ? `${r.clients?.length ?? 0} resultado(s).` : r.message || "Consulta falhou.");
+      if (r.ok) {
+        showToast("ok", `${r.clients?.length ?? 0} resultado(s).`);
+      } else {
+        const extra =
+          r.response_preview && r.message?.includes("JSON")
+            ? ""
+            : r.response_preview
+              ? ` (${r.response_preview.slice(0, 120)}…)`
+              : "";
+        showToast("err", (r.message || "Consulta falhou.") + extra);
+      }
     },
     onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
   });
@@ -77,6 +95,45 @@ export function IntegrationConsultPage() {
     [slug, busca, termo],
   );
 
+  const lookupForClient = useCallback(
+    (client: ClientCard) => {
+      const t = termo.trim();
+      return attendanceBuscaForClient(client, { busca, termo: t });
+    },
+    [busca, termo],
+  );
+
+  const fetchClientAttendance = useCallback(
+    async (client: ClientCard) => {
+      const q = lookupForClient(client);
+      const r = await apiFetch<ClientAttendanceResponse>(`/api/v1/integrations/${slug}/consumer/client-attendance`, {
+        method: "POST",
+        json: {
+          busca: q.busca,
+          termo_busca: q.termo,
+          apenas_pendente: "nao",
+        },
+      });
+      return { ok: !!r.ok, message: r.message, items: r.items ?? [] };
+    },
+    [slug, lookupForClient],
+  );
+
+  const fetchClientWorkOrders = useCallback(
+    async (client: ClientCard) => {
+      const q = lookupForClient(client);
+      const r = await apiFetch<ClientWorkOrderResponse>(`/api/v1/integrations/${slug}/consumer/client-work-order`, {
+        method: "POST",
+        json: {
+          busca: q.busca,
+          termo_busca: q.termo,
+        },
+      });
+      return { ok: !!r.ok, message: r.message, items: r.items ?? [] };
+    },
+    [slug, lookupForClient],
+  );
+
   const d = detailQ.data;
   const meta = metaQ.data;
   const result = searchM.data;
@@ -103,11 +160,11 @@ export function IntegrationConsultPage() {
       <div>
         <IntegrationNav slug={slug!} name={d.name} consultaEnabled={false} />
         <div className="msg" style={{ marginTop: 12 }}>
-          A consulta de clientes ainda não está activa nesta integração.
+          A consulta de clientes ainda não está ativa nesta integração.
           {isAdminUser() ? (
             <>
               {" "}
-              Active em{" "}
+              Ative em{" "}
               <Link to={`/integrations/${slug}/config`}>Configuração API</Link> → separador Operação.
             </>
           ) : (
@@ -133,7 +190,10 @@ export function IntegrationConsultPage() {
           <h2>
             <Search size={18} aria-hidden /> Consultar cliente
           </h2>
-          <p>{meta?.client_search_request_name || "API de clientes"} — autenticação automática.</p>
+          <p>
+            {meta?.client_search_request_name || "API de clientes"}
+            {meta?.client_search_provider ? ` · ${meta.client_search_provider.toUpperCase()}` : ""} — autenticação automática.
+          </p>
         </div>
 
         <div className="integration-consult-search__row">
@@ -207,6 +267,10 @@ export function IntegrationConsultPage() {
               ok={!!result.ok}
               localFilter={resultFilter}
               onFetchDetail={fetchClientDetail}
+              onFetchAttendance={meta?.client_attendance_enabled ? fetchClientAttendance : undefined}
+              onFetchWorkOrders={meta?.client_work_order_enabled ? fetchClientWorkOrders : undefined}
+              attendanceEnabled={!!meta?.client_attendance_enabled}
+              workOrderEnabled={!!meta?.client_work_order_enabled}
             />
           </>
         ) : (

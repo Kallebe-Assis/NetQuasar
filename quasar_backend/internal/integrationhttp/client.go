@@ -45,8 +45,9 @@ type AuthConfig struct {
 	GrantType     string `json:"grant_type"`
 	HeaderName    string `json:"header_name"`
 	APIKey        string `json:"api_key"`
-	TokenPrefix   string `json:"token_prefix"`
-	LoginPath     string `json:"login_path"`
+	TokenPrefix        string `json:"token_prefix"`
+	TokenEncodeBase64  bool   `json:"token_encode_base64"`
+	LoginPath          string `json:"login_path"`
 	LoginMethod   string `json:"login_method"`
 	LoginBody     string `json:"login_body"`
 	LoginBodyType string `json:"login_body_type"` // json | form (form = x-www-form-urlencoded, padrão OAuth2/Postman)
@@ -238,11 +239,7 @@ func applyAuthHeaders(h map[string]string, cfg IntegrationConfig) {
 			tok = cfg.SessionToken
 		}
 		if tok != "" {
-			prefix := strings.TrimSpace(ac.TokenPrefix)
-			if prefix == "" {
-				prefix = "Bearer"
-			}
-			h["Authorization"] = strings.TrimSpace(prefix) + " " + strings.TrimSpace(tok)
+			h["Authorization"] = BearerAuthorizationValue(tok, ac.TokenPrefix, ac.TokenEncodeBase64)
 		}
 	case "basic":
 		if ac.Username != "" {

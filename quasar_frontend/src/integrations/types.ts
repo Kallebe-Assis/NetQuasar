@@ -46,8 +46,40 @@ export type IntegrationRequest = {
   last_run_message?: string | null;
 };
 
+export type ClientSearchProvider = "auto" | "hubsoft" | "ixc" | "generic";
+
+export const CLIENT_SEARCH_PROVIDERS: { id: ClientSearchProvider; label: string }[] = [
+  { id: "auto", label: "Detectar automaticamente (Hubsoft / IXC / genérico)" },
+  { id: "ixc", label: "IXC (webservice — POST + ixcsoft:listar)" },
+  { id: "hubsoft", label: "Hubsoft (GET /integracao/cliente)" },
+  { id: "generic", label: "Genérico (só variáveis na requisição)" },
+];
+
+export type SearchFieldMapping = {
+  qtype?: string;
+  oper?: string;
+  termo_format?: "digits" | "raw" | "br_document";
+};
+
 export type ConsumerConfig = {
   client_search: {
+    enabled: boolean;
+    request_id?: string;
+    provider?: ClientSearchProvider;
+    /** Header ixcsoft na listagem IXC (padrão: listar). */
+    ixc_list_action?: string;
+    /** Tipos de busca na Consulta; vazio = padrão do ERP. */
+    busca_options?: BuscaOption[];
+    /** Mapeamento por tipo (ex. cpf_cnpj → qtype/oper). */
+    field_mappings?: Record<string, SearchFieldMapping>;
+    /** Várias tentativas automáticas ao buscar CPF/CNPJ (padrão: true). */
+    cpf_multi_attempt?: boolean;
+  };
+  client_attendance?: {
+    enabled: boolean;
+    request_id?: string;
+  };
+  client_work_order?: {
     enabled: boolean;
     request_id?: string;
   };
@@ -91,6 +123,57 @@ export type ClientSearchResponse = {
   latency_ms?: number;
   request_url?: string;
   request_method?: string;
+  response_preview?: string;
+  provider?: ClientSearchProvider;
+};
+
+export type AttendanceItem = {
+  id?: string;
+  protocol?: string;
+  status?: string;
+  subject?: string;
+  description?: string;
+  opened_at?: string;
+  closed_at?: string;
+  pending?: boolean;
+  raw?: Record<string, unknown>;
+};
+
+export type WorkOrderItem = {
+  id?: string;
+  number?: string;
+  status?: string;
+  status_label?: string;
+  plan_name?: string;
+  service_status?: string;
+  value?: string;
+  description?: string;
+  scheduled_at?: string;
+  created_at?: string;
+  attendance_protocol?: string;
+  raw?: Record<string, unknown>;
+};
+
+export type ClientAttendanceResponse = {
+  ok: boolean;
+  message?: string;
+  items: AttendanceItem[];
+  raw_status?: string;
+  status_code?: number;
+  latency_ms?: number;
+  request_url?: string;
+  request_method?: string;
+};
+
+export type ClientWorkOrderResponse = {
+  ok: boolean;
+  message?: string;
+  items: WorkOrderItem[];
+  raw_status?: string;
+  status_code?: number;
+  latency_ms?: number;
+  request_url?: string;
+  request_method?: string;
 };
 
 export type ConsumerMeta = {
@@ -99,7 +182,16 @@ export type ConsumerMeta = {
   client_search_enabled: boolean;
   client_search_request_id?: string;
   client_search_request_name?: string;
+  client_search_provider?: ClientSearchProvider;
   busca_options: BuscaOption[];
+  client_attendance_enabled?: boolean;
+  client_attendance_request_id?: string;
+  client_attendance_request_name?: string;
+  busca_atendimento_options?: BuscaOption[];
+  client_work_order_enabled?: boolean;
+  client_work_order_request_id?: string;
+  client_work_order_request_name?: string;
+  busca_ordem_servico_options?: BuscaOption[];
 };
 
 export type IntegrationDetail = IntegrationSummary & {
@@ -146,10 +238,28 @@ export const AUTH_TYPES = [
   { id: "none", label: "Sem autenticação" },
   { id: "oauth2_password", label: "OAuth2 — obter token (recomendado)" },
   { id: "bearer", label: "Bearer token (já tenho o token)" },
-  { id: "basic", label: "Basic (utilizador/senha)" },
+  { id: "basic", label: "Basic (usuário/senha)" },
   { id: "api_key", label: "API Key (header)" },
   { id: "login", label: "Login avançado (JSON manual)" },
 ] as const;
+
+/** Prefixos do header Authorization para auth_type=bearer (e sessão OAuth2). */
+export const AUTH_TOKEN_PREFIXES = [
+  { id: "Bearer", label: "Bearer" },
+  { id: "Basic", label: "Basic" },
+] as const;
+
+export const TERMO_FORMAT_OPTIONS = [
+  { id: "", label: "Padrão do ERP" },
+  { id: "digits", label: "Só dígitos" },
+  { id: "raw", label: "Texto digitado" },
+  { id: "br_document", label: "CPF/CNPJ formatado (BR)" },
+] as const;
+
+export function normalizeAuthTokenPrefix(raw?: string | null): string {
+  const v = (raw ?? "Bearer").trim();
+  return AUTH_TOKEN_PREFIXES.some((p) => p.id === v) ? v : "Bearer";
+}
 
 /** Campos típicos de auth_config para OAuth2 password grant. */
 export type OAuth2PasswordAuthConfig = {

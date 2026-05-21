@@ -10,8 +10,14 @@ import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
 import {
   AUTH_TYPES,
+  AUTH_TOKEN_PREFIXES,
+  CLIENT_SEARCH_PROVIDERS,
+  TERMO_FORMAT_OPTIONS,
   HTTP_METHODS,
+  normalizeAuthTokenPrefix,
+  type ClientSearchProvider,
   type ConsumerConfig,
+  type SearchFieldMapping,
   type IntegrationDetail,
   type IntegrationRequest,
   type OAuth2PasswordAuthConfig,
@@ -135,7 +141,13 @@ export function IntegrationDetailPage() {
       void qc.invalidateQueries({ queryKey: queryKeys.integrationDetail(slug ?? "") });
       showToast(
         r.ok ? "ok" : "err",
-        r.token_received ? "Token obtido e salvo na sessão." : r.ok ? "Autenticação OK." : r.error || "Falha ao obter token.",
+        r.token_received
+          ? "Token obtido e salvo na sessão."
+          : r.ok
+            ? r.status_code
+              ? `Requisição de teste OK (HTTP ${r.status_code}).`
+              : "Autenticação configurada."
+            : r.error || "Falha na autenticação.",
       );
     },
     onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
@@ -239,6 +251,9 @@ export function IntegrationDetailPage() {
 
   const authCfg = (form.auth_config ?? {}) as OAuth2PasswordAuthConfig & Record<string, string>;
   const isOAuth2 = form.auth_type === "oauth2_password";
+  const isLoginFlowAuth =
+    form.auth_type === "oauth2_password" || form.auth_type === "login";
+  const authTestLabel = isLoginFlowAuth ? "Testar login" : "Testar autenticação";
   const oauthKeysInHeaders = Object.keys((form.default_headers as Record<string, string>) ?? {}).filter((k) =>
     /^(client_id|client_secret|username|password|grant_type)$/i.test(k.trim()),
   );
@@ -263,15 +278,18 @@ export function IntegrationDetailPage() {
     <div>
       <IntegrationNav slug={slug!} name={d.name} />
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Activa" : "Inactiva"}</span>
-        {d.session_active ? <span className="badge">Sessão activa</span> : null}
-        {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta activa</span> : null}
+        <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Ativa" : "Inativa"}</span>
+        {d.session_active ? <span className="badge">Sessão ativa</span> : null}
+        {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta ativa</span> : null}
+        {consumerCfg.client_attendance?.enabled || consumerCfg.client_work_order?.enabled ? (
+          <span className="badge badge--ok">Atend. / O.S. ativos</span>
+        ) : null}
       </div>
 
       <PageToastHost toast={toast} onDismiss={dismissToast} />
 
       <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-        Configuração técnica da API (URL, autenticação, requisições HTTP). Utilizadores do NOC usam o separador{" "}
+        Configuração técnica da API (URL, autenticação, requisições HTTP). Usuários do NOC usam o separador{" "}
         <strong>Consulta</strong> para pesquisar clientes.
       </p>
 
@@ -293,11 +311,12 @@ export function IntegrationDetailPage() {
 
       {tab === "operacao" && (
         <section className="panel" style={{ marginTop: 16, padding: 16 }}>
-          <h2 style={{ marginTop: 0, fontSize: 16 }}>Operação para utilizadores</h2>
+          <h2 style={{ marginTop: 0, fontSize: 16 }}>Operação para usuários</h2>
           <p style={{ fontSize: 12, color: "var(--muted)" }}>
-            Define o que aparece no separador <strong>Consulta</strong>. A requisição HTTP escolhida deve ser GET{" "}
-            <code className="mono">/api/v1/integracao/cliente</code> com query <code className="mono">busca</code> e{" "}
-            <code className="mono">termo_busca</code> (a consulta substitui estes valores automaticamente).
+            Define o que aparece no separador <strong>Consulta</strong>. O NetQuasar adapta parâmetros e parser conforme o{" "}
+            <strong>ERP</strong>: Hubsoft (GET <code className="mono">/integracao/cliente</code>), IXC (POST{" "}
+            <code className="mono">/cliente</code> + header <code className="mono">ixcsoft: listar</code> — GET com query não é suportado pelo IXC), ou genérico (variáveis{" "}
+            <code className="mono">{"{{termo_busca}}"}</code> na requisição).
           </p>
           <label className="row" style={{ gap: 8, marginTop: 12 }}>
             <input
@@ -308,6 +327,7 @@ export function IntegrationDetailPage() {
                 setForm((f) => ({
                   ...f,
                   consumer_config: {
+                    ...consumerCfg,
                     client_search: {
                       ...consumerCfg.client_search,
                       enabled: e.target.checked,
@@ -316,7 +336,7 @@ export function IntegrationDetailPage() {
                 }))
               }
             />
-            Activar consulta de cliente na UI
+            Ativar consulta de cliente na UI
           </label>
           <div className="field" style={{ maxWidth: 420, marginTop: 12 }}>
             <label>Requisição HTTP de consulta</label>
@@ -328,6 +348,7 @@ export function IntegrationDetailPage() {
                 setForm((f) => ({
                   ...f,
                   consumer_config: {
+                    ...consumerCfg,
                     client_search: {
                       ...consumerCfg.client_search,
                       enabled: consumerCfg.client_search?.enabled ?? false,
@@ -337,7 +358,195 @@ export function IntegrationDetailPage() {
                 }))
               }
             >
-              <option value="">Detectar automaticamente (GET …/integracao/cliente)</option>
+              <option value="">Detectar automaticamente (Hubsoft ou IXC /cliente)</option>
+              {requests.map((req) => (
+                <option key={req.id} value={req.id}>
+                  {req.name} — {req.method} {req.path}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ maxWidth: 420, marginTop: 12 }}>
+            <label>ERP / formato da consulta</label>
+            <select
+              className="input"
+              disabled={!admin}
+              value={consumerCfg.client_search?.provider ?? "auto"}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_search: {
+                      ...consumerCfg.client_search,
+                      enabled: consumerCfg.client_search?.enabled ?? false,
+                      request_id: consumerCfg.client_search?.request_id,
+                      provider: e.target.value as ClientSearchProvider,
+                    },
+                  },
+                }))
+              }
+            >
+              {CLIENT_SEARCH_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <details style={{ marginTop: 16, fontSize: 13 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Avançado — IXC / mapeamento de busca</summary>
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0" }}>
+              Deixe em branco para usar os padrões do NetQuasar. Preencha só o que a sua API exigir de diferente.
+            </p>
+            <div className="field" style={{ maxWidth: 280, marginTop: 8 }}>
+              <label>Header ixcsoft (listagem)</label>
+              <input
+                className="input mono"
+                disabled={!admin}
+                placeholder="listar"
+                value={consumerCfg.client_search?.ixc_list_action ?? ""}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    consumer_config: {
+                      ...consumerCfg,
+                      client_search: { ...consumerCfg.client_search, ixc_list_action: e.target.value || undefined },
+                    },
+                  }))
+                }
+              />
+            </div>
+            <label className="row" style={{ gap: 8, marginTop: 10 }}>
+              <input
+                type="checkbox"
+                disabled={!admin}
+                checked={consumerCfg.client_search?.cpf_multi_attempt !== false}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    consumer_config: {
+                      ...consumerCfg,
+                      client_search: { ...consumerCfg.client_search, cpf_multi_attempt: e.target.checked },
+                    },
+                  }))
+                }
+              />
+              CPF/CNPJ: tentar várias combinações qtype/oper (recomendado)
+            </label>
+            <FieldMappingsEditor
+              mappings={consumerCfg.client_search?.field_mappings ?? {}}
+              disabled={!admin}
+              onChange={(field_mappings) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_search: { ...consumerCfg.client_search, field_mappings },
+                  },
+                }))
+              }
+            />
+          </details>
+
+          <hr style={{ margin: "20px 0", border: "none", borderTop: "1px solid var(--border)" }} />
+
+          <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Atendimentos e ordens de serviço</h3>
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>
+            No menu ⋮ dos resultados abre um modal com abas. O sistema preenche <code className="mono">busca</code> e{" "}
+            <code className="mono">termo_busca</code> a partir do cartão (código, CPF/CNPJ ou ID do serviço).
+          </p>
+          <label className="row" style={{ gap: 8, marginTop: 12 }}>
+            <input
+              type="checkbox"
+              disabled={!admin}
+              checked={!!consumerCfg.client_attendance?.enabled}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_attendance: {
+                      ...consumerCfg.client_attendance,
+                      enabled: e.target.checked,
+                      request_id: consumerCfg.client_attendance?.request_id,
+                    },
+                  },
+                }))
+              }
+            />
+            Ativar aba Atendimentos (<code className="mono">…/cliente/atendimento</code>)
+          </label>
+          <div className="field" style={{ maxWidth: 420, marginTop: 8 }}>
+            <label>Requisição HTTP — atendimentos</label>
+            <select
+              className="input"
+              disabled={!admin}
+              value={consumerCfg.client_attendance?.request_id ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_attendance: {
+                      enabled: consumerCfg.client_attendance?.enabled ?? false,
+                      request_id: e.target.value || undefined,
+                    },
+                  },
+                }))
+              }
+            >
+              <option value="">Detectar automaticamente (GET …/integracao/cliente/atendimento)</option>
+              {requests.map((req) => (
+                <option key={req.id} value={req.id}>
+                  {req.name} — {req.method} {req.path}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <label className="row" style={{ gap: 8, marginTop: 16 }}>
+            <input
+              type="checkbox"
+              disabled={!admin}
+              checked={!!consumerCfg.client_work_order?.enabled}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_work_order: {
+                      ...consumerCfg.client_work_order,
+                      enabled: e.target.checked,
+                      request_id: consumerCfg.client_work_order?.request_id,
+                    },
+                  },
+                }))
+              }
+            />
+            Ativar aba Ordens de serviço (<code className="mono">…/cliente/ordem_servico</code>)
+          </label>
+          <div className="field" style={{ maxWidth: 420, marginTop: 8 }}>
+            <label>Requisição HTTP — ordens de serviço</label>
+            <select
+              className="input"
+              disabled={!admin}
+              value={consumerCfg.client_work_order?.request_id ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_work_order: {
+                      enabled: consumerCfg.client_work_order?.enabled ?? false,
+                      request_id: e.target.value || undefined,
+                    },
+                  },
+                }))
+              }
+            >
+              <option value="">Detectar automaticamente (GET …/integracao/cliente/ordem_servico)</option>
               {requests.map((req) => (
                 <option key={req.id} value={req.id}>
                   {req.name} — {req.method} {req.path}
@@ -371,7 +580,7 @@ export function IntegrationDetailPage() {
           <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
             <label className="row" style={{ gap: 6 }}>
               <input type="checkbox" disabled={!admin} checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} />
-              Integração activa
+              Integração ativa
             </label>
             <label className="row" style={{ gap: 6 }}>
               <input type="checkbox" disabled={!admin} checked={!!form.tls_insecure} onChange={(e) => setForm((f) => ({ ...f, tls_insecure: e.target.checked }))} />
@@ -557,24 +766,76 @@ export function IntegrationDetailPage() {
                   onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, token_json_path: e.target.value } }))}
                 />
               </div>
+              <label className="row" style={{ gap: 8 }}>
+                <input
+                  type="checkbox"
+                  disabled={!admin}
+                  checked={!!authCfg.token_encode_base64}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      auth_config: { ...authCfg, token_encode_base64: e.target.checked },
+                    }))
+                  }
+                />
+                Codificar token em Base64 no header Authorization
+              </label>
             </>
           )}
           {form.auth_type === "bearer" && (
             <>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px" }}>
+                Token fixo (ex. IXC: <code className="mono">id:hash</code> no painel). «Testar autenticação» executa a primeira requisição HTTP activa.
+              </p>
               <div className="field">
                 <label>Token {d.token_configured ? "(já configurado — deixe vazio para manter)" : ""}</label>
-                <input className="input mono" disabled={!admin} placeholder="••••••" onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, token: e.target.value } }))} />
+                <input
+                  className="input mono"
+                  disabled={!admin}
+                  placeholder="Ex.: 2:121e78ce… ou Base64 já codificado"
+                  onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, token: e.target.value } }))}
+                />
               </div>
-              <div className="field">
-                <label>Prefixo (ex. Bearer)</label>
-                <input className="input" disabled={!admin} defaultValue={authCfg.token_prefix || "Bearer"} onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, token_prefix: e.target.value } }))} />
+              <label className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <input
+                  type="checkbox"
+                  disabled={!admin}
+                  checked={!!authCfg.token_encode_base64}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      auth_config: { ...authCfg, token_encode_base64: e.target.checked },
+                    }))
+                  }
+                />
+                Codificar token em Base64 ao enviar (ex.: IXC com prefixo Basic e token <code className="mono">id:hash</code>)
+              </label>
+              <div className="field" style={{ maxWidth: 360 }}>
+                <label>Prefixo do Authorization</label>
+                <select
+                  className="input"
+                  disabled={!admin}
+                  value={normalizeAuthTokenPrefix(authCfg.token_prefix)}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      auth_config: { ...authCfg, token_prefix: e.target.value },
+                    }))
+                  }
+                >
+                  {AUTH_TOKEN_PREFIXES.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </>
           )}
           {form.auth_type === "basic" && (
             <>
               <div className="field">
-                <label>Utilizador</label>
+                <label>Usuário</label>
                 <input className="input" disabled={!admin} defaultValue={authCfg.username} onChange={(e) => setForm((f) => ({ ...f, auth_config: { ...authCfg, username: e.target.value } }))} />
               </div>
               <div className="field">
@@ -665,7 +926,7 @@ export function IntegrationDetailPage() {
                 Salvar auth
               </button>
               <button type="button" className="btn" disabled={loginM.isPending} onClick={() => loginM.mutate()}>
-                {loginM.isPending ? "A autenticar…" : "Testar login"}
+                {loginM.isPending ? "A testar…" : authTestLabel}
               </button>
             </div>
           ) : null}
@@ -790,7 +1051,7 @@ export function IntegrationDetailPage() {
                 {testM.isPending ? "A testar…" : "Testar conexão (GET /)"}
               </button>
               <button type="button" className="btn" disabled={loginM.isPending} onClick={() => loginM.mutate()}>
-                Testar login
+                {loginM.isPending ? "A testar…" : authTestLabel}
               </button>
               <button type="button" className="btn" disabled={runAllM.isPending} onClick={() => runAllM.mutate()}>
                 {runAllM.isPending ? "A colectar…" : "Executar todos os requisições"}
@@ -877,13 +1138,30 @@ export function IntegrationDetailPage() {
 
 function parseConsumerConfig(raw: unknown): ConsumerConfig {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { client_search: { enabled: false } };
+    return {
+      client_search: { enabled: false },
+      client_attendance: { enabled: false },
+      client_work_order: { enabled: false },
+    };
   }
   const o = raw as ConsumerConfig;
   return {
     client_search: {
       enabled: !!o.client_search?.enabled,
       request_id: o.client_search?.request_id,
+      provider: (o.client_search?.provider as ClientSearchProvider) || "auto",
+      ixc_list_action: o.client_search?.ixc_list_action,
+      busca_options: o.client_search?.busca_options,
+      field_mappings: o.client_search?.field_mappings,
+      cpf_multi_attempt: o.client_search?.cpf_multi_attempt,
+    },
+    client_attendance: {
+      enabled: !!o.client_attendance?.enabled,
+      request_id: o.client_attendance?.request_id,
+    },
+    client_work_order: {
+      enabled: !!o.client_work_order?.enabled,
+      request_id: o.client_work_order?.request_id,
     },
   };
 }
@@ -1180,6 +1458,103 @@ function HeadersEditor({
   );
 }
 
+const FIELD_MAPPING_KEYS = [
+  { key: "cpf_cnpj", label: "CPF/CNPJ" },
+  { key: "codigo_cliente", label: "ID cliente" },
+  { key: "nome_razaosocial", label: "Razão social" },
+  { key: "nome_fantasia", label: "Nome fantasia" },
+  { key: "telefone", label: "Telefone" },
+  { key: "email", label: "E-mail" },
+] as const;
+
+function FieldMappingsEditor({
+  mappings,
+  onChange,
+  disabled,
+}: {
+  mappings: Record<string, SearchFieldMapping>;
+  onChange: (m: Record<string, SearchFieldMapping>) => void;
+  disabled?: boolean;
+}) {
+  const patch = (buscaKey: string, field: keyof SearchFieldMapping, value: string) => {
+    const next = { ...mappings };
+    const cur = { ...(next[buscaKey] ?? {}) };
+    if (value === "") delete cur[field];
+    else cur[field] = value as SearchFieldMapping[typeof field];
+    if (Object.keys(cur).length === 0) delete next[buscaKey];
+    else next[buscaKey] = cur;
+    onChange(next);
+  };
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <table className="table-compact" style={{ fontSize: 12, width: "100%", minWidth: 520 }}>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>qtype (API)</th>
+            <th>oper</th>
+            <th>Formato termo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {FIELD_MAPPING_KEYS.map(({ key, label }) => {
+            const m = mappings[key] ?? {};
+            return (
+              <tr key={key}>
+                <td>{label}</td>
+                <td>
+                  <input
+                    className="input mono"
+                    disabled={disabled}
+                    placeholder="padrão"
+                    value={m.qtype ?? ""}
+                    onChange={(e) => patch(key, "qtype", e.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="input mono"
+                    style={{ width: 56 }}
+                    disabled={disabled}
+                    placeholder="= / L"
+                    value={m.oper ?? ""}
+                    onChange={(e) => patch(key, "oper", e.target.value)}
+                  />
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    disabled={disabled}
+                    value={m.termo_format ?? ""}
+                    onChange={(e) => patch(key, "termo_format", e.target.value)}
+                  >
+                    {TERMO_FORMAT_OPTIONS.map((o) => (
+                      <option key={o.id || "default"} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function looksLikeIXCRequest(req: Pick<IntegrationRequest, "path" | "headers" | "body_template">): boolean {
+  const path = (req.path || "").toLowerCase();
+  if (path.includes("/cliente") && !path.includes("integracao")) return true;
+  const hdrs = req.headers || {};
+  for (const [k, v] of Object.entries(hdrs)) {
+    if (k.toLowerCase() === "ixcsoft" && String(v).trim()) return true;
+  }
+  const body = (req.body_template || "").toLowerCase();
+  return body.includes("qtype") && body.includes("sortname");
+}
+
 function RequestEditorModal({
   req,
   onClose,
@@ -1219,6 +1594,15 @@ function RequestEditorModal({
         </div>
         <PathParamsEditor params={local.path_params} onChange={(path_params) => setLocal((r) => ({ ...r, path_params }))} />
         <QueryParamsEditor params={local.query_params} onChange={(query_params) => setLocal((r) => ({ ...r, query_params }))} />
+        {looksLikeIXCRequest(local) ? (
+          <p className="msg" style={{ fontSize: 12, marginTop: 0 }}>
+            <strong>IXC:</strong> use POST com header <code className="mono">ixcsoft: listar</code>. Parâmetros{" "}
+            <code className="mono">qtype</code>, <code className="mono">query</code>, <code className="mono">oper</code> etc. vão no{" "}
+            <strong>body JSON</strong>, não na query string. Exemplo:{" "}
+            <code className="mono">{`{"qtype":"cliente.id","query":"0","oper":">","rp":"20","sortname":"cliente.id","sortorder":"desc"}`}</code>
+            . Na Consulta, o NetQuasar preenche <code className="mono">qtype</code>/<code className="mono">query</code> automaticamente.
+          </p>
+        ) : null}
         <HeadersEditor title="Headers desta requisição" headers={local.headers} onChange={(headers) => setLocal((r) => ({ ...r, headers }))} />
         <div className="field">
           <label>Tipo de body</label>
@@ -1246,7 +1630,7 @@ function RequestEditorModal({
           </label>
           <label className="row" style={{ gap: 6 }}>
             <input type="checkbox" checked={local.enabled} onChange={(e) => setLocal((r) => ({ ...r, enabled: e.target.checked }))} />
-            Activo
+            Ativo
           </label>
           <div className="field" style={{ margin: 0, width: 80 }}>
             <label>Ordem</label>

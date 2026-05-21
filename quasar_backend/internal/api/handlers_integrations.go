@@ -443,6 +443,56 @@ func (s *Server) persistIntegrationTest(ctx context.Context, id uuid.UUID, res i
 	`, id, res.OK, msg)
 }
 
+func isStaticIntegrationAuth(authType string) bool {
+	switch strings.ToLower(strings.TrimSpace(authType)) {
+	case "bearer", "basic", "api_key", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+// integrationVerifyStaticAuth valida credencial fixa (Bearer/Basic/API key) executando a 1.ª requisição HTTP activa.
+func (s *Server) integrationVerifyStaticAuth(w http.ResponseWriter, r *http.Request, id uuid.UUID, cfg integrationhttp.IntegrationConfig) {
+	if msg := integrationhttp.ValidateStaticAuthConfig(cfg); msg != "" {
+		res := integrationhttp.RunResult{OK: false, ErrorMessage: msg}
+		s.persistIntegrationTest(r.Context(), id, res)
+		writeJSON(w, http.StatusOK, runResultPayload(res))
+		return
+	}
+
+	var rr requestRow
+	err := s.DB().QueryRow(r.Context(), `
+		SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+		FROM integration_requests
+		WHERE integration_id=$1 AND enabled=true AND COALESCE(is_login, false)=false
+		ORDER BY sort_order, name
+		LIMIT 1
+	`, id).Scan(&rr.ID, &rr.Method, &rr.Path, &rr.PathParams, &rr.QueryParams, &rr.Headers, &rr.BodyTemplate, &rr.BodyType, &rr.ExtractJSONPath, &rr.IsLogin)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			res := integrationhttp.RunResult{
+				OK:              true,
+				ResponsePreview: "Credencial configurada. Crie uma requisição HTTP activa (ex.: POST /cliente) e execute-a para testar a API.",
+			}
+			s.persistIntegrationTest(r.Context(), id, res)
+			writeJSON(w, http.StatusOK, runResultPayload(res))
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+
+	rc := s.requestRowToConfig(rr)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	res := integrationhttp.Execute(ctx, cfg, rc)
+	s.persistRequestRun(r.Context(), rr.ID, res)
+	s.persistIntegrationTest(r.Context(), id, res)
+	s.logIntegrationRun(r.Context(), id, &rr.ID, "verify_auth", res)
+	writeJSON(w, http.StatusOK, runResultPayload(res))
+}
+
 func (s *Server) integrationLogin(w http.ResponseWriter, r *http.Request) {
 	id, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
@@ -506,6 +556,9 @@ func (s *Server) integrationLogin(w http.ResponseWriter, r *http.Request) {
 			rc.Method = "POST"
 		}
 		loginReq = &rc
+	} else if isStaticIntegrationAuth(cfg.AuthType) {
+		s.integrationVerifyStaticAuth(w, r, id, cfg)
+		return
 	} else {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "configure auth_type=login/oauth2_password ou uma requisição marcada como login", nil)
 		return

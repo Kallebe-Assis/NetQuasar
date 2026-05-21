@@ -106,9 +106,9 @@ func mapClientItem(it any) (ClientCard, bool) {
 	card := ClientCard{
 		ID:        pickStr(m, "id_cliente", "id", "uuid_cliente", "codigo_cliente"),
 		Code:      pickStr(m, "codigo_cliente", "codigo", "id_cliente"),
-		Name:      pickStr(m, "nome_razaosocial", "nome", "razao_social", "name"),
+		Name:      pickStr(m, "nome_razaosocial", "nome", "razao_social", "razao", "name"),
 		TradeName: pickStr(m, "nome_fantasia", "fantasia"),
-		Document:  pickStr(m, "cpf_cnpj", "cpf", "cnpj", "documento"),
+		Document:  pickStr(m, "cpf_cnpj", "cnpj_cpf", "cpf", "cnpj", "documento"),
 		Email:     pickStr(m, "email_principal", "email", "email_secundario"),
 		Phone:     pickStr(m, "telefone", "telefone_principal", "celular"),
 		Status:    pickStr(m, "status_cadastro", "status", "situacao"),
@@ -203,13 +203,48 @@ func formatAddress(m map[string]any) string {
 func pickStr(m map[string]any, keys ...string) string {
 	for _, k := range keys {
 		if v, ok := m[k]; ok && v != nil {
-			s := strings.TrimSpace(fmt.Sprint(v))
-			if s != "" && s != "<nil>" {
+			if s := scalarToString(v); s != "" {
 				return s
 			}
 		}
 	}
 	return ""
+}
+
+// scalarToString converte apenas valores escalares; ignora mapas/slices (evita map[k:v] na UI).
+func scalarToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if x == float64(int64(x)) {
+			return fmt.Sprintf("%d", int64(x))
+		}
+		return fmt.Sprintf("%g", x)
+	case int:
+		return fmt.Sprintf("%d", x)
+	case int64:
+		return fmt.Sprintf("%d", x)
+	default:
+		return ""
+	}
+}
+
+func pickNestedMap(m map[string]any, keys ...string) map[string]any {
+	for _, k := range keys {
+		if sub, ok := m[k].(map[string]any); ok && sub != nil {
+			return sub
+		}
+	}
+	return nil
 }
 
 func cloneRawMap(m map[string]any) map[string]interface{} {

@@ -242,6 +242,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}", s.getIntegration)
 			r.Get("/{id}/consumer", s.getIntegrationConsumerMeta)
 			r.Post("/{id}/consumer/client-search", s.integrationConsumerClientSearch)
+			r.Post("/{id}/consumer/client-attendance", s.integrationConsumerClientAttendance)
+			r.Post("/{id}/consumer/client-work-order", s.integrationConsumerClientWorkOrder)
 			r.Get("/{id}/logs", s.listIntegrationLogs)
 			r.Post("/{id}/test", s.integrationTest)
 			r.Post("/{id}/login", s.integrationLogin)
