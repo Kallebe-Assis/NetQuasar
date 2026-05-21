@@ -54,10 +54,31 @@ func TestParseHubsoftClientSearch_ipv4(t *testing.T) {
 		t.Fatalf("ok=%v clients=%d", r.OK, len(r.Clients))
 	}
 	c := r.Clients[0]
-	if c.IPv4 != "187.45.10.88" {
-		t.Fatalf("ipv4=%q services=%+v", c.IPv4, c.Services)
-	}
 	if c.Services[0].IPv4 != "187.45.10.88" {
 		t.Fatalf("service ipv4=%q", c.Services[0].IPv4)
+	}
+}
+
+func TestParseHubsoftClientSearch_ipv4_per_contract(t *testing.T) {
+	raw := []byte(`{
+		"status":"success",
+		"clientes":[{
+			"nome_razaosocial":"Cliente Multi",
+			"contratos":[
+				{"nome":"Plano A","ipv4":"10.0.0.1","login_radius":"user-a"},
+				{"nome":"Plano B","ip_fixo":"10.0.0.2","login_radius":"user-b"}
+			]
+		}]
+	}`)
+	r := ParseHubsoftClientSearch(raw)
+	if !r.OK || len(r.Clients) != 1 {
+		t.Fatalf("ok=%v clients=%d", r.OK, len(r.Clients))
+	}
+	svcs := r.Clients[0].Services
+	if len(svcs) != 2 {
+		t.Fatalf("services=%+v", svcs)
+	}
+	if svcs[0].IPv4 != "10.0.0.1" || svcs[1].IPv4 != "10.0.0.2" {
+		t.Fatalf("ipv4 per service: %+v", svcs)
 	}
 }

@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { DashboardPageLoader } from "../components/DashboardPageLoader";
 import { InfoHint } from "../components/InfoHint";
 import {
@@ -7,10 +9,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ComposedChart,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -19,6 +18,16 @@ import {
   YAxis,
 } from "recharts";
 import { apiFetch } from "../lib/api";
+import {
+  DASHBOARD_DEFAULT_DAYS,
+  DASHBOARD_GC_MS,
+  DASHBOARD_STALE_MS,
+  dashboardAnalyticsKey,
+  dashboardOltCapacityKey,
+  dashboardTopLatencyKey,
+  refreshDashboard,
+} from "../lib/dashboardCache";
+import { displayAlertType } from "../lib/alertLabels";
 
 const CHART_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#79c0ff", "#ff7b72", "#56d364", "#ffa657"];
 
@@ -35,8 +44,6 @@ type DashboardTotals = {
 
 type NamedCount = { category?: string; network_status?: string; operational_mode?: string; count?: number; pop_name?: string; locality_name?: string; alert_type?: string };
 
-type PingDay = { day?: string; samples?: number; ok_percent?: number; avg_latency_ms?: number | null };
-type TelDay = { day?: string; samples?: number };
 type LatRank = { device_id?: string; description?: string; avg_latency_ms?: number; samples?: number };
 type MikTraffic = { device_id?: string; description?: string; if_in_octets?: number | null; if_out_octets?: number | null; collected_at?: string };
 type OltOnu = {
@@ -59,25 +66,14 @@ type DashboardAnalytics = {
   devices_by_operational_mode?: NamedCount[];
   devices_by_pop?: Array<{ pop_id?: string; pop_name?: string; count?: number }>;
   devices_by_locality?: Array<{ locality_id?: string; locality_name?: string; count?: number }>;
-  ping_window?: { samples?: number; ok_samples?: number; ok_percent?: number; avg_latency_ms?: number | null };
-  ping_by_day?: PingDay[];
   ping_ranking_worst_latency?: LatRank[];
   ping_ranking_best_latency?: LatRank[];
   telemetry_window?: { samples?: number };
-  telemetry_by_day?: TelDay[];
   alerts_by_type_30d?: NamedCount[];
   alerts_open?: number;
   mikrotik_interface_traffic_latest?: MikTraffic[];
   olt_onu_by_device?: OltOnu[];
 };
-type DataGapSummary = {
-  without_locality?: number;
-  without_ip?: number;
-  without_snmp_community?: number;
-  without_coordinates?: number;
-  without_telemetry?: number;
-};
-type DataGapDevice = { id: string; description: string; category: string; gaps: string[] };
 type OltCapacityPON = {
   olt_id: string;
   olt: string;
@@ -167,46 +163,44 @@ function ChartBox({ h, children }: { h: number; children: React.ReactElement }) 
 }
 
 export function DashboardPage() {
-  const [days, setDays] = useState(30);
+  const qc = useQueryClient();
+  const [days, setDays] = useState(DASHBOARD_DEFAULT_DAYS);
   const [catViz, setCatViz] = useState<"pie" | "bar">("pie");
   const [pageIn, setPageIn] = useState(false);
+  const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const dash = useQuery({
-    queryKey: ["dashboard-analytics", days],
+    queryKey: dashboardAnalyticsKey(days),
     queryFn: () => apiFetch<DashboardAnalytics>(`/api/v1/dashboard/analytics?days=${days}`),
+    staleTime: DASHBOARD_STALE_MS,
+    gcTime: DASHBOARD_GC_MS,
   });
 
   const topProbe = useQuery({
-    queryKey: ["top-latency"],
+    queryKey: dashboardTopLatencyKey,
     queryFn: () => apiFetch<{ top: TopRow[] }>("/api/v1/overview/top-latency?limit=8"),
-  });
-  const gaps = useQuery({
-    queryKey: ["dashboard-data-gaps"],
-    queryFn: () => apiFetch<{ summary: DataGapSummary; devices: DataGapDevice[] }>("/api/v1/dashboard/data-gaps"),
+    staleTime: DASHBOARD_STALE_MS,
+    gcTime: DASHBOARD_GC_MS,
   });
   const cap = useQuery({
-    queryKey: ["dashboard-olt-capacity"],
+    queryKey: dashboardOltCapacityKey,
     queryFn: () => apiFetch<OltCapacity>("/api/v1/dashboard/olt-capacity"),
+    staleTime: DASHBOARD_STALE_MS,
+    gcTime: DASHBOARD_GC_MS,
   });
 
+  const runFullRefresh = async () => {
+    setRefreshConfirmOpen(false);
+    setRefreshing(true);
+    try {
+      await refreshDashboard(qc, days);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const totals = dash.data?.totals;
-
-  const pingDays = useMemo(() => {
-    const rows = dash.data?.ping_by_day ?? [];
-    return rows.map((r) => ({
-      day: String(r.day ?? "").slice(5),
-      samples: num(r.samples),
-      ok_percent: r.ok_percent != null ? num(r.ok_percent) : null,
-      avg_latency_ms: r.avg_latency_ms != null ? num(r.avg_latency_ms) : null,
-    }));
-  }, [dash.data?.ping_by_day]);
-
-  const telDays = useMemo(() => {
-    return (dash.data?.telemetry_by_day ?? []).map((r) => ({
-      day: String(r.day ?? "").slice(5),
-      samples: num(r.samples),
-    }));
-  }, [dash.data?.telemetry_by_day]);
 
   const catPie = useMemo(() => {
     return (dash.data?.devices_by_category ?? []).map((r) => ({
@@ -251,8 +245,9 @@ export function DashboardPage() {
 
   const alertsPie = useMemo(() => {
     return (dash.data?.alerts_by_type_30d ?? []).map((r) => ({
-      name: String(r.alert_type ?? "—"),
+      name: displayAlertType(r.alert_type),
       value: num(r.count),
+      code: String(r.alert_type ?? ""),
     }));
   }, [dash.data?.alerts_by_type_30d]);
 
@@ -299,22 +294,45 @@ export function DashboardPage() {
     setPageIn(false);
   }, [dash.isLoading, dash.data, dash.isError]);
 
-  if (dash.isLoading && !dash.data) return <DashboardPageLoader />;
-  if (dash.isError) return <div className="msg msg--err">{(dash.error as Error).message}</div>;
+  const initialLoading = dash.isLoading && !dash.data;
+  const isFetching = dash.isFetching || topProbe.isFetching || cap.isFetching || refreshing;
 
-  const pw = dash.data?.ping_window;
+  if (initialLoading) return <DashboardPageLoader />;
+  if (dash.isError) return <div className="msg msg--err">{(dash.error as Error).message}</div>;
 
   return (
     <div className={`dashboard-page${pageIn ? " dashboard-page--in" : ""}`}>
-      <h1>
+      <ConfirmModal
+        open={refreshConfirmOpen}
+        title="Actualizar dashboard"
+        message="Vai recarregar todos os gráficos e indicadores do dashboard. Esta operação pode demorar alguns segundos, conforme o volume de dados no servidor."
+        confirmLabel="Actualizar agora"
+        cancelLabel="Cancelar"
+        busy={refreshing}
+        onCancel={() => !refreshing && setRefreshConfirmOpen(false)}
+        onConfirm={() => void runFullRefresh()}
+      />
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <h1 style={{ margin: 0 }}>
         Dashboard analítico
         <InfoHint label="Sobre o dashboard analítico">
           <p>
-            Visão agregada dos últimos <strong>{dash.data?.days ?? days}</strong> dias (dados materializados: ping, telemetria, alertas,
-            snapshots). Ajuste o período para comparar tendências. Secções independentes — pode fazer scroll por tema.
+            Visão agregada dos últimos <strong>{dash.data?.days ?? days}</strong> dias. Métricas de coleta (ping, telemetria, tráfego, ONUs)
+            consideram apenas equipamentos em operação <strong>Ativo</strong>.
           </p>
         </InfoHint>
-      </h1>
+        </h1>
+        <button
+          type="button"
+          className="btn"
+          disabled={refreshing}
+          onClick={() => setRefreshConfirmOpen(true)}
+          title="Recarregar todos os dados do dashboard"
+        >
+          <RefreshCw size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+          {refreshing ? "A actualizar…" : "Actualizar dados"}
+        </button>
+      </div>
 
       <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
         <label style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -329,11 +347,11 @@ export function DashboardPage() {
         </label>
         <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
           Gerado: {dash.data?.generated_at ? new Date(dash.data.generated_at).toLocaleString("pt-PT") : "—"}
+          {isFetching ? " · a actualizar…" : " · em cache"}
         </span>
       </div>
 
-      {/* KPIs */}
-      <div className="grid-cards" style={{ marginTop: 4 }}>
+      <div className="dashboard-kpi-row">
         <div className="stat">
           <div className="stat__k">Equipamentos</div>
           <div className="stat__v">{fmtInt(totals?.devices)}</div>
@@ -358,13 +376,6 @@ export function DashboardPage() {
           <div className="stat__k">Monitorização</div>
           <div className="stat__v" style={{ fontSize: 14 }}>
             {totals?.monitoring_running ? <span className="badge badge--ok">A correr</span> : <span className="badge badge--off">Parada</span>}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat__k">Amostras ping (janela)</div>
-          <div className="stat__v">{fmtInt(pw?.samples)}</div>
-          <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
-            OK médio: {fmt1(pw?.ok_percent)}% · latência média: {pw?.avg_latency_ms != null ? `${fmt1(pw.avg_latency_ms)} ms` : "—"}
           </div>
         </div>
         <div className="stat">
@@ -393,15 +404,20 @@ export function DashboardPage() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
           {catViz === "pie" ? (
-            <ChartBox h={280}>
-              <PieChart>
-                <Pie data={catPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}>
+            <ChartBox h={300}>
+              <PieChart margin={{ top: 8, right: 8, bottom: 48, left: 8 }}>
+                <Pie data={catPie} dataKey="value" nameKey="name" cx="50%" cy="42%" outerRadius={78} label={false}>
                   {catPie.map((_, i) => (
                     <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
-                <Legend />
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ fontSize: 11, lineHeight: 1.35, paddingTop: 8 }}
+                />
               </PieChart>
             </ChartBox>
           ) : (
@@ -472,45 +488,9 @@ export function DashboardPage() {
       </Section>
 
       <Section
-        id="sec-ping"
-        title="3 · Ping na janela temporal"
-        subtitle="À esquerda: volume de amostras por dia. À direita: qualidade — taxa média de sucesso (%) e latência média em ms (só pings OK com latência); escalas independentes."
-      >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-          <div>
-            <h3 style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Volume de amostras / dia</h3>
-            <ChartBox h={260}>
-              <BarChart data={pingDays} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" tick={{ fill: "var(--muted)", fontSize: 10 }} />
-                <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
-                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
-                <Bar dataKey="samples" name="Amostras" fill="#58a6ff" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartBox>
-          </div>
-          <div>
-            <h3 style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Qualidade (média diária)</h3>
-            <ChartBox h={260}>
-              <ComposedChart data={pingDays} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" tick={{ fill: "var(--muted)", fontSize: 10 }} />
-                <YAxis yAxisId="pct" domain={[0, 100]} tick={{ fill: "var(--muted)", fontSize: 10 }} width={36} />
-                <YAxis yAxisId="ms" orientation="right" tick={{ fill: "var(--muted)", fontSize: 10 }} width={44} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Line yAxisId="pct" type="monotone" dataKey="ok_percent" name="OK %" stroke="#3fb950" dot strokeWidth={2} connectNulls />
-                <Line yAxisId="ms" type="monotone" dataKey="avg_latency_ms" name="Latência (ms)" stroke="#ffa657" dot strokeWidth={2} connectNulls />
-              </ComposedChart>
-            </ChartBox>
-          </div>
-        </div>
-      </Section>
-
-      <Section
         id="sec-rankings"
-        title="4 · Rankings de latência (média na janela)"
-        subtitle="Equipamentos com pelo menos 3 amostras válidas: piores médias (investigar congestão) e melhores médias. À direita, última latência na cache de sondas (instantâneo)."
+        title="3 · Rankings de latência (média na janela)"
+        subtitle="Apenas equipamentos Ativos com pelo menos 3 amostras válidas na janela. À direita, última latência na cache de sondas."
       >
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
           <div>
@@ -611,37 +591,33 @@ export function DashboardPage() {
       </Section>
 
       <Section
-        id="sec-telemetria"
-        title="5 · Telemetria SNMP (volume)"
-        subtitle="Contagem de amostras gravadas por dia — reflexo do ciclo configurado e do número de equipamentos com telemetria activa."
-      >
-        <ChartBox h={280}>
-          <LineChart data={telDays} margin={{ left: 8, right: 16, top: 12, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="day" tick={{ fill: "var(--muted)", fontSize: 10 }} />
-            <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
-            <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
-            <Legend />
-            <Line type="monotone" dataKey="samples" name="Amostras / dia" stroke="#79c0ff" strokeWidth={2} dot />
-          </LineChart>
-        </ChartBox>
-      </Section>
-
-      <Section
         id="sec-alertas"
-        title="6 · Alertas na janela"
-        subtitle="Distribuição por tipo de alerta (instâncias com active_since dentro do período). O cartão de KPI mostra alertas ainda abertos (sem closed_at)."
+        title="4 · Alertas na janela"
+        subtitle="Distribuição por tipo de alerta (equipamentos Ativos, active_since no período). O cartão de KPI mostra alertas ainda abertos."
       >
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-          <ChartBox h={260}>
-            <PieChart>
-              <Pie data={alertsPie.length ? alertsPie : [{ name: "Sem dados", value: 1 }]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+          <ChartBox h={280}>
+            <PieChart margin={{ top: 8, right: 8, bottom: 56, left: 8 }}>
+              <Pie
+                data={alertsPie.length ? alertsPie : [{ name: "Sem dados", value: 1 }]}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="42%"
+                outerRadius={72}
+                label={false}
+              >
                 {(alertsPie.length ? alertsPie : [{ name: "—", value: 1 }]).map((_, i) => (
                   <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                 ))}
               </Pie>
               <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
-              <Legend />
+              <Legend
+                layout="horizontal"
+                verticalAlign="bottom"
+                align="center"
+                wrapperStyle={{ fontSize: 11, lineHeight: 1.35, paddingTop: 8 }}
+              />
             </PieChart>
           </ChartBox>
           <div>
@@ -657,7 +633,7 @@ export function DashboardPage() {
                 <tbody>
                   {(dash.data?.alerts_by_type_30d ?? []).map((r) => (
                     <tr key={String(r.alert_type)}>
-                      <td className="mono">{String(r.alert_type)}</td>
+                      <td>{displayAlertType(r.alert_type)}</td>
                       <td className="mono">{fmtInt(r.count)}</td>
                     </tr>
                   ))}
@@ -670,8 +646,8 @@ export function DashboardPage() {
 
       <Section
         id="sec-mikrotik"
-        title="7 · Tráfego por interface (Mikrotik, última amostra)"
-        subtitle="Soma de contadores IF-MIB ifInOctets (.10.*) e ifOutOctets (.16.*) no último snapshot de interfaces por equipamento (categoria ou marca contém «mikrotik»). Valores cumulativos SNMP — barras em GiB para leitura humana."
+        title="5 · Tráfego por interface (Mikrotik, última amostra)"
+        subtitle="Equipamentos Ativos (categoria ou marca Mikrotik). Soma IF-MIB ifInOctets / ifOutOctets na última amostra — valores cumulativos SNMP em GiB."
       >
         {mikTrafficBar.length === 0 ? (
           <p style={{ color: "var(--muted)", fontSize: 13 }}>Sem snapshots de interface no período. Use Interfaces SNMP nos equipamentos ou ferramentas de walk.</p>
@@ -726,8 +702,8 @@ export function DashboardPage() {
 
       <Section
         id="sec-olt"
-        title="8 · ONUs por OLT (snapshot)"
-        subtitle="Soma de onu_total / onu_online / onu_offline nas linhas «pons» (SNMP MIB OLT ou derivado das interfaces IF-MIB após «Actualizar interfaces» na OLT)."
+        title="6 · ONUs por OLT (snapshot)"
+        subtitle="OLTs em operação Ativo: soma onu_total / onu_online / onu_offline nas PONs do último snapshot."
       >
         {oltOnuBar.length === 0 ? (
           <p style={{ color: "var(--muted)", fontSize: 13 }}>Sem snapshots OLT. Associe equipamentos OLT e execute refresh de dados OLT.</p>
@@ -785,7 +761,7 @@ export function DashboardPage() {
 
       <Section
         id="sec-olt-capacity"
-        title="9 · Capacidade OLT por PON"
+        title="7 · Capacidade OLT por PON"
         subtitle="Percentual de ocupação por PON (base 128 ONUs/PON) e tendência total de ONUs nos últimos 7 dias."
       >
         {cap.isError && <div className="msg msg--err">{(cap.error as Error).message}</div>}
@@ -824,45 +800,6 @@ export function DashboardPage() {
                       <td className="mono">{fmtInt(p.onu_total)}</td>
                       <td className="mono">{Number(p.usage_percent ?? 0).toFixed(1)}%</td>
                       <td>{p.near_saturation ? <span className="badge badge--err">próx. saturação</span> : <span className="badge badge--ok">ok</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </Section>
-
-      <Section
-        id="sec-data-gaps"
-        title="10 · Painel de dados faltantes"
-        subtitle="Dispositivos com cadastro incompleto para operação/monitoramento."
-      >
-        {gaps.isError && <div className="msg msg--err">{(gaps.error as Error).message}</div>}
-        {gaps.data && (
-          <>
-            <div className="grid-cards" style={{ marginBottom: 10 }}>
-              <div className="stat"><div className="stat__k">Sem localidade</div><div className="stat__v">{fmtInt(gaps.data.summary.without_locality)}</div></div>
-              <div className="stat"><div className="stat__k">Sem IP</div><div className="stat__v">{fmtInt(gaps.data.summary.without_ip)}</div></div>
-              <div className="stat"><div className="stat__k">Sem community</div><div className="stat__v">{fmtInt(gaps.data.summary.without_snmp_community)}</div></div>
-              <div className="stat"><div className="stat__k">Sem coordenadas</div><div className="stat__v">{fmtInt(gaps.data.summary.without_coordinates)}</div></div>
-              <div className="stat"><div className="stat__k">Sem telemetria</div><div className="stat__v">{fmtInt(gaps.data.summary.without_telemetry)}</div></div>
-            </div>
-            <div className="table-wrap">
-              <table style={{ fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th>Equipamento</th>
-                    <th>Categoria</th>
-                    <th>Pendências</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(gaps.data.devices ?? []).slice(0, 80).map((d) => (
-                    <tr key={d.id}>
-                      <td>{d.description}</td>
-                      <td>{d.category}</td>
-                      <td className="mono">{(d.gaps ?? []).join(", ")}</td>
                     </tr>
                   ))}
                 </tbody>

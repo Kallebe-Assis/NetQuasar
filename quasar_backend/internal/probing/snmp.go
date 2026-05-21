@@ -11,6 +11,8 @@ import (
 	"github.com/gosnmp/gosnmp"
 )
 
+const snmpMACOctets = 6
+
 // SNMPGetParams parâmetros para GET SNMP v2c.
 type SNMPGetParams struct {
 	Host      string
@@ -154,20 +156,92 @@ func octetStringToUTF8(b []byte) string {
 	for len(b) > 0 && b[len(b)-1] == 0 {
 		b = b[:len(b)-1]
 	}
+	if len(b) == 0 {
+		return ""
+	}
+	// ifPhysAddress e similares: 6 octetos (por vezes com 0x00 à frente).
+	if mac, ok := bytesAsMAC(b); ok {
+		return mac
+	}
+	if isPrintableASCII(b) {
+		return string(b)
+	}
 	s := string(b)
-	if utf8.ValidString(s) {
+	if utf8.ValidString(s) && isMostlyPrintableUTF8(s) {
 		return s
 	}
-	var sb strings.Builder
+	return formatOctetsHex(b)
+}
+
+func trimTrailingNulls(b []byte) []byte {
+	for len(b) > 0 && b[len(b)-1] == 0 {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+func bytesAsMAC(b []byte) (string, bool) {
+	b = trimTrailingNulls(append([]byte(nil), b...))
+	if len(b) == snmpMACOctets+1 && b[0] == 0 {
+		b = b[1:]
+	}
+	if len(b) != snmpMACOctets {
+		return "", false
+	}
+	parts := make([]string, snmpMACOctets)
+	for i := 0; i < snmpMACOctets; i++ {
+		parts[i] = fmt.Sprintf("%02x", b[i])
+	}
+	return strings.Join(parts, ":"), true
+}
+
+func isPrintableASCII(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
 	for _, c := range b {
-		switch {
-		case c >= 32 && c < 127:
-			sb.WriteByte(c)
-		case c == 9 || c == 10 || c == 13:
-			sb.WriteByte(' ')
-		default:
-			sb.WriteByte('.')
+		if c >= 32 && c < 127 {
+			continue
 		}
+		if c == 9 || c == 10 || c == 13 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isMostlyPrintableUTF8(s string) bool {
+	if s == "" {
+		return false
+	}
+	printable := 0
+	for _, r := range s {
+		if r == '\t' || r == '\n' || r == '\r' || (r >= 32 && r < 127) {
+			printable++
+		}
+	}
+	return printable*2 >= len([]rune(s))
+}
+
+func formatOctetsHex(b []byte) string {
+	if len(b) <= 32 {
+		parts := make([]string, len(b))
+		for i, c := range b {
+			parts[i] = fmt.Sprintf("%02x", c)
+		}
+		return strings.Join(parts, ":")
+	}
+	var sb strings.Builder
+	for i, c := range b {
+		if i > 0 {
+			if i%16 == 0 {
+				sb.WriteString("\n")
+			} else {
+				sb.WriteByte(' ')
+			}
+		}
+		sb.WriteString(fmt.Sprintf("%02x", c))
 	}
 	return sb.String()
 }

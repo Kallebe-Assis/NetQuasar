@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bolt,
@@ -17,7 +18,8 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { clearSession, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
+import { clearSession, getAuthToken, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
+import { prefetchDashboard } from "../lib/dashboardCache";
 import { apiFetch } from "../lib/api";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -43,6 +45,14 @@ const ICON_SZ = 16;
 const ICON_STROKE = 2;
 
 export function ShellLayout() {
+  const qc = useQueryClient();
+
+  useEffect(() => {
+    if (getAuthToken()) {
+      void prefetchDashboard(qc);
+    }
+  }, [qc]);
+
   const monState = useQuery({
     queryKey: queryKeys.monStateGlobal,
     queryFn: () =>

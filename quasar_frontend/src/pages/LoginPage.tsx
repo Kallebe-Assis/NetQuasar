@@ -1,10 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { GlobeSplash } from "../components/GlobeSplash";
 import { LoginCircuitBackdrop } from "../components/LoginCircuitBackdrop";
 import { apiFetch, ApiError } from "../lib/api";
 import { isClientConfigured, markClientConfigured, markSessionReady, saveAuthToken, saveUserDisplayLabel, saveUserRole } from "../lib/auth";
+import { prefetchDashboard } from "../lib/dashboardCache";
 
 type SetupStatus = { database_configured?: boolean };
 
@@ -15,6 +16,7 @@ const LOGIN_SPLASH_MIN_MS = 2000;
 
 export function LoginPage() {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
@@ -42,7 +44,7 @@ export function LoginPage() {
     onMutate: () => {
       loginStartedAtRef.current = Date.now();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       const t = typeof data?.token === "string" ? data.token : "";
       if (!t) {
         setErr("Resposta do servidor sem token de sessão.");
@@ -68,17 +70,14 @@ export function LoginPage() {
         window.clearTimeout(postLoginNavTimerRef.current);
         postLoginNavTimerRef.current = null;
       }
-      if (remain <= 0) {
-        setPostLoginNavPending(false);
-        nav("/dashboard", { replace: true });
-        return;
-      }
       setPostLoginNavPending(true);
-      postLoginNavTimerRef.current = window.setTimeout(() => {
-        postLoginNavTimerRef.current = null;
-        setPostLoginNavPending(false);
-        nav("/dashboard", { replace: true });
-      }, remain);
+      try {
+        await Promise.all([prefetchDashboard(qc), new Promise((r) => window.setTimeout(r, remain))]);
+      } catch {
+        /* dashboard pode falhar; a página tenta de novo */
+      }
+      setPostLoginNavPending(false);
+      nav("/dashboard", { replace: true });
     },
     onError: (e) => {
       loginStartedAtRef.current = null;

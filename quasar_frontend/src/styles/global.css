@@ -1386,6 +1386,8 @@ h3 .info-hint {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 .integration-consult-card__service {
   font-size: 11px;
@@ -1394,7 +1396,7 @@ h3 .info-hint {
   border-radius: 4px;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 4px 10px;
   align-items: center;
 }
 .integration-detail-modal {
@@ -1541,6 +1543,22 @@ h3 .info-hint {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+.dashboard-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 4px 0 1rem;
+}
+.dashboard-kpi-row .stat {
+  min-width: 0;
+}
+@media (max-width: 1280px) {
+  .dashboard-kpi-row {
+    grid-template-columns: repeat(8, minmax(108px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
 }
 .stat {
   background: var(--panel);

@@ -24,7 +24,7 @@ func HubsoftSearchQueryOverrides(detailed bool) map[string]string {
 		"cancelado":            "nao",
 		"ultima_conexao":       "sim",
 		"incluir_alarmes":      "nao",
-		"incluir_contrato":     "nao",
+		"incluir_contrato":     "sim",
 		"incluir_stfc":         "nao",
 		"incluir_mvno":         "nao",
 		"incluir_anexos":       "nao",

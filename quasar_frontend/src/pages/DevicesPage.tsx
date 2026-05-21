@@ -88,6 +88,20 @@ function dispCadastro(s: string | null | undefined): string {
   return t || "—";
 }
 
+type DeviceSortKey =
+  | "category"
+  | "brand"
+  | "description"
+  | "ip"
+  | "mac"
+  | "serial_number"
+  | "software_version"
+  | "hardware_version"
+  | "network_status"
+  | "ping"
+  | "telemetry"
+  | "operational_mode";
+
 function normalizeTelemetryMode(raw: string | null | undefined): "SNMP" | "telnet" | "ssh" {
   if (!raw?.trim()) return "SNMP";
   const t = raw.trim();
@@ -333,6 +347,8 @@ export function DevicesPage() {
   const [bulkForm, setBulkForm] = useState<BulkEditForm>(() => emptyBulkForm());
   const [bulkRunning, setBulkRunning] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortKey, setSortKey] = useState<DeviceSortKey>("description");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const csvImportInputRef = useRef<HTMLInputElement>(null);
   const mibFolderPickerRef = useRef<HTMLInputElement>(null);
   const [mibBrowseNote, setMibBrowseNote] = useState<string | null>(null);
@@ -515,6 +531,68 @@ export function DevicesPage() {
     filterCategory,
     filterBrand,
   ]);
+
+  const sortedDevices = useMemo(() => {
+    const out = [...filteredDevices];
+    const txt = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const boolNum = (v: boolean) => (v ? 1 : 0);
+    out.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "category":
+          cmp = txt(a.category).localeCompare(txt(b.category), "pt");
+          break;
+        case "brand":
+          cmp = txt(a.brand).localeCompare(txt(b.brand), "pt");
+          break;
+        case "description":
+          cmp = txt(a.description).localeCompare(txt(b.description), "pt");
+          break;
+        case "ip":
+          cmp = txt(a.ip).localeCompare(txt(b.ip), "pt");
+          break;
+        case "mac":
+          cmp = txt(a.mac).localeCompare(txt(b.mac), "pt");
+          break;
+        case "serial_number":
+          cmp = txt(a.serial_number).localeCompare(txt(b.serial_number), "pt");
+          break;
+        case "software_version":
+          cmp = txt(a.software_version).localeCompare(txt(b.software_version), "pt");
+          break;
+        case "hardware_version":
+          cmp = txt(a.hardware_version).localeCompare(txt(b.hardware_version), "pt");
+          break;
+        case "network_status":
+          cmp = txt(a.network_status).localeCompare(txt(b.network_status), "pt");
+          break;
+        case "ping":
+          cmp = boolNum(a.ping_enabled) - boolNum(b.ping_enabled);
+          break;
+        case "telemetry":
+          cmp = boolNum(a.telemetry_enabled) - boolNum(b.telemetry_enabled);
+          break;
+        case "operational_mode":
+          cmp = txt(a.operational_mode).localeCompare(txt(b.operational_mode), "pt");
+          break;
+      }
+      if (cmp === 0) cmp = txt(a.description).localeCompare(txt(b.description), "pt");
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return out;
+  }, [filteredDevices, sortDir, sortKey]);
+
+  const sortArrow = (k: DeviceSortKey) => (sortKey !== k ? "↕" : sortDir === "asc" ? "↑" : "↓");
+  const toggleSort = (k: DeviceSortKey) => {
+    setSortKey((cur) => {
+      if (cur === k) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return cur;
+      }
+      setSortDir("asc");
+      return k;
+    });
+  };
 
   function clearFilters() {
     setFilterText("");
@@ -953,23 +1031,47 @@ export function DevicesPage() {
         <table>
           <thead>
             <tr>
-              <th>Categoria</th>
-              <th>Marca</th>
-              <th>Descrição</th>
-              <th>IP</th>
-              <th>MAC</th>
-              <th>N.º série</th>
-              <th>Firmware</th>
-              <th>Hardware</th>
-              <th>Rede</th>
-              <th>Ping</th>
-              <th>Tel.</th>
-              <th>Modo op.</th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("category")}>
+                Categoria {sortArrow("category")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("brand")}>
+                Marca {sortArrow("brand")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("description")}>
+                Descrição {sortArrow("description")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("ip")}>
+                IP {sortArrow("ip")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("mac")}>
+                MAC {sortArrow("mac")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("serial_number")}>
+                N.º série {sortArrow("serial_number")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("software_version")}>
+                Firmware {sortArrow("software_version")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("hardware_version")}>
+                Hardware {sortArrow("hardware_version")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("network_status")}>
+                Rede {sortArrow("network_status")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("ping")}>
+                Ping {sortArrow("ping")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("telemetry")}>
+                Tel. {sortArrow("telemetry")}
+              </th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("operational_mode")}>
+                Modo op. {sortArrow("operational_mode")}
+              </th>
               <th style={{ width: 52 }}>{canMutate ? "Ações" : ""}</th>
             </tr>
           </thead>
           <tbody>
-            {filteredDevices.map((d) => {
+            {sortedDevices.map((d) => {
               const br = networkIsBridge(d.network_status);
               return (
               <tr key={d.id}>

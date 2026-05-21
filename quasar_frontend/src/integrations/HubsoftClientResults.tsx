@@ -81,7 +81,6 @@ function ClientCardSummary({ c }: { c: ClientCard }) {
       <div className="integration-consult-card__meta">
         <FieldInline label="Código" value={c.code} mono />
         <FieldInline label="CPF/CNPJ" value={c.document} mono />
-        <FieldInline label="IPv4" value={c.ipv4} mono />
         <FieldInline label="Tel." value={c.phone} />
         <FieldInline label="E-mail" value={c.email} />
       </div>
@@ -93,19 +92,15 @@ function ClientCardSummary({ c }: { c: ClientCard }) {
       ) : null}
       {c.services && c.services.length > 0 ? (
         <div className="integration-consult-card__services">
-          {c.services.slice(0, 4).map((s, si) => (
-            <div key={s.id ?? si} className="integration-consult-card__service">
-              <span className="integration-consult-card__value">{s.name || s.login || "Serviço"}</span>
-              {s.ipv4 && !c.ipv4?.includes(s.ipv4) ? (
-                <span className="mono integration-consult-card__label">{s.ipv4}</span>
-              ) : null}
+          {c.services.map((s, si) => (
+            <div key={s.id ?? `${si}-${s.login}-${s.ipv4}`} className="integration-consult-card__service">
+              <span className="integration-consult-card__value">{s.name || s.login || "Plano / serviço"}</span>
+              <span className="integration-consult-card__label">IPv4:</span>
+              <span className="mono integration-consult-card__value">{s.ipv4 || "—"}</span>
               {s.login ? <span className="mono integration-consult-card__label">{s.login}</span> : null}
               {s.status ? <span className={labelStatus(s.status) ?? "badge"}>{s.status}</span> : null}
             </div>
           ))}
-          {c.services.length > 4 ? (
-            <span className="integration-consult-card__label">+{c.services.length - 4} serviço(s)</span>
-          ) : null}
         </div>
       ) : null}
     </>

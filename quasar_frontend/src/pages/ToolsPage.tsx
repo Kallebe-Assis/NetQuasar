@@ -15,6 +15,7 @@ import {
 } from "../components/ToolsOutputViews";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
+import { buildSnmpBulkResult, exportSnmpBulkCsv, oidColumnTitle } from "../lib/toolsSnmpBulk";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -259,7 +260,7 @@ export function ToolsPage() {
     onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
   });
 
-  const [bulkHost, setBulkHost] = useState("127.0.0.1");
+  const [bulkHosts, setBulkHosts] = useState("127.0.0.1\n192.168.1.1");
   const [bulkComm, setBulkComm] = useState("public");
   const [walkHost, setWalkHost] = useState("127.0.0.1");
   const [walkPort, setWalkPort] = useState("161");
@@ -285,24 +286,30 @@ export function ToolsPage() {
   const [bulkOids, setBulkOids] = useState("1.3.6.1.2.1.1.1.0\n1.3.6.1.2.1.1.3.0");
   const [bulkTo, setBulkTo] = useState("8000");
   const bulkRun = useMutation({
-    mutationFn: () =>
-      apiFetch("/api/v1/tools/snmp/bulk-get", {
-        method: "POST",
-        json: {
-          host: bulkHost.trim(),
-          community: bulkComm,
-          oids: bulkOids
-            .split(/[\s,\n]+/)
-            .map((s) => s.trim())
-            .filter(Boolean),
-          timeout_ms: Number(bulkTo) || 8000,
-        },
-      }),
-    onMutate: () => show("info", "A executar SNMP bulk-get (vários OIDs)…"),
-    onSuccess: (d) => {
-      if (isRecord(d) && d.ok === true) show("ok", "SNMP bulk-get concluído com sucesso.");
-      else if (isRecord(d) && typeof d.error === "string" && d.error) show("err", `SNMP bulk-get: ${d.error}`);
-      else show("ok", "SNMP bulk-get concluído. Verifique o resultado abaixo.");
+    mutationFn: async () => {
+      const hosts = splitLinesOrComma(bulkHosts).slice(0, 50);
+      const oids = bulkOids
+        .split(/[\s,\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (hosts.length === 0 || oids.length === 0) {
+        throw new Error("Indique pelo menos um host e um OID.");
+      }
+      const timeout_ms = Number(bulkTo) || 8000;
+      return buildSnmpBulkResult({
+        hosts,
+        oids,
+        fetchHost: (host) =>
+          apiFetch("/api/v1/tools/snmp/bulk-get", {
+            method: "POST",
+            json: { host, community: bulkComm, oids, timeout_ms },
+          }),
+      });
+    },
+    onMutate: () => show("info", "A executar SNMP bulk-get em todos os hosts…"),
+    onSuccess: (data) => {
+      const hostsOk = data.hosts.filter((r) => r.ok).length;
+      show("ok", `Bulk-get concluído: ${hostsOk} de ${data.hosts.length} host(s) com leituras.`);
     },
     onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
   });
@@ -822,31 +829,83 @@ export function ToolsPage() {
       {tab === "snmp_bulk" && (
         <ToolsPanel
           title="SNMP bulk-get (v2c)"
-          description="Vários OIDs num única requisição GET-BULK. Indique host, comunidade, timeout e lista de OIDs (um por linha)."
+          description="Vários hosts e vários OIDs: um host por linha (ou separados por vírgula) e OIDs um por linha. O servidor executa bulk-get em cada host com a mesma lista de OIDs (até 50 hosts por execução)."
           results={
             <>
               <ToolOutputError err={bulkRun.error as Error | null} />
-              {bulkRun.data !== undefined ? <SnmpGetOutput data={bulkRun.data} /> : null}
+              {bulkRun.data ? (
+                <div className="table-wrap" style={{ marginTop: 12 }}>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                    <p style={{ color: "var(--muted)", fontSize: 11, margin: 0 }}>{bulkRun.data.note}</p>
+                    <button type="button" className="btn" onClick={() => exportSnmpBulkCsv(bulkRun.data!)}>
+                      Exportar CSV
+                    </button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Host</th>
+                        <th>Estado</th>
+                        {bulkRun.data.oids.map((oid) => (
+                          <th key={oid} className="mono" style={{ fontSize: 11 }} title={oid}>
+                            {oidColumnTitle(oid)}
+                          </th>
+                        ))}
+                        <th>Detalhe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkRun.data.hosts.map((r) => (
+                        <tr key={r.host}>
+                          <td className="mono">{r.host}</td>
+                          <td>{r.ok ? <span className="badge badge--ok">OK</span> : <span className="badge badge--off">Erro</span>}</td>
+                          {bulkRun.data!.oids.map((oid) => (
+                            <td key={oid} className="mono" style={{ fontSize: 11, maxWidth: 280, wordBreak: "break-all" }} title={r.values[oid]?.type}>
+                              {r.ok ? r.values[oid]?.value || "—" : "—"}
+                            </td>
+                          ))}
+                          <td style={{ fontSize: 11, color: "var(--muted)", maxWidth: 240 }}>
+                            {r.error ?? "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </>
           }
         >
-          <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-            <div className="field" style={{ marginBottom: 0, flex: "1 1 180px" }}>
-              <label htmlFor="tools-bulk-host">Host / IP</label>
-              <input id="tools-bulk-host" className="input mono" value={bulkHost} onChange={(e) => setBulkHost(e.target.value)} />
+          <div className="tools-http-matrix-inputs">
+            <div className="field tools-http-matrix-inputs__col">
+              <label htmlFor="tools-bulk-hosts">Hosts / IPs</label>
+              <textarea
+                id="tools-bulk-hosts"
+                className="textarea mono tools-http-matrix-inputs__textarea"
+                rows={8}
+                placeholder={"192.168.1.1\n10.0.0.2"}
+                value={bulkHosts}
+                onChange={(e) => setBulkHosts(e.target.value)}
+              />
             </div>
-            <div className="field" style={{ marginBottom: 0, width: 140 }}>
+            <div className="field tools-http-matrix-inputs__col">
+              <label htmlFor="tools-bulk-oids">OIDs (um por linha)</label>
+              <textarea
+                id="tools-bulk-oids"
+                className="textarea mono tools-http-matrix-inputs__textarea"
+                rows={8}
+                value={bulkOids}
+                onChange={(e) => setBulkOids(e.target.value)}
+              />
+            </div>
+            <div className="field tools-http-matrix-inputs__opts">
               <label htmlFor="tools-bulk-comm">Comunidade</label>
               <input id="tools-bulk-comm" className="input" value={bulkComm} onChange={(e) => setBulkComm(e.target.value)} />
-            </div>
-            <div className="field" style={{ marginBottom: 0, width: 120 }}>
-              <label htmlFor="tools-bulk-to">Timeout (ms)</label>
+              <label htmlFor="tools-bulk-to" style={{ marginTop: 10 }}>
+                Timeout (ms)
+              </label>
               <input id="tools-bulk-to" className="input mono" value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} />
             </div>
-          </div>
-          <div className="field" style={{ marginTop: 12 }}>
-            <label htmlFor="tools-bulk-oids">OIDs (um por linha)</label>
-            <textarea id="tools-bulk-oids" className="textarea mono" rows={5} value={bulkOids} onChange={(e) => setBulkOids(e.target.value)} />
           </div>
           <div className="tools-panel__actions">
             <button type="button" className="btn btn--primary" disabled={bulkRun.isPending} onClick={() => bulkRun.mutate()}>

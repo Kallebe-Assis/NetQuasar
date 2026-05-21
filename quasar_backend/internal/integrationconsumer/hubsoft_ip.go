@@ -11,6 +11,7 @@ var ipv4FieldKeys = []string{
 	"ip_fixo",
 	"ip_atribuido",
 	"endereco_ip",
+	"endereco_ipv4",
 	"framed_ip_address",
 	"framedipaddress",
 	"ip_wan",
@@ -18,6 +19,9 @@ var ipv4FieldKeys = []string{
 	"ip_conexao",
 	"ip_atual",
 	"ip_autenticacao",
+	"ip_cliente",
+	"ipv4_fixo",
+	"ipv4_atribuido",
 }
 
 var ipv4NestedKeys = []string{
@@ -27,6 +31,9 @@ var ipv4NestedKeys = []string{
 	"radius",
 	"pppoe",
 	"conexao_radius",
+	"pacote",
+	"servico",
+	"cliente_servico",
 }
 
 func isValidIPv4(s string) bool {

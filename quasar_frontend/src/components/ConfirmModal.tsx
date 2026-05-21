@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+
 type ConfirmModalProps = {
   open: boolean;
   title: string;
@@ -22,7 +24,7 @@ export function ConfirmModal({
   onConfirm,
 }: ConfirmModalProps) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
@@ -36,7 +38,8 @@ export function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

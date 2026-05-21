@@ -10,6 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// Filtro alinhado ao monitoramento: só equipamentos em operação «Ativo».
+const sqlDeviceOperationalAtivo = `TRIM(BOTH FROM COALESCE(operational_mode, '')) = 'Ativo'`
+const sqlDeviceOperationalAtivoD = `TRIM(BOTH FROM COALESCE(d.operational_mode, '')) = 'Ativo'`
+
 // dashboardAnalytics agrega leituras materializadas (sem ping/SNMP inline).
 func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -28,8 +32,10 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 		WHERE year_month = to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), 'YYYY-MM')
 	`).Scan(&nClients)
 	_ = s.DB().QueryRow(ctx, `SELECT is_running FROM monitoring_runtime WHERE id=1`).Scan(&monRunning)
-	_ = s.DB().QueryRow(ctx, `SELECT COUNT(*) FROM devices WHERE telemetry_enabled = true`).Scan(&telDev)
-	_ = s.DB().QueryRow(ctx, `SELECT COUNT(*) FROM devices WHERE ping_enabled = true`).Scan(&pingDev)
+	_ = s.DB().QueryRow(ctx, `
+		SELECT COUNT(*) FROM devices WHERE telemetry_enabled = true AND `+sqlDeviceOperationalAtivo).Scan(&telDev)
+	_ = s.DB().QueryRow(ctx, `
+		SELECT COUNT(*) FROM devices WHERE ping_enabled = true AND `+sqlDeviceOperationalAtivo).Scan(&pingDev)
 	totals := map[string]any{
 		"devices":                   nDev,
 		"pops":                      nPops,
@@ -46,7 +52,6 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 		"totals":       totals,
 	}
 
-	// Por categoria
 	if rows, err := s.DB().Query(ctx, `
 		SELECT COALESCE(NULLIF(trim(category), ''), '(sem categoria)'), COUNT(*)::bigint
 		FROM devices GROUP BY 1 ORDER BY 2 DESC, 1`); err == nil {
@@ -142,9 +147,11 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	var pingAvg *float64
 	_ = s.DB().QueryRow(ctx, `
 		SELECT COUNT(*)::bigint,
-			COUNT(*) FILTER (WHERE ok)::bigint,
-			AVG(latency_ms)::float8 FILTER (WHERE ok AND latency_ms IS NOT NULL)
-		FROM ping_history WHERE checked_at >= $1`, since).Scan(&pingN, &pingOk, &pingAvg)
+			COUNT(*) FILTER (WHERE ph.ok)::bigint,
+			AVG(ph.latency_ms)::float8 FILTER (WHERE ph.ok AND ph.latency_ms IS NOT NULL)
+		FROM ping_history ph
+		JOIN devices d ON d.id = ph.device_id AND `+sqlDeviceOperationalAtivoD+`
+		WHERE ph.checked_at >= $1`, since).Scan(&pingN, &pingOk, &pingAvg)
 	pingRatio := float64(0)
 	if pingN > 0 {
 		pingRatio = float64(pingOk) / float64(pingN) * 100
@@ -157,32 +164,9 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rows, err := s.DB().Query(ctx, `
-		SELECT (checked_at AT TIME ZONE 'UTC')::date::text AS day,
-			COUNT(*)::bigint AS samples,
-			AVG(CASE WHEN ok THEN 100.0 ELSE 0 END)::float8 AS ok_pct,
-			AVG(latency_ms)::float8 FILTER (WHERE ok AND latency_ms IS NOT NULL) AS avg_lat
-		FROM ping_history
-		WHERE checked_at >= $1
-		GROUP BY 1 ORDER BY 1`, since); err == nil {
-		var byDay []map[string]any
-		for rows.Next() {
-			var day string
-			var samples int64
-			var okPct, avgLat *float64
-			if rows.Scan(&day, &samples, &okPct, &avgLat) == nil {
-				byDay = append(byDay, map[string]any{"day": day, "samples": samples, "ok_percent": okPct, "avg_latency_ms": avgLat})
-			}
-		}
-		rows.Close()
-		out["ping_by_day"] = byDay
-	} else {
-		out["ping_by_day"] = []any{}
-	}
-
-	if rows, err := s.DB().Query(ctx, `
 		SELECT d.id::text, d.description, AVG(ph.latency_ms)::float8 AS avg_ms, COUNT(*)::bigint AS n
 		FROM ping_history ph
-		JOIN devices d ON d.id = ph.device_id
+		JOIN devices d ON d.id = ph.device_id AND `+sqlDeviceOperationalAtivoD+`
 		WHERE ph.checked_at >= $1 AND ph.ok = true AND ph.latency_ms IS NOT NULL
 		GROUP BY d.id, d.description
 		HAVING COUNT(*) >= 3
@@ -206,7 +190,7 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	if rows, err := s.DB().Query(ctx, `
 		SELECT d.id::text, d.description, AVG(ph.latency_ms)::float8 AS avg_ms, COUNT(*)::bigint AS n
 		FROM ping_history ph
-		JOIN devices d ON d.id = ph.device_id
+		JOIN devices d ON d.id = ph.device_id AND `+sqlDeviceOperationalAtivoD+`
 		WHERE ph.checked_at >= $1 AND ph.ok = true AND ph.latency_ms IS NOT NULL
 		GROUP BY d.id, d.description
 		HAVING COUNT(*) >= 3
@@ -228,33 +212,19 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var telN int64
-	_ = s.DB().QueryRow(ctx, `SELECT COUNT(*)::bigint FROM telemetry_samples WHERE collected_at >= $1`, since).Scan(&telN)
+	_ = s.DB().QueryRow(ctx, `
+		SELECT COUNT(*)::bigint
+		FROM telemetry_samples ts
+		JOIN devices d ON d.id = ts.device_id AND `+sqlDeviceOperationalAtivoD+`
+		WHERE ts.collected_at >= $1`, since).Scan(&telN)
 	out["telemetry_window"] = map[string]any{"samples": telN}
 
 	if rows, err := s.DB().Query(ctx, `
-		SELECT (collected_at AT TIME ZONE 'UTC')::date::text AS day, COUNT(*)::bigint
-		FROM telemetry_samples
-		WHERE collected_at >= $1
-		GROUP BY 1 ORDER BY 1`, since); err == nil {
-		var tbd []map[string]any
-		for rows.Next() {
-			var day string
-			var n int64
-			if rows.Scan(&day, &n) == nil {
-				tbd = append(tbd, map[string]any{"day": day, "samples": n})
-			}
-		}
-		rows.Close()
-		out["telemetry_by_day"] = tbd
-	} else {
-		out["telemetry_by_day"] = []any{}
-	}
-
-	if rows, err := s.DB().Query(ctx, `
-		SELECT alert_type, COUNT(*)::bigint
-		FROM alert_instances
-		WHERE active_since >= $1
-		GROUP BY alert_type ORDER BY 2 DESC`, since); err == nil {
+		SELECT ai.alert_type, COUNT(*)::bigint
+		FROM alert_instances ai
+		JOIN devices d ON d.id = ai.device_id AND `+sqlDeviceOperationalAtivoD+`
+		WHERE ai.active_since >= $1
+		GROUP BY ai.alert_type ORDER BY 2 DESC`, since); err == nil {
 		var at []map[string]any
 		for rows.Next() {
 			var typ string
@@ -270,7 +240,11 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var openAlerts int64
-	_ = s.DB().QueryRow(ctx, `SELECT COUNT(*)::bigint FROM alert_instances WHERE closed_at IS NULL`).Scan(&openAlerts)
+	_ = s.DB().QueryRow(ctx, `
+		SELECT COUNT(*)::bigint
+		FROM alert_instances ai
+		JOIN devices d ON d.id = ai.device_id AND `+sqlDeviceOperationalAtivoD+`
+		WHERE ai.closed_at IS NULL`).Scan(&openAlerts)
 	out["alerts_open"] = openAlerts
 
 	if rows, err := s.DB().Query(ctx, `
@@ -290,8 +264,9 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 			o.updated_at
 		FROM devices d
 		JOIN olt_snapshots o ON o.device_id = d.id
-		WHERE lower(trim(d.category)) = 'olt'
-		ORDER BY onu_total DESC, d.description`); err == nil {
+		WHERE lower(trim(d.category)) = 'olt' AND `+sqlDeviceOperationalAtivoD+`
+		ORDER BY onu_total DESC, d.description
+		LIMIT 24`); err == nil {
 		var olts []map[string]any
 		for rows.Next() {
 			var id, desc string
@@ -300,12 +275,12 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 			var upd time.Time
 			if rows.Scan(&id, &desc, &brand, &onuTotal, &onuOn, &onuOff, &upd) == nil {
 				m := map[string]any{
-					"device_id":    id,
-					"description":  desc,
-					"onu_count":    onuTotal,
-					"onu_online":   onuOn,
-					"onu_offline":  onuOff,
-					"snapshot_at":  upd.Format(time.RFC3339),
+					"device_id":   id,
+					"description": desc,
+					"onu_count":   onuTotal,
+					"onu_online":  onuOn,
+					"onu_offline": onuOff,
+					"snapshot_at": upd.Format(time.RFC3339),
 				}
 				if brand != nil {
 					m["brand"] = *brand
@@ -322,13 +297,14 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	if rows, err := s.DB().Query(ctx, `
 		SELECT DISTINCT ON (i.device_id) i.device_id, d.description, i.collected_at, i.interfaces::text
 		FROM interface_snapshots i
-		JOIN devices d ON d.id = i.device_id
+		JOIN devices d ON d.id = i.device_id AND `+sqlDeviceOperationalAtivoD+`
 		WHERE i.collected_at >= $1
 		  AND (
 			lower(trim(d.category)) LIKE '%mikrotik%'
 			OR lower(coalesce(d.brand, '')) LIKE '%mikrotik%'
 		  )
-		ORDER BY i.device_id, i.collected_at DESC`, since); err == nil {
+		ORDER BY i.device_id, i.collected_at DESC
+		LIMIT 16`, since); err == nil {
 		var mk []map[string]any
 		for rows.Next() {
 			var did uuid.UUID
@@ -345,7 +321,7 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 				"collected_at":  ts.Format(time.RFC3339),
 				"if_in_octets":  inO,
 				"if_out_octets": outO,
-				"note":          "Soma ifInOctets / ifOutOctets (IF-MIB) na última amostra por equipamento Mikrotik.",
+				"note":          "Soma ifInOctets / ifOutOctets (IF-MIB) na última amostra por equipamento Mikrotik (Ativo).",
 			})
 		}
 		rows.Close()
