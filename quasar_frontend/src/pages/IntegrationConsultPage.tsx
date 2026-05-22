@@ -95,17 +95,21 @@ export function IntegrationConsultPage() {
     [slug, busca, termo],
   );
 
-  const lookupForClient = useCallback(
-    (client: ClientCard) => {
-      const t = termo.trim();
-      return attendanceBuscaForClient(client, { busca, termo: t });
-    },
-    [busca, termo],
-  );
+  const lookupForClient = useCallback((client: ClientCard) => {
+    return attendanceBuscaForClient(client, { busca: "codigo_cliente", termo: "" });
+  }, []);
 
   const fetchClientAttendance = useCallback(
     async (client: ClientCard) => {
       const q = lookupForClient(client);
+      if (!q.termo.trim()) {
+        return {
+          ok: false,
+          message:
+            "ID do cliente não encontrado no cartão. Consulte por ID do cliente ou abra «Ver dados completos» antes dos atendimentos.",
+          items: [],
+        };
+      }
       const r = await apiFetch<ClientAttendanceResponse>(`/api/v1/integrations/${slug}/consumer/client-attendance`, {
         method: "POST",
         json: {
@@ -122,6 +126,14 @@ export function IntegrationConsultPage() {
   const fetchClientWorkOrders = useCallback(
     async (client: ClientCard) => {
       const q = lookupForClient(client);
+      if (!q.termo.trim()) {
+        return {
+          ok: false,
+          message:
+            "ID do cliente não encontrado no cartão. Consulte por ID do cliente ou abra «Ver dados completos» antes das ordens de serviço.",
+          items: [],
+        };
+      }
       const r = await apiFetch<ClientWorkOrderResponse>(`/api/v1/integrations/${slug}/consumer/client-work-order`, {
         method: "POST",
         json: {

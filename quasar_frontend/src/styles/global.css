@@ -207,6 +207,11 @@ h2 {
   color: var(--on-accent);
   font-weight: 600;
 }
+.btn--sm {
+  padding: 4px 10px;
+  font-size: 11px;
+  min-height: 0;
+}
 .btn--primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 92%, var(--text));
   border-color: color-mix(in srgb, var(--accent) 92%, var(--text));
@@ -772,6 +777,9 @@ tr:hover td {
   justify-content: center;
   z-index: 50;
   padding: 1rem;
+}
+.modal-backdrop--stack {
+  z-index: 60;
 }
 .modal {
   background: var(--panel);
@@ -1566,11 +1574,29 @@ h3 .info-hint {
 .integration-support-table__grid--att td:nth-child(4) {
   width: 32%;
 }
+.integration-support-table__col-actions {
+  width: 5.5rem;
+  text-align: right;
+}
+.integration-support-table__cell--actions {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.integration-support-table__more-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  min-width: 0;
+}
 .integration-support-table__grid--att th:nth-child(5),
 .integration-support-table__grid--att td:nth-child(5),
 .integration-support-table__grid--att th:nth-child(6),
 .integration-support-table__grid--att td:nth-child(6) {
-  width: 14%;
+  width: 12%;
+}
+.integration-support-table__grid--att th:nth-child(7),
+.integration-support-table__grid--att td:nth-child(7) {
+  width: 6.5rem;
 }
 /* Ordens de serviço */
 .integration-support-table__grid--os th:nth-child(1),
@@ -1593,7 +1619,11 @@ h3 .info-hint {
 .integration-support-table__grid--os td:nth-child(5),
 .integration-support-table__grid--os th:nth-child(6),
 .integration-support-table__grid--os td:nth-child(6) {
-  width: 13%;
+  width: 11%;
+}
+.integration-support-table__grid--os th:nth-child(7),
+.integration-support-table__grid--os td:nth-child(7) {
+  width: 6.5rem;
 }
 .integration-consult-card__meta {
   display: grid;
@@ -1689,6 +1719,30 @@ h3 .info-hint {
   margin: 4px 0 0;
   font-size: 11px;
   color: var(--muted);
+}
+.integration-support-detail-modal {
+  max-width: min(92vw, 800px);
+}
+.integration-support-detail-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.integration-detail__row--stack {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.integration-detail__value--block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-weight: 400;
+  line-height: 1.45;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--panel2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
 }
 .integration-detail {
   padding: 12px 16px 16px;

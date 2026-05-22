@@ -57,7 +57,7 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	}
 
 	if runTel {
-		setActivity(ctx, pool, "2/5 — Telemetria SNMP (equipamentos com telemetria activa)")
+		setActivity(ctx, pool, "2/5 — Telemetria SNMP (equipamentos com telemetria ativa)")
 		if err := RunTelemetrySweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap}); err != nil {
 			log.Warn().Err(err).Msg("pipeline: telemetria")
 		}

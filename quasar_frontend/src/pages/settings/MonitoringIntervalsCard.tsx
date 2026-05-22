@@ -111,7 +111,7 @@ export function MonitoringPingIntervalsCard() {
             hintLabel="Intervalo de latência e ping ICMP/TCP"
             hint={
               <p>
-                Tempo mínimo entre ciclos de <strong>latência/ping</strong> para todos os equipamentos activos no monitoramento. Valores típicos: 30–60 s.
+                Tempo mínimo entre ciclos de <strong>latência/ping</strong> para todos os equipamentos ativos no monitoramento. Valores típicos: 30–60 s.
                 Este intervalo entra no cálculo do ciclo efectivo do worker (o menor entre ping, telemetria, interfaces e PON).
               </p>
             }
@@ -123,7 +123,7 @@ export function MonitoringPingIntervalsCard() {
             hintLabel="Intervalo de telemetria SNMP"
             hint={
               <p>
-                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria activa.
+                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria ativa.
                 Ex.: 180 s = 3 minutos entre amostras.
               </p>
             }
@@ -267,7 +267,7 @@ export function MonitoringPingIntervalsCard() {
             hint={
               <p>
                 Se o <strong>sysUpTime</strong> reportado por SNMP (em minutos) for <strong>inferior</strong> a este valor, o sistema cria um alerta de
-                possível reinício do equipamento. Use <strong>0</strong> para desactivar este tipo de alerta.
+                possível reinício do equipamento. Use <strong>0</strong> para desativar este tipo de alerta.
               </p>
             }
           >

@@ -27,7 +27,7 @@ export function SettingsPage() {
     <>
       <h1>Configurações</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, utilizadores, credenciais de rede, Telegram (alertas e relatórios), fabricantes OLT e relatórios automáticos.
+        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), fabricantes OLT e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
@@ -553,9 +553,9 @@ function UsersPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-users"] });
       setEditId(null);
-      setSaveToast({ ok: true, text: "Guardado com sucesso (utilizador)." });
+      setSaveToast({ ok: true, text: "Guardado com sucesso (usuário)." });
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (utilizador)." }),
+    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (usuário)." }),
   });
 
   const del = useMutation({
@@ -567,7 +567,7 @@ function UsersPanel() {
   if (list.isError) {
     const ae = list.error as ApiError;
     if (ae?.status === 403) {
-      return <p style={{ color: "var(--muted)" }}>Apenas administradores podem gerir utilizadores.</p>;
+      return <p style={{ color: "var(--muted)" }}>Apenas administradores podem gerir usuários.</p>;
     }
     return <div className="msg msg--err">{(list.error as Error).message}</div>;
   }
@@ -575,11 +575,11 @@ function UsersPanel() {
   return (
     <>
       <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
-        Novos utilizadores só podem ser criados aqui (não existe registo público). Campos: nome, e-mail, <strong>telefone com DDD</strong> (10 ou 11 dígitos), palavra-passe e nível{" "}
+        Novos usuários só podem ser criados aqui (não existe registo público). Campos: nome, e-mail, <strong>telefone com DDD</strong> (10 ou 11 dígitos), palavra-passe e nível{" "}
         <strong>administrador</strong> ou <strong>visitante (viewer)</strong>.
       </p>
       <div className="card">
-        <h2>Novo utilizador</h2>
+        <h2>Novo usuário</h2>
         <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
           <div className="field" style={{ minWidth: 140 }}>
             <label style={{ fontSize: 11 }}>Nome</label>
@@ -619,7 +619,7 @@ function UsersPanel() {
               create.mutate();
             }}
           >
-            Criar utilizador
+            Criar usuário
           </button>
         </div>
         {userCreateErr ? <div className="msg msg--err">{userCreateErr}</div> : null}
@@ -676,7 +676,7 @@ function UsersPanel() {
 
       {editId && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h2>Editar utilizador</h2>
+          <h2>Editar usuário</h2>
           <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
             <div className="field" style={{ minWidth: 140 }}>
               <label style={{ fontSize: 11 }}>Nome</label>

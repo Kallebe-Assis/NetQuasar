@@ -182,11 +182,11 @@ export function oidFriendlyDescription(oid: string): string | null {
     ifMib("8", "Estado operacional da interface") ??
     ({
       "1.3.6.1.2.1.1.1.0": "Descrição do sistema",
-      "1.3.6.1.2.1.1.3.0": "Tempo activo do sistema",
+      "1.3.6.1.2.1.1.3.0": "Tempo ativo do sistema",
       "1.3.6.1.2.1.1.5.0": "Nome do sistema",
       "1.3.6.1.2.1.1.6.0": "Localização do sistema",
       "1.3.6.1.4.1.14988.1.1.3.10.0": "CPU (equipamento Mikrotik)",
-      "1.3.6.1.4.1.2021.11.11.0": "CPU — tempo inactivo (UCD-SNMP)",
+      "1.3.6.1.4.1.2021.11.11.0": "CPU — tempo inativo (UCD-SNMP)",
       "1.3.6.1.4.1.2021.4.6.0": "Memória RAM livre (UCD-SNMP)",
       "1.3.6.1.4.1.2021.4.5.0": "Memória RAM total (UCD-SNMP)",
     } as Record<string, string>)[o] ??
@@ -528,7 +528,7 @@ const CADASTRAL_LABELS: Record<string, string> = {
   access_mode: "Modo de acesso",
   telemetry_mode: "Modo de telemetria",
   ping_enabled: "Monitorizar com ping",
-  telemetry_enabled: "Telemetria activa",
+  telemetry_enabled: "Telemetria ativa",
   operational_mode: "Modo operacional",
   latitude: "Latitude",
   longitude: "Longitude",

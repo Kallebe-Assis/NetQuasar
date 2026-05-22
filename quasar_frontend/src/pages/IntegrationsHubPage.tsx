@@ -118,7 +118,7 @@ export function IntegrationsHubPage() {
               </p>
             </div>
             <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Activa" : "Inactiva"}</span>
+              <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Ativa" : "Inativa"}</span>
               <span className="badge">{it.request_count} requisição(ões)</span>
               {it.last_test_ok === true ? <span className="badge badge--ok">Teste OK</span> : null}
               {it.last_test_ok === false ? <span className="badge badge--err">Teste falhou</span> : null}

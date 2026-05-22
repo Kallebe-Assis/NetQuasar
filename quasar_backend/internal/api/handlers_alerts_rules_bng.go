@@ -159,7 +159,7 @@ func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"closed_count": n,
-		"note":         "Fecha alertas ping_unreachable quando o probe está OK ou quando o equipamento não está em monitorização activa (Ativo, ping ligado, rede Normal). Outros tipos de alerta não são alterados.",
+		"note":         "Fecha alertas ping_unreachable quando o probe está OK ou quando o equipamento não está em monitorização ativa (Ativo, ping ligado, rede Normal). Outros tipos de alerta não são alterados.",
 	})
 }
 

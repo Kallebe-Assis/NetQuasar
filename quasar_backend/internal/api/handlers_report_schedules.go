@@ -176,7 +176,7 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 		}
 	}
 	if !tg && !em {
-		sendErr = fmt.Errorf("nenhum canal activo (Telegram ou e-mail)")
+		sendErr = fmt.Errorf("nenhum canal ativo (Telegram ou e-mail)")
 	}
 	if sendErr != nil {
 		s.setAlertsDigestStatus(ctx, "failed", strPtr(sendErr.Error()), runKey)
@@ -315,7 +315,7 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 		}
 	}
 	if !tg && !em {
-		sendErr = fmt.Errorf("nenhum canal activo")
+		sendErr = fmt.Errorf("nenhum canal ativo")
 	}
 	if sendErr != nil {
 		s.setCommercialReportStatus(ctx, "failed", strPtr(sendErr.Error()), period)

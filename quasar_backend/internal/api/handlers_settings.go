@@ -676,7 +676,7 @@ func (s *Server) requireSettingsUsersAdmin(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	if role != "admin" {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "apenas administradores podem gerir utilizadores", nil)
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "apenas administradores podem gerir usuários", nil)
 		return false
 	}
 	return true

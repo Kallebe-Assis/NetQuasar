@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionMenu } from "../components/ActionMenu";
@@ -62,6 +63,19 @@ function normalizeBrand(raw: string | null | undefined): string {
   const t = raw.trim().toLowerCase();
   const found = DEVICE_BRANDS.find((b) => b.toLowerCase() === t);
   return found ?? "";
+}
+
+function DeviceBoolIcon({ value, label }: { value: boolean; label: string }) {
+  const Icon = value ? Check : X;
+  return (
+    <span
+      className={`devices-overview-table__bool-icon ${value ? "devices-overview-table__bool-icon--yes" : "devices-overview-table__bool-icon--no"}`}
+      title={label}
+      aria-label={label}
+    >
+      <Icon size={18} strokeWidth={2} aria-hidden />
+    </span>
+  );
 }
 
 function networkIsBridge(ns: string | undefined | null): boolean {
@@ -1027,7 +1041,7 @@ export function DevicesPage() {
       </div>
       )}
 
-      <div className="table-wrap" style={{ overflowX: "auto", overflowY: "visible" }}>
+      <div className="table-wrap devices-overview-table" style={{ overflowX: "auto", overflowY: "visible" }}>
         <table>
           <thead>
             <tr>
@@ -1077,15 +1091,32 @@ export function DevicesPage() {
               <tr key={d.id}>
                 <td>{d.category}</td>
                 <td>{d.brand ?? "—"}</td>
-                <td>{d.description}</td>
-                <td className="mono">{d.ip ?? "—"}</td>
-                <td className="mono" style={{ fontSize: 11 }} title={dispCadastro(d.mac)}>{dispCadastro(d.mac)}</td>
-                <td className="mono" style={{ fontSize: 11 }} title={dispCadastro(d.serial_number)}>{dispCadastro(d.serial_number)}</td>
-                <td style={{ fontSize: 11, maxWidth: 120 }} title={dispCadastro(d.software_version)}>{dispCadastro(d.software_version)}</td>
-                <td style={{ fontSize: 11, maxWidth: 120 }} title={dispCadastro(d.hardware_version)}>{dispCadastro(d.hardware_version)}</td>
-                <td className="mono" style={{ fontSize: 11 }}>{d.network_status}</td>
-                <td>{d.ping_enabled ? "sim" : "não"}</td>
-                <td>{d.telemetry_enabled ? "sim" : "não"}</td>
+                <td className="devices-overview-table__desc" title={d.description}>
+                  {d.description}
+                </td>
+                <td className="devices-overview-table__mono">{d.ip ?? "—"}</td>
+                <td className="devices-overview-table__mono devices-overview-table__truncate" title={dispCadastro(d.mac)}>
+                  {dispCadastro(d.mac)}
+                </td>
+                <td className="devices-overview-table__mono devices-overview-table__truncate" title={dispCadastro(d.serial_number)}>
+                  {dispCadastro(d.serial_number)}
+                </td>
+                <td className="devices-overview-table__truncate" title={dispCadastro(d.software_version)}>
+                  {dispCadastro(d.software_version)}
+                </td>
+                <td className="devices-overview-table__truncate" title={dispCadastro(d.hardware_version)}>
+                  {dispCadastro(d.hardware_version)}
+                </td>
+                <td className="devices-overview-table__mono">{d.network_status}</td>
+                <td className="devices-overview-table__bool">
+                  <DeviceBoolIcon value={d.ping_enabled} label={d.ping_enabled ? "Ping ativo" : "Ping inativo"} />
+                </td>
+                <td className="devices-overview-table__bool">
+                  <DeviceBoolIcon
+                    value={d.telemetry_enabled}
+                    label={d.telemetry_enabled ? "Telemetria ativa" : "Telemetria inativa"}
+                  />
+                </td>
                 <td>{d.operational_mode}</td>
                 <td>
                   {canMutate ? (
@@ -1704,7 +1735,7 @@ export function DevicesPage() {
                   </select>
                 </BulkFieldRow>
                 <BulkFieldRow
-                  label="Ping activo"
+                  label="Ping ativo"
                   checked={bulkForm.updatePing}
                   onCheck={(v) => setBulkForm((f) => ({ ...f, updatePing: v }))}
                 >
@@ -1720,7 +1751,7 @@ export function DevicesPage() {
                   </select>
                 </BulkFieldRow>
                 <BulkFieldRow
-                  label="Telemetria activa"
+                  label="Telemetria ativa"
                   checked={bulkForm.updateTelemetry}
                   onCheck={(v) => setBulkForm((f) => ({ ...f, updateTelemetry: v }))}
                 >

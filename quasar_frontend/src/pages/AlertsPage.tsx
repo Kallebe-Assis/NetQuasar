@@ -145,9 +145,9 @@ export function AlertsPage() {
     },
     staleTime: 0,
     refetchOnMount: "always",
-    /** Reverter o default global (main.tsx desactiva refetch ao foco). */
+    /** Reverter o default global (main.tsx desativa refetch ao foco). */
     refetchOnWindowFocus: true,
-    /** Polling contínuo na página Alertas — lista activa actualiza mesmo no separador Histórico. */
+    /** Polling contínuo na página Alertas — lista ativa actualiza mesmo no separador Histórico. */
     refetchInterval: ALERTS_ACTIVE_REFRESH_MS,
     refetchIntervalInBackground: true,
   });
@@ -385,7 +385,7 @@ export function AlertsPage() {
               type="button"
               className="btn btn--primary"
               disabled={reval.isPending}
-              title="Fecha alertas de equipamento offline quando o ping está OK ou quando o equipamento não está em monitorização activa (inativo, ping desligado, etc.)"
+              title="Fecha alertas de equipamento offline quando o ping está OK ou quando o equipamento não está em monitorização ativa (inativo, ping desligado, etc.)"
               onClick={() => reval.mutate()}
             >
               Recalcular estado

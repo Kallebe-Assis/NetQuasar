@@ -476,7 +476,7 @@ export function IntegrationDetailPage() {
                 }))
               }
             />
-            Ativar aba Atendimentos (<code className="mono">…/cliente/atendimento</code>)
+            Ativar aba Atendimentos (Hubsoft GET ou IXC POST <code className="mono">/su_ticket</code>)
           </label>
           <div className="field" style={{ maxWidth: 420, marginTop: 8 }}>
             <label>Requisição HTTP — atendimentos</label>
@@ -497,7 +497,7 @@ export function IntegrationDetailPage() {
                 }))
               }
             >
-              <option value="">Detectar automaticamente (GET …/integracao/cliente/atendimento)</option>
+              <option value="">Detectar automaticamente (Hubsoft ou IXC /su_ticket)</option>
               {requests.map((req) => (
                 <option key={req.id} value={req.id}>
                   {req.name} — {req.method} {req.path}
@@ -505,6 +505,11 @@ export function IntegrationDetailPage() {
               ))}
             </select>
           </div>
+          <p className="msg" style={{ fontSize: 12, marginTop: 8 }}>
+            <strong>IXC su_ticket:</strong> a requisição deve ser <strong>POST</strong> (não GET), path <code className="mono">/su_ticket</code>, header{" "}
+            <code className="mono">ixcsoft: listar</code>, body JSON. O filtro usa o campo <code className="mono">id_cliente</code> do ticket (igual ao ID do
+            cliente consultado). O mapeamento da consulta de clientes (tabela acima) também vale para atendimentos se não houver mapeamento próprio.
+          </p>
 
           <label className="row" style={{ gap: 8, marginTop: 16 }}>
             <input
@@ -1158,6 +1163,9 @@ function parseConsumerConfig(raw: unknown): ConsumerConfig {
     client_attendance: {
       enabled: !!o.client_attendance?.enabled,
       request_id: o.client_attendance?.request_id,
+      provider: (o.client_attendance?.provider as ClientSearchProvider) || "auto",
+      ixc_list_action: o.client_attendance?.ixc_list_action,
+      field_mappings: o.client_attendance?.field_mappings,
     },
     client_work_order: {
       enabled: !!o.client_work_order?.enabled,

@@ -297,14 +297,41 @@ func (s *Server) integrationConsumerClientAttendance(w http.ResponseWriter, r *h
 	}
 
 	rc := s.requestRowToConfig(rr)
-	overrides := integrationconsumer.HubsoftAttendanceQueryOverrides(busca, termo, apenas)
-	rc = integrationconsumer.ApplyQueryOverrides(rc, overrides)
+	profile := integrationconsumer.DetectAttendanceProfile(cc.ClientAttendance.Provider, rc, cfg.BaseURL)
 
-	res := integrationhttp.RunWithLoginRequest(ctx, cfg, rc, false)
+	execute := func(rc integrationhttp.RequestConfig) integrationhttp.RunResult {
+		runCfg := cfg
+		vars := map[string]string{
+			"busca":       busca,
+			"termo_busca": termo,
+			"query":       termo,
+		}
+		if runCfg.Variables == nil {
+			runCfg.Variables = vars
+		} else {
+			runCfg.Variables = make(map[string]string, len(runCfg.Variables)+len(vars))
+			for k, v := range cfg.Variables {
+				runCfg.Variables[k] = v
+			}
+			for k, v := range vars {
+				runCfg.Variables[k] = v
+			}
+		}
+		return integrationhttp.RunWithLoginRequest(ctx, runCfg, rc, false)
+	}
+
+	var res integrationhttp.RunResult
+	var parsed integrationconsumer.AttendanceResult
+	if profile == integrationconsumer.ProviderIXC || integrationconsumer.LooksLikeIXCAttendanceRequest(rc) {
+		res, parsed = integrationconsumer.RunIXCAttendanceWithAttempts(rc, busca, termo, cc.ClientAttendance, cc.ClientSearch, execute)
+	} else {
+		rc = integrationconsumer.ApplyAttendanceContext(rc, profile, busca, termo, apenas, cc.ClientAttendance, cc.ClientSearch)
+		res = execute(rc)
+		rawBody := integrationconsumer.ResponseBodyForParse([]byte(res.ResponsePreview))
+		parsed = integrationconsumer.ParseClientAttendance(rawBody, profile)
+	}
 	s.persistRequestRun(ctx, reqID, res)
 	s.logIntegrationRun(ctx, integID, &reqID, "request", res)
-
-	parsed := integrationconsumer.ParseHubsoftClientAttendance([]byte(res.ResponsePreview))
 	if !res.OK && parsed.OK {
 		parsed.OK = false
 		if parsed.Message == "" || parsed.Message == "Nenhum atendimento encontrado." {
@@ -324,6 +351,8 @@ func (s *Server) integrationConsumerClientAttendance(w http.ResponseWriter, r *h
 		"latency_ms":     res.LatencyMS,
 		"request_url":    res.RequestURL,
 		"request_method": res.RequestMethod,
+		"termo_busca":    termo,
+		"busca":          busca,
 	})
 }
 
@@ -346,6 +375,10 @@ func (s *Server) integrationConsumerClientWorkOrder(w http.ResponseWriter, r *ht
 		busca = "codigo_cliente"
 	}
 	termo := strings.TrimSpace(body.TermoBusca)
+	if termo == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "termo_busca é obrigatório", nil)
+		return
+	}
 
 	var consumerCfg []byte
 	var integEnabled bool
@@ -397,14 +430,42 @@ func (s *Server) integrationConsumerClientWorkOrder(w http.ResponseWriter, r *ht
 	}
 
 	rc := s.requestRowToConfig(rr)
-	overrides := integrationconsumer.HubsoftWorkOrderQueryOverrides(busca, termo)
-	rc = integrationconsumer.ApplyQueryOverrides(rc, overrides)
+	profile := integrationconsumer.DetectWorkOrderProfile(cc.ClientWorkOrder.Provider, rc, cfg.BaseURL)
 
-	res := integrationhttp.RunWithLoginRequest(ctx, cfg, rc, false)
+	execute := func(rc integrationhttp.RequestConfig) integrationhttp.RunResult {
+		runCfg := cfg
+		vars := map[string]string{
+			"busca":       busca,
+			"termo_busca": termo,
+			"query":       termo,
+		}
+		if runCfg.Variables == nil {
+			runCfg.Variables = vars
+		} else {
+			runCfg.Variables = make(map[string]string, len(runCfg.Variables)+len(vars))
+			for k, v := range cfg.Variables {
+				runCfg.Variables[k] = v
+			}
+			for k, v := range vars {
+				runCfg.Variables[k] = v
+			}
+		}
+		return integrationhttp.RunWithLoginRequest(ctx, runCfg, rc, false)
+	}
+
+	var res integrationhttp.RunResult
+	var parsed integrationconsumer.WorkOrderResult
+	if profile == integrationconsumer.ProviderIXC || integrationconsumer.LooksLikeIXCWorkOrderRequest(rc) {
+		res, parsed = integrationconsumer.RunIXCWorkOrderWithAttempts(rc, busca, termo, cc.ClientWorkOrder, cc.ClientSearch, execute)
+	} else {
+		overrides := integrationconsumer.HubsoftWorkOrderQueryOverrides(busca, termo)
+		rc = integrationconsumer.ApplyQueryOverrides(rc, overrides)
+		res = execute(rc)
+		rawBody := integrationconsumer.ResponseBodyForParse([]byte(res.ResponsePreview))
+		parsed = integrationconsumer.ParseClientWorkOrder(rawBody, profile)
+	}
 	s.persistRequestRun(ctx, reqID, res)
 	s.logIntegrationRun(ctx, integID, &reqID, "request", res)
-
-	parsed := integrationconsumer.ParseHubsoftClientWorkOrder([]byte(res.ResponsePreview))
 	if !res.OK && parsed.OK {
 		parsed.OK = false
 		if parsed.Message == "" || parsed.Message == "Nenhuma ordem de serviço encontrada." {
@@ -424,6 +485,8 @@ func (s *Server) integrationConsumerClientWorkOrder(w http.ResponseWriter, r *ht
 		"latency_ms":     res.LatencyMS,
 		"request_url":    res.RequestURL,
 		"request_method": res.RequestMethod,
+		"termo_busca":    termo,
+		"busca":          busca,
 	})
 }
 
@@ -473,10 +536,16 @@ func (s *Server) resolveClientAttendanceRequest(ctx context.Context, integID uui
 	var name string
 	err := s.DB().QueryRow(ctx, `
 		SELECT id, name FROM integration_requests
-		WHERE integration_id=$1 AND enabled=true
-			AND UPPER(method)='GET'
-			AND path ILIKE '%integracao/cliente/atendimento%'
-		ORDER BY sort_order, name LIMIT 1
+		WHERE integration_id=$1 AND enabled=true AND COALESCE(is_login, false)=false
+			AND (
+				(UPPER(method)='GET' AND path ILIKE '%integracao/cliente/atendimento%')
+				OR (UPPER(method)='POST' AND path ILIKE '%su_ticket%')
+			)
+		ORDER BY
+			CASE WHEN path ILIKE '%integracao%' THEN 1 ELSE 0 END,
+			CASE WHEN UPPER(method)='POST' THEN 0 ELSE 1 END,
+			sort_order, name
+		LIMIT 1
 	`, integID).Scan(&rid, &name)
 	return rid, name, err
 }

@@ -37,7 +37,7 @@ export function AppearancePanel() {
       applyUiTheme(theme);
       qc.setQueryData(queryKeys.uiAppearance, { theme, updated_at: new Date().toISOString() });
       void qc.invalidateQueries({ queryKey: queryKeys.uiAppearance });
-      setSaveToast({ ok: true, text: `Tema «${uiThemeLabel(theme)}» salvo para todos os utilizadores.` });
+      setSaveToast({ ok: true, text: `Tema «${uiThemeLabel(theme)}» salvo para todos os usuários.` });
     },
     onError: (e: Error) => setSaveToast({ ok: false, text: e.message }),
   });
@@ -54,7 +54,7 @@ export function AppearancePanel() {
         <InfoHint label="Tema claro e escuro">
           <p>
             Define o aspecto visual de todo o NetQuasar (menu, tabelas, alertas, login). A preferência fica salva na base de dados e aplica-se a todos os
-            utilizadores.
+            usuários.
           </p>
         </InfoHint>
       </h2>

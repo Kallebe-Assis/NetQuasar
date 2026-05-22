@@ -43,7 +43,7 @@ Plataforma de **monitoramento e operação de rede** voltada a provedores ISP (N
 
 - **Autenticação** — login na UI; opcionalmente chaves de API (`NETQUASAR_API_KEYS`).
 - **Perfis** — rotas administrativas (configurações) restritas a administradores.
-- **Auditoria** — registo de alterações relevantes (equipamentos, utilizadores, Telegram, intervalos, base comercial, etc.) consultável em Configurações.
+- **Auditoria** — registo de alterações relevantes (equipamentos, usuários, Telegram, intervalos, base comercial, etc.) consultável em Configurações.
 
 ### Relatórios agendados e incidentes
 
@@ -175,7 +175,7 @@ Guia passo a passo para Debian/Proxmox: [deploy/linux-debian/README.md](deploy/l
 
 1. Aceda à UI (`/login` ou setup se a base estiver vazia).
 2. **Configuração da base** — `/config-setup` ou assistente de cliente (`/client-setup`) conforme o estado da instalação.
-3. **Configurações** (admin) — intervalos de monitoramento, timeouts de coleta, Telegram, perfis OLT, utilizadores.
+3. **Configurações** (admin) — intervalos de monitoramento, timeouts de coleta, Telegram, perfis OLT, usuários.
 4. **Monitoramento** — inicie o motor de coleta e cadastre equipamentos/POPs.
 5. Ajuste **alertas** e regras conforme a operação do ISP.
 

@@ -350,7 +350,7 @@ function SmtpPanel() {
       </p>
       <label className="row" style={{ gap: 8, marginTop: 10 }}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        SMTP activo
+        SMTP ativo
       </label>
       <div className="settings-fields-grid" style={{ marginTop: 10 }}>
         <SettingsField label="Servidor">
@@ -359,7 +359,7 @@ function SmtpPanel() {
         <SettingsField label="Porta">
           <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
         </SettingsField>
-        <SettingsField label="Utilizador">
+        <SettingsField label="Usuário">
           <input className="input" value={user} onChange={(e) => setUser(e.target.value)} />
         </SettingsField>
         <SettingsField label="Palavra-passe">

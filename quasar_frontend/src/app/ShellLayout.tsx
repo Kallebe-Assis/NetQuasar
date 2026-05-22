@@ -108,7 +108,7 @@ export function ShellLayout() {
         </nav>
         <div style={{ marginTop: "auto", padding: "0.75rem 1rem", fontSize: 12, color: "var(--muted)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }} title="Sessão actual">
-            {getStoredUserDisplayLabel() || "Utilizador"}
+            {getStoredUserDisplayLabel() || "Usuário"}
           </div>
           <button type="button" className="btn" style={{ marginTop: 4, width: "100%" }} onClick={() => { clearSession(); window.location.href = "/login"; }}>
             Sair

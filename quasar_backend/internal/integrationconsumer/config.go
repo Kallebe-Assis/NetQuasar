@@ -18,16 +18,28 @@ type ClientSearchConfig struct {
 	CpfMultiAttempt *bool `json:"cpf_multi_attempt,omitempty"`
 }
 
-// ClientAttendanceConfig liga a consulta de atendimentos na UI aa requisição HTTP.
+// ClientAttendanceConfig liga a consulta de atendimentos na UI à requisição HTTP.
 type ClientAttendanceConfig struct {
 	Enabled   bool   `json:"enabled"`
 	RequestID string `json:"request_id,omitempty"`
+	// Provider: auto | hubsoft | ixc | generic.
+	Provider string `json:"provider,omitempty"`
+	// IxcListAction header ixcsoft (padrão listar).
+	IxcListAction string `json:"ixc_list_action,omitempty"`
+	// FieldMappings qtype/oper por tipo de busca (codigo_cliente, cpf_cnpj, …).
+	FieldMappings map[string]SearchFieldConfig `json:"field_mappings,omitempty"`
 }
 
 // ClientWorkOrderConfig liga a consulta de ordens de serviço na UI.
 type ClientWorkOrderConfig struct {
 	Enabled   bool   `json:"enabled"`
 	RequestID string `json:"request_id,omitempty"`
+	// Provider: auto | hubsoft | ixc | generic.
+	Provider string `json:"provider,omitempty"`
+	// IxcListAction header ixcsoft (padrão listar).
+	IxcListAction string `json:"ixc_list_action,omitempty"`
+	// FieldMappings qtype/oper por tipo de busca; vazio reutiliza client_search.
+	FieldMappings map[string]SearchFieldConfig `json:"field_mappings,omitempty"`
 }
 
 // Config agrupa acções de consumo expostas na UI do NetQuasar.

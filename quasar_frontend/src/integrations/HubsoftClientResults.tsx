@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
 import type { AttendanceItem, ClientCard, WorkOrderItem } from "./types";
+import { SupportItemDetailModal, type SupportDetailTarget } from "./SupportItemDetailModal";
 
 type SupportTab = "atendimentos" | "ordens";
 
@@ -103,7 +104,8 @@ function ClientCardSummary({ c }: { c: ClientCard }) {
   return (
     <>
       <div className="integration-consult-card__meta">
-        <FieldInline label="Código" value={c.code} mono />
+        <FieldInline label="ID" value={c.id ?? c.code} mono />
+        {c.code && c.id && c.code !== c.id ? <FieldInline label="Código" value={c.code} mono /> : null}
         <FieldInline label="CPF/CNPJ" value={c.document} mono />
         <FieldInline label="Tel." value={c.phone} />
         <FieldInline label="E-mail" value={c.email} />
@@ -350,6 +352,7 @@ function SupportModal({
 }) {
   const showAttTab = attendanceEnabled !== false;
   const showWoTab = workOrderEnabled !== false;
+  const [detailTarget, setDetailTarget] = useState<SupportDetailTarget | null>(null);
 
   return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -365,8 +368,11 @@ function SupportModal({
               Atendimentos e ordens de serviço
             </h3>
             <p className="integration-support-modal__client-name">{client.name || "Cliente"}</p>
-            {client.code ? (
-              <p className="integration-support-modal__subtitle mono">Código {client.code}</p>
+            {client.id || client.code ? (
+              <p className="integration-support-modal__subtitle mono">
+                ID {client.id || client.code}
+                {client.code && client.id && client.code !== client.id ? ` · Código ${client.code}` : ""}
+              </p>
             ) : null}
           </div>
           <button type="button" className="btn" aria-label="Fechar" onClick={onClose}>
@@ -406,6 +412,7 @@ function SupportModal({
                       <th>Descrição</th>
                       <th>Abertura</th>
                       <th>Fechamento</th>
+                      <th className="integration-support-table__col-actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -425,6 +432,15 @@ function SupportModal({
                         </td>
                         <td className="mono integration-support-table__cell integration-support-table__cell--date">
                           {a.closed_at || "—"}
+                        </td>
+                        <td className="integration-support-table__cell integration-support-table__cell--actions">
+                          <button
+                            type="button"
+                            className="btn btn--sm integration-support-table__more-btn"
+                            onClick={() => setDetailTarget({ kind: "attendance", item: a })}
+                          >
+                            Ver mais
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -452,6 +468,7 @@ function SupportModal({
                       <th>Atendimento</th>
                       <th>Cadastro</th>
                       <th>Agendamento</th>
+                      <th className="integration-support-table__col-actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -477,6 +494,15 @@ function SupportModal({
                         <td className="mono integration-support-table__cell integration-support-table__cell--date">
                           {o.scheduled_at || "—"}
                         </td>
+                        <td className="integration-support-table__cell integration-support-table__cell--actions">
+                          <button
+                            type="button"
+                            className="btn btn--sm integration-support-table__more-btn"
+                            onClick={() => setDetailTarget({ kind: "work_order", item: o })}
+                          >
+                            Ver mais
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -485,6 +511,7 @@ function SupportModal({
             )
           ) : null}
         </div>
+        {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
       </div>
     </div>,
     document.body,
@@ -552,11 +579,21 @@ export function HubsoftClientResults({
     setAttendanceOk(true);
     setWorkOrderOk(true);
 
+    let client = c;
+    if (onFetchDetail) {
+      try {
+        client = await onFetchDetail(c);
+        setSupportClient(client);
+      } catch {
+        /* usa cartão da listagem */
+      }
+    }
+
     const jobs: Promise<void>[] = [];
     if (onFetchAttendance && attendanceEnabled) {
       setAttendanceLoading(true);
       jobs.push(
-        onFetchAttendance(c)
+        onFetchAttendance(client)
           .then((r) => {
             setAttendanceOk(!!r.ok);
             setAttendanceMessage(r.message);
@@ -573,7 +610,7 @@ export function HubsoftClientResults({
     if (onFetchWorkOrders && workOrderEnabled) {
       setWorkOrderLoading(true);
       jobs.push(
-        onFetchWorkOrders(c)
+        onFetchWorkOrders(client)
           .then((r) => {
             setWorkOrderOk(!!r.ok);
             setWorkOrderMessage(r.message);

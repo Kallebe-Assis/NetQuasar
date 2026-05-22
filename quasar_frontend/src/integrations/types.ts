@@ -78,6 +78,9 @@ export type ConsumerConfig = {
   client_attendance?: {
     enabled: boolean;
     request_id?: string;
+    provider?: ClientSearchProvider;
+    ixc_list_action?: string;
+    field_mappings?: Record<string, SearchFieldMapping>;
   };
   client_work_order?: {
     enabled: boolean;

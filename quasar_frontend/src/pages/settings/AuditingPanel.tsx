@@ -40,7 +40,7 @@ export function AuditingPanel() {
     <div className="card">
       <h2>Auditoria</h2>
       <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-        Registo de alterações no sistema (equipamentos, monitoramento, relatórios Telegram, utilizadores, etc.).
+        Registo de alterações no sistema (equipamentos, monitoramento, relatórios Telegram, usuários, etc.).
       </p>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <button type="button" className={sub === "ops" ? "active" : ""} onClick={() => setSub("ops")}>

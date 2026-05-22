@@ -710,7 +710,7 @@ export function ToolsPage() {
       {tab === "nmap" && (
         <ToolsPanel
           title="Nmap (varredura rápida)"
-          description="Requer nmap instalado no servidor. Modo «ping» (-sn): descobre se o host está activo; «rápida» (-F): portas mais comuns."
+          description="Requer nmap instalado no servidor. Modo «ping» (-sn): descobre se o host está ativo; «rápida» (-F): portas mais comuns."
           results={
             <>
               <ToolOutputError err={nmapRun.error as Error | null} />
