@@ -23,13 +23,23 @@ type ClientCard struct {
 	Raw         map[string]interface{} `json:"raw,omitempty"`
 }
 
-// ServiceSummary resumo de serviço/plano/contrato do cliente.
+// ServiceSummary resumo de serviço/plano/contrato/login do cliente.
 type ServiceSummary struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Status string `json:"status,omitempty"`
-	Login  string `json:"login,omitempty"`
-	IPv4   string `json:"ipv4,omitempty"`
+	ID             string `json:"id,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Status         string `json:"status,omitempty"`
+	StatusLabel    string `json:"status_label,omitempty"`
+	StatusInternet string `json:"status_internet,omitempty"`
+	Login          string `json:"login,omitempty"`
+	IPv4           string `json:"ipv4,omitempty"`
+	MAC            string `json:"mac,omitempty"`
+	Online         string `json:"online,omitempty"`
+	OnlineLabel    string `json:"online_label,omitempty"`
+	Contrato       string `json:"contrato,omitempty"`
+	ContratoID     string `json:"contrato_id,omitempty"`
+	PlanoVenda     string `json:"plano_venda,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	ClientName     string `json:"client_name,omitempty"`
 }
 
 // SearchResult resultado estruturado da consulta.

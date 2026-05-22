@@ -9,6 +9,7 @@ import type {
   ClientAttendanceResponse,
   ClientCard,
   ClientSearchResponse,
+  ClientLoginResponse,
   ClientWorkOrderResponse,
   ConsumerMeta,
   IntegrationDetail,
@@ -19,16 +20,26 @@ import { PageToastHost, usePageToast } from "../lib/pageToast";
 import { queryKeys } from "../lib/queryKeys";
 
 function matchClient(a: ClientCard, b: ClientCard): boolean {
-  if (a.id && b.id && a.id === b.id) return true;
-  if (a.code && b.code && a.code === b.code) return true;
-  if (a.document && b.document && a.document === b.document) return true;
+  const aId = a.id?.trim();
+  const bId = b.id?.trim();
+  if (aId && bId && aId === bId) return true;
+  const aCode = a.code?.trim();
+  const bCode = b.code?.trim();
+  if (aCode && bCode && aCode === bCode) return true;
+  if (!aId && !bId && a.document?.trim() && a.document.trim() === b.document?.trim()) return true;
   return false;
+}
+
+function clientLookupQuery(client: ClientCard, fallback: { busca: string; termo: string }) {
+  const id = client.id?.trim() || client.code?.trim();
+  if (id) return { busca: "codigo_cliente", termo: id };
+  return fallback;
 }
 
 export function IntegrationConsultPage() {
   const { slug } = useParams<{ slug: string }>();
   const { toast, show: showToast, dismiss: dismissToast } = usePageToast();
-  const [busca, setBusca] = useState("cpf_cnpj");
+  const [busca, setBusca] = useState("nome_razaosocial");
   const [termo, setTermo] = useState("");
   const [resultFilter, setResultFilter] = useState("");
 
@@ -79,13 +90,13 @@ export function IntegrationConsultPage() {
 
   const fetchClientDetail = useCallback(
     async (client: ClientCard): Promise<ClientCard> => {
-      const t = termo.trim();
-      if (!t) return client;
+      const q = clientLookupQuery(client, { busca, termo: termo.trim() });
+      if (!q.termo.trim()) return client;
       const r = await apiFetch<ClientSearchResponse>(`/api/v1/integrations/${slug}/consumer/client-search`, {
         method: "POST",
         json: {
-          busca,
-          termo_busca: t,
+          busca: q.busca,
+          termo_busca: q.termo,
           detailed: true,
         },
       });
@@ -146,6 +157,28 @@ export function IntegrationConsultPage() {
     [slug, lookupForClient],
   );
 
+  const fetchClientLogins = useCallback(
+    async (client: ClientCard) => {
+      const q = lookupForClient(client);
+      if (!q.termo.trim()) {
+        return {
+          ok: false,
+          message: "ID do cliente não encontrado no cartão.",
+          items: [],
+        };
+      }
+      const r = await apiFetch<ClientLoginResponse>(`/api/v1/integrations/${slug}/consumer/client-login`, {
+        method: "POST",
+        json: {
+          busca: q.busca,
+          termo_busca: q.termo,
+        },
+      });
+      return { ok: !!r.ok, message: r.message, items: r.items ?? [] };
+    },
+    [slug, lookupForClient],
+  );
+
   const d = detailQ.data;
   const meta = metaQ.data;
   const result = searchM.data;
@@ -188,7 +221,9 @@ export function IntegrationConsultPage() {
   }
 
   const buscaOptions = meta?.busca_options ?? [{ value: "cpf_cnpj", label: "CPF/CNPJ" }];
-  const termoLabel = busca === "cpf_cnpj" ? "CPF/CNPJ" : "Termo de busca";
+  const termoLabel =
+    buscaOptions.find((o) => o.value === busca)?.label ??
+    (busca === "cpf_cnpj" ? "CPF/CNPJ" : "Termo de busca");
   const hasResults = !!result;
   const showCount = resultFilter.trim() ? filteredClients.length : allClients.length;
 
@@ -225,7 +260,13 @@ export function IntegrationConsultPage() {
               className="input mono"
               value={termo}
               onChange={(e) => setTermo(e.target.value)}
-              placeholder={busca === "cpf_cnpj" ? "Ex.: 12345678900" : "Valor a pesquisar"}
+              placeholder={
+                busca === "cpf_cnpj"
+                  ? "Ex.: 12345678900"
+                  : busca === "login" || busca === "login_radius"
+                    ? "Ex.: usuario@provedor"
+                    : "Valor a pesquisar"
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") runSearch();
               }}
@@ -281,8 +322,10 @@ export function IntegrationConsultPage() {
               onFetchDetail={fetchClientDetail}
               onFetchAttendance={meta?.client_attendance_enabled ? fetchClientAttendance : undefined}
               onFetchWorkOrders={meta?.client_work_order_enabled ? fetchClientWorkOrders : undefined}
+              onFetchLogins={meta?.client_login_enabled ? fetchClientLogins : undefined}
               attendanceEnabled={!!meta?.client_attendance_enabled}
               workOrderEnabled={!!meta?.client_work_order_enabled}
+              loginEnabled={!!meta?.client_login_enabled}
             />
           </>
         ) : (

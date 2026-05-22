@@ -30,9 +30,9 @@ export function LoginCircuitBackdrop() {
           <path d="M320 20v70l-25 30v100" className="login-circuit-backdrop__trace login-circuit-backdrop__trace--d4" />
         </g>
         <g className="login-circuit-backdrop__nodes" fill="none">
-          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--a" cx="120" cy="60" r="3" fill="rgba(100,200,255,0.35)" stroke="none" />
-          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--b" cx="260" cy="95" r="2.5" fill="rgba(100,200,255,0.3)" stroke="none" />
-          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--c" cx="180" cy="210" r="2.5" fill="rgba(100,200,255,0.28)" stroke="none" />
+          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--a" cx="120" cy="60" r="3" stroke="none" />
+          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--b" cx="260" cy="95" r="2.5" stroke="none" />
+          <circle className="login-circuit-backdrop__node login-circuit-backdrop__node--c" cx="180" cy="210" r="2.5" stroke="none" />
         </g>
       </svg>
     </div>

@@ -281,8 +281,10 @@ export function IntegrationDetailPage() {
         <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Ativa" : "Inativa"}</span>
         {d.session_active ? <span className="badge">Sessão ativa</span> : null}
         {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta ativa</span> : null}
-        {consumerCfg.client_attendance?.enabled || consumerCfg.client_work_order?.enabled ? (
-          <span className="badge badge--ok">Atend. / O.S. ativos</span>
+        {consumerCfg.client_attendance?.enabled ||
+        consumerCfg.client_work_order?.enabled ||
+        consumerCfg.client_login?.enabled ? (
+          <span className="badge badge--ok">Atend. / O.S. / Logins</span>
         ) : null}
       </div>
 
@@ -559,6 +561,59 @@ export function IntegrationDetailPage() {
               ))}
             </select>
           </div>
+          <label className="row" style={{ gap: 8, marginTop: 16 }}>
+            <input
+              type="checkbox"
+              disabled={!admin}
+              checked={!!consumerCfg.client_login?.enabled}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_login: {
+                      ...consumerCfg.client_login,
+                      enabled: e.target.checked,
+                      request_id: consumerCfg.client_login?.request_id,
+                    },
+                  },
+                }))
+              }
+            />
+            Ativar aba Logins (Hubsoft ou IXC POST <code className="mono">/radusuarios</code>)
+          </label>
+          <div className="field" style={{ maxWidth: 420, marginTop: 8 }}>
+            <label>Requisição HTTP — logins</label>
+            <select
+              className="input"
+              disabled={!admin}
+              value={consumerCfg.client_login?.request_id ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  consumer_config: {
+                    ...consumerCfg,
+                    client_login: {
+                      enabled: consumerCfg.client_login?.enabled ?? false,
+                      request_id: e.target.value || undefined,
+                    },
+                  },
+                }))
+              }
+            >
+              <option value="">Detectar automaticamente (IXC /radusuarios)</option>
+              {requests.map((req) => (
+                <option key={req.id} value={req.id}>
+                  {req.name} — {req.method} {req.path}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="msg" style={{ fontSize: 12, marginTop: 8 }}>
+            <strong>IXC:</strong> POST <code className="mono">/radusuarios</code>, header <code className="mono">ixcsoft: listar</code>, filtro{" "}
+            <code className="mono">radusuarios.id_cliente</code>. Com esta opção ativa, a consulta de clientes também tenta carregar logins/planos no cartão (até 8 resultados).
+          </p>
+
           {admin ? (
             <button type="button" className="btn btn--primary" style={{ marginTop: 12 }} disabled={saveM.isPending} onClick={() => saveM.mutate()}>
               Salvar operação
@@ -1147,6 +1202,7 @@ function parseConsumerConfig(raw: unknown): ConsumerConfig {
       client_search: { enabled: false },
       client_attendance: { enabled: false },
       client_work_order: { enabled: false },
+      client_login: { enabled: false },
     };
   }
   const o = raw as ConsumerConfig;
@@ -1170,6 +1226,16 @@ function parseConsumerConfig(raw: unknown): ConsumerConfig {
     client_work_order: {
       enabled: !!o.client_work_order?.enabled,
       request_id: o.client_work_order?.request_id,
+      provider: (o.client_work_order?.provider as ClientSearchProvider) || "auto",
+      ixc_list_action: o.client_work_order?.ixc_list_action,
+      field_mappings: o.client_work_order?.field_mappings,
+    },
+    client_login: {
+      enabled: !!o.client_login?.enabled,
+      request_id: o.client_login?.request_id,
+      provider: (o.client_login?.provider as ClientSearchProvider) || "auto",
+      ixc_list_action: o.client_login?.ixc_list_action,
+      field_mappings: o.client_login?.field_mappings,
     },
   };
 }

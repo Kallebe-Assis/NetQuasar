@@ -96,7 +96,7 @@ func mapIXCClientItem(it any) (ClientCard, bool) {
 		return ClientCard{}, false
 	}
 	card.Raw = cloneRawMap(m)
-	card.Services = mapServices(m)
+	card.Services = mapIXCServices(m)
 	card.IPv4 = extractClientIPv4(m)
 	return card, true
 }

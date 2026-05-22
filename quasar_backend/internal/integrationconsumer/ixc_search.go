@@ -22,6 +22,8 @@ func IXCBuscaToQtype(busca string) string {
 		return "fone"
 	case "email":
 		return "email"
+	case "login", "login_radius":
+		return "radusuarios.login"
 	default:
 		return "cliente.cnpj_cpf"
 	}
@@ -32,7 +34,7 @@ func IXCOperForBusca(busca string) string {
 	switch strings.ToLower(strings.TrimSpace(busca)) {
 	case "cpf_cnpj", "codigo_cliente", "email":
 		return "="
-	case "nome_razaosocial", "nome_fantasia", "telefone":
+	case "nome_razaosocial", "nome_fantasia", "telefone", "login", "login_radius":
 		return "L"
 	default:
 		return "="

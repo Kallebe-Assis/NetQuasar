@@ -85,6 +85,16 @@ export type ConsumerConfig = {
   client_work_order?: {
     enabled: boolean;
     request_id?: string;
+    provider?: ClientSearchProvider;
+    ixc_list_action?: string;
+    field_mappings?: Record<string, SearchFieldMapping>;
+  };
+  client_login?: {
+    enabled: boolean;
+    request_id?: string;
+    provider?: ClientSearchProvider;
+    ixc_list_action?: string;
+    field_mappings?: Record<string, SearchFieldMapping>;
   };
 };
 
@@ -97,8 +107,16 @@ export type ClientServiceSummary = {
   id?: string;
   name?: string;
   status?: string;
+  status_label?: string;
+  status_internet?: string;
   login?: string;
   ipv4?: string;
+  mac?: string;
+  online?: string;
+  online_label?: string;
+  contrato?: string;
+  contrato_id?: string;
+  plano_venda?: string;
 };
 
 export type ClientCard = {
@@ -134,6 +152,7 @@ export type AttendanceItem = {
   id?: string;
   protocol?: string;
   status?: string;
+  status_label?: string;
   subject?: string;
   description?: string;
   opened_at?: string;
@@ -195,6 +214,15 @@ export type ConsumerMeta = {
   client_work_order_request_id?: string;
   client_work_order_request_name?: string;
   busca_ordem_servico_options?: BuscaOption[];
+  client_login_enabled?: boolean;
+  client_login_request_id?: string;
+  client_login_request_name?: string;
+};
+
+export type ClientLoginResponse = {
+  ok: boolean;
+  message?: string;
+  items: ClientServiceSummary[];
 };
 
 export type IntegrationDetail = IntegrationSummary & {

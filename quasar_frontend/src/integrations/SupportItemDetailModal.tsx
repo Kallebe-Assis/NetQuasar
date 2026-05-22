@@ -2,6 +2,11 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { AttendanceItem, WorkOrderItem } from "./types";
 import {
+  formatAttendanceStatus,
+  formatIntegrationDateTime,
+  formatWorkOrderStatus,
+} from "./integrationDisplay";
+import {
   formatSupportFieldValue,
   orderedRawEntries,
   supportFieldLabel,
@@ -22,11 +27,11 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
 function SummaryAttendance({ item }: { item: AttendanceItem }) {
   const rows: { label: string; value?: string; mono?: boolean }[] = [
     { label: "Protocolo", value: item.protocol, mono: true },
-    { label: "Estado", value: item.status },
+    { label: "Estado", value: formatAttendanceStatus(item) },
     { label: "Assunto", value: item.subject },
     { label: "Descrição", value: item.description },
-    { label: "Abertura", value: item.opened_at, mono: true },
-    { label: "Fechamento", value: item.closed_at, mono: true },
+    { label: "Abertura", value: formatIntegrationDateTime(item.opened_at) },
+    { label: "Fechamento", value: formatIntegrationDateTime(item.closed_at) },
   ];
   const visible = rows.filter((r) => r.value?.trim());
   if (visible.length === 0) return null;
@@ -45,12 +50,12 @@ function SummaryAttendance({ item }: { item: AttendanceItem }) {
 function SummaryWorkOrder({ item }: { item: WorkOrderItem }) {
   const rows: { label: string; value?: string; mono?: boolean }[] = [
     { label: "N.º O.S.", value: item.number ?? item.id, mono: true },
-    { label: "Estado", value: item.status_label ?? item.status },
+    { label: "Estado", value: formatWorkOrderStatus(item) },
     { label: "Plano / serviço", value: item.plan_name },
     { label: "Descrição", value: item.description },
     { label: "Atendimento", value: item.attendance_protocol, mono: true },
-    { label: "Cadastro", value: item.created_at, mono: true },
-    { label: "Agendamento", value: item.scheduled_at, mono: true },
+    { label: "Cadastro", value: formatIntegrationDateTime(item.created_at) },
+    { label: "Agendamento", value: formatIntegrationDateTime(item.scheduled_at) },
     { label: "Valor", value: item.value },
   ];
   const visible = rows.filter((r) => r.value?.trim());

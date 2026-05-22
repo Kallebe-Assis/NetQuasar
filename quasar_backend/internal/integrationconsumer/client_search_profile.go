@@ -72,12 +72,13 @@ func BuscaOptionsForProfile(profile string) []BuscaOption {
 // BuscaIXCOptions tipos de pesquisa IXC (corpo POST listar).
 func BuscaIXCOptions() []BuscaOption {
 	return []BuscaOption{
-		{Value: "cpf_cnpj", Label: "CPF/CNPJ"},
 		{Value: "nome_razaosocial", Label: "Razão social"},
+		{Value: "cpf_cnpj", Label: "CPF/CNPJ"},
 		{Value: "nome_fantasia", Label: "Nome fantasia"},
 		{Value: "codigo_cliente", Label: "ID / código cliente"},
 		{Value: "telefone", Label: "Telefone"},
 		{Value: "email", Label: "E-mail"},
+		{Value: "login", Label: "Login PPPoE/RADIUS"},
 	}
 }
 

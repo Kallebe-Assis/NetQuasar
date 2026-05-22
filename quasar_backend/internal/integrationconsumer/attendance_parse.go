@@ -48,10 +48,12 @@ func mapIXCAttendanceItem(it any) (AttendanceItem, bool) {
 	if !ok {
 		return AttendanceItem{}, false
 	}
+	statusCode := firstNonEmpty(pickStr(m, "status"), pickStr(m, "su_status"), pickStr(m, "situacao", "estado"))
 	row := AttendanceItem{
 		ID:       pickStr(m, "id", "id_ticket", "su_ticket_id"),
 		Protocol: pickStr(m, "protocolo", "numero_protocolo"),
-		Status:   pickStr(m, "status", "su_status", "situacao", "estado"),
+		Status:   statusCode,
+		StatusLabel: FormatIXCAttendanceStatus(statusCode),
 		Subject: firstNonEmpty(
 			pickStr(m, "titulo", "assunto", "id_assunto", "motivo", "tipo", "categoria"),
 		),

@@ -12,7 +12,7 @@ func ApplyClientSearchContext(rc integrationhttp.RequestConfig, profile, busca, 
 	busca = strings.TrimSpace(busca)
 	termo = strings.TrimSpace(termo)
 	if busca == "" {
-		busca = "cpf_cnpj"
+		busca = DefaultClientSearchBusca
 	}
 
 	switch profile {

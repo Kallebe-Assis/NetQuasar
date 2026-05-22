@@ -11,6 +11,7 @@ type AttendanceItem struct {
 	ID          string                 `json:"id,omitempty"`
 	Protocol    string                 `json:"protocol,omitempty"`
 	Status      string                 `json:"status,omitempty"`
+	StatusLabel string                 `json:"status_label,omitempty"`
 	Subject     string                 `json:"subject,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	OpenedAt    string                 `json:"opened_at,omitempty"`

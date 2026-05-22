@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { GlobeSplash } from "../components/GlobeSplash";
+import { LoginBrandLogo } from "../components/LoginBrandLogo";
 import { LoginCircuitBackdrop } from "../components/LoginCircuitBackdrop";
 import { apiFetch, ApiError } from "../lib/api";
 import { isClientConfigured, markClientConfigured, markSessionReady, saveAuthToken, saveUserDisplayLabel, saveUserRole } from "../lib/auth";
@@ -96,7 +97,11 @@ export function LoginPage() {
 
   if (setupQ.isLoading) {
     return (
-      <div className="login-page" style={{ position: "relative" }}>
+      <div className="login-page login-page--splash" style={{ position: "relative" }}>
+        <LoginCircuitBackdrop />
+        <div className="login-page__center-brand">
+          <LoginBrandLogo />
+        </div>
         <GlobeSplash />
       </div>
     );
@@ -107,7 +112,7 @@ export function LoginPage() {
       <div className="login-page">
         <LoginCircuitBackdrop />
         <div className="login-box">
-          <h1 style={{ marginBottom: "0.25rem" }}>NetQuasar</h1>
+          <LoginBrandLogo />
           <div className="msg msg--err">{(setupQ.error as Error).message}</div>
           <p style={{ marginTop: 12, fontSize: 13, color: "var(--muted)" }}>
             Não foi possível contactar a API. Confirme a URL do servidor ou a rede.
@@ -142,7 +147,7 @@ export function LoginPage() {
       <LoginCircuitBackdrop />
       {loading ? <GlobeSplash /> : null}
       <div className="login-box">
-        <h1 style={{ marginBottom: "0.25rem" }}>NetQuasar</h1>
+        <LoginBrandLogo />
         {err ? <div className="msg msg--err">{err}</div> : null}
         <form onSubmit={onSubmit}>
           <div className="login-credentials-row">

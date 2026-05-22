@@ -30,6 +30,22 @@ type ClientAttendanceConfig struct {
 	FieldMappings map[string]SearchFieldConfig `json:"field_mappings,omitempty"`
 }
 
+// ClientLoginConfig liga a aba de logins na UI à requisição HTTP (ex. radusuarios IXC).
+type ClientLoginConfig struct {
+	Enabled   bool   `json:"enabled"`
+	RequestID string `json:"request_id,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	IxcListAction string `json:"ixc_list_action,omitempty"`
+	FieldMappings map[string]SearchFieldConfig `json:"field_mappings,omitempty"`
+}
+
+// ClientContractConfig liga status_internet à requisição cliente_contrato IXC.
+type ClientContractConfig struct {
+	Enabled   bool   `json:"enabled"`
+	RequestID string `json:"request_id,omitempty"`
+	IxcListAction string `json:"ixc_list_action,omitempty"`
+}
+
 // ClientWorkOrderConfig liga a consulta de ordens de serviço na UI.
 type ClientWorkOrderConfig struct {
 	Enabled   bool   `json:"enabled"`
@@ -47,6 +63,8 @@ type Config struct {
 	ClientSearch     ClientSearchConfig     `json:"client_search"`
 	ClientAttendance ClientAttendanceConfig `json:"client_attendance"`
 	ClientWorkOrder  ClientWorkOrderConfig  `json:"client_work_order"`
+	ClientLogin     ClientLoginConfig      `json:"client_login"`
+	ClientContract  ClientContractConfig   `json:"client_contract"`
 }
 
 func ConfigFromJSON(b []byte) Config {
@@ -69,8 +87,8 @@ type BuscaOption struct {
 // BuscaOptions lista documentada pela API Hubsoft (GET /integracao/cliente).
 func BuscaOptions() []BuscaOption {
 	return []BuscaOption{
-		{Value: "cpf_cnpj", Label: "CPF/CNPJ"},
 		{Value: "nome_razaosocial", Label: "Nome / Razão social"},
+		{Value: "cpf_cnpj", Label: "CPF/CNPJ"},
 		{Value: "nome_fantasia", Label: "Nome fantasia"},
 		{Value: "codigo_cliente", Label: "Código do cliente"},
 		{Value: "telefone", Label: "Telefone"},

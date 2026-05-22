@@ -62,7 +62,7 @@ func mapIXCWorkOrderItem(it any) (WorkOrderItem, bool) {
 	if row.Number == "" {
 		row.Number = row.ID
 	}
-	row.StatusLabel = formatWorkOrderStatusLabel(row.Status)
+	row.StatusLabel = FormatIXCWorkOrderStatus(row.Status)
 	row.PlanName = firstNonEmpty(pickStr(m, "tipo", "id_assunto", "assunto"))
 	if row.Number == "" && row.ID == "" && row.Status == "" && row.Description == "" {
 		if pickStr(m, "id_cliente", "id_contrato") == "" {

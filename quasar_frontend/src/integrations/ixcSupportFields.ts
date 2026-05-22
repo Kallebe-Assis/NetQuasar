@@ -184,17 +184,12 @@ const VALUE_MAP: Record<string, Record<string, string>> = {
   melhor_horario_reserva: { M: "Manhã", T: "Tarde", N: "Noite", Q: "Qualquer" },
   melhor_horario_agenda: { M: "Manhã", T: "Tarde", N: "Noite", Q: "Qualquer" },
   status_conexao: { S: "Online", N: "Offline" },
-  status: {
-    A: "Aberta",
-    AN: "Análise",
-    EN: "Encaminhada",
-    AS: "Assumida",
-    AG: "Agendada",
-    DS: "Deslocamento",
-    EX: "Execução",
-    F: "Finalizada",
-    RAG: "Aguardando agendamento",
-    T: "Aberto",
+  su_status: {
+    N: "Novo",
+    P: "Pendente",
+    EP: "Em progresso",
+    S: "Solucionado",
+    C: "Cancelado",
   },
   status_pesquisa_satisfacao: { "1": "Enviado", "2": "Respondida", "3": "Expirada" },
   status_assinatura: { A: "Pendente", F: "Assinada" },
@@ -211,14 +206,54 @@ export function supportFieldLabel(kind: SupportDetailKind, key: string): string 
   return map[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function formatSupportFieldValue(key: string, value: unknown): string {
+const WORK_ORDER_STATUS: Record<string, string> = {
+  A: "Aberta",
+  AN: "Análise",
+  EN: "Encaminhada",
+  AS: "Assumida",
+  AG: "Agendada",
+  DS: "Deslocamento",
+  EX: "Execução",
+  F: "Finalizada",
+  RAG: "Aguardando agendamento",
+};
+
+const ATTENDANCE_STATUS: Record<string, string> = {
+  N: "Novo",
+  P: "Pendente",
+  EP: "Em progresso",
+  S: "Solucionado",
+  C: "Cancelado",
+};
+
+export function formatSupportFieldValue(key: string, value: unknown, kind?: SupportDetailKind): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "boolean") return value ? "Sim" : "Não";
   if (typeof value === "object") return JSON.stringify(value, null, 2);
   const s = String(value).trim();
   if (!s) return "";
+  if ((key === "status" || key === "su_status") && kind === "attendance") {
+    return ATTENDANCE_STATUS[s.toUpperCase()] ?? VALUE_MAP.su_status?.[s] ?? s;
+  }
+  if (key === "status" && kind === "work_order") {
+    return WORK_ORDER_STATUS[s.toUpperCase()] ?? s;
+  }
   const mapped = VALUE_MAP[key]?.[s];
-  return mapped ?? s;
+  if (mapped) return mapped;
+  if (/^data_|_at$|data$|abertura|fechamento|agenda|criacao|alteracao/i.test(key)) {
+    const normalized = s.includes("T") ? s : s.replace(" ", "T");
+    const d = new Date(normalized);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  }
+  return s;
 }
 
 export function orderedRawEntries(

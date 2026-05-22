@@ -51,6 +51,7 @@ func (s *Server) getIntegrationConsumerMeta(w http.ResponseWriter, r *http.Reque
 	}
 	attReqID, attReqName, _ := s.resolveClientAttendanceRequest(r.Context(), id, cc)
 	woReqID, woReqName, _ := s.resolveClientWorkOrderRequest(r.Context(), id, cc)
+	loginReqID, loginReqName, _ := s.resolveClientLoginRequest(r.Context(), id, cc)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"integration_name":               name,
 		"integration_enabled":            enabled,
@@ -67,6 +68,9 @@ func (s *Server) getIntegrationConsumerMeta(w http.ResponseWriter, r *http.Reque
 		"client_work_order_request_id":   woReqID,
 		"client_work_order_request_name": woReqName,
 		"busca_ordem_servico_options":    integrationconsumer.BuscaOrdemServicoOptions(),
+		"client_login_enabled":           cc.ClientLogin.Enabled,
+		"client_login_request_id":      loginReqID,
+		"client_login_request_name":    loginReqName,
 	})
 }
 
@@ -87,7 +91,7 @@ func (s *Server) integrationConsumerClientSearch(w http.ResponseWriter, r *http.
 	}
 	busca := strings.TrimSpace(body.Busca)
 	if busca == "" {
-		busca = "cpf_cnpj"
+		busca = integrationconsumer.DefaultClientSearchBusca
 	}
 	termo := strings.TrimSpace(body.TermoBusca)
 	if termo == "" {
@@ -167,6 +171,55 @@ func (s *Server) integrationConsumerClientSearch(w http.ResponseWriter, r *http.
 
 	var res integrationhttp.RunResult
 	var parsed integrationconsumer.SearchResult
+	if profile == integrationconsumer.ProviderIXC && integrationconsumer.IsLoginBusca(busca) {
+		if !cc.ClientLogin.Enabled {
+			writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", "consulta por login requer a API de logins (radusuarios) ativa", nil)
+			return
+		}
+		loginReqID, _, err := s.resolveClientLoginRequest(ctx, integID, cc)
+		if err != nil || loginReqID == uuid.Nil {
+			writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", "requisição HTTP de logins não configurada", nil)
+			return
+		}
+		var lrr requestRow
+		err = s.DB().QueryRow(ctx, `
+			SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+			FROM integration_requests WHERE id=$1 AND integration_id=$2 AND enabled=true
+		`, loginReqID, integID).Scan(&lrr.ID, &lrr.Method, &lrr.Path, &lrr.PathParams, &lrr.QueryParams, &lrr.Headers,
+			&lrr.BodyTemplate, &lrr.BodyType, &lrr.ExtractJSONPath, &lrr.IsLogin)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "requisição de logins não encontrada", nil)
+			return
+		}
+		lrc := s.requestRowToConfig(lrr)
+		contractRC := rc
+		if contractReqID, _, err := s.resolveClientContractRequest(ctx, integID, cc); err == nil && contractReqID != uuid.Nil {
+			var crr requestRow
+			if err := s.DB().QueryRow(ctx, `
+				SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+				FROM integration_requests WHERE id=$1 AND integration_id=$2 AND enabled=true
+			`, contractReqID, integID).Scan(&crr.ID, &crr.Method, &crr.Path, &crr.PathParams, &crr.QueryParams, &crr.Headers,
+				&crr.BodyTemplate, &crr.BodyType, &crr.ExtractJSONPath, &crr.IsLogin); err == nil {
+				contractRC = s.requestRowToConfig(crr)
+			}
+		}
+		res, parsed = integrationconsumer.RunIXCClientSearchByLogin(lrc, rc, contractRC, busca, termo, cc.ClientLogin, cc.ClientSearch, execute)
+		s.persistRequestRun(ctx, loginReqID, res)
+		s.logIntegrationRun(ctx, integID, &loginReqID, "request", res)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":               parsed.OK && res.OK,
+			"message":          parsed.Message,
+			"clients":          parsed.Clients,
+			"raw_status":       parsed.RawStatus,
+			"provider":         profile,
+			"status_code":      res.StatusCode,
+			"latency_ms":       res.LatencyMS,
+			"request_url":      res.RequestURL,
+			"request_method":   res.RequestMethod,
+			"response_preview": res.ResponsePreview,
+		})
+		return
+	}
 	if profile == integrationconsumer.ProviderIXC && busca == "cpf_cnpj" && cc.ClientSearch.CpfMultiAttemptEnabled() {
 		res, parsed = integrationconsumer.RunIXCClientSearchWithAttempts(rc, busca, termo, body.Detailed, cc.ClientSearch, execute)
 	} else {
@@ -202,6 +255,42 @@ func (s *Server) integrationConsumerClientSearch(w http.ResponseWriter, r *http.
 	}
 	if !parsed.OK && parsed.Message == "" {
 		parsed.Message = res.ErrorMessage
+	}
+
+	if parsed.OK && profile == integrationconsumer.ProviderIXC && len(parsed.Clients) > 0 {
+		max := len(parsed.Clients)
+		if max > 8 {
+			max = 8
+		}
+		contratoRC := rc
+		if contractReqID, _, err := s.resolveClientContractRequest(ctx, integID, cc); err == nil && contractReqID != uuid.Nil {
+			var crr requestRow
+			if err := s.DB().QueryRow(ctx, `
+				SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+				FROM integration_requests WHERE id=$1 AND integration_id=$2 AND enabled=true
+			`, contractReqID, integID).Scan(&crr.ID, &crr.Method, &crr.Path, &crr.PathParams, &crr.QueryParams, &crr.Headers,
+				&crr.BodyTemplate, &crr.BodyType, &crr.ExtractJSONPath, &crr.IsLogin); err == nil {
+				contratoRC = s.requestRowToConfig(crr)
+			}
+		}
+		if cc.ClientLogin.Enabled {
+			if loginReqID, _, err := s.resolveClientLoginRequest(ctx, integID, cc); err == nil && loginReqID != uuid.Nil {
+				var lrr requestRow
+				if err := s.DB().QueryRow(ctx, `
+					SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+					FROM integration_requests WHERE id=$1 AND integration_id=$2 AND enabled=true
+				`, loginReqID, integID).Scan(&lrr.ID, &lrr.Method, &lrr.Path, &lrr.PathParams, &lrr.QueryParams, &lrr.Headers,
+					&lrr.BodyTemplate, &lrr.BodyType, &lrr.ExtractJSONPath, &lrr.IsLogin); err == nil {
+					lrc := s.requestRowToConfig(lrr)
+					parsed.Clients = integrationconsumer.EnrichIXCClientServices(
+						parsed.Clients, cc.ClientLogin, cc.ClientSearch, lrc, execute, max,
+					)
+				}
+			}
+		}
+		parsed.Clients = integrationconsumer.EnrichIXCClientsContractStatus(
+			parsed.Clients, contratoRC, cc.ClientSearch, execute, max,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -566,12 +655,192 @@ func (s *Server) resolveClientWorkOrderRequest(ctx context.Context, integID uuid
 	var name string
 	err := s.DB().QueryRow(ctx, `
 		SELECT id, name FROM integration_requests
-		WHERE integration_id=$1 AND enabled=true
-			AND UPPER(method)='GET'
-			AND path ILIKE '%integracao/cliente/ordem_servico%'
-		ORDER BY sort_order, name LIMIT 1
+		WHERE integration_id=$1 AND enabled=true AND COALESCE(is_login, false)=false
+			AND (
+				(UPPER(method)='GET' AND path ILIKE '%integracao/cliente/ordem_servico%')
+				OR (UPPER(method)='POST' AND path ILIKE '%su_oss_chamado%')
+			)
+		ORDER BY
+			CASE WHEN path ILIKE '%integracao%' THEN 1 ELSE 0 END,
+			CASE WHEN UPPER(method)='POST' THEN 0 ELSE 1 END,
+			sort_order, name
+		LIMIT 1
 	`, integID).Scan(&rid, &name)
 	return rid, name, err
+}
+
+func (s *Server) resolveClientContractRequest(ctx context.Context, integID uuid.UUID, cc integrationconsumer.Config) (uuid.UUID, string, error) {
+	if cc.ClientContract.RequestID != "" {
+		if rid, err := uuid.Parse(cc.ClientContract.RequestID); err == nil {
+			var name string
+			err := s.DB().QueryRow(ctx, `
+				SELECT name FROM integration_requests WHERE id=$1 AND integration_id=$2
+			`, rid, integID).Scan(&name)
+			if err == nil {
+				return rid, name, nil
+			}
+		}
+	}
+	var rid uuid.UUID
+	var name string
+	err := s.DB().QueryRow(ctx, `
+		SELECT id, name FROM integration_requests
+		WHERE integration_id=$1 AND enabled=true AND COALESCE(is_login, false)=false
+			AND (path ILIKE '%cliente_contrato%' OR body_template ILIKE '%cliente_contrato%')
+		ORDER BY
+			CASE WHEN UPPER(method)='POST' THEN 0 ELSE 1 END,
+			sort_order, name
+		LIMIT 1
+	`, integID).Scan(&rid, &name)
+	return rid, name, err
+}
+
+func (s *Server) resolveClientLoginRequest(ctx context.Context, integID uuid.UUID, cc integrationconsumer.Config) (uuid.UUID, string, error) {
+	if cc.ClientLogin.RequestID != "" {
+		if rid, err := uuid.Parse(cc.ClientLogin.RequestID); err == nil {
+			var name string
+			err := s.DB().QueryRow(ctx, `
+				SELECT name FROM integration_requests WHERE id=$1 AND integration_id=$2
+			`, rid, integID).Scan(&name)
+			if err == nil {
+				return rid, name, nil
+			}
+		}
+	}
+	var rid uuid.UUID
+	var name string
+	err := s.DB().QueryRow(ctx, `
+		SELECT id, name FROM integration_requests
+		WHERE integration_id=$1 AND enabled=true AND COALESCE(is_login, false)=false
+			AND (path ILIKE '%radusuarios%' OR body_template ILIKE '%radusuarios%')
+		ORDER BY
+			CASE WHEN UPPER(method)='POST' THEN 0 ELSE 1 END,
+			sort_order, name
+		LIMIT 1
+	`, integID).Scan(&rid, &name)
+	return rid, name, err
+}
+
+func (s *Server) integrationConsumerClientLogin(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body struct {
+		Busca      string `json:"busca"`
+		TermoBusca string `json:"termo_busca"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	busca := strings.TrimSpace(body.Busca)
+	if busca == "" {
+		busca = "codigo_cliente"
+	}
+	termo := strings.TrimSpace(body.TermoBusca)
+	if termo == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "termo_busca é obrigatório", nil)
+		return
+	}
+
+	var consumerCfg []byte
+	var integEnabled bool
+	err = s.DB().QueryRow(r.Context(), `
+		SELECT enabled, consumer_config FROM integrations WHERE id=$1
+	`, integID).Scan(&integEnabled, &consumerCfg)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !integEnabled {
+		writeErr(w, http.StatusBadRequest, "DISABLED", "integração inativa", nil)
+		return
+	}
+	cc := integrationconsumer.ConfigFromJSON(consumerCfg)
+	if !cc.ClientLogin.Enabled {
+		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", "consulta de logins não ativa nesta integração", nil)
+		return
+	}
+	reqID, _, err := s.resolveClientLoginRequest(r.Context(), integID, cc)
+	if err != nil || reqID == uuid.Nil {
+		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", "requisição HTTP de logins não configurada", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+
+	cfg, err := s.loadIntegrationRunner(ctx, integID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if err := s.ensureIntegrationSession(ctx, integID, cfg); err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	cfg, _ = s.loadIntegrationRunner(ctx, integID)
+
+	var rr requestRow
+	err = s.DB().QueryRow(ctx, `
+		SELECT id, method, path, path_params, query_params, headers, body_template, body_type, extract_json_path, is_login
+		FROM integration_requests WHERE id=$1 AND integration_id=$2 AND enabled=true
+	`, reqID, integID).Scan(&rr.ID, &rr.Method, &rr.Path, &rr.PathParams, &rr.QueryParams, &rr.Headers,
+		&rr.BodyTemplate, &rr.BodyType, &rr.ExtractJSONPath, &rr.IsLogin)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "requisição de logins não encontrada", nil)
+		return
+	}
+
+	rc := s.requestRowToConfig(rr)
+	execute := func(rc integrationhttp.RequestConfig) integrationhttp.RunResult {
+		runCfg := cfg
+		vars := map[string]string{"busca": busca, "termo_busca": termo, "query": termo}
+		if runCfg.Variables == nil {
+			runCfg.Variables = vars
+		} else {
+			runCfg.Variables = make(map[string]string, len(runCfg.Variables)+len(vars))
+			for k, v := range cfg.Variables {
+				runCfg.Variables[k] = v
+			}
+			for k, v := range vars {
+				runCfg.Variables[k] = v
+			}
+		}
+		return integrationhttp.RunWithLoginRequest(ctx, runCfg, rc, false)
+	}
+
+	var res integrationhttp.RunResult
+	var parsed integrationconsumer.LoginListResult
+	if integrationconsumer.LooksLikeIXCLoginRequest(rc) {
+		res, parsed = integrationconsumer.RunIXCLoginWithAttempts(rc, busca, termo, cc.ClientLogin, cc.ClientSearch, execute)
+	} else {
+		res = execute(rc)
+		rawBody := integrationconsumer.ResponseBodyForParse([]byte(res.ResponsePreview))
+		parsed = integrationconsumer.ParseIXCClientLogins(rawBody)
+	}
+	s.persistRequestRun(ctx, reqID, res)
+	s.logIntegrationRun(ctx, integID, &reqID, "request", res)
+	if !res.OK && parsed.OK {
+		parsed.OK = false
+		if parsed.Message == "" {
+			parsed.Message = res.ErrorMessage
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             parsed.OK && res.OK,
+		"message":        parsed.Message,
+		"items":          parsed.Items,
+		"status_code":    res.StatusCode,
+		"latency_ms":     res.LatencyMS,
+		"request_url":    res.RequestURL,
+		"request_method": res.RequestMethod,
+		"termo_busca":    termo,
+		"busca":          busca,
+	})
 }
 
 // ensureIntegrationSession obtém token OAuth/login se necessário; Bearer/Basic/API key usam credencial salva.

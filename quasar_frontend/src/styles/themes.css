@@ -83,8 +83,12 @@
   --toggle-track: #d0d7de;
   --toggle-thumb: #656d76;
   --toggle-thumb-active: #ffffff;
-  --login-bg: #f0f6fc;
-  --login-bg-gradient: linear-gradient(165deg, #f0f6fc 0%, #f6f8fa 45%, #eaeef2 100%);
+  --login-bg: #f4f0fa;
+  --login-bg-gradient:
+    radial-gradient(ellipse 88% 58% at 50% 18%, rgba(139, 92, 246, 0.14) 0%, transparent 58%),
+    radial-gradient(ellipse 65% 48% at 88% 92%, rgba(99, 102, 241, 0.1) 0%, transparent 52%),
+    radial-gradient(ellipse 50% 40% at 8% 75%, rgba(167, 139, 250, 0.08) 0%, transparent 48%),
+    linear-gradient(165deg, #f8f6fc 0%, #f0f6fc 42%, #e8eaf4 100%);
 
   --hover-transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
   --hover-bg: #e8ecf1;
