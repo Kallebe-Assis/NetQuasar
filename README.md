@@ -260,3 +260,4 @@ Consulte os ficheiros de licença no repositório (se existirem). Para evoluçã
 | Migrações em falta | `go run ./cmd/migrate/` no `quasar_backend` |
 
 Para diagnóstico de base: `go run ./cmd/dbping/` dentro de `quasar_backend`.
+Teste alteração
