@@ -300,15 +300,36 @@ func cleanSNMPOID(oid string) string {
 	return strings.TrimPrefix(strings.TrimSpace(oid), ".")
 }
 
-func loadVendorOIDProfile(ctx context.Context, pool *pgxpool.Pool, brand string) oltVendorOIDProfile {
+func loadVendorOIDProfile(ctx context.Context, pool *pgxpool.Pool, brand, model string) oltVendorOIDProfile {
 	if pool == nil {
 		return oltVendorOIDProfile{}
 	}
+	brand = strings.TrimSpace(brand)
+	model = strings.TrimSpace(model)
 	var p oltVendorOIDProfile
-	_ = pool.QueryRow(ctx, `
-		SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
-		FROM olt_vendor_profiles WHERE upper(trim(brand)) = upper(trim($1))
-	`, brand).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
+	if brand != "" && model != "" {
+		err := pool.QueryRow(ctx, `
+			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
+			FROM olt_vendor_models WHERE brand = $1 AND model = $2
+		`, brand, model).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
+		if err == nil {
+			return p
+		}
+	}
+	if brand != "" {
+		_ = pool.QueryRow(ctx, `
+			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
+			FROM olt_vendor_models WHERE brand = $1 AND model <> 'Padrão'
+			ORDER BY model LIMIT 1
+		`, brand).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
+		if p.OnuOnlineOID != "" || p.PonStatusOID != "" || p.TransceiverOID != "" || p.SNMPBaseOID != "" {
+			return p
+		}
+		_ = pool.QueryRow(ctx, `
+			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
+			FROM olt_vendor_profiles WHERE upper(trim(brand)) = upper(trim($1))
+		`, brand).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
+	}
 	return p
 }
 

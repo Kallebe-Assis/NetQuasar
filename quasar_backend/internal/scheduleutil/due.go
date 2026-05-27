@@ -42,37 +42,40 @@ func LoadTZ(tz string) *time.Location {
 	return loc
 }
 
-// MonthlyDue indica se já passou o agendamento mensal e runKey (YYYY-MM) ainda não foi executado.
-func MonthlyDue(enabled bool, tz, hhmm string, dom int, lastRunKey *string, running bool, now time.Time) (period string, due bool) {
+// MonthlyDue indica se já passou o agendamento mensal (YYYY-MM) e ainda não houve execução
+// bem-sucedida neste período após o horário agendado do mês.
+func MonthlyDue(enabled bool, tz, hhmm string, dom int, lastRunKey *string, lastRunAt *time.Time, running bool, now time.Time) (period string, due bool) {
 	if !enabled || running {
 		return "", false
 	}
 	loc := LoadTZ(tz)
 	now = now.In(loc)
 	period = now.Format("2006-01")
-	if lastRunKey != nil && strings.TrimSpace(*lastRunKey) == period {
-		return period, false
-	}
 	day := EffectiveDOM(dom, now.Year(), int(now.Month()))
 	hour, min := ParseHHMM(hhmm)
 	scheduled := time.Date(now.Year(), now.Month(), day, hour, min, 0, 0, loc)
 	if now.Before(scheduled) {
 		return period, false
 	}
+	if lastRunKey != nil && strings.TrimSpace(*lastRunKey) == period {
+		if lastRunAt != nil && !lastRunAt.In(loc).Before(scheduled) {
+			return period, false
+		}
+		if lastRunAt == nil {
+			return period, false
+		}
+	}
 	return period, true
 }
 
 // DailyWeeklyDue runKey = YYYY-MM-DD. frequency: daily | weekly (dayOfWeek 0=Sunday).
-func DailyWeeklyDue(enabled bool, frequency, tz, hhmm string, dayOfWeek *int, lastRunKey *string, running bool, now time.Time) (runKey string, due bool) {
+func DailyWeeklyDue(enabled bool, frequency, tz, hhmm string, dayOfWeek *int, lastRunKey *string, lastRunAt *time.Time, running bool, now time.Time) (runKey string, due bool) {
 	if !enabled || running {
 		return "", false
 	}
 	loc := LoadTZ(tz)
 	now = now.In(loc)
 	runKey = now.Format("2006-01-02")
-	if lastRunKey != nil && strings.TrimSpace(*lastRunKey) == runKey {
-		return runKey, false
-	}
 	if strings.EqualFold(strings.TrimSpace(frequency), "weekly") {
 		dow := 1
 		if dayOfWeek != nil {
@@ -86,6 +89,14 @@ func DailyWeeklyDue(enabled bool, frequency, tz, hhmm string, dayOfWeek *int, la
 	scheduled := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc)
 	if now.Before(scheduled) {
 		return runKey, false
+	}
+	if lastRunKey != nil && strings.TrimSpace(*lastRunKey) == runKey {
+		if lastRunAt != nil && !lastRunAt.In(loc).Before(scheduled) {
+			return runKey, false
+		}
+		if lastRunAt == nil {
+			return runKey, false
+		}
 	}
 	return runKey, true
 }

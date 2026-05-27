@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import { useAppToast } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
 
 const COLLECT = "Relatório ONU mensal: a recolher dados OLT";
 const TELEGRAM = "Relatório ONU mensal: a enviar Telegram";
 
-/** Toast global quando o relatório ONU mensal corre em segundo plano (agendador ou API). */
+/** Notificações do relatório ONU mensal em segundo plano (pilha global). */
 export function OnuReportGlobalToast() {
+  const { push } = useAppToast();
   const mon = useQuery({
     queryKey: queryKeys.monStateGlobal,
     queryFn: () => apiFetch<{ current_activity?: string | null }>("/api/v1/monitoring/state"),
@@ -15,42 +17,27 @@ export function OnuReportGlobalToast() {
   });
   const activity = (mon.data?.current_activity ?? "").trim();
   const prev = useRef("");
-  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const toastIds = useRef<string[]>([]);
 
   useEffect(() => {
     if (!activity) {
       if (prev.current === TELEGRAM) {
-        setToast({ ok: true, text: "Relatório ONU enviado para o Telegram." });
+        const id = push({ tone: "ok", text: "Relatório ONU enviado para o Telegram.", autoMs: 6000 });
+        toastIds.current.push(id);
       }
       prev.current = "";
       return;
     }
     if (activity === prev.current) return;
     if (activity === COLLECT) {
-      setToast({ ok: true, text: "A recolher dados para o relatório ONU mensal…" });
+      const id = push({ tone: "info", text: "A recolher dados para o relatório ONU mensal…", autoMs: 8000 });
+      toastIds.current.push(id);
     } else if (activity === TELEGRAM) {
-      setToast({ ok: true, text: "Dados recolhidos. A enviar relatório ONU para o Telegram…" });
+      const id = push({ tone: "info", text: "A enviar relatório ONU para o Telegram…", autoMs: 8000 });
+      toastIds.current.push(id);
     }
     prev.current = activity;
-  }, [activity]);
+  }, [activity, push]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 7000);
-    return () => window.clearTimeout(t);
-  }, [toast]);
-
-  if (!toast) return null;
-  return (
-    <div
-      className={`page-toast ${toast.ok ? "page-toast--ok" : "page-toast--err"}`}
-      role="status"
-      style={{ position: "fixed", bottom: 24, right: 24, zIndex: 9000, maxWidth: 420 }}
-    >
-      <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setToast(null)}>
-        ×
-      </button>
-      {toast.text}
-    </div>
-  );
+  return null;
 }

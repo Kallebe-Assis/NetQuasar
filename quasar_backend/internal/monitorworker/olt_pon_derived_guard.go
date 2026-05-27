@@ -16,5 +16,9 @@ func OltUsesIfDerivedPonSnapshots(category, brand, model string) bool {
 	if strings.Contains(bl, "datacom") {
 		return false
 	}
+	// VSOL: contagens e estado vêm do MIB enterprise (gOnuAuthList); IF-MIB incompleto sobrescreve totais.
+	if strings.Contains(bl, "vsol") || strings.Contains(bl, "v1600") || strings.Contains(bl, "1600g") {
+		return false
+	}
 	return true
 }

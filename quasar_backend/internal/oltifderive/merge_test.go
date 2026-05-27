@@ -39,8 +39,11 @@ func TestMergePonRowsForIfaceRefresh_dedupes_vsol_and_if(t *testing.T) {
 	if fmt.Sprint(out[0]["id"]) != "01" {
 		t.Fatalf("id %v want 01", out[0]["id"])
 	}
-	if rowPickInt(out[0], "onu_total") != 2 {
-		t.Fatalf("onu_total %v", out[0]["onu_total"])
+	if rowPickInt(out[0], "onu_total") != 4 {
+		t.Fatalf("onu_total %v want 4 (preservar VSOL)", out[0]["onu_total"])
+	}
+	if rowPickInt(out[0], "onu_online") != 3 {
+		t.Fatalf("onu_online %v want 3", out[0]["onu_online"])
 	}
 	if out[0]["tx_dbm"] == nil {
 		t.Fatal("lost tx_dbm from VSOL")

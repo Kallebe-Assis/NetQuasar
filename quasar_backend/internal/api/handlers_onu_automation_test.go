@@ -56,7 +56,7 @@ func TestScheduleutilMonthlyDue_EndOfMonthDOM(t *testing.T) {
 	t.Parallel()
 	loc, _ := time.LoadLocation("UTC")
 	now := time.Date(2026, 2, 28, 12, 0, 0, 0, loc)
-	period, due := scheduleutil.MonthlyDue(true, "UTC", "08:00", 31, nil, false, now)
+	period, due := scheduleutil.MonthlyDue(true, "UTC", "08:00", 31, nil, nil, false, now)
 	if !due || period != "2026-02" {
 		t.Fatalf("feb 31 should schedule on 28th: due=%v period=%q", due, period)
 	}

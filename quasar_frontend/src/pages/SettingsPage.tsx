@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type CSSProperties } from "react";
-import { Blend, ClockFading, Cpu, Sun, ThermometerSun } from "lucide-react";
+import { Blend, ClockFading, Cpu, Plus, Sun, ThermometerSun, Trash2 } from "lucide-react";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
@@ -27,7 +27,7 @@ export function SettingsPage() {
     <>
       <h1>Configurações</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), fabricantes OLT e relatórios automáticos.
+        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
@@ -39,7 +39,7 @@ export function SettingsPage() {
             ["appearance", "Aparência"],
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
-            ["olt", "OLT vendors"],
+            ["olt", "Perfis OLT"],
             ["automation", "Relatórios agendados"],
           ] as const
         ).map(([k, lab]) => (
@@ -1956,100 +1956,787 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   );
 }
 
+type OltCollectionStep = {
+  id?: string;
+  method: string;
+  enabled?: boolean;
+  oid?: string;
+  oid_field?: string;
+  oids?: string[];
+  store_as?: string;
+  command?: string;
+  pre_commands?: string[];
+  parser?: string;
+  params?: Record<string, unknown>;
+};
+
+type OltOnuMetricDef = {
+  enabled?: boolean;
+  oid?: string;
+  online_values?: number[];
+  offline_values?: number[];
+  status_mode?: "pon_onu_suffix" | "if_mib_index" | "pon_online_offline";
+  ifdescr_oid?: string;
+  ifoper_oid?: string;
+  online_count_oid?: string;
+  offline_count_oid?: string;
+};
+
+type OltMetricsForm = Record<string, OltOnuMetricDef>;
+
+const OLT_METRIC_FIELDS: Array<{
+  key: string;
+  label: string;
+  hint: string;
+  placeholder: string;
+  hasStatusValues?: boolean;
+}> = [
+  {
+    key: "serial",
+    label: "Número de série",
+    hint: "OID da tabela SNMP. O sistema faz snmpwalk e lê .PON.ONU (ex.: …2.1.5.3.10 = PON 3, ONU 10).",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.5",
+  },
+  {
+    key: "status",
+    label: "Estado (online / offline)",
+    hint: "OID da tabela de estado. Configure quais valores significam online e offline.",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.5.2",
+    hasStatusValues: true,
+  },
+  {
+    key: "rx_power",
+    label: "RX da ONU (dBm)",
+    hint: "Potência recebida na ONU. OID da tabela SNMP; sufixo .PON.ONU.",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.7",
+  },
+  {
+    key: "tx_power",
+    label: "TX da ONU",
+    hint: "Potência transmitida pela ONU. OID da tabela SNMP; sufixo .PON.ONU.",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.6",
+  },
+  {
+    key: "temperature",
+    label: "Temperatura",
+    hint: "OID da tabela de temperatura.",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.3",
+  },
+  {
+    key: "model",
+    label: "Modelo",
+    hint: "OID da tabela de modelo (ex.: …2.1.6.3.10 = modelo da ONU 10 na PON 3).",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.6",
+  },
+];
+
+const OLT_PON_METRIC_FIELDS: Array<{
+  key: string;
+  label: string;
+  hint: string;
+  placeholder: string;
+}> = [
+  {
+    key: "pon_rx_power",
+    label: "RX da PON (OLT)",
+    hint: "Potência recebida na porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON (sem ONU).",
+    placeholder: "",
+  },
+  {
+    key: "pon_tx_power",
+    label: "TX da PON (OLT)",
+    hint: "Potência transmitida na porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON.",
+    placeholder: "",
+  },
+];
+
+const OLT_ALL_METRIC_FIELDS = [...OLT_METRIC_FIELDS, ...OLT_PON_METRIC_FIELDS];
+
+function defaultMetricsForm(): OltMetricsForm {
+  const out: OltMetricsForm = {};
+  for (const f of OLT_ALL_METRIC_FIELDS) {
+    out[f.key] = {
+      enabled: f.key === "status" || f.key === "model",
+      oid: "",
+      online_values: f.hasStatusValues ? [3] : undefined,
+      offline_values: f.hasStatusValues ? [] : undefined,
+      status_mode: f.hasStatusValues ? "pon_onu_suffix" : undefined,
+      ifdescr_oid: f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.2" : undefined,
+      ifoper_oid: f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.8" : undefined,
+      online_count_oid: "",
+      offline_count_oid: "",
+    };
+  }
+  return out;
+}
+
+function metricsFromApi(raw: unknown): OltMetricsForm {
+  const base = defaultMetricsForm();
+  if (!raw || typeof raw !== "object") return base;
+  const src = raw as Record<string, OltOnuMetricDef>;
+  for (const f of OLT_ALL_METRIC_FIELDS) {
+    const m = src[f.key];
+    if (!m) continue;
+    base[f.key] = {
+      enabled: m.enabled !== false,
+      oid: m.oid ?? "",
+      online_values: m.online_values ?? (f.hasStatusValues ? [3] : undefined),
+      offline_values: m.offline_values ?? (f.hasStatusValues ? [] : undefined),
+      status_mode:
+        (m.status_mode as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline" | undefined) ??
+        (f.hasStatusValues ? "pon_onu_suffix" : undefined),
+      ifdescr_oid: m.ifdescr_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.2" : undefined),
+      ifoper_oid: m.ifoper_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.8" : undefined),
+      online_count_oid: m.online_count_oid ?? "",
+      offline_count_oid: m.offline_count_oid ?? "",
+    };
+  }
+  return base;
+}
+
+function buildMetricsPayload(form: OltMetricsForm): OltMetricsForm {
+  const out: OltMetricsForm = {};
+  for (const f of OLT_ALL_METRIC_FIELDS) {
+    const m = form[f.key] ?? {};
+    const statusMode = m.status_mode ?? "pon_onu_suffix";
+    if (f.hasStatusValues && statusMode === "pon_online_offline") {
+      const onlineOID = (m.online_count_oid ?? "").trim();
+      const offlineOID = (m.offline_count_oid ?? "").trim();
+      if (m.enabled === false || !onlineOID || !offlineOID) continue;
+      out[f.key] = {
+        enabled: true,
+        oid: onlineOID,
+        status_mode: "pon_online_offline",
+        online_count_oid: onlineOID,
+        offline_count_oid: offlineOID,
+      };
+      continue;
+    }
+    const oid =
+      f.hasStatusValues && statusMode === "if_mib_index"
+        ? ((m.oid ?? "").trim() || (m.ifoper_oid ?? "").trim() || "1.3.6.1.2.1.2.2.1.8")
+        : (m.oid ?? "").trim();
+    if (!oid) continue;
+    out[f.key] = {
+      enabled: m.enabled !== false,
+      oid,
+      ...(f.hasStatusValues
+        ? {
+            online_values: Array.isArray(m.online_values) ? m.online_values : parseIntList(String(m.online_values ?? "3")),
+            offline_values: Array.isArray(m.offline_values) ? m.offline_values : parseIntList(String(m.offline_values ?? "")),
+            status_mode: statusMode,
+            ifdescr_oid: (m.ifdescr_oid ?? "").trim(),
+            ifoper_oid: (m.ifoper_oid ?? "").trim(),
+            online_count_oid: (m.online_count_oid ?? "").trim(),
+            offline_count_oid: (m.offline_count_oid ?? "").trim(),
+          }
+        : {}),
+    };
+  }
+  return out;
+}
+
+function parseIntList(raw: string): number[] {
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n));
+}
+
+function hasEnabledMetrics(form: OltMetricsForm): boolean {
+  return OLT_ALL_METRIC_FIELDS.some((f) => {
+    const m = form[f.key];
+    if (m?.enabled === false) return false;
+    const mode = m?.status_mode ?? "pon_onu_suffix";
+    if (f.hasStatusValues && mode === "pon_online_offline") {
+      return (m?.online_count_oid ?? "").trim() !== "" && (m?.offline_count_oid ?? "").trim() !== "";
+    }
+    if (f.hasStatusValues && mode === "if_mib_index") {
+      return (m?.oid ?? "").trim() !== "" || (m?.ifoper_oid ?? "").trim() !== "";
+    }
+    return (m?.oid ?? "").trim() !== "";
+  });
+}
+
+function filterOltModels<T extends { model: string }>(list: T[]): T[] {
+  return list.filter((m) => m.model.trim().toLowerCase() !== "padrão" && m.model.trim().toLowerCase() !== "padrao");
+}
+
+const OLT_COLLECT_METHODS: { value: string; label: string }[] = [
+  { value: "if_mib_refresh", label: "SNMP — actualizar interfaces (walk completo)" },
+  { value: "if_mib_snapshot", label: "SNMP — ler interfaces (rápido)" },
+  { value: "onu_metrics_collect", label: "Coletar métricas SNMP das ONUs" },
+  { value: "onu_snmp_walk", label: "Contagem simples via snmpwalk (legado)" },
+  { value: "vsol_onu_collect", label: "VSOL — tabela legada gOnuAuthList" },
+  { value: "snmp_walk", label: "SNMP — snmpwalk (OID livre)" },
+  { value: "snmp_get", label: "SNMP — snmpget (vários OIDs)" },
+  { value: "telnet", label: "Telnet — comando CLI" },
+  { value: "datacom_build_pons", label: "Datacom — agregar PONs do walk ONU" },
+  { value: "if_mib_merge_pons", label: "Derivar e fundir portas PON" },
+  { value: "stabilize_pons", label: "Estabilizar PONs vs. coleta anterior" },
+];
+
 function OltVendorsPanel() {
   const qc = useQueryClient();
   const brands = useQuery({ queryKey: ["olt-brands"], queryFn: () => apiFetch<{ brands: string[] }>("/api/v1/settings/olt-vendors") });
   const [brand, setBrand] = useState("");
+  const [model, setModel] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
-  const vendor = useQuery({
-    queryKey: ["olt-vendor", brand],
+  const [metrics, setMetrics] = useState<OltMetricsForm>(() => defaultMetricsForm());
+  const [steps, setSteps] = useState<OltCollectionStep[]>([]);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createBrandNew, setCreateBrandNew] = useState(false);
+  const [createBrand, setCreateBrand] = useState("");
+  const [createBrandName, setCreateBrandName] = useState("");
+  const [createModelName, setCreateModelName] = useState("");
+
+  const models = useQuery({
+    queryKey: ["olt-vendor-models", brand],
     enabled: !!brand,
     queryFn: () =>
-      apiFetch<{ brand: string; onu_online_oid: string | null; pon_status_oid: string | null; transceiver_oid: string | null; snmp_base_oid: string | null }>(
-        `/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}`,
+      apiFetch<{ brand: string; models: Array<{ model: string }> }>(
+        `/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models`,
       ),
   });
-  const [onu, setOnu] = useState("");
-  const [pon, setPon] = useState("");
-  const [trx, setTrx] = useState("");
-  const [base, setBase] = useState("");
+
+  const vendor = useQuery({
+    queryKey: ["olt-vendor-model", brand, model],
+    enabled: !!brand && !!model,
+    queryFn: () =>
+      apiFetch<{
+        brand: string;
+        model: string;
+        onu_metrics?: OltMetricsForm;
+        collection_steps?: OltCollectionStep[];
+      }>(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`),
+  });
+
+  useEffect(() => {
+    setModel("");
+  }, [brand]);
+
+  useEffect(() => {
+    const list = filterOltModels(models.data?.models ?? []);
+    if (!brand || list.length === 0) {
+      setModel("");
+      return;
+    }
+    if (!model || !list.some((m) => m.model === model)) {
+      setModel(list[0].model);
+    }
+  }, [brand, models.data, model]);
 
   useEffect(() => {
     if (!vendor.data) return;
-    setOnu(vendor.data.onu_online_oid ?? "");
-    setPon(vendor.data.pon_status_oid ?? "");
-    setTrx(vendor.data.transceiver_oid ?? "");
-    setBase(vendor.data.snmp_base_oid ?? "");
+    setMetrics(metricsFromApi(vendor.data.onu_metrics));
+    setSteps(Array.isArray(vendor.data.collection_steps) ? vendor.data.collection_steps : []);
   }, [vendor.data]);
 
+  const metricsReady = hasEnabledMetrics(metrics);
+
   const patch = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}`, {
+    mutationFn: () => {
+      const payload = buildMetricsPayload(metrics);
+      const autoSteps: OltCollectionStep[] = metricsReady
+        ? [{ id: "onu_metrics", method: "onu_metrics_collect", enabled: true }]
+        : steps;
+      return apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`, {
         method: "PATCH",
         json: {
-          onu_online_oid: onu || null,
-          pon_status_oid: pon || null,
-          transceiver_oid: trx || null,
-          snmp_base_oid: base || null,
+          onu_metrics: payload,
+          collection_steps: autoSteps,
         },
-      }),
+      });
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["olt-vendor", brand] });
-      setSaveToast({ ok: true, text: `Guardado com sucesso (perfil OLT: ${brand}).` });
+      qc.invalidateQueries({ queryKey: ["olt-vendor-model", brand, model] });
+      qc.invalidateQueries({ queryKey: ["olt-models-catalog"] });
+      setSaveToast({ ok: true, text: `Perfil guardado: ${brand} / ${model}` });
     },
     onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao salvar (perfil OLT)." });
+      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao salvar." });
+    },
+  });
+
+  const createModel = useMutation({
+    mutationFn: ({ targetBrand, name }: { targetBrand: string; name: string }) =>
+      apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(targetBrand)}/models`, {
+        method: "POST",
+        json: { model: name },
+      }),
+    onSuccess: (_data, { targetBrand, name }) => {
+      qc.invalidateQueries({ queryKey: ["olt-brands"] });
+      qc.invalidateQueries({ queryKey: ["olt-vendor-models", targetBrand] });
+      qc.invalidateQueries({ queryKey: ["olt-models-catalog"] });
+      setBrand(targetBrand);
+      setModel(name);
+      setCreateModalOpen(false);
+      setCreateBrandNew(false);
+      setCreateBrand("");
+      setCreateBrandName("");
+      setCreateModelName("");
+      setSaveToast({ ok: true, text: `Modelo «${name}» criado (${targetBrand}).` });
+    },
+    onError: (err) => {
+      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao criar modelo." });
+    },
+  });
+
+  const removeModel = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["olt-vendor-models", brand] });
+      qc.invalidateQueries({ queryKey: ["olt-models-catalog"] });
+      setModel("");
+      setSaveToast({ ok: true, text: "Modelo removido." });
+    },
+    onError: (err) => {
+      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao remover." });
     },
   });
 
   if (brands.isLoading) return <p>A carregar…</p>;
   if (brands.isError) return <div className="msg msg--err">{(brands.error as Error).message}</div>;
 
+  const modelList = filterOltModels(models.data?.models ?? []);
+  const brandOptions = brands.data?.brands ?? [];
+
+  function openCreateModal() {
+    setCreateBrandNew(!brand);
+    setCreateBrand(brand || "");
+    setCreateBrandName("");
+    setCreateModelName("");
+    setCreateModalOpen(true);
+  }
+
+  function submitCreateModel() {
+    const name = createModelName.trim();
+    const targetBrand = (createBrandNew ? createBrandName : createBrand).trim();
+    if (!targetBrand || !name) return;
+    createModel.mutate({ targetBrand, name });
+  }
+
   return (
     <div className="card">
-      <h2>Perfis por fabricante</h2>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <select className="input" value={brand} onChange={(e) => setBrand(e.target.value)} style={{ minWidth: 200 }}>
-          <option value="">— escolher —</option>
-          {(brands.data?.brands ?? []).map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
-      </div>
-      {brand && vendor.isLoading && <p>A carregar perfil…</p>}
-      {brand && vendor.isError && <div className="msg msg--err">{(vendor.error as Error).message}</div>}
-      {brand && vendor.data && (
-        <>
-          <div className="field" style={{ marginTop: 12 }}>
-            <label>ONUs em linha</label>
-            <input className="input mono" value={onu} onChange={(e) => setOnu(e.target.value)} title="Identificador SNMP" />
-          </div>
-          <div className="field">
-            <label>Estado das portas PON</label>
-            <input className="input mono" value={pon} onChange={(e) => setPon(e.target.value)} title="Identificador SNMP" />
-          </div>
-          <div className="field">
-            <label>Dados do transceiver (GBIC/SFP)</label>
-            <input className="input mono" value={trx} onChange={(e) => setTrx(e.target.value)} title="Identificador SNMP" />
-          </div>
-          <div className="field">
-            <label>Prefixo SNMP do fabricante</label>
-            <input className="input mono" value={base} onChange={(e) => setBase(e.target.value)} title="Árvore SNMP base para este fabricante" />
-          </div>
-          <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
-            Salvar perfil
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Perfis OLT por marca e modelo</h2>
+          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, marginBottom: 0 }}>
+            Configure OIDs SNMP por modelo. O sistema faz snmpwalk e interpreta os dados conforme o modo escolhido.
+          </p>
+        </div>
+        <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+          <button
+            type="button"
+            className="btn"
+            title="Criar modelo"
+            aria-label="Criar modelo"
+            onClick={openCreateModal}
+          >
+            <Plus size={16} aria-hidden />
           </button>
-          {saveToast && (
-            <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-              <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                ×
-              </button>
-              {saveToast.text}
+          <button
+            type="button"
+            className="btn btn--danger"
+            title="Remover modelo"
+            aria-label="Remover modelo"
+            disabled={!brand || !model || removeModel.isPending}
+            onClick={() => {
+              if (window.confirm(`Remover modelo «${model}» da marca ${brand}?`)) removeModel.mutate();
+            }}
+          >
+            <Trash2 size={16} aria-hidden />
+          </button>
+        </div>
+      </div>
+      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Marca</label>
+          <select className="input" value={brand} onChange={(e) => setBrand(e.target.value)} style={{ minWidth: 180 }}>
+            <option value="">— escolher —</option>
+            {(brands.data?.brands ?? []).map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </div>
+        {brand && (
+          <div className="field" style={{ margin: 0 }}>
+            <label>Modelo</label>
+            <select className="input" value={model} onChange={(e) => setModel(e.target.value)} style={{ minWidth: 200 }}>
+              <option value="">— escolher —</option>
+              {modelList.map((m) => (
+                <option key={m.model} value={m.model}>
+                  {m.model}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      {brand && models.isLoading && <p style={{ marginTop: 12 }}>A carregar modelos…</p>}
+      {brand && models.isError && <div className="msg msg--err">{(models.error as Error).message}</div>}
+      {brand && model && vendor.isLoading && <p style={{ marginTop: 12 }}>A carregar perfil…</p>}
+      {brand && model && vendor.isError && <div className="msg msg--err">{(vendor.error as Error).message}</div>}
+      {brand && model && vendor.data && (
+        <>
+          {!metricsReady && (
+            <div className="msg msg--off" style={{ marginTop: 12, fontSize: 12 }}>
+              Nenhuma MIB SNMP configurada para monitoramento deste modelo. Marque pelo menos uma métrica abaixo e preencha o OID da tabela.
             </div>
           )}
+
+          <h3 style={{ marginTop: 16, fontSize: 14, marginBottom: 4 }}>Dados a coletar das ONUs (SNMP)</h3>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>Métricas por ONU (sufixo .PON.ONU).</p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
+          {OLT_METRIC_FIELDS.map((field) => {
+            const m = metrics[field.key] ?? {};
+            const statusMode = m.status_mode ?? "pon_onu_suffix";
+            return (
+              <div
+                key={field.key}
+                className="card"
+                style={{ margin: 0, padding: "8px 10px", background: "var(--surface-2, rgba(0,0,0,0.04))" }}
+              >
+                <div className="row" style={{ alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <label style={{ fontWeight: 600, margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={m.enabled !== false}
+                      onChange={(e) =>
+                        setMetrics((prev) => ({
+                          ...prev,
+                          [field.key]: { ...prev[field.key], enabled: e.target.checked },
+                        }))
+                      }
+                    />
+                    {field.label}
+                  </label>
+                  <InfoHint label={field.label}>{field.hint}</InfoHint>
+                </div>
+                {field.hasStatusValues && m.enabled !== false && (
+                  <div className="field" style={{ margin: "0 0 6px" }}>
+                    <label style={{ fontSize: 11 }}>Modo de leitura do estado</label>
+                    <select
+                      className="input"
+                      style={{ fontSize: 12, padding: "4px 8px" }}
+                      value={statusMode}
+                      onChange={(e) =>
+                        setMetrics((prev) => ({
+                          ...prev,
+                          [field.key]: {
+                            ...prev[field.key],
+                            status_mode: e.target.value as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline",
+                          },
+                        }))
+                      }
+                    >
+                      <option value="pon_onu_suffix">Tabela PON/ONU (sufixo .PON.ONU)</option>
+                      <option value="if_mib_index">Interfaces (ifDescr + ifOperStatus)</option>
+                      <option value="pon_online_offline">Contagem por PON (OID online + OID offline)</option>
+                    </select>
+                  </div>
+                )}
+                {field.hasStatusValues && m.enabled !== false && statusMode === "pon_online_offline" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>OID ONUs online por PON</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="1.3.6.1.4.1.3709.3.6.18.2.1.5"
+                        value={m.online_count_oid ?? ""}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: { ...prev[field.key], online_count_oid: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>OID ONUs offline por PON</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="1.3.6.1.4.1.3709.3.6.18.2.1.6"
+                        value={m.offline_count_oid ?? ""}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: { ...prev[field.key], offline_count_oid: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {!(field.hasStatusValues && statusMode === "if_mib_index") && (
+                      <div className="field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: 11 }}>OID da tabela SNMP</label>
+                        <input
+                          className="input mono"
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder={field.placeholder}
+                          value={m.oid ?? ""}
+                          disabled={m.enabled === false}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], oid: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    )}
+                    {field.hasStatusValues && m.enabled !== false && statusMode === "if_mib_index" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 11 }}>OID ifDescr</label>
+                          <input
+                            className="input mono"
+                            style={{ width: "100%", fontSize: 12 }}
+                            placeholder="1.3.6.1.2.1.2.2.1.2"
+                            value={m.ifdescr_oid ?? "1.3.6.1.2.1.2.2.1.2"}
+                            onChange={(e) =>
+                              setMetrics((prev) => ({
+                                ...prev,
+                                [field.key]: { ...prev[field.key], ifdescr_oid: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 11 }}>OID ifOperStatus</label>
+                          <input
+                            className="input mono"
+                            style={{ width: "100%", fontSize: 12 }}
+                            placeholder="1.3.6.1.2.1.2.2.1.8"
+                            value={m.ifoper_oid ?? "1.3.6.1.2.1.2.2.1.8"}
+                            onChange={(e) =>
+                              setMetrics((prev) => ({
+                                ...prev,
+                                [field.key]: { ...prev[field.key], ifoper_oid: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {field.hasStatusValues && m.enabled !== false && statusMode !== "pon_online_offline" && (
+                      <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                        <div className="field" style={{ margin: 0, flex: "1 1 120px" }}>
+                          <label style={{ fontSize: 11 }}>Valores = online</label>
+                          <input
+                            className="input mono"
+                            style={{ fontSize: 12 }}
+                            placeholder={statusMode === "if_mib_index" ? "1" : "3"}
+                            value={(m.online_values ?? (statusMode === "if_mib_index" ? [1] : [3])).join(", ")}
+                            onChange={(e) =>
+                              setMetrics((prev) => ({
+                                ...prev,
+                                [field.key]: { ...prev[field.key], online_values: parseIntList(e.target.value) },
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="field" style={{ margin: 0, flex: "1 1 120px" }}>
+                          <label style={{ fontSize: 11 }}>Valores = offline</label>
+                          <input
+                            className="input mono"
+                            style={{ fontSize: 12 }}
+                            placeholder="(vazio = resto)"
+                            value={(m.offline_values ?? []).join(", ")}
+                            onChange={(e) =>
+                              setMetrics((prev) => ({
+                                ...prev,
+                                [field.key]: { ...prev[field.key], offline_values: parseIntList(e.target.value) },
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+          </div>
+
+          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Potência óptica das portas PON (OLT)</h3>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+            RX/TX da porta GPON na OLT — distinto do RX/TX de cada ONU. Sufixo SNMP apenas .PON.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
+            {OLT_PON_METRIC_FIELDS.map((field) => {
+              const m = metrics[field.key] ?? {};
+              return (
+                <div
+                  key={field.key}
+                  className="card"
+                  style={{ margin: 0, padding: "8px 10px", background: "var(--surface-2, rgba(0,0,0,0.04))" }}
+                >
+                  <div className="row" style={{ alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <label style={{ fontWeight: 600, margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={m.enabled !== false}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: { ...prev[field.key], enabled: e.target.checked },
+                          }))
+                        }
+                      />
+                      {field.label}
+                    </label>
+                    <InfoHint label={field.label}>{field.hint}</InfoHint>
+                  </div>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label style={{ fontSize: 11 }}>OID da tabela SNMP</label>
+                    <input
+                      className="input mono"
+                      style={{ width: "100%", fontSize: 12 }}
+                      placeholder={field.placeholder}
+                      value={m.oid ?? ""}
+                      disabled={m.enabled === false}
+                      onChange={(e) =>
+                        setMetrics((prev) => ({
+                          ...prev,
+                          [field.key]: { ...prev[field.key], oid: e.target.value },
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <details style={{ marginTop: 14 }} open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
+            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Opções avançadas (passos extras de coleta)</summary>
+            <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+              Normalmente não é necessário — o perfil usa automaticamente coleta SNMP das métricas marcadas acima.
+            </p>
+            {steps.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum passo extra.</p>}
+            {steps.map((st, idx) => (
+              <div key={`${st.id ?? st.method}-${idx}`} className="card" style={{ marginTop: 8, padding: 10 }}>
+                <div className="field" style={{ margin: 0 }}>
+                  <label>Método</label>
+                  <select
+                    className="input"
+                    value={st.method}
+                    onChange={(e) => {
+                      const next = [...steps];
+                      next[idx] = { ...next[idx], method: e.target.value };
+                      setSteps(next);
+                    }}
+                  >
+                    {OLT_COLLECT_METHODS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="button" className="btn btn--danger" style={{ marginTop: 8 }} onClick={() => setSteps(steps.filter((_, i) => i !== idx))}>
+                  Remover passo
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn"
+              style={{ marginTop: 8 }}
+              onClick={() => setSteps([...steps, { id: `step_${steps.length + 1}`, method: "telnet", enabled: true }])}
+            >
+              Adicionar passo extra
+            </button>
+          </details>
+
+          <button type="button" className="btn btn--primary" style={{ marginTop: 14 }} disabled={patch.isPending} onClick={() => patch.mutate()}>
+            {patch.isPending ? "A guardar…" : "Guardar perfil de monitoramento"}
+          </button>
         </>
+      )}
+      {createModalOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !createModel.isPending && setCreateModalOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <h3 style={{ marginTop: 0 }}>Novo modelo OLT</h3>
+            <div className="field">
+              <label>Marca</label>
+              {!createBrandNew ? (
+                <select className="input" value={createBrand} onChange={(e) => setCreateBrand(e.target.value)}>
+                  <option value="">— escolher —</option>
+                  {brandOptions.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="input"
+                  placeholder="Ex.: Datacom"
+                  value={createBrandName}
+                  onChange={(e) => setCreateBrandName(e.target.value)}
+                />
+              )}
+              <button
+                type="button"
+                className="btn"
+                style={{ marginTop: 6, fontSize: 12 }}
+                onClick={() => setCreateBrandNew((v) => !v)}
+              >
+                {createBrandNew ? "Usar marca existente" : "Criar nova marca"}
+              </button>
+            </div>
+            <div className="field">
+              <label>Nome do modelo</label>
+              <input
+                className="input"
+                placeholder="Ex.: DM4610"
+                value={createModelName}
+                onChange={(e) => setCreateModelName(e.target.value)}
+              />
+            </div>
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn" disabled={createModel.isPending} onClick={() => setCreateModalOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={
+                  createModel.isPending ||
+                  !createModelName.trim() ||
+                  !(createBrandNew ? createBrandName.trim() : createBrand.trim())
+                }
+                onClick={submitCreateModel}
+              >
+                {createModel.isPending ? "A criar…" : "Criar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {saveToast && (
+        <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
+          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
+            ×
+          </button>
+          {saveToast.text}
+        </div>
       )}
     </div>
   );

@@ -12,10 +12,10 @@ export class ApiError extends Error {
   }
 }
 
-type Opt = RequestInit & { json?: unknown; skipAuth?: boolean };
+type Opt = RequestInit & { json?: unknown; skipAuth?: boolean; /** Aborta fetch após N ms (evita Failed to fetch em coletas longas). */ timeoutMs?: number };
 
 export async function apiFetch<T = unknown>(path: string, opts: Opt = {}): Promise<T> {
-  const { json, skipAuth, headers: hIn, ...rest } = opts;
+  const { json, skipAuth, timeoutMs, headers: hIn, ...rest } = opts;
   const headers = new Headers(hIn);
   if (json !== undefined) {
     headers.set("Content-Type", "application/json");
@@ -27,11 +27,31 @@ export async function apiFetch<T = unknown>(path: string, opts: Opt = {}): Promi
   const key = getStoredApiKey();
   if (key) headers.set("X-API-Key", key);
 
-  const res = await fetch(apiUrl(path), {
-    ...rest,
-    headers,
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  const signal =
+    timeoutMs != null && timeoutMs > 0
+      ? AbortSignal.timeout(timeoutMs)
+      : rest.signal;
+
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      ...rest,
+      headers,
+      signal,
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    const msg = e instanceof Error ? e.message : String(e);
+    if (name === "TimeoutError" || msg.includes("signal timed out")) {
+      throw new ApiError(
+        "Tempo esgotado à espera da resposta. Se a OLT tiver muitas ONUs, use «Atualizar ONUs» após «Só interfaces», ou aumente NETQUASAR_HTTP_WRITE_TIMEOUT no servidor.",
+        0,
+        "CLIENT_TIMEOUT",
+      );
+    }
+    throw e;
+  }
 
   const ct = res.headers.get("content-type") ?? "";
   const isJson = ct.includes("application/json");

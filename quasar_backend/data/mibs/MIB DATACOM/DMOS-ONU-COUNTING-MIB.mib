@@ -1,0 +1,193 @@
+--
+-- DATACOM
+-- Copyright 2023 by DATACOM (Teracom Telematica Ltda). All Rights Reserved.
+-- This DATACOM SNMP MIB Specification is Datacom proprietary intellectual property.
+--
+-- This module will be extend, as required. The specification and other information
+-- contained in this document can be modified without prior notice. The user should
+-- consult Datacom to determine whether any such changes have been done.
+--
+
+DMOS-ONU-COUNTING-MIB DEFINITIONS ::= BEGIN
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE,
+    Integer32, Unsigned32, Counter32, Counter64,
+    Gauge32, IpAddress
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION, RowStatus, DateAndTime,
+    TruthValue
+        FROM SNMPv2-TC
+    datacomDevicesMIBs
+        FROM DATACOM-SMI
+;
+
+onuCountingIfMIB MODULE-IDENTITY
+    LAST-UPDATED "202405240000Z"
+    ORGANIZATION "DATACOM"
+    CONTACT-INFO
+                 "DATACOM
+
+                 Postal: DATACOM
+                     Rua America, 1000
+                     Eldorado do Sul, RS
+                     CEP 92990-000
+                             BRAZIL
+
+                 Tel:+55(51)3933 3000
+                 Fax:+55(51)3933 3003
+
+                 E-mail: datacom@datacom.com.br "
+    DESCRIPTION "The DATACOM MIB module for ONUs counting by ponlink and total."
+    REVISION "202405240000Z"
+    DESCRIPTION "Added discoveredOnusTable to show the discovered ONUs list in the MIB."
+    REVISION "202308110000Z"
+    DESCRIPTION "Initial revision."
+    ::= { datacomDevicesMIBs 18 }
+
+String ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs:string"
+    SYNTAX      OCTET STRING
+
+ponGlobalOnuCount OBJECT IDENTIFIER ::= { onuCountingIfMIB 1 }
+
+ponIfGlobalTotalOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs on all PON, including all states (provisioned up/down and not provisioned)"
+    ::= { ponGlobalOnuCount 1 }
+
+ponIfGlobalNonProvisionedOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of non provisioned ONUs on all interfaces"
+    ::= { ponGlobalOnuCount 2 }
+
+ponIfGlobalUpOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs provisioned and up on all interfaces"
+    ::= { ponGlobalOnuCount 3 }
+
+ponIfGlobalDownOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs provisioned and down on all interfaces"
+    ::= { ponGlobalOnuCount 4 }
+
+ponIfTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF PonIfEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "This table represents the ONU counting per PON interface"
+    ::= { onuCountingIfMIB 2 }
+
+ponIfEntry OBJECT-TYPE
+    SYNTAX      PonIfEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION ""
+    INDEX { ponIfIndex }
+        ::= { ponIfTable 1 }
+
+PonIfEntry ::=
+    SEQUENCE {
+        ponIfIndex Unsigned32,
+        ponIfDescr String,
+        ponIfTotalOnus Unsigned32,
+        ponIfNonProvisionedOnus Unsigned32,
+        ponIfUpOnus Unsigned32,
+        ponIfDownOnus Unsigned32
+    }
+
+ponIfIndex OBJECT-TYPE
+    SYNTAX      Unsigned32 (1 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Table index"
+    ::= { ponIfEntry 1 }
+
+ponIfDescr OBJECT-TYPE
+    SYNTAX      String (SIZE (0 .. 255))
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Interface description"
+    ::= { ponIfEntry 2 }
+
+ponIfTotalOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs on PON link, including all states (provisioned up/down and not provisioned)"
+    ::= { ponIfEntry 3 }
+
+ponIfNonProvisionedOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of non provisioned ONUs on PON link"
+    ::= { ponIfEntry 4 }
+
+ponIfUpOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs provisioned and up on PON link"
+    ::= { ponIfEntry 5 }
+
+ponIfDownOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 2147483647)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Number of ONUs provisioned and down on PON link"
+    ::= { ponIfEntry 6 }
+
+ponIfDiscoveredOnusTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF PonIfDiscoveredOnusEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "This table represents the list of discovered ONUs by pon link"
+    ::= { onuCountingIfMIB 3 }
+
+ponIfDiscoveredOnusEntry OBJECT-TYPE
+    SYNTAX      PonIfDiscoveredOnusEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION ""
+    INDEX { ponIfIndexDiscoveredOnus, id }
+        ::= { ponIfDiscoveredOnusTable 1 }
+
+PonIfDiscoveredOnusEntry ::=
+    SEQUENCE {
+        ponIfIndexDiscoveredOnus Unsigned32,
+        id Unsigned32,
+        onuSerialNumber String
+    }
+
+ponIfIndexDiscoveredOnus OBJECT-TYPE
+    SYNTAX      Unsigned32 (1 .. 2147483647)
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "If-index of pon link"
+    ::= { ponIfDiscoveredOnusEntry 1 }
+
+id OBJECT-TYPE
+    SYNTAX      Unsigned32 (0 .. 127)
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Sequential ID of discovered onu"
+    ::= { ponIfDiscoveredOnusEntry 2 }
+
+onuSerialNumber OBJECT-TYPE
+    SYNTAX      String
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "ONU serial number"
+    ::= { ponIfDiscoveredOnusEntry 3 }
+
+END

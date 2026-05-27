@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
@@ -22,16 +23,18 @@ type onuAutomationConfig struct {
 	TimeHHMM      string
 	Timezone      string
 	LastRunPeriod *string
+	LastRunAt     *time.Time
 	LastStatus    *string
 	Running       bool
 }
 
 func (s *Server) ensureAutomationONUScheduler() {
-	if s.WorkerCtx == nil {
-		return
-	}
 	s.automationONUOnce.Do(func() {
-		go s.runAutomationONUScheduler(s.WorkerCtx)
+		ctx := s.WorkerCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go s.runAutomationONUScheduler(ctx)
 	})
 }
 
@@ -43,7 +46,7 @@ func (s *Server) runAutomationONUScheduler(ctx context.Context) {
 	}
 	// Ao arranque: recupera execuções perdidas se o serviço estava parado na hora agendada.
 	check("startup")
-	ticker := time.NewTicker(time.Hour)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -51,7 +54,7 @@ func (s *Server) runAutomationONUScheduler(ctx context.Context) {
 			l.Info().Msg("agendador relatório ONU encerrado")
 			return
 		case <-ticker.C:
-			check("hourly")
+			check("minute")
 		}
 	}
 }
@@ -108,11 +111,12 @@ func loadONUAutomationConfig(ctx context.Context, pool *pgxpool.Pool) (onuAutoma
 	var c onuAutomationConfig
 	var dom *int
 	var lrp, ls *string
+	var lra *time.Time
 	err := pool.QueryRow(ctx, `
 		SELECT enabled, COALESCE(NULLIF(trim(mode), ''), 'monthly'), day_of_month, time_hhmm, timezone,
-			last_run_period, last_status, running
+			last_run_period, last_run_at, last_status, running
 		FROM automation_onu_report WHERE id=1
-	`).Scan(&c.Enabled, &c.Mode, &dom, &c.TimeHHMM, &c.Timezone, &lrp, &ls, &c.Running)
+	`).Scan(&c.Enabled, &c.Mode, &dom, &c.TimeHHMM, &c.Timezone, &lrp, &lra, &ls, &c.Running)
 	if err != nil {
 		return c, err
 	}
@@ -122,6 +126,7 @@ func loadONUAutomationConfig(ctx context.Context, pool *pgxpool.Pool) (onuAutoma
 		c.DayOfMonth = 1
 	}
 	c.LastRunPeriod = lrp
+	c.LastRunAt = lra
 	c.LastStatus = ls
 	if strings.TrimSpace(c.Timezone) == "" {
 		c.Timezone = "America/Sao_Paulo"
@@ -141,7 +146,7 @@ func onuReportDue(cfg onuAutomationConfig, now time.Time) (period string, due bo
 	if mode != "" && mode != "monthly" {
 		return "", false
 	}
-	return scheduleutil.MonthlyDue(true, cfg.Timezone, cfg.TimeHHMM, cfg.DayOfMonth, cfg.LastRunPeriod, cfg.Running, now)
+	return scheduleutil.MonthlyDue(true, cfg.Timezone, cfg.TimeHHMM, cfg.DayOfMonth, cfg.LastRunPeriod, cfg.LastRunAt, cfg.Running, now)
 }
 
 func (s *Server) setONUAutomationStatus(ctx context.Context, status string, errMsg *string) {
@@ -155,6 +160,11 @@ func (s *Server) setONUAutomationStatus(ctx context.Context, status string, errM
 }
 
 func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, actor string, requireEnabled bool) error {
+	started := time.Now()
+	trigger := "manual"
+	if actor == "scheduler" {
+		trigger = "scheduled"
+	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base de dados indisponível")
@@ -168,6 +178,12 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 		return err
 	}
 	if tag.RowsAffected() == 0 {
+		trigger := "manual"
+		if actor == "scheduler" {
+			trigger = "scheduled"
+		}
+		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, false,
+			"Não iniciado (desativado, já em execução ou bloqueado)", nil, map[string]any{"period": period}, period)
 		return nil
 	}
 	defer func() {
@@ -183,13 +199,15 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 		INSERT INTO onu_report_runs (status, summary) VALUES ('collecting', $1::jsonb) RETURNING id
 	`, string(startSummary)).Scan(&runID); err != nil {
 		s.setONUAutomationStatus(ctx, "failed", strPtr(err.Error()))
+		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, false, "Falha ao iniciar execução", err,
+			map[string]any{"period": period}, period)
 		return err
 	}
 
 	oltOK, oltFail := 0, 0
 	rows, err := pool.Query(ctx, `SELECT id FROM devices WHERE lower(trim(category)) = 'olt' ORDER BY description`)
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), nil)
+		s.finishONURun(ctx, runID, period, false, err.Error(), nil, started, actor, trigger)
 		return err
 	}
 	defer rows.Close()
@@ -207,7 +225,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 
 	agg, err := s.aggregateONUReport(ctx)
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), map[string]any{"olts_refreshed": oltOK, "olts_failed": oltFail})
+		s.finishONURun(ctx, runID, period, false, err.Error(), map[string]any{"olts_refreshed": oltOK, "olts_failed": oltFail}, started, actor, trigger)
 		return err
 	}
 	agg["period"] = period
@@ -217,7 +235,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 	upserted, syncErr := s.syncCommercialMonthlyFromOLTSnapshots(ctx, period)
 	agg["commercial_localities_upserted"] = upserted
 	if syncErr != nil {
-		s.finishONURun(ctx, runID, period, false, syncErr.Error(), agg)
+		s.finishONURun(ctx, runID, period, false, syncErr.Error(), agg, started, actor, trigger)
 		return syncErr
 	}
 
@@ -226,30 +244,30 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 
 	cfg, err := telegramclient.LoadConfig(ctx, pool, "reports")
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
 		return err
 	}
 	if !cfg.Ready() {
 		err := fmt.Errorf("Telegram (relatórios) não configurado")
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
 		return err
 	}
 	text, compErr := s.commercialTelegramCompose(ctx, period, true)
 	if compErr != nil {
-		s.finishONURun(ctx, runID, period, false, compErr.Error(), agg)
+		s.finishONURun(ctx, runID, period, false, compErr.Error(), agg, started, actor, trigger)
 		return compErr
 	}
 	if err := telegramclient.SendMessageWithParseMode(ctx, cfg, text, "HTML"); err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
 		return err
 	}
 
-	s.finishONURun(ctx, runID, period, true, "", agg)
+	s.finishONURun(ctx, runID, period, true, "", agg, started, actor, trigger)
 	s.appendAuditLog(ctx, "automation_onu_report", "1", "run", actor, nil, agg)
 	return nil
 }
 
-func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period string, ok bool, errMsg string, agg map[string]any) {
+func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period string, ok bool, errMsg string, agg map[string]any, started time.Time, actor, trigger string) {
 	status := "completed"
 	stAuto := "completed"
 	var em *string
@@ -265,6 +283,7 @@ func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period strin
 	}
 	agg["period"] = period
 	agg["telegram_sent"] = ok
+	agg["onu_report_run_id"] = runID.String()
 	if !ok && errMsg != "" {
 		agg["error"] = errMsg
 	}
@@ -295,6 +314,15 @@ func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period strin
 		`, stAuto, em)
 	}
 	s.setMonitoringActivity(ctx, "")
+	var execErr error
+	if !ok && strings.TrimSpace(errMsg) != "" {
+		execErr = fmt.Errorf("%s", errMsg)
+	}
+	statusMsg := fmt.Sprintf("Relatório ONU %s concluído", period)
+	if !ok {
+		statusMsg = fmt.Sprintf("Relatório ONU %s falhou", period)
+	}
+	s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, ok, statusMsg, execErr, agg, period)
 }
 
 func (s *Server) aggregateONUReport(ctx context.Context) (map[string]any, error) {
@@ -316,24 +344,26 @@ func (s *Server) aggregateONUReport(ctx context.Context) (map[string]any, error)
 		if err := rows.Scan(&desc, &ponsRaw); err != nil {
 			continue
 		}
-		var pons []map[string]any
-		_ = json.Unmarshal([]byte(ponsRaw), &pons)
-		oltTotal, oltOn := 0, 0
-		for _, p := range pons {
-			oltTotal += toInt(p["onu_total"])
-			oltOn += toInt(p["onu_online"])
-		}
+		comp := oltparse.SnapshotComputed(nil, []byte(ponsRaw))
+		oltTotal := toInt(comp["onu_total_sum"])
+		oltOn := toInt(comp["onu_online_sum"])
+		oltOff := toInt(comp["onu_offline_sum"])
+		ponN := toInt(comp["pon_count"])
 		oltLines = append(oltLines, map[string]any{
-			"olt": desc, "pons": len(pons), "onu_total": oltTotal, "onu_online": oltOn,
+			"olt": desc, "pons": ponN, "onu_total": oltTotal, "onu_online": oltOn, "onu_offline": oltOff,
 		})
 		totalONU += oltTotal
 		totalOnline += oltOn
+	}
+	totalOffline := totalONU - totalOnline
+	if totalOffline < 0 {
+		totalOffline = 0
 	}
 	return map[string]any{
 		"olt_count":   len(oltLines),
 		"onu_total":   totalONU,
 		"onu_online":  totalOnline,
-		"onu_offline": totalONU - totalOnline,
+		"onu_offline": totalOffline,
 		"olt_lines":   oltLines,
 	}, nil
 }
@@ -403,6 +433,7 @@ func (s *Server) patchAutomationONU(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	resetLast := body.DayOfMonth != nil || body.TimeHHMM != nil || body.Timezone != nil
 	_, err = tx.Exec(r.Context(), `
 		UPDATE automation_onu_report SET
 			enabled = COALESCE($1, enabled),
@@ -410,9 +441,12 @@ func (s *Server) patchAutomationONU(w http.ResponseWriter, r *http.Request) {
 			day_of_month = COALESCE($3, day_of_month),
 			time_hhmm = COALESCE($4, time_hhmm),
 			timezone = COALESCE($5, timezone),
+			last_run_period = CASE WHEN $6 THEN NULL ELSE last_run_period END,
+			last_run_at = CASE WHEN $6 THEN NULL ELSE last_run_at END,
+			running = CASE WHEN $6 THEN false ELSE running END,
 			updated_at = now()
 		WHERE id = 1
-	`, body.Enabled, modeArg, body.DayOfMonth, body.TimeHHMM, body.Timezone)
+	`, body.Enabled, modeArg, body.DayOfMonth, body.TimeHHMM, body.Timezone, resetLast)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

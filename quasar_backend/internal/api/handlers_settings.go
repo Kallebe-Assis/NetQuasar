@@ -599,7 +599,12 @@ func (s *Server) testTelegramByID(w http.ResponseWriter, r *http.Request, id, ti
 }
 
 func (s *Server) listOltVendors(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB().Query(r.Context(), `SELECT brand FROM olt_vendor_profiles ORDER BY brand`)
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT brand FROM olt_vendor_models
+		UNION
+		SELECT brand FROM olt_vendor_profiles
+		ORDER BY brand
+	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

@@ -133,7 +133,8 @@ func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
 			COALESCE(c.reach_ok, false)
 			OR `+monitorworker.SQLDeviceEligibleForPingAlertsNotMet+`
 		)
-		RETURNING a.id, a.alert_type, a.message
+		RETURNING a.id, a.alert_type, a.message,
+			(COALESCE(c.reach_ok, false)) AS probe_ok
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -144,11 +145,15 @@ func (s *Server) alertsRevalidate(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id uuid.UUID
 		var atype, msg string
-		if err := rows.Scan(&id, &atype, &msg); err != nil {
+		var probeOK bool
+		if err := rows.Scan(&id, &atype, &msg, &probeOK); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		n++
+		if !probeOK {
+			continue
+		}
 		head := alertnotify.ResolutionHeadlineForAlertType(atype)
 		alertnotify.SendResolutionTelegramAndPatchMeta(r.Context(), s.DB(), &s.Log, id, head, msg)
 	}

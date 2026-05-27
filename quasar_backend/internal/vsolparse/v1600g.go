@@ -9,17 +9,18 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
 
 // OIDGOnuAuthList raiz MIB ONU (enterprise VSOL 37950) — gOnuAuthList e tabelas associadas.
 const OIDGOnuAuthList = "1.3.6.1.4.1.37950.1.1.6.1.1"
 
-// OIDLegacyGOnuOptical árvore alternativa comentada no MIB (1.1.5.12.2.1.8) — alguns firmwares só respondem aqui para óptica.
+// OIDLegacyGOnuOptical árvore alternativa comentada no MIB (1.1.5.12.2.1.8).
 const OIDLegacyGOnuOptical = "1.3.6.1.4.1.37950.1.1.5.12.2.1.8"
 
 const maxOnuRowsOut = 2500
+
+const fieldUnset = -1
 
 func phaseLabel(v int) string {
 	switch v {
@@ -38,6 +39,9 @@ func phaseLabel(v int) string {
 	case 6:
 		return "offLine"
 	default:
+		if v < 0 {
+			return "—"
+		}
 		return fmt.Sprintf("%d", v)
 	}
 }
@@ -68,11 +72,11 @@ func authModeLabel(v int) string {
 func intFromVal(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return -1
+		return fieldUnset
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return -1
+		return fieldUnset
 	}
 	return n
 }
@@ -86,6 +90,34 @@ type onuAcc struct {
 	temp, volt, bias, tx, rx   string
 	vendor, version, sn, model  string
 	detailAdmin, detailOp       int
+	onuOnlineSta               int // tabela 4 col 8: 4.1.8.pon.onu — 1 online, 0 offline
+}
+
+func newOnuAcc(pon, onu int) *onuAcc {
+	return &onuAcc{
+		pon: pon, onu: onu,
+		adminSta: fieldUnset, omccSta: fieldUnset, phaseSta: fieldUnset,
+		authMode: fieldUnset, detailAdmin: fieldUnset, detailOp: fieldUnset,
+		onuOnlineSta: fieldUnset,
+	}
+}
+
+// onuIsOnline só com OID 4.1.8: 1=online; 0, 2 ou outro=offline. Sem leitura = não online.
+func onuIsOnline(o *onuAcc) bool {
+	if o == nil {
+		return false
+	}
+	return OnuOnlineFromSta(o.onuOnlineSta)
+}
+
+func onuPhaseLabel(o *onuAcc) string {
+	if o.phaseSta == fieldUnset {
+		if o.onuOnlineSta == 1 {
+			return "working"
+		}
+		return "—"
+	}
+	return phaseLabel(o.phaseSta)
 }
 
 func parseSuffix(oid string) (tbl, col, pon, onu int, ok bool) {
@@ -96,7 +128,19 @@ func parseSuffix(oid string) (tbl, col, pon, onu int, ok bool) {
 	}
 	rest := strings.TrimPrefix(oid, base)
 	parts := strings.Split(rest, ".")
-	// Forma típica: T.1.col.pon.onu (MIB MG-SOFT). Alguns agentes omitem o «1» da entrada: T.col.pon.onu
+	// T.1.1.col.pon.onu (firmware com índice de entrada explícito)
+	if len(parts) >= 6 {
+		t := intFromVal(parts[0])
+		sub := intFromVal(parts[1])
+		entry := intFromVal(parts[2])
+		c := intFromVal(parts[3])
+		ponIx := intFromVal(parts[4])
+		onuIx := intFromVal(parts[5])
+		if t >= 1 && t <= 4 && (sub == 1 || sub == 0) && entry == 1 && c >= 1 && ponIx >= 1 && onuIx >= 1 {
+			return t, c, ponIx, onuIx, true
+		}
+	}
+	// T.1.col.pon.onu (MIB MG-SOFT)
 	if len(parts) >= 5 {
 		t := intFromVal(parts[0])
 		sub := intFromVal(parts[1])
@@ -119,14 +163,22 @@ func parseSuffix(oid string) (tbl, col, pon, onu int, ok bool) {
 	return 0, 0, 0, 0, false
 }
 
-// normalizeVSOLString limpa OCTET STRING (zeros à direita, espaços).
+func looksLikeSerial(s string) bool {
+	s = normalizeVSOLString(s)
+	if len(s) < 4 {
+		return false
+	}
+	up := strings.ToUpper(s)
+	return strings.HasPrefix(up, "MONU") || strings.HasPrefix(up, "HWTC") ||
+		strings.HasPrefix(up, "VSOL") || strings.HasPrefix(up, "GPON")
+}
+
 func normalizeVSOLString(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, "\x00")
 	return strings.TrimSpace(s)
 }
 
-// parseOpticalFloat tenta interpretar potências / temperaturas em texto MIB VSOL.
 func parseOpticalFloat(s string) (float64, bool) {
 	s = normalizeVSOLString(s)
 	if s == "" {
@@ -145,7 +197,6 @@ func parseOpticalFloat(s string) (float64, bool) {
 	return 0, false
 }
 
-// parseLegacyOpticalSuffix interpreta OIDs sob OIDLegacyGOnuOptical (entrada 1, coluna, PON, ONU).
 func parseLegacyOpticalSuffix(oid string) (col, pon, onu int, ok bool) {
 	base := OIDLegacyGOnuOptical + "."
 	oid = strings.TrimPrefix(strings.TrimSpace(oid), ".")
@@ -169,7 +220,6 @@ func parseLegacyOpticalSuffix(oid string) (col, pon, onu int, ok bool) {
 	return col, pon, onu, true
 }
 
-// VsolOnuRowsFromSummaryBlob extrai vsol_onu_rows do summary JSON (incl. double-encoding em string).
 func VsolOnuRowsFromSummaryBlob(sum []byte) []any {
 	var sumObj map[string]any
 	if len(sum) == 0 || json.Unmarshal(sum, &sumObj) != nil {
@@ -204,13 +254,13 @@ func unwrapVsolOnuRowsValue(v any) []any {
 	return nil
 }
 
-// FromSNMPWalk agrega um walk sob OIDGOnuAuthList (tabelas gOnuSta/Auth/Optical/Detail).
-func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[string]any, onuRows []map[string]any) {
+// FromSNMPWalk agrega walk SNMP VSOL em contagens por PON e lista de ONUs.
+func FromSNMPWalk(vars []probing.SNMPVar, walkTruncated bool) (summary map[string]any, pons []map[string]any, onuRows []map[string]any) {
 	acc := make(map[string]*onuAcc)
 	get := func(pon, onu int) *onuAcc {
 		k := fmt.Sprintf("%d.%d", pon, onu)
 		if acc[k] == nil {
-			acc[k] = &onuAcc{pon: pon, onu: onu}
+			acc[k] = newOnuAcc(pon, onu)
 		}
 		return acc[k]
 	}
@@ -218,18 +268,12 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 	for _, v := range vars {
 		t, col, pon, onu, ok := parseSuffix(v.OID)
 		if !ok {
-			if lc, lp, lu, lok := parseLegacyOpticalSuffix(v.OID); lok {
-				t, col, pon, onu = 3, lc, lp, lu
-				ok = true
-			}
-		}
-		if !ok {
 			continue
 		}
 		row := get(pon, onu)
 		val := normalizeVSOLString(v.Value)
 		switch t {
-		case 1: // gOnuStaInfo
+		case 1:
 			switch col {
 			case 3:
 				row.adminSta = intFromVal(val)
@@ -238,16 +282,23 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 			case 5:
 				row.phaseSta = intFromVal(val)
 			}
-		case 2: // gOnuAuthInfo
+		case 2:
+			// Firmware V1600: 2.1.F.pon.onu — F=1 phase, 3 profile, 4 authMode, 5 serial, 6 model.
 			switch col {
+			case 1:
+				row.phaseSta = intFromVal(val)
 			case 3:
 				row.profileName = val
 			case 4:
 				row.authMode = intFromVal(val)
 			case 5:
-				row.authInfo = val
+				if strings.TrimSpace(val) != "" {
+					row.sn = val
+				}
+			case 6:
+				row.model = val
 			}
-		case 3: // gOnuOpticalInfo
+		case 3:
 			switch col {
 			case 3:
 				row.temp = val
@@ -260,8 +311,10 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 			case 7:
 				row.rx = val
 			}
-		case 4: // gOnuDetailInfo
+		case 4:
 			switch col {
+			case 8:
+				row.onuOnlineSta = intFromVal(val)
 			case 3:
 				row.vendor = val
 			case 4:
@@ -278,73 +331,25 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 		}
 	}
 
-	ponSet := make(map[int]struct{})
-	for _, o := range acc {
-		ponSet[o.pon] = struct{}{}
-	}
-	ponOnline := make(map[int]int)
-	ponTotal := make(map[int]int)
-	for _, o := range acc {
-		ponTotal[o.pon]++
-		if o.phaseSta == 3 {
-			ponOnline[o.pon]++
-		}
-	}
-
-	var ponIDs []int
-	for p := range ponSet {
-		ponIDs = append(ponIDs, p)
-	}
-	for i := 0; i < len(ponIDs); i++ {
-		for j := i + 1; j < len(ponIDs); j++ {
-			if ponIDs[j] < ponIDs[i] {
-				ponIDs[i], ponIDs[j] = ponIDs[j], ponIDs[i]
-			}
-		}
-	}
-
-	txSum := map[int]float64{}
-	txN := map[int]int{}
-	for _, o := range acc {
-		if f, ok := parseOpticalFloat(o.tx); ok {
-			txSum[o.pon] += f
-			txN[o.pon]++
-		}
-	}
-
-	pons = make([]map[string]any, 0, len(ponIDs))
-	for _, pid := range ponIDs {
-		tot := ponTotal[pid]
-		on := ponOnline[pid]
-		off := tot - on
-		if off < 0 {
-			off = 0
-		}
-		compactID := oltifderive.VsolMibPonCompactID(pid)
-		row := map[string]any{
-			"id":           compactID,
-			"name":         fmt.Sprintf("GPON0/%d", pid),
-			"onu_total":    tot,
-			"onu_online":   on,
-			"onu_offline":  off,
-			"status":       "vsol_snmp",
-			"vendor_model": "VSOL enterprise MIB (gOnuAuthList)",
-		}
-		if n := txN[pid]; n > 0 {
-			row["tx_dbm"] = txSum[pid] / float64(n)
-		}
-		pons = append(pons, row)
-	}
+	onByPon, offByPon := OnlineOfflineByPon(vars)
+	pons = nil
 
 	for _, o := range acc {
-		m := map[string]any{
+		hasOnline := o.onuOnlineSta == 0 || o.onuOnlineSta == 1
+		if !hasOnline && strings.TrimSpace(o.sn) == "" && o.phaseSta == fieldUnset &&
+			strings.TrimSpace(o.model) == "" && strings.TrimSpace(o.rx) == "" &&
+			strings.TrimSpace(o.volt) == "" {
+			continue
+		}
+		onuRows = append(onuRows, map[string]any{
 			"pon":          o.pon,
 			"onu":          o.onu,
 			"profile_name": o.profileName,
 			"auth_mode":    authModeLabel(o.authMode),
 			"admin_sta":    o.adminSta,
 			"omcc_sta":     o.omccSta,
-			"phase_sta":    phaseLabel(o.phaseSta),
+			"phase_sta":    onuPhaseLabel(o),
+			"online":       onuIsOnline(o),
 			"temp":         o.temp,
 			"voltage":      o.volt,
 			"bias":         o.bias,
@@ -356,8 +361,8 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 			"model":        o.model,
 			"detail_admin": o.detailAdmin,
 			"detail_op":    o.detailOp,
-		}
-		onuRows = append(onuRows, m)
+			"onu_online_sta": o.onuOnlineSta,
+		})
 	}
 	sort.Slice(onuRows, func(i, j int) bool {
 		pi, _ := onuRows[i]["pon"].(int)
@@ -370,32 +375,33 @@ func FromSNMPWalk(vars []probing.SNMPVar) (summary map[string]any, pons []map[st
 		return oi < oj
 	})
 
-	truncated := false
+	rowTruncated := false
 	if len(onuRows) > maxOnuRowsOut {
 		onuRows = onuRows[:maxOnuRowsOut]
-		truncated = true
+		rowTruncated = true
 	}
 
-	totOnu := len(acc)
-	onlineAll := 0
-	for _, o := range acc {
-		if o.phaseSta == 3 {
-			onlineAll++
-		}
+	onlineAll, offlineAll := 0, 0
+	for _, n := range onByPon {
+		onlineAll += n
 	}
+	for _, n := range offByPon {
+		offlineAll += n
+	}
+
 	raw, _ := json.Marshal(onuRows)
 	var arr []any
 	_ = json.Unmarshal(raw, &arr)
+
 	summary = map[string]any{
 		"source":              "vsol_olt_mib_snmp",
 		"vsol_mib":            "OLT gOnuAuthList (VSOL enterprise)",
-		"vsol_onu_count":      totOnu,
-		"vsol_onu_online":     onlineAll,
-		"vsol_onu_offline":    totOnu - onlineAll,
-		"vsol_pon_count":      len(ponIDs),
-		"vsol_rows_truncated": truncated,
+		"vsol_onu_count":       len(onuRows),
+		"vsol_onu_online":      onlineAll,
+		"vsol_onu_offline":     offlineAll,
+		"vsol_onu_status_rows": onlineAll + offlineAll,
+		"vsol_rows_truncated": rowTruncated || walkTruncated,
 		"vsol_onu_rows":       arr,
 	}
-
 	return summary, pons, onuRows
 }

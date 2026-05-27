@@ -2477,7 +2477,54 @@ h3 .info-hint {
   animation: offlineToastOut 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-/** Pilha no canto: mais recente em cima; só usado em Monitoramento. */
+/** Pilha global: canto superior direito; a mais recente fica por cima. */
+.app-toast-stack {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10070;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: none;
+  width: min(400px, calc(100vw - 24px));
+}
+.app-toast-stack__item {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+  pointer-events: auto;
+  max-width: 100%;
+  max-height: 140px;
+  overflow: auto;
+  word-break: break-word;
+}
+.app-toast-stack__text {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.page-toast--offline {
+  padding: 8px 32px 8px 10px;
+  max-height: 96px;
+}
+.app-toast-stack__offline-title {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.app-toast-stack__offline-ip {
+  font-size: 11px;
+  margin-top: 2px;
+  opacity: 0.9;
+}
+
+/** Pilha legada (monitoramento) — mantida por compatibilidade CSS residual. */
 .monitoring-toast-stack {
   position: fixed;
   top: 12px;
@@ -2546,6 +2593,33 @@ h3 .info-hint {
 .monitoring-toast-stack .offline-toast.offline-toast--compact .offline-toast__actions .btn {
   padding: 3px 8px;
   font-size: 10px;
+}
+.monitoring-toast-stack .offline-toast.offline-toast--compact {
+  position: relative;
+}
+.monitoring-toast-stack .offline-toast__close-icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0.65;
+}
+.monitoring-toast-stack .offline-toast__close-icon:hover {
+  opacity: 1;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.06);
+}
+.automation-history-modal {
+  padding: 20px 22px;
 }
 
 .monitoring-toolbar-search {

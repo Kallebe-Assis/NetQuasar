@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/rs/zerolog"
 )
 
@@ -35,10 +34,10 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	runLat := bootstrap || cycleDue(lastLat, cfg.PingSeconds)
 	runTel := bootstrap || (mode == ModeFull && cycleDue(lastTel, cfg.TelemetrySeconds))
 	runIf := bootstrap || (mode == ModeFull && cycleDue(lastIf, cfg.IfaceSeconds))
-	runOlt := bootstrap || (mode == ModeFull && cycleDue(lastOlt, cfg.OltDerivedSeconds))
-	if runOlt && !alertthresholds.OltOnuQuantityAlertsEnabled(ctx, pool) {
-		runOlt = false
-	}
+	// Coleta OLT (IF-MIB derivada / refresh) é manual via perfil — não agendar no worker.
+	runOlt := false
+	_ = lastOlt
+	_ = cfg.OltDerivedSeconds
 
 	if !runLat && !runTel && !runIf && !runOlt {
 		return
@@ -65,13 +64,9 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	}
 
 	if runIf {
-		setActivity(ctx, pool, "3/5 — Interfaces SNMP (MikroTik / RouterOS)")
+		setActivity(ctx, pool, "3/4 — Interfaces SNMP (MikroTik / RouterOS)")
 		if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseMikrotik}); err != nil {
 			log.Warn().Err(err).Msg("pipeline: interfaces MikroTik")
-		}
-		setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT)")
-		if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseOLT}); err != nil {
-			log.Warn().Err(err).Msg("pipeline: interfaces OLT")
 		}
 		setActivity(ctx, pool, "")
 	}
@@ -109,8 +104,6 @@ func PipelineHasWorkDue(ctx context.Context, pool *pgxpool.Pool, mode string) (b
 	if mode != ModeFull {
 		return false, nil
 	}
-	oltDue := cycleDue(lastOlt, cfg.OltDerivedSeconds) && alertthresholds.OltOnuQuantityAlertsEnabled(ctx, pool)
 	return cycleDue(lastTel, cfg.TelemetrySeconds) ||
-		cycleDue(lastIf, cfg.IfaceSeconds) ||
-		oltDue, nil
+		cycleDue(lastIf, cfg.IfaceSeconds), nil
 }

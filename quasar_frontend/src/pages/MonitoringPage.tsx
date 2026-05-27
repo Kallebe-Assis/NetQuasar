@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
@@ -8,6 +8,7 @@ import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
 import { prettyAuditDiff } from "../lib/auditDisplay";
+import { useAppToast } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
 
 type ActiveEquipRow = {
@@ -318,50 +319,23 @@ function IconExternalLinkSubtle({ size = 16 }: { size?: number }) {
 export function MonitoringPage() {
   const canMutate = isAdminUser();
   const qc = useQueryClient();
+  const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const showPageToastRef = useRef<(ok: boolean, text: string) => void>(() => {});
-  const pageToastAtRef = useRef(0);
-  const offlineToastAtRef = useRef(0);
-  const toastTimersRef = useRef<{ auto?: number; exit?: number }>({});
-  const [pageToast, setPageToast] = useState<{ ok: boolean; text: string } | null>(null);
-  const [pageToastLeave, setPageToastLeave] = useState(false);
-
-  const clearToastTimers = () => {
-    if (toastTimersRef.current.auto) window.clearTimeout(toastTimersRef.current.auto);
-    if (toastTimersRef.current.exit) window.clearTimeout(toastTimersRef.current.exit);
-    toastTimersRef.current = {};
-  };
-
-  const endPageToast = useCallback(() => {
-    clearToastTimers();
-    setPageToastLeave(true);
-    toastTimersRef.current.exit = window.setTimeout(() => {
-      setPageToast(null);
-      setPageToastLeave(false);
-    }, 350);
-  }, []);
+  const offlineToastIdsRef = useRef(new Map<string, string>());
 
   const showPageToast = useCallback(
     (ok: boolean, text: string) => {
-      clearToastTimers();
-      setPageToastLeave(false);
-      pageToastAtRef.current = Date.now();
-      setPageToast({ ok, text: ok ? text : friendlyApiMessage(text) });
-      toastTimersRef.current.auto = window.setTimeout(() => {
-        endPageToast();
-      }, 4800);
+      pushToast({ tone: ok ? "ok" : "err", text: ok ? text : friendlyApiMessage(text), autoMs: 4800 });
     },
-    [endPageToast],
+    [pushToast],
   );
   showPageToastRef.current = showPageToast;
-
-  useEffect(() => () => clearToastTimers(), []);
 
   const [tab, setTab] = useState<"overview" | "settings" | "ops">("overview");
   useEffect(() => {
     if (!canMutate && (tab === "settings" || tab === "ops")) setTab("overview");
   }, [canMutate, tab]);
   const handledOfflineAlertsRef = useRef(new Set<string>());
-  const [offlineModal, setOfflineModal] = useState<OfflineAlertRow | null>(null);
   const [snmpModalDeviceId, setSnmpModalDeviceId] = useState<string | null>(null);
   const [actionMenuRow, setActionMenuRow] = useState<ActiveEquipRow | null>(null);
   const [reportModalDevice, setReportModalDevice] = useState<DeviceReportTarget | null>(null);
@@ -518,34 +492,45 @@ export function MonitoringPage() {
 
   useEffect(() => {
     if (tab !== "overview") {
-      setOfflineModal(null);
+      for (const tid of offlineToastIdsRef.current.values()) dismissToast(tid);
+      offlineToastIdsRef.current.clear();
       return;
     }
-    if (offlineModal) return;
-    const list = offlineAlerts.data?.alerts as OfflineAlertRow[] | undefined;
-    if (!list?.length) return;
+    const list = (offlineAlerts.data?.alerts as OfflineAlertRow[] | undefined) ?? [];
+    const active = new Set<string>();
     for (const a of list) {
       if (handledOfflineAlertsRef.current.has(a.id)) continue;
-      offlineToastAtRef.current = Date.now();
-      setOfflineModal(a);
-      return;
+      active.add(a.id);
+      if (!offlineToastIdsRef.current.has(a.id)) {
+        const alertId = a.id;
+        const tid = pushToast({
+          tone: "err",
+          text: "",
+          kind: "offline",
+          offlineTitle: a.device_name || "Equipamento offline",
+          offlineIp: a.ip || "—",
+          autoMs: 0,
+          onDismiss: () => {
+            handledOfflineAlertsRef.current.add(alertId);
+            offlineToastIdsRef.current.delete(alertId);
+          },
+        });
+        offlineToastIdsRef.current.set(a.id, tid);
+      }
     }
-  }, [tab, offlineAlerts.data, offlineModal]);
+    for (const [alertId, tid] of [...offlineToastIdsRef.current.entries()]) {
+      if (!active.has(alertId)) {
+        dismissToast(tid);
+        offlineToastIdsRef.current.delete(alertId);
+      }
+    }
+  }, [tab, offlineAlerts.data, pushToast, dismissToast]);
 
   useEffect(() => {
     if (tab !== "overview") return;
     const id = window.setInterval(() => setAgoTick((n) => n + 1), 15000);
     return () => window.clearInterval(id);
   }, [tab]);
-
-  useEffect(() => {
-    if (!offlineModal || tab !== "overview") return;
-    const id = window.setTimeout(() => {
-      handledOfflineAlertsRef.current.add(offlineModal.id);
-      setOfflineModal(null);
-    }, 14000);
-    return () => window.clearTimeout(id);
-  }, [offlineModal, tab]);
 
   const pingOne = useMutation({
     mutationFn: (id: string) => apiFetch<PingRunResponse>(`/api/v1/ping/devices/${id}/run?port=443&icmp_only=true`, { method: "POST" }),
@@ -710,74 +695,8 @@ export function MonitoringPage() {
 
   if (state.isLoading) return <p>Carregando estado…</p>;
 
-  const showMonitoringToastStack = pageToast != null || (!!offlineModal && tab === "overview");
-
   return (
     <>
-      {showMonitoringToastStack ? (
-        <div className="monitoring-toast-stack" aria-live="polite">
-          {(() => {
-            type Row = { key: string; at: number; node: ReactNode };
-            const rows: Row[] = [];
-            if (pageToast) {
-              rows.push({
-                key: "page",
-                at: pageToastAtRef.current,
-                node: (
-                  <div
-                    className={`page-toast ${pageToast.ok ? "page-toast--ok" : "page-toast--err"}${pageToastLeave ? " page-toast--leave" : ""}`}
-                    role="status"
-                  >
-                    <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => endPageToast()}>
-                      ×
-                    </button>
-                    {pageToast.text}
-                  </div>
-                ),
-              });
-            }
-            if (offlineModal && tab === "overview") {
-              rows.push({
-                key: `off-${offlineModal.id}`,
-                at: offlineToastAtRef.current,
-                node: (
-                  <div className="offline-toast offline-toast--compact" role="status">
-                    <div className="offline-toast__inner">
-                      <div className="offline-toast__title">Equipamento offline</div>
-                      <div className="offline-toast__body">
-                        <div className="mono" style={{ fontWeight: 600 }}>
-                          {offlineModal.device_name || "—"}
-                        </div>
-                        <div className="mono" style={{ marginTop: 2 }}>
-                          {offlineModal.ip || "—"}
-                        </div>
-                      </div>
-                      <div className="offline-toast__actions">
-                        <button
-                          type="button"
-                          className="btn btn--primary"
-                          style={{ fontSize: 11, padding: "4px 10px" }}
-                          onClick={() => {
-                            handledOfflineAlertsRef.current.add(offlineModal.id);
-                            setOfflineModal(null);
-                          }}
-                        >
-                          Fechar
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ),
-              });
-            }
-            rows.sort((a, b) => {
-              if (b.at !== a.at) return b.at - a.at;
-              return (a.key === "page" ? 1 : 0) - (b.key === "page" ? 1 : 0);
-            });
-            return rows.map((r) => <Fragment key={r.key}>{r.node}</Fragment>);
-          })()}
-        </div>
-      ) : null}
       <div className="page-heading">
         <h1>
           Monitoramento

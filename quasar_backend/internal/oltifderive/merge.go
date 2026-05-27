@@ -68,6 +68,19 @@ func rowToInt(v any) int {
 	}
 }
 
+// ponRowHasProtectedCounts — linhas com contagens fiáveis (IF-MIB agregado ou MIB VSOL).
+func ponRowHasProtectedCounts(m map[string]any) bool {
+	if m == nil {
+		return false
+	}
+	st := strings.ToLower(strings.TrimSpace(fmt.Sprint(m["status"])))
+	if st == "vsol_snmp" || st == "if_mib_onu" {
+		return true
+	}
+	ss := strings.ToLower(strings.TrimSpace(fmt.Sprint(m["source_slice"])))
+	return strings.Contains(ss, "if_mib_onu")
+}
+
 func preferPonDisplayName(a, b string) string {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	if b == "" {
@@ -130,6 +143,7 @@ func mergePonRowPair(a, b map[string]any) map[string]any {
 			out["rx_dbm"] = v
 		}
 	}
+	NormalizePonONUCounts(out)
 	return out
 }
 
@@ -158,6 +172,7 @@ func DedupePonMaps(rows []map[string]any) []map[string]any {
 		if k != "" {
 			row["id"] = k
 		}
+		NormalizePonONUCounts(row)
 		out = append(out, row)
 	}
 	return out
@@ -190,11 +205,20 @@ func MergePonRowsForIfaceRefresh(existing []map[string]any, fromIf []map[string]
 			order = append(order, id)
 			continue
 		}
-		prev["onu_total"] = row["onu_total"]
-		prev["onu_online"] = row["onu_online"]
-		prev["onu_offline"] = row["onu_offline"]
-		prev["status"] = row["status"]
-		prev["source_slice"] = row["source_slice"]
+		prevTot := rowPickInt(prev, "onu_total", "total_onu", "onus", "onus_total", "onu_count")
+		newTot := rowPickInt(row, "onu_total", "total_onu", "onus", "onus_total", "onu_count")
+		// Preserva contagens VSOL ou IF-MIB; porta física (pon_down/0) só complementa nome/óptica.
+		if !ponRowHasProtectedCounts(prev) {
+			if newTot > 0 || prevTot == 0 {
+				prev["onu_total"] = row["onu_total"]
+				prev["onu_online"] = row["onu_online"]
+				prev["onu_offline"] = row["onu_offline"]
+				prev["status"] = row["status"]
+				prev["source_slice"] = row["source_slice"]
+			}
+		} else if ponRowHasProtectedCounts(prev) && newTot == 0 {
+			// Mantém contagens; nome/óptica da porta PON abaixo.
+		}
 		if v, ok := row["tx_dbm"]; ok && v != nil {
 			prev["tx_dbm"] = v
 		}

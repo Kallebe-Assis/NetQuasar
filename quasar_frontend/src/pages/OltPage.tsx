@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
@@ -12,6 +12,9 @@ import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { DropdownMenu } from "../components/DropdownMenu";
 import { OltReportsTab } from "./olt/OltReportsTab";
+import { OltMetricsCollectLogModal, type MetricsWalkRow } from "../components/OltMetricsCollectLogModal";
+import { OltSnmpDebugPanel } from "../components/OltSnmpDebugPanel";
+import { OltVsolOnuTable, type VsOnuRow } from "../components/OltVsolOnuTable";
 
 type OltRow = {
   id: string;
@@ -36,6 +39,7 @@ type OltRow = {
 type PonTableRow = {
   id?: string;
   name?: string;
+  rx_dbm?: number | null;
   tx_dbm?: number | null;
   onu_total?: number;
   onu_online?: number;
@@ -44,25 +48,6 @@ type PonTableRow = {
 };
 
 type IfRow = Omit<InterfaceMonitorTableRow, "if_index"> & { if_index: number };
-
-type VsOnuRow = {
-  pon?: number;
-  onu?: number;
-  profile_name?: string;
-  auth_mode?: string;
-  phase_sta?: string;
-  admin_sta?: number;
-  omcc_sta?: number;
-  temp?: string;
-  voltage?: string;
-  bias?: string;
-  tx_pwr?: string;
-  rx_pwr?: string;
-  vendor?: string;
-  version?: string;
-  serial?: string;
-  model?: string;
-};
 
 type ZteMibRow = {
   oid?: string;
@@ -101,11 +86,6 @@ function IconExternalLinkSubtle({ size = 16 }: { size?: number }) {
 function ifDisplayLabel(r: IfRow): string {
   const s = String(r.display_name ?? r.if_name ?? r.descr ?? "").trim();
   return s || EM_DASH;
-}
-
-function fmtVsolCell(v: unknown): string {
-  if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  return formatNullable(v);
 }
 
 function badgeOper(s: string | undefined): string {
@@ -271,6 +251,8 @@ export function OltPage() {
   const qc = useQueryClient();
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const [sel, setSel] = useState<string | null>(null);
+  const [snmpDebugOpen, setSnmpDebugOpen] = useState(true);
+  const [refreshScope, setRefreshScope] = useState<"onu" | "full" | "telemetry">("onu");
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkPhase, setBulkPhase] = useState<"select" | "running" | "results">("select");
   const [bulkRunning, setBulkRunning] = useState(false);
@@ -288,6 +270,13 @@ export function OltPage() {
   const [bulkOltFilter, setBulkOltFilter] = useState("");
   const [sortKey, setSortKey] = useState<OltSortKey>("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [collectLogOpen, setCollectLogOpen] = useState(false);
+  const [metricsWalkRows, setMetricsWalkRows] = useState<MetricsWalkRow[] | null>(null);
+
+  useEffect(() => {
+    setMetricsWalkRows(null);
+    setCollectLogOpen(false);
+  }, [sel]);
 
   const list = useQuery({
     queryKey: ["olt-devices"],
@@ -314,15 +303,64 @@ export function OltPage() {
         zte_onu_online_table?: ZteMibRow[];
         zte_pon_status_table?: ZteMibRow[];
         zte_transceiver_table?: ZteMibRow[];
+        collection_log?: Record<string, unknown>;
+        snmp_debug?: Record<string, unknown>;
       }>(`/api/v1/olt/devices/${sel}`),
   });
 
+  const OLT_REFRESH_ONU_MS = 110 * 1000;
+  const OLT_REFRESH_FULL_MS = 15 * 60 * 1000;
+  const OLT_TELEMETRY_MS = 15 * 60 * 1000;
+
   const refresh = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/olt/devices/${id}/refresh`, { method: "POST", json: {} }),
-    onSuccess: (_, id) => {
+    mutationFn: ({ id, scope }: { id: string; scope: "onu" | "full" | "telemetry" }) => {
+      const q =
+        scope === "telemetry"
+          ? "?telemetry=1&scope=onu"
+          : scope === "onu"
+            ? "?scope=onu"
+            : "?scope=full";
+      const timeoutMs =
+        scope === "telemetry" ? OLT_TELEMETRY_MS : scope === "onu" ? OLT_REFRESH_ONU_MS : OLT_REFRESH_FULL_MS;
+      return apiFetch<{
+        computed?: OltRow["computed"];
+        collection_log?: Record<string, unknown>;
+        vsol_onu_table?: VsOnuRow[];
+      }>(`/api/v1/olt/devices/${id}/refresh${q}`, {
+        method: "POST",
+        json: {},
+        timeoutMs,
+      });
+    },
+    onSuccess: (data, { id, scope }) => {
+      setRefreshScope(scope);
+      const comp = data.computed;
+      const sum = (data as { summary?: unknown }).summary;
+      let sumObj: Record<string, unknown> | undefined;
+      if (sum && typeof sum === "object" && !Array.isArray(sum)) {
+        sumObj = sum as Record<string, unknown>;
+      } else if (typeof sum === "string" && sum.trim()) {
+        try {
+          sumObj = JSON.parse(sum) as Record<string, unknown>;
+        } catch {
+          sumObj = undefined;
+        }
+      }
+      if (sumObj && Array.isArray(sumObj.onu_metrics_walks)) {
+        setMetricsWalkRows(sumObj.onu_metrics_walks as MetricsWalkRow[]);
+      }
+      const on = comp?.onu_online_sum ?? 0;
+      const tot = comp?.onu_total_sum ?? 0;
+      setSaveToast({
+        ok: true,
+        text: `Coleta concluída (${scope === "onu" ? "rápida" : scope === "telemetry" ? "telemetria" : "completa"}): ${on} online / ${tot} ONUs`,
+      });
       qc.invalidateQueries({ queryKey: ["olt-devices"] });
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
+    },
+    onError: (err) => {
+      setSaveToast({ ok: false, text: (err as Error).message || "Falha na coleta OLT" });
     },
   });
 
@@ -476,6 +514,16 @@ export function OltPage() {
   const comp = detail.data?.computed;
   const vsolOnuRows = detail.data?.vsol_onu_table ?? [];
   const summaryObj = detail.data?.summary as Record<string, unknown> | undefined;
+  const walkRowsFromSnapshot = Array.isArray(summaryObj?.onu_metrics_walks)
+    ? (summaryObj.onu_metrics_walks as MetricsWalkRow[])
+    : [];
+  const metricsWalkLogRows = metricsWalkRows ?? walkRowsFromSnapshot;
+  const metricsLogNote =
+    typeof summaryObj?.onu_metrics_note === "string" && summaryObj.onu_metrics_note.trim()
+      ? summaryObj.onu_metrics_note.trim()
+      : null;
+  const metricsLogElapsed =
+    typeof summaryObj?.onu_metrics_elapsed_ms === "number" ? summaryObj.onu_metrics_elapsed_ms : null;
   const selectedOlt = rows.find((x) => x.id === sel);
   const isZte =
     String(selectedOlt?.brand ?? "")
@@ -535,11 +583,8 @@ export function OltPage() {
             OLT — PONs, ONUs e interfaces
             <InfoHint label="Sobre dados OLT e PON">
               <p>
-                Equipamentos com categoria <code className="mono">olt</code>. Os totais por PON em <code className="mono">pons</code> vêm do{" "}
-                <strong>SNMP OLT</strong> (MIB <code className="mono">gOnuAuthList</code>, refresh OLT) ou são <strong>derivados das interfaces</strong> (
-                <code className="mono">GPON0/1</code> + <code className="mono">GPON01ONU…</code>) após <strong>Actualizar interfaces</strong> — online/offline por{" "}
-                <code className="mono">ifOperStatus</code>. O walk OLT usa <code className="mono">1.3.6.1.4.1.37950.1.1.6.1.1</code>. IF-MIB + ifXTable +
-                ENTITY-SENSOR nas interfaces.
+                Equipamentos OLT. Os dados de PON e ONU vêm do perfil SNMP configurado em{" "}
+                <strong>Definições → Perfis OLT</strong> (serial, estado, RX, TX, temperatura, modelo). Clique numa linha para ver detalhes.
               </p>
             </InfoHint>
           </h1>
@@ -557,7 +602,7 @@ export function OltPage() {
               setBulkOpen(true);
             }}
           >
-            {bulkRunning ? "Actualização em massa…" : "Actualizar snapshot e interfaces (OLTs seleccionadas)"}
+            {bulkRunning ? "Actualização em massa…" : "Actualizar dados e interfaces (OLTs seleccionadas)"}
           </button>
         ) : null}
       </div>
@@ -755,22 +800,6 @@ export function OltPage() {
           .olt-update-menu__item:hover { background: var(--hover-bg-menu); }
           .olt-update-menu__item:disabled { opacity: 0.5; cursor: not-allowed; }
           .olt-anim-enter { animation: olt-fade-slide-in 220ms ease; }
-          .olt-detail-close {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 24px;
-            height: 24px;
-            min-width: 24px;
-            padding: 0;
-            border-radius: 999px;
-            font-size: 14px;
-            line-height: 1;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0.8;
-          }
         `}
       </style>
       {!sel ? (
@@ -807,65 +836,25 @@ export function OltPage() {
           {rows.length === 0 && <p style={{ padding: 12, color: "var(--muted)" }}>Nenhuma OLT cadastrada.</p>}
         </div>
       ) : (
-        <div
-          className="olt-anim-enter"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(300px, 360px) minmax(0, 1fr)",
-            gap: 16,
-            alignItems: "start",
-            transition: "grid-template-columns 260ms ease",
-            maxWidth: "100%",
-            overflowX: "hidden",
-          }}
-        >
-          <div className="table-wrap" style={{ transition: "opacity 240ms ease, transform 240ms ease", opacity: 1, transform: "translateY(0)", minWidth: 0, maxWidth: "100%", overflowX: "auto" }}>
-            <table style={{ fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ cursor: "pointer" }} onClick={() => toggleSort("description")}>Descrição {sortArrow("description")}</th>
-                  <th style={{ cursor: "pointer" }} onClick={() => toggleSort("ip")}>IP {sortArrow("ip")}</th>
-                  <th style={{ cursor: "pointer" }} onClick={() => toggleSort("pons")}>PONs {sortArrow("pons")}</th>
-                  <th style={{ cursor: "pointer" }} onClick={() => toggleSort("onus")}>ONUs {sortArrow("onus")}</th>
-                  <th style={{ cursor: "pointer", fontWeight: 400, color: "var(--muted)" }} onClick={() => toggleSort("updated")}>
-                    Última atualização {sortArrow("updated")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedRows.map((r) => {
-                  const c = r.computed;
-                  return (
-                    <tr key={r.id} onClick={() => setSel(r.id)} style={{ cursor: "pointer", background: sel === r.id ? "var(--panel2)" : undefined }}>
-                      <td>{r.description ?? "—"}</td>
-                      <td className="mono">{r.ip ?? "—"}</td>
-                      <td className="mono">{formatNum(c?.pon_count)}</td>
-                      <td className="mono">{formatNum(c?.onu_total_sum)}</td>
-                      <td className="mono" style={{ color: "var(--muted)" }}>{formatCollectedPt(r.olt_snapshot_at)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {rows.length === 0 && <p style={{ padding: 12, color: "var(--muted)" }}>Nenhuma OLT cadastrada.</p>}
-          </div>
-
-          <div className="card" style={{ transition: "opacity 240ms ease, transform 240ms ease", opacity: 1, transform: "translateY(0)", minWidth: 0, maxWidth: "100%", overflowX: "hidden", position: "relative", paddingTop: 12 }}>
+        <div className="olt-anim-enter" style={{ maxWidth: "100%" }}>
+          <button
+            type="button"
+            className="btn"
+            style={{ marginBottom: 12 }}
+            onClick={() => {
+              setSel(null);
+              setSnmpDebugOpen(false);
+              setCollectLogOpen(false);
+              setMetricsWalkRows(null);
+            }}
+          >
+            ← Todas as OLTs
+          </button>
+          <div className="card" style={{ position: "relative", paddingTop: 12 }}>
             {detail.isLoading && <p>A carregar…</p>}
             {detail.isError && <div className="msg msg--err">{(detail.error as Error).message}</div>}
             {detail.data && (
               <>
-                <button
-                  type="button"
-                  className="btn olt-detail-close"
-                  title="Fechar detalhe da OLT"
-                  aria-label="Fechar detalhe da OLT"
-                  onClick={() => {
-                    setSel(null);
-                  }}
-                >
-                  ×
-                </button>
                 <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <h2 style={{ margin: 0 }}>{detail.data.description}</h2>
                   <span className="mono" style={{ color: "var(--muted)" }}>{detail.data.ip}</span>
@@ -881,45 +870,120 @@ export function OltPage() {
                     </span>
                   </Link>
                   {canMutate ? (
-                    <DropdownMenu
-                      key={sel ?? "olt-update"}
-                      align="end"
-                      className="dropdown"
-                      trigger={({ toggle, open }) => (
-                        <button
-                          type="button"
-                          className="btn btn--primary"
-                          disabled={refresh.isPending || refreshIf.isPending}
-                          aria-haspopup="menu"
-                          aria-expanded={open}
-                          onClick={toggle}
-                          style={{ display: "flex", alignItems: "center", gap: 6 }}
-                        >
-                          <span>{refresh.isPending || refreshIf.isPending ? "Atualizando…" : "Atualizar"}</span>
-                          <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, opacity: 0.8 }}>▾</span>
-                        </button>
-                      )}
-                    >
-                      {({ close }) => (
-                        <>
-                          <button type="button" className="olt-update-menu__item" disabled={refresh.isPending} onClick={() => { close(); refresh.mutate(sel); }}>
-                            Atualizar snapshot
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={refresh.isPending || refreshIf.isPending}
+                        onClick={() => sel && refresh.mutate({ id: sel, scope: "onu" })}
+                      >
+                        {refresh.isPending && refreshScope === "onu" ? "A coletar ONUs…" : "Atualizar ONUs"}
+                      </button>
+                      <DropdownMenu
+                        key={sel ?? "olt-update"}
+                        align="end"
+                        className="dropdown"
+                        trigger={({ toggle, open }) => (
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={refresh.isPending || refreshIf.isPending}
+                            aria-haspopup="menu"
+                            aria-expanded={open}
+                            onClick={toggle}
+                            title="Mais opções de coleta"
+                          >
+                            Mais ▾
                           </button>
-                          <button type="button" className="olt-update-menu__item" disabled={refreshIf.isPending} onClick={() => { close(); refreshIf.mutate(sel); }}>
-                            Atualizar interfaces
-                          </button>
-                          <button type="button" className="olt-update-menu__item" disabled={refresh.isPending || refreshIf.isPending} onClick={() => { close(); refresh.mutate(sel); refreshIf.mutate(sel); }}>
-                            Atualizar snapshot e interfaces
-                          </button>
-                        </>
-                      )}
-                    </DropdownMenu>
+                        )}
+                      >
+                        {({ close }) => (
+                          <>
+                            <button
+                              type="button"
+                              className="olt-update-menu__item"
+                              disabled={refresh.isPending}
+                              onClick={() => {
+                                close();
+                                if (sel) refresh.mutate({ id: sel, scope: "full" });
+                              }}
+                            >
+                              Coleta completa (interfaces + ONUs)
+                            </button>
+                            {vsolHint ? (
+                              <button
+                                type="button"
+                                className="olt-update-menu__item"
+                                disabled={refresh.isPending}
+                                onClick={() => {
+                                  close();
+                                  if (sel) refresh.mutate({ id: sel, scope: "telemetry" });
+                                }}
+                              >
+                                Só métricas das ONUs (RX, modelo…)
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="olt-update-menu__item"
+                              disabled={refreshIf.isPending}
+                              onClick={() => {
+                                close();
+                                refreshIf.mutate(sel!);
+                              }}
+                            >
+                              Só interfaces de rede
+                            </button>
+                          </>
+                        )}
+                      </DropdownMenu>
+                    </>
                   ) : null}
+                  {vsolHint && canMutate ? (
+                    <button type="button" className="btn" onClick={() => setSnmpDebugOpen((v) => !v)}>
+                      {snmpDebugOpen ? "Ocultar tabela SNMP" : "Tabela SNMP"}
+                    </button>
+                  ) : null}
+                  <button type="button" className="btn" onClick={() => setCollectLogOpen(true)} title="Detalhe de cada snmpwalk por métrica">
+                    Logs da coleta
+                  </button>
                 </div>
                 <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, marginBottom: 0 }}>
-                  Snapshot OLT: {formatCollectedPt(detail.data.olt_snapshot_at)} · Interfaces: {formatCollectedPt(detail.data.interface_collected_at)}
+                  Última coleta OLT: {formatCollectedPt(detail.data.olt_snapshot_at)} · Interfaces:{" "}
+                  {formatCollectedPt(detail.data.interface_collected_at)}
+                  {refresh.isPending ? " · coleta em curso…" : ""}
                 </p>
-                {refresh.isError && <div className="msg msg--err">{(refresh.error as Error).message}</div>}
+
+                {saveToast && (
+                  <div
+                    className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`}
+                    role="status"
+                    style={{ marginTop: 8 }}
+                  >
+                    <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
+                      ×
+                    </button>
+                    {saveToast.text}
+                  </div>
+                )}
+
+                {collectLogOpen ? (
+                  <OltMetricsCollectLogModal
+                    open={collectLogOpen}
+                    onClose={() => setCollectLogOpen(false)}
+                    walkRows={metricsWalkLogRows}
+                    elapsedMs={metricsLogElapsed}
+                    note={metricsLogNote}
+                  />
+                ) : null}
+                {vsolHint && snmpDebugOpen && sel ? (
+                  <OltSnmpDebugPanel
+                    deviceId={sel}
+                    open={snmpDebugOpen}
+                    onClose={() => setSnmpDebugOpen(false)}
+                    initialDebug={(detail.data.snmp_debug ?? summaryObj?.snmp_debug) as Record<string, unknown> | undefined}
+                  />
+                ) : null}
                 {refreshIf.isError && <div className="msg msg--err">{(refreshIf.error as Error).message}</div>}
 
                 <div className="grid-cards" style={{ marginTop: 12 }}>
@@ -929,14 +993,15 @@ export function OltPage() {
                   <div className="stat"><div className="stat__k">Offline</div><div className="stat__v">{formatNum(comp?.onu_offline_sum)}</div></div>
                 </div>
 
-                <h2 style={{ marginTop: 18 }}>PONs — TX e ONUs por porta</h2>
-                <div className="table-wrap" style={{ maxHeight: 320, overflow: "auto", maxWidth: "100%" }}>
-                  <table style={{ fontSize: 11 }}>
+                <h2 style={{ marginTop: 18 }}>Portas PON</h2>
+                <div className="table-wrap" style={{ maxHeight: 280, overflow: "auto" }}>
+                  <table className="table table--compact" style={{ width: "100%", fontSize: 12 }}>
                     <thead>
                       <tr>
                         <th>Porta / ID</th>
                         <th>Nome</th>
-                        <th className="mono">TX (dBm)</th>
+                        <th className="mono">RX PON</th>
+                        <th className="mono">TX PON</th>
                         <th className="mono">Total</th>
                         <th className="mono">On</th>
                         <th className="mono">Off</th>
@@ -948,6 +1013,7 @@ export function OltPage() {
                         <tr key={`${p.id}-${i}`}>
                           <td className="mono">{p.id || `#${i}`}</td>
                           <td>{p.name ?? "—"}</td>
+                          <td className="mono">{p.rx_dbm != null ? format1f(p.rx_dbm) : "—"}</td>
                           <td className="mono">{p.tx_dbm != null ? format1f(p.tx_dbm) : "—"}</td>
                           <td className="mono">{formatNum(p.onu_total)}</td>
                           <td className="mono">{formatNum(p.onu_online)}</td>
@@ -960,65 +1026,32 @@ export function OltPage() {
                 </div>
                 {ponsRows.length === 0 && (
                   <p style={{ fontSize: 12, color: "var(--muted)" }}>
-                    Sem linhas em «pons». Com community e IP correctos, use «Actualizar snapshot OLT» para preencher via SNMP (MIB OLT).
+                    Sem portas PON registadas. Confira IP e community SNMP e use «Atualizar ONUs» ou coleta completa.
                   </p>
                 )}
 
               {vsolHint && (
-                <details className="collapsible-section" style={{ marginTop: 18 }}>
-                  <summary>
-                    ONUs (MIB OLT){" "}
-                    <span style={{ fontWeight: 400, color: "var(--muted)" }}>({vsolOnuRows.length})</span>
-                  </summary>
-                  <div className="collapsible-section__body">
-                    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                      Dados de <code className="mono">gOnuStaInfo</code>, <code className="mono">gOnuAuthInfo</code>, <code className="mono">gOnuOpticalInfo</code> e{" "}
-                      <code className="mono">gOnuDetailInfo</code> agregados por PON e índice ONU. Leituras ópticas vêm como texto do equipamento.
-                    </p>
-                    <div className="table-wrap" style={{ maxHeight: 360, overflow: "auto", maxWidth: "100%" }}>
-                      <table style={{ fontSize: 10, width: "100%", tableLayout: "fixed" }}>
-                        <thead>
-                          <tr>
-                            <th>PON</th>
-                            <th>ONU</th>
-                            <th>Perfil</th>
-                            <th>Fase</th>
-                            <th className="mono">Pot. RX (MIB)</th>
-                            <th className="mono">Pot. TX (MIB)</th>
-                            <th>Modelo</th>
-                            <th>SN</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {vsolOnuRows.map((u, i) => (
-                            <tr key={`${u.pon}-${u.onu}-${i}`}>
-                              <td className="mono">{fmtVsolCell(u.pon as unknown)}</td>
-                              <td className="mono">{fmtVsolCell(u.onu as unknown)}</td>
-                              <td>{fmtVsolCell(u.profile_name as unknown)}</td>
-                              <td>{fmtVsolCell(u.phase_sta as unknown)}</td>
-                              <td className="mono">{fmtVsolCell(u.rx_pwr as unknown)}</td>
-                              <td className="mono">{fmtVsolCell(u.tx_pwr as unknown)}</td>
-                              <td>{fmtVsolCell(u.model as unknown)}</td>
-                              <td className="mono" style={{ maxWidth: 120, wordBreak: "break-all" }}>
-                                {fmtVsolCell(u.serial as unknown)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {vsolOnuRows.length === 0 && (
-                      <p style={{ fontSize: 12, color: "var(--muted)" }}>
-                        Ainda sem linhas de ONU no snapshot (MIB OLT). Confirme IP, community SNMP e clique em «Actualizar snapshot OLT».
-                      </p>
-                    )}
-                    {summaryObj?.vsol_walk_note ? (
-                      <p className="msg msg--off" style={{ fontSize: 11, marginTop: 8 }}>
-                        Nota walk: {String(summaryObj.vsol_walk_note)}
-                      </p>
-                    ) : null}
-                  </div>
-                </details>
+                <>
+                  <h2 style={{ marginTop: 20 }}>
+                    ONUs — estado e telemetria{" "}
+                    <span style={{ fontWeight: 400, fontSize: 12, color: "var(--muted)" }}>({vsolOnuRows.length})</span>
+                  </h2>
+                  <OltVsolOnuTable
+                    rows={vsolOnuRows}
+                    onuRefs={typeof summaryObj?.vsol_onu_refs_count === "number" ? summaryObj.vsol_onu_refs_count : undefined}
+                    note={
+                      summaryObj?.onu_metrics_note
+                        ? String(summaryObj.onu_metrics_note)
+                        : summaryObj?.vsol_get_note
+                          ? String(summaryObj.vsol_get_note)
+                          : summaryObj?.vsol_walk_note
+                            ? String(summaryObj.vsol_walk_note)
+                            : summaryObj?.onu_metrics_missing
+                              ? "Nenhuma MIB SNMP configurada para monitoramento deste modelo. Configure em Definições → Perfis OLT."
+                              : undefined
+                    }
+                  />
+                </>
               )}
 
               {isZte && (
@@ -1146,36 +1179,38 @@ export function OltPage() {
               {ifRows.length > 0 ? <OltIfaceSection rows={ifRows as IfRow[]} /> : null}
               {ifRows.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Use «Actualizar interfaces» para colher IF-MIB desta OLT.</p>}
 
-              <h2 style={{ marginTop: 18 }}>Sensores ENTITY (SFP / óptica)</h2>
-              <div className="table-wrap" style={{ maxHeight: 200, overflow: "auto", maxWidth: "100%" }}>
-                <table style={{ fontSize: 10 }}>
-                  <thead>
-                    <tr>
-                      <th>OID</th>
-                      <th>Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sensors.slice(0, 80).map((s, i) => (
-                      <tr key={`${s.oid}-${i}`}>
-                        <td className="mono" style={{ wordBreak: "break-all" }}>
-                          {s.oid}
-                        </td>
-                        <td className="mono">{s.value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <h2 style={{ marginTop: 18 }}>Resumo JSON (bruto)</h2>
-                <pre className="mono" style={{ padding: 10, background: "var(--panel2)", borderRadius: "var(--radius)", overflow: "auto", maxHeight: 160, fontSize: 10 }}>
-                  {JSON.stringify(detail.data.summary, null, 2)}
-                </pre>
+              {sensors.length > 0 && (
+                <details className="collapsible-section" style={{ marginTop: 18 }}>
+                  <summary>
+                    Sensores SFP (ENTITY) <span style={{ fontWeight: 400, color: "var(--muted)" }}>({sensors.length})</span>
+                  </summary>
+                  <div className="collapsible-section__body">
+                    <div className="table-wrap" style={{ maxHeight: 200, overflow: "auto" }}>
+                      <table className="table table--compact" style={{ width: "100%", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th>OID</th>
+                            <th>Valor</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sensors.slice(0, 80).map((s, i) => (
+                            <tr key={`${s.oid}-${i}`}>
+                              <td className="mono" style={{ wordBreak: "break-all" }}>
+                                {s.oid}
+                              </td>
+                              <td className="mono">{s.value}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+              )}
               </>
             )}
           </div>
-
         </div>
       )}
     </>

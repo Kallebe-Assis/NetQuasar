@@ -1,8 +1,11 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DelayedGlobeFallback } from "../components/GlobeSplash";
+import { NotFoundPage } from "../pages/NotFoundPage";
 import { AdminOnly } from "./AdminOnly";
+import { IntegrationSlugRedirect } from "./IntegrationSlugRedirect";
 import { ProtectedLayout } from "./ProtectedLayout";
+import { APP_ROUTES } from "./routes";
 import { ShellLayout } from "./ShellLayout";
 import { ClientSetupPage } from "../pages/ClientSetupPage";
 import { ConfigSetupPage } from "../pages/ConfigSetupPage";
@@ -51,157 +54,70 @@ const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
 );
 
+function withSuspense(el: React.ReactNode) {
+  return <Suspense fallback={<DelayedGlobeFallback />}>{el}</Suspense>;
+}
+
 export function AppRouter() {
   return (
     <Routes>
-      <Route path="/client-setup" element={<ClientSetupPage />} />
-      <Route path="/config-setup" element={<ConfigSetupPage />} />
-      <Route path="/database-setup" element={<Navigate to="/config-setup" replace />} />
-      <Route path="/login" element={<LoginPage />} />
+      <Route path={APP_ROUTES.clientSetup} element={<ClientSetupPage />} />
+      <Route path={APP_ROUTES.configSetup} element={<ConfigSetupPage />} />
+      <Route path="database-setup" element={<Navigate to={APP_ROUTES.configSetup} replace />} />
+      <Route path={APP_ROUTES.login} element={<LoginPage />} />
+
       <Route element={<ProtectedLayout />}>
+        <Route path="monitoramento" element={<Navigate to={APP_ROUTES.monitoring} replace />} />
+        <Route path="equipamentos" element={<Navigate to={APP_ROUTES.devices} replace />} />
+        <Route path="configuracoes" element={<Navigate to={APP_ROUTES.settings} replace />} />
+        <Route path="ferramentas" element={<Navigate to={APP_ROUTES.tools} replace />} />
+        <Route path="alertas" element={<Navigate to={APP_ROUTES.alerts} replace />} />
+        <Route path="mapa" element={<Navigate to={APP_ROUTES.map} replace />} />
+        <Route path="comercial" element={<Navigate to={APP_ROUTES.commercial} replace />} />
+        <Route path="integracoes" element={<Navigate to={APP_ROUTES.integrations} replace />} />
+        <Route path="tempo-real" element={<Navigate to={APP_ROUTES.realtime} replace />} />
+        <Route path="eventos" element={<Navigate to={APP_ROUTES.events} replace />} />
+        <Route path="overview" element={<Navigate to={APP_ROUTES.dashboard} replace />} />
+        <Route path="bng" element={<Navigate to={APP_ROUTES.mikrotik} replace />} />
+        <Route path="metrics" element={<Navigate to={APP_ROUTES.integrations} replace />} />
         <Route path="/" element={<ShellLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route
-            path="dashboard"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <DashboardPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="monitoring"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <MonitoringPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="pops"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <PopsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="devices"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <DevicesPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="commercial"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <CommercialPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="alerts"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <AlertsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="map"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <MapPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="tools"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <ToolsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="settings"
-            element={
-              <AdminOnly>
-                <Suspense fallback={<DelayedGlobeFallback />}>
-                  <SettingsPage />
-                </Suspense>
-              </AdminOnly>
-            }
-          />
-          <Route
-            path="olt"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <OltPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="mikrotik"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <MikrotikPage />
-              </Suspense>
-            }
-          />
-          <Route path="bng" element={<Navigate to="/mikrotik" replace />} />
-          <Route
-            path="events"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <EventsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="integrations"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <IntegrationsHubPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="integrations/:slug"
-            element={<Navigate to="consulta" replace />}
-          />
-          <Route
-            path="integrations/:slug/consulta"
-            element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <IntegrationConsultPage />
-              </Suspense>
-            }
-          />
+          <Route index element={<Navigate to={APP_ROUTES.dashboard} replace />} />
+          <Route path="dashboard" element={withSuspense(<DashboardPage />)} />
+          <Route path="monitoring" element={withSuspense(<MonitoringPage />)} />
+          <Route path="realtime" element={withSuspense(<RealtimePage />)} />
+          <Route path="integrations" element={withSuspense(<IntegrationsHubPage />)} />
+          <Route path="integrations/:slug" element={<IntegrationSlugRedirect />} />
+          <Route path="integrations/:slug/consulta" element={withSuspense(<IntegrationConsultPage />)} />
           <Route
             path="integrations/:slug/config"
             element={
               <AdminOnly>
-                <Suspense fallback={<DelayedGlobeFallback />}>
-                  <IntegrationDetailPage />
-                </Suspense>
+                {withSuspense(<IntegrationDetailPage />)}
               </AdminOnly>
             }
           />
-          <Route path="metrics" element={<Navigate to="/integrations" replace />} />
+          <Route path="pops" element={withSuspense(<PopsPage />)} />
+          <Route path="devices" element={withSuspense(<DevicesPage />)} />
+          <Route path="commercial" element={withSuspense(<CommercialPage />)} />
+          <Route path="alerts" element={withSuspense(<AlertsPage />)} />
+          <Route path="map" element={withSuspense(<MapPage />)} />
+          <Route path="tools" element={withSuspense(<ToolsPage />)} />
           <Route
-            path="realtime"
+            path="settings"
             element={
-              <Suspense fallback={<DelayedGlobeFallback />}>
-                <RealtimePage />
-              </Suspense>
+              <AdminOnly>
+                {withSuspense(<SettingsPage />)}
+              </AdminOnly>
             }
           />
+          <Route path="olt" element={withSuspense(<OltPage />)} />
+          <Route path="mikrotik" element={withSuspense(<MikrotikPage />)} />
+          <Route path="events" element={withSuspense(<EventsPage />)} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
-      <Route path="*" element={<Navigate to="/login" replace />} />
+
+      <Route path="*" element={<Navigate to={APP_ROUTES.login} replace />} />
     </Routes>
   );
 }

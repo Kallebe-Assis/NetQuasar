@@ -1,54 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useAppToast, type AppToastTone } from "./appToast";
 
-export type PageToastTone = "ok" | "err" | "info";
+export type PageToastTone = AppToastTone;
 
 export type PageToastState = { tone: PageToastTone; text: string } | null;
 
+/** Compatível com páginas antigas: envia para a pilha global (canto superior direito). */
 export function usePageToast() {
-  const [toast, setToast] = useState<PageToastState>(null);
-  const timerRef = useRef<number | null>(null);
+  const { push, dismiss } = useAppToast();
+  const lastId = useRef<string | null>(null);
 
-  const dismiss = useCallback(() => {
-    if (timerRef.current != null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
+  const dismissLast = useCallback(() => {
+    if (lastId.current) {
+      dismiss(lastId.current);
+      lastId.current = null;
     }
-    setToast(null);
-  }, []);
+  }, [dismiss]);
 
-  const show = useCallback((tone: PageToastTone, text: string, autoMs?: number) => {
-    if (timerRef.current != null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setToast({ tone, text });
-    const ms = autoMs ?? (tone === "err" ? 10_000 : 7000);
-    if (ms > 0) {
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
-        setToast(null);
-      }, ms);
-    }
-  }, []);
+  const show = useCallback(
+    (tone: PageToastTone, text: string, autoMs?: number) => {
+      dismissLast();
+      lastId.current = push({ tone, text, autoMs });
+    },
+    [push, dismissLast],
+  );
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current != null) window.clearTimeout(timerRef.current);
-    };
-  }, []);
+  useEffect(() => () => dismissLast(), [dismissLast]);
 
-  return { toast, show, dismiss };
+  return { toast: null as PageToastState, show, dismiss: dismissLast };
 }
 
-export function PageToastHost({ toast, onDismiss }: { toast: PageToastState; onDismiss: () => void }) {
-  if (!toast) return null;
-  const mod = toast.tone === "ok" ? "page-toast--ok" : toast.tone === "err" ? "page-toast--err" : "page-toast--info";
-  return (
-    <div className={`page-toast ${mod}`} role="status" aria-live="polite" style={{ marginTop: 12, maxWidth: 560 }}>
-      <button type="button" className="page-toast__close" aria-label="Fechar" onClick={onDismiss}>
-        ×
-      </button>
-      {toast.text}
-    </div>
-  );
+/** Host legado — toasts vão para AppToastProvider (nada a renderizar aqui). */
+export function PageToastHost(_props: { toast: PageToastState; onDismiss: () => void }) {
+  return null;
 }

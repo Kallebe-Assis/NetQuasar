@@ -18,6 +18,7 @@ import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { PageToastHost, usePageToast } from "../lib/pageToast";
 import { queryKeys } from "../lib/queryKeys";
+import { APP_ROUTES } from "../app/routes";
 
 function matchClient(a: ClientCard, b: ClientCard): boolean {
   const aId = a.id?.trim();
@@ -210,7 +211,7 @@ export function IntegrationConsultPage() {
             <>
               {" "}
               Ative em{" "}
-              <Link to={`/integrations/${slug}/config`}>Configuração API</Link> → separador Operação.
+              <Link to={APP_ROUTES.integrationConfig(slug!)}>Configuração API</Link> → separador Operação.
             </>
           ) : (
             " Peça a um administrador para configurar."

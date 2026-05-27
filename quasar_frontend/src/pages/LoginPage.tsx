@@ -1,11 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { APP_ROUTES } from "../app/routes";
 import { GlobeSplash } from "../components/GlobeSplash";
 import { LoginBrandLogo } from "../components/LoginBrandLogo";
 import { LoginCircuitBackdrop } from "../components/LoginCircuitBackdrop";
 import { apiFetch, ApiError } from "../lib/api";
-import { isClientConfigured, markClientConfigured, markSessionReady, saveAuthToken, saveUserDisplayLabel, saveUserRole } from "../lib/auth";
+import {
+  getAuthToken,
+  isClientConfigured,
+  isSessionReady,
+  markClientConfigured,
+  markSessionReady,
+  saveAuthToken,
+  saveUserDisplayLabel,
+  saveUserRole,
+} from "../lib/auth";
 import { prefetchDashboard } from "../lib/dashboardCache";
 
 type SetupStatus = { database_configured?: boolean };
@@ -17,6 +27,7 @@ const LOGIN_SPLASH_MIN_MS = 2000;
 
 export function LoginPage() {
   const nav = useNavigate();
+  const loc = useLocation();
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -78,7 +89,12 @@ export function LoginPage() {
         /* dashboard pode falhar; a página tenta de novo */
       }
       setPostLoginNavPending(false);
-      nav("/dashboard", { replace: true });
+      const from = (loc.state as { from?: string } | null)?.from;
+      const dest =
+        from && from !== APP_ROUTES.login && from.startsWith("/") && !from.startsWith("//")
+          ? from
+          : APP_ROUTES.dashboard;
+      nav(dest, { replace: true });
     },
     onError: (e) => {
       loginStartedAtRef.current = null;
@@ -126,7 +142,11 @@ export function LoginPage() {
   }
 
   if (!setupQ.data?.database_configured) {
-    return <Navigate to="/config-setup" replace />;
+    return <Navigate to={APP_ROUTES.configSetup} replace />;
+  }
+
+  if (getAuthToken() && isSessionReady()) {
+    return <Navigate to={APP_ROUTES.dashboard} replace />;
   }
 
   function onSubmit(e: React.FormEvent) {

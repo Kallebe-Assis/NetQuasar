@@ -117,8 +117,14 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Delete("/users/{id}", s.deleteUser)
 				r.Patch("/connection/defaults", s.patchConnectionDefaults)
 				r.Get("/olt-vendors", s.listOltVendors)
+				r.Get("/olt-vendors/catalog", s.getOltModelsCatalog)
 				r.Get("/olt-vendors/{brand}", s.getOltVendor)
 				r.Patch("/olt-vendors/{brand}", s.patchOltVendor)
+				r.Get("/olt-vendors/{brand}/models", s.listOltVendorModels)
+				r.Post("/olt-vendors/{brand}/models", s.createOltVendorModel)
+				r.Get("/olt-vendors/{brand}/models/{model}", s.getOltVendorModel)
+				r.Patch("/olt-vendors/{brand}/models/{model}", s.patchOltVendorModel)
+				r.Delete("/olt-vendors/{brand}/models/{model}", s.deleteOltVendorModel)
 				r.Get("/notifications/telegram/monitoring", s.getTelegramMonitoring)
 				r.Patch("/notifications/telegram/monitoring", s.patchTelegramMonitoring)
 				r.Post("/notifications/telegram/monitoring/test", s.testTelegramMonitoring)
@@ -135,6 +141,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/automation/commercial-report", s.getAutomationCommercialReport)
 				r.Patch("/automation/commercial-report", s.patchAutomationCommercialReport)
 				r.Post("/automation/commercial-report/run", s.runAutomationCommercialReport)
+				r.Get("/automation/history", s.getAutomationExecutionHistory)
 				r.Get("/notifications/smtp", s.getSMTPSettings)
 				r.Patch("/notifications/smtp", s.patchSMTPSettings)
 				r.Post("/notifications/smtp/test", s.testSMTPSettings)
@@ -182,6 +189,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/monthly-records", s.listMonthlyRecords)
 			r.Get("/monthly-records/{id}", s.getMonthlyRecord)
 			r.Get("/aggregates", s.commercialAggregates)
+			r.Get("/totals-history", s.commercialTotalsHistory)
 			r.Get("/comparison", s.commercialMonthComparison)
 			r.Get("/reports/export", s.commercialReportsExport)
 			r.Group(func(r chi.Router) {
@@ -311,10 +319,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/olt", func(r chi.Router) {
 			r.Get("/devices", s.listOLTDevices)
 			r.Get("/devices/{id}", s.getOLTDevice)
+			r.Get("/devices/{id}/snmp-debug", s.getOLTSnmpDebug)
 			r.Get("/reports/history", s.getOLTReportsHistory)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
 				r.Post("/devices/{id}/refresh", s.refreshOLTDevice)
+				r.Post("/devices/{id}/snmp-debug", s.postOLTSnmpDebug)
 			})
 		})
 

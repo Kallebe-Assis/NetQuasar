@@ -1,0 +1,94 @@
+DMOS-IP-APPLICATION DEFINITIONS ::= BEGIN
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE,
+    Integer32, Unsigned32, Counter32, Counter64,
+    Gauge32, IpAddress
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION, RowStatus, DateAndTime,
+    TruthValue
+        FROM SNMPv2-TC
+;
+
+dmosIPMIB MODULE-IDENTITY
+    LAST-UPDATED "202406200000Z"
+    ORGANIZATION "@ORGANIZATION"
+    CONTACT-INFO "@CONTACT-INFO"
+    DESCRIPTION "This module contains definitions for configuring Management, Loopback and L3 logical interfaces."
+    REVISION "202406200000Z"
+    DESCRIPTION "@REVISION-DESCRIPTION"
+    ::= { 1 3 6 1 2 1 4 }
+
+UnsignedShort ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "d"
+    STATUS      current
+    DESCRIPTION "xs:unsignedShort"
+    SYNTAX      Unsigned32 (0 .. 65535)
+
+Ipv6Prefix ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "2x:2x:2x:2x:2x:2x:2x:2x/1d"
+    STATUS      current
+    DESCRIPTION "confd:ipv6Prefix"
+    SYNTAX      OCTET STRING (SIZE (17))
+
+Ipv4AddressAndPrefixLength ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1d.1d.1d.1d/1d"
+    STATUS      current
+    DESCRIPTION "tailf:ipv4AddressAndPrefixLength"
+    SYNTAX      OCTET STRING (SIZE (5))
+
+Ipv6AddressAndPrefixLength ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "2x:2x:2x:2x:2x:2x:2x:2x/1d"
+    STATUS      current
+    DESCRIPTION "tailf:ipv6AddressAndPrefixLength"
+    SYNTAX      OCTET STRING (SIZE (17))
+
+String ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs:string"
+    SYNTAX      OCTET STRING
+
+ipAddrTableIpAddrEntryTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF IpAddrTableIpAddrEntryEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION ""
+    ::= { dmosIPMIB 20 }
+
+ipAddrTableIpAddrEntryEntry OBJECT-TYPE
+    SYNTAX      IpAddrTableIpAddrEntryEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION ""
+    INDEX { ipAddrTableIpAddrEntryIpAdEntAddr }
+        ::= { ipAddrTableIpAddrEntryTable 1 }
+
+IpAddrTableIpAddrEntryEntry ::=
+    SEQUENCE {
+        ipAddrTableIpAddrEntryIpAdEntAddr IpAddress,
+        ipAddrTableIpAddrEntryIpAdEntIfIndex Integer32,
+        ipAddrTableIpAddrEntryIpAdEntNetMask IpAddress
+    }
+
+ipAddrTableIpAddrEntryIpAdEntAddr OBJECT-TYPE
+    SYNTAX      IpAddress
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION ""
+    ::= { ipAddrTableIpAddrEntryEntry 1 }
+
+ipAddrTableIpAddrEntryIpAdEntIfIndex OBJECT-TYPE
+    SYNTAX      Integer32
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION ""
+    ::= { ipAddrTableIpAddrEntryEntry 2 }
+
+ipAddrTableIpAddrEntryIpAdEntNetMask OBJECT-TYPE
+    SYNTAX      IpAddress
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION ""
+    ::= { ipAddrTableIpAddrEntryEntry 3 }
+
+END

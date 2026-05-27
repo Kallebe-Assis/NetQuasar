@@ -12,14 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
-	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
-	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
-	"github.com/netquasar/netquasar/quasar_backend/internal/zteparse"
 )
 
 func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
@@ -169,10 +167,17 @@ func (s *Server) getOLTDevice(w http.ResponseWriter, r *http.Request) {
 			oltifderive.AnnotateInterfaceTable(tab)
 		}
 	}
+	if sumObj != nil {
+		out["collection_log"] = buildOltCollectionLog(sumObj)
+		if dbg, ok := sumObj["snmp_debug"].(map[string]any); ok {
+			out["snmp_debug"] = dbg
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
+	extendWriteDeadline(w, 3*time.Minute)
 	s.setMonitoringActivity(r.Context(), "Coletando PONs OLT")
 	defer s.setMonitoringActivity(r.Context(), "")
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -194,7 +199,7 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 	var brand, model, devDesc string
 	_ = s.DB().QueryRow(r.Context(), `
 		SELECT host(d.ip)::text, d.snmp_community,
-			lower(coalesce(trim(d.brand), '')), lower(coalesce(trim(d.model), '')),
+			coalesce(trim(d.brand), ''), coalesce(trim(d.model), ''),
 			coalesce(trim(d.description), '')
 		FROM devices d WHERE d.id=$1
 	`, id).Scan(&ip, &comm, &brand, &model, &devDesc)
@@ -212,272 +217,69 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 			c = strings.TrimSpace(*comm)
 		}
 	}
+	if host == "" || c == "" {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "IP e community SNMP obrigatórios para refresh OLT", nil)
+		return
+	}
+	if strings.TrimSpace(model) == "" {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "modelo OLT obrigatório — seleccione em Equipamentos e configure o perfil em Definições", nil)
+		return
+	}
+
+	profile, profErr := loadOltCollectionProfile(r.Context(), s.DB(), brand, model)
+	if profErr != nil {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION",
+			fmt.Sprintf("perfil OLT não encontrado para %s / %s — cadastre em Definições → OLT vendors", brand, model), nil)
+		return
+	}
+
 	collTO := s.loadCollectionTimeouts(r.Context())
 	oltRefreshTotal := collTO.OltRefreshTotal()
-	snmpWalkTO := collTO.SnmpPerWalkTimeout(oltRefreshTotal)
+	if oltcollect.IsSimpleOnuCollect(profile.Steps) || strings.TrimSpace(strings.ToLower(r.URL.Query().Get("scope"))) == oltcollect.ScopeOnu {
+		oltRefreshTotal = 100 * time.Second
+	}
 	telnetTO := collTO.TelnetPhaseTimeout(oltRefreshTotal)
 	oltCtx, oltCancel := context.WithTimeout(r.Context(), oltRefreshTotal)
 	defer oltCancel()
 
-	m := strings.ToLower(model)
-	isVsol := strings.Contains(brand, "vsol") || strings.Contains(model, "vsol") ||
-		strings.Contains(m, "v1600") || strings.Contains(m, "1600g")
-	isZTE := strings.Contains(brand, "zte") || strings.Contains(model, "zte") || strings.Contains(m, "zxa10")
-	isDatacom := strings.Contains(brand, "datacom") || strings.Contains(model, "datacom") || strings.Contains(m, "dm46")
-	if isVsol && host != "" && c != "" {
-		walk, trunc, note := probing.SNMPWalk(oltCtx, probing.SNMPWalkParams{
-			Host: host, Port: 161, Community: c, RootOID: vsolparse.OIDGOnuAuthList,
-			Version: "2c", Timeout: snmpWalkTO, Retries: 0, MaxRows: 48000,
-		})
-		walk2, trunc2, note2 := probing.SNMPWalk(oltCtx, probing.SNMPWalkParams{
-			Host: host, Port: 161, Community: c, RootOID: vsolparse.OIDLegacyGOnuOptical,
-			Version: "2c", Timeout: snmpWalkTO / 2, Retries: 0, MaxRows: 12000,
-		})
-		walk = append(walk, walk2...)
-		trunc = trunc || trunc2
-		if strings.TrimSpace(note2) != "" {
-			if strings.TrimSpace(note) != "" {
-				note = note + "; legado óptica: " + note2
-			} else {
-				note = "legado óptica: " + note2
-			}
-		}
-		vSum, vPons, _ := vsolparse.FromSNMPWalk(walk)
-		for k, v := range vSum {
-			summary[k] = v
-		}
-		summary["vsol_walk_truncated"] = trunc
-		if strings.TrimSpace(note) != "" {
-			summary["vsol_walk_note"] = note
-		}
-		if len(vPons) > 0 {
-			pons = make([]any, 0, len(vPons))
-			for _, p := range vPons {
-				pons = append(pons, p)
-			}
+	fullTelemetry := strings.TrimSpace(r.URL.Query().Get("telemetry")) == "1"
+	scope := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("scope")))
+	if scope == "" {
+		scope = oltcollect.ScopeFull
+	}
+	if scope == "fast" {
+		scope = oltcollect.ScopeOnu
+	}
+	refreshT0 := time.Now()
+	execSt := &oltCollectExecState{
+		DeviceID: id, Host: host, Community: c,
+		Brand: brand, Model: model, DevDesc: devDesc,
+		Profile: profile, Summary: summary, Pons: pons,
+		FullTelemetry: fullTelemetry, TelnetTO: telnetTO,
+		Scope: scope,
+	}
+	if err := s.executeOltProfile(oltCtx, execSt); err != nil {
+		summary["olt_profile_exec_error"] = err.Error()
+	}
+	if oltCtx.Err() != nil {
+		summary["olt_refresh_timeout"] = true
+		summary["olt_refresh_timeout_reason"] = oltCtx.Err().Error()
+		if _, ok := summary["olt_refresh_cancelled"]; !ok {
+			summary["olt_refresh_cancelled"] = oltCtx.Err().Error()
 		}
 	}
-	if isZTE && host != "" && c != "" {
-		prof := loadVendorOIDProfile(r.Context(), s.DB(), "ZTE")
-		zteSummary := map[string]any{
-			"zte_profile": map[string]any{
-				"onu_online_oid":  cleanSNMPOID(prof.OnuOnlineOID),
-				"pon_status_oid":  cleanSNMPOID(prof.PonStatusOID),
-				"transceiver_oid": cleanSNMPOID(prof.TransceiverOID),
-				"snmp_base_oid":   cleanSNMPOID(prof.SNMPBaseOID),
-			},
-		}
-		var notes []string
-		onuRows, truncOnu, noteOnu := walkRootRows(oltCtx, host, c, prof.OnuOnlineOID)
-		if len(onuRows) > 0 {
-			zteSummary["zte_onu_online_table"] = onuRows
-		} else {
-			zteSummary["zte_onu_online_table"] = []any{}
-		}
-		ponRows, truncPon, notePon := walkRootRows(oltCtx, host, c, prof.PonStatusOID)
-		if len(ponRows) > 0 {
-			zteSummary["zte_pon_status_table"] = ponRows
-		} else {
-			zteSummary["zte_pon_status_table"] = []any{}
-		}
-		trxRows, truncTrx, noteTrx := walkRootRows(oltCtx, host, c, prof.TransceiverOID)
-		if len(trxRows) > 0 {
-			zteSummary["zte_transceiver_table"] = trxRows
-		} else {
-			zteSummary["zte_transceiver_table"] = []any{}
-		}
-		if strings.TrimSpace(noteOnu) != "" {
-			notes = append(notes, "onu_online: "+strings.TrimSpace(noteOnu))
-		}
-		if strings.TrimSpace(notePon) != "" {
-			notes = append(notes, "pon_status: "+strings.TrimSpace(notePon))
-		}
-		if strings.TrimSpace(noteTrx) != "" {
-			notes = append(notes, "transceiver: "+strings.TrimSpace(noteTrx))
-		}
-		zteSummary["zte_walk_truncated"] = truncOnu || truncPon || truncTrx
-		if len(notes) > 0 {
-			zteSummary["zte_walk_note"] = strings.Join(notes, "; ")
-		}
-		for k, v := range zteSummary {
-			summary[k] = v
-		}
-		var telUser, telPass, telEnable *string
-		_ = s.DB().QueryRow(r.Context(), `SELECT telnet_user, telnet_password, telnet_enable FROM settings_connection_defaults WHERE id=1`).Scan(&telUser, &telPass, &telEnable)
-		tu, tp, te := "", "", ""
-		if telUser != nil {
-			tu = strings.TrimSpace(*telUser)
-		}
-		if telPass != nil {
-			tp = strings.TrimSpace(*telPass)
-		}
-		if telEnable != nil {
-			te = strings.TrimSpace(*telEnable)
-		}
-		zteTelnetApplied := false
-		if tu != "" && tp != "" {
-			tel := probing.TelnetRunCommand(oltCtx, probing.TelnetRunParams{
-				Host: host, Port: "23", Timeout: telnetTO,
-				User: tu, Password: tp, Enable: te,
-				Command:      "show gpon onu state",
-				PreCommands:  []string{"terminal length 0", "terminal page-break disable", "scroll 512"},
-				MaxReadBytes: 220000,
-			})
-			summary["zte_telnet_note"] = tel.Note
-			summary["zte_telnet_raw_snippet"] = trimForSummary(tel.Output, 2400)
-			if !tel.OK {
-				summary["zte_telnet_error"] = tel.Error
-			} else {
-				rows := zteparse.ParseShowGponOnuState(tel.Output)
-				summary["zte_telnet_onu_state_rows"] = rows
-				summary["zte_telnet_onu_state_count"] = len(rows)
-				if len(rows) > 0 {
-					zteTelnetApplied = true
-					statusByIf := buildZTEPonStatusByIfIndex(ponRows)
-					ifNameByIndex := map[int]string{}
-					var ifRaw []byte
-					if err := s.DB().QueryRow(r.Context(), `SELECT interfaces::text FROM interface_snapshots WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1`, id).Scan(&ifRaw); err == nil && len(ifRaw) > 0 {
-						ifRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(ifRaw))
-						for _, r := range ifRows {
-							lb := strings.TrimSpace(r.DisplayName)
-							if lb == "" {
-								lb = strings.TrimSpace(r.IfName)
-							}
-							if lb == "" {
-								lb = strings.TrimSpace(r.Descr)
-							}
-							ifNameByIndex[r.IfIndex] = lb
-						}
-					}
-					pons = make([]any, 0, len(rows))
-					for _, pr := range rows {
-						st := "unknown"
-						for ifIdx, lb := range ifNameByIndex {
-							if ztePonIDFromIfLabel(lb) == strings.TrimSpace(pr.Pon) {
-								if x := strings.TrimSpace(statusByIf[ifIdx]); x != "" {
-									st = x
-								}
-								break
-							}
-						}
-						pons = append(pons, map[string]any{
-							"id":           pr.Pon,
-							"name":         "PON-" + pr.Pon,
-							"onu_total":    pr.OnuTotal,
-							"onu_online":   pr.OnuOnline,
-							"onu_offline":  pr.OnuOffline,
-							"status":       st,
-							"source_slice": "zte_telnet_show_gpon_onu_state",
-						})
-					}
-				}
-			}
-		}
-		if !zteTelnetApplied {
-			summary["zte_telnet_note"] = anyString(summary["zte_telnet_note"]) + " (sem parse válido; pons não serão inferidas por ifIndex)"
-		}
+	pons = execSt.Pons
+	for k, v := range execSt.Summary {
+		summary[k] = v
 	}
-	if isDatacom && host != "" && c != "" {
-		prof := loadVendorOIDProfile(r.Context(), s.DB(), "DATACOM")
-		datacomSummary := map[string]any{
-			"datacom_profile": map[string]any{
-				"onu_online_oid":  cleanSNMPOID(prof.OnuOnlineOID),
-				"pon_status_oid":  cleanSNMPOID(prof.PonStatusOID),
-				"transceiver_oid": cleanSNMPOID(prof.TransceiverOID),
-				"snmp_base_oid":   cleanSNMPOID(prof.SNMPBaseOID),
-			},
-		}
-		var notes []string
-		onuRows, truncOnu, noteOnu := walkRootRows(oltCtx, host, c, prof.OnuOnlineOID)
-		if len(onuRows) > 0 {
-			datacomSummary["datacom_onu_online_table"] = onuRows
-			dRows := buildDatacomPonRowsFromTable(onuRows)
-			if len(dRows) > 0 {
-				pons = make([]any, 0, len(dRows))
-				for _, pr := range dRows {
-					pons = append(pons, pr)
-				}
-				datacomSummary["datacom_pon_rows_count"] = len(dRows)
-			}
-		} else {
-			datacomSummary["datacom_onu_online_table"] = []any{}
-		}
-		ponRows, truncPon, notePon := walkRootRows(oltCtx, host, c, prof.PonStatusOID)
-		if len(ponRows) > 0 {
-			datacomSummary["datacom_pon_status_table"] = ponRows
-		} else {
-			datacomSummary["datacom_pon_status_table"] = []any{}
-		}
-		trxRows, truncTrx, noteTrx := walkRootRows(oltCtx, host, c, prof.TransceiverOID)
-		if len(trxRows) > 0 {
-			datacomSummary["datacom_transceiver_table"] = trxRows
-		} else {
-			datacomSummary["datacom_transceiver_table"] = []any{}
-		}
-		if strings.TrimSpace(noteOnu) != "" {
-			notes = append(notes, "onu_online: "+strings.TrimSpace(noteOnu))
-		}
-		if strings.TrimSpace(notePon) != "" {
-			notes = append(notes, "pon_status: "+strings.TrimSpace(notePon))
-		}
-		if strings.TrimSpace(noteTrx) != "" {
-			notes = append(notes, "transceiver: "+strings.TrimSpace(noteTrx))
-		}
-		datacomSummary["datacom_walk_truncated"] = truncOnu || truncPon || truncTrx
-		if len(notes) > 0 {
-			datacomSummary["datacom_walk_note"] = strings.Join(notes, "; ")
-		}
-		for k, v := range datacomSummary {
-			summary[k] = v
-		}
-	}
-
-	// Tratamento de consistência: reforça dados de PON/ONU com derivação de IF-MIB (último snapshot de interfaces).
-	if pool := s.DB(); pool != nil && !isZTE && !isDatacom {
-		var ifRaw []byte
-		if err := pool.QueryRow(r.Context(), `
-			SELECT interfaces::text FROM interface_snapshots WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
-		`, id).Scan(&ifRaw); err == nil && len(ifRaw) > 0 {
-			ifRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(ifRaw))
-			optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, walkJSONToSNMPVars(ifRaw))
-			derivedPons, sumPatch := oltifderive.DeriveFromIfRows(ifRows, optMap)
-			if len(derivedPons) > 0 {
-				existing := make([]map[string]any, 0, len(pons))
-				for _, p := range pons {
-					if m, ok := p.(map[string]any); ok {
-						existing = append(existing, m)
-					}
-				}
-				merged := oltifderive.MergePonRowsForIfaceRefresh(existing, derivedPons)
-				pons = make([]any, 0, len(merged))
-				for _, p := range merged {
-					pons = append(pons, p)
-				}
-				summary["if_mib_merge_applied"] = true
-				for k, v := range sumPatch {
-					summary[k] = v
-				}
-			}
-		}
-	}
+	summary["olt_refresh_elapsed_ms"] = time.Since(refreshT0).Milliseconds()
 
 	if pool := s.DB(); pool != nil {
-		var prevSnapPons, prevSnapSum []byte
-		_ = pool.QueryRow(r.Context(), `
-			SELECT COALESCE(pons::text,'[]'), COALESCE(summary::text,'{}')
-			FROM olt_snapshots WHERE device_id=$1
-		`, id).Scan(&prevSnapPons, &prevSnapSum)
-		prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
-		prevSumm := oltifderive.SummaryJSONBytesToMap(prevSnapSum)
-		newMaps := oltifderive.PonsAnySliceToMaps(pons)
-		stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, newMaps, prevSumm)
-		pons = oltifderive.PonsMapsToAny(stabMaps)
-		for k, v := range stabPatch {
-			summary[k] = v
-		}
-
 		thPct, okPct := loadGlobalMetricThreshold(r.Context(), pool, "olt_onu_drop_percent")
 		if okPct {
+			var prevSnapPons []byte
+			_ = pool.QueryRow(r.Context(), `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons)
+			prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
 			prevOn := map[string]float64{}
 			for _, p := range prevMaps {
 				k := oltifderive.StablePonRowKey(p)

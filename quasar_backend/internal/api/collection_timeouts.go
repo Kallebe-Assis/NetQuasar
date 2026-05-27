@@ -17,7 +17,7 @@ func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts 
 	out := collectionTimeouts{
 		TelemetryMs:    120_000,
 		InterfaceMs:    120_000,
-		OltIfDerivedMs: 180_000,
+		OltIfDerivedMs: 300_000,
 	}
 	pool := s.DB()
 	if pool == nil {
@@ -31,7 +31,7 @@ func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts 
 }
 
 func (t collectionTimeouts) OltRefreshTotal() time.Duration {
-	ms := monitorworker.ClampCollectionTimeoutMsPublic(t.OltIfDerivedMs, 180_000)
+	ms := monitorworker.ClampCollectionTimeoutMsPublic(t.OltIfDerivedMs, 300_000)
 	if tel := monitorworker.ClampCollectionTimeoutMsPublic(t.TelemetryMs, 120_000); tel > ms {
 		ms = tel
 	}

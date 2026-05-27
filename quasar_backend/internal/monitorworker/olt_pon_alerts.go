@@ -290,7 +290,8 @@ deriveLoop:
 		break
 	}
 
-	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, pons, prevSumm)
+	incomplete := truncated || len(pons) < len(prevMaps)
+	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, pons, prevSumm, incomplete)
 	pons = stabMaps
 
 	prevOn := map[string]float64{}

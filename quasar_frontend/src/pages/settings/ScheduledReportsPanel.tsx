@@ -4,6 +4,7 @@ import { InfoHint } from "../../components/InfoHint";
 import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { AutomationHistoryModal } from "./AutomationHistoryModal";
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
 
 const TZ_DEFAULT = "America/Sao_Paulo";
@@ -32,21 +33,6 @@ type SmtpCfg = {
   from_address?: string | null;
   use_tls: boolean;
 };
-
-function statusLabel(st: string | null | undefined): string {
-  switch (st) {
-    case "completed":
-      return "Concluído";
-    case "failed":
-      return "Falhou";
-    case "collecting":
-      return "A recolher…";
-    case "sending_telegram":
-      return "A enviar…";
-    default:
-      return st ?? "—";
-  }
-}
 
 function DigestScheduleCard() {
   const qc = useQueryClient();
@@ -101,7 +87,10 @@ function DigestScheduleCard() {
 
   const run = useMutation({
     mutationFn: () => apiFetch("/api/v1/settings/automation/alerts-digest/run", { method: "POST", json: {} }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.automationAlertsDigest }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.automationAlertsDigest });
+      void qc.invalidateQueries({ queryKey: queryKeys.automationHistory });
+    },
   });
 
   const busy = !!cfg.data?.running || run.isPending;
@@ -114,10 +103,9 @@ function DigestScheduleCard() {
           <p>Envia contagem de alertas abertos, resolvidos em 24 h e incidentes correlacionados via Telegram (relatórios) e/ou e-mail SMTP.</p>
         </InfoHint>
       </h2>
-      <p style={{ fontSize: 12, color: "var(--muted)" }}>
-        Estado: <strong>{statusLabel(cfg.data?.last_status)}</strong>
-        {cfg.data?.last_error ? ` · ${cfg.data.last_error}` : ""}
-      </p>
+      {cfg.data?.running ? (
+        <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>Execução em curso…</p>
+      ) : null}
       <label className="row" style={{ gap: 8, marginTop: 10 }}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
         Agendamento ativo
@@ -228,7 +216,10 @@ function CommercialScheduleCard() {
 
   const run = useMutation({
     mutationFn: () => apiFetch("/api/v1/settings/automation/commercial-report/run", { method: "POST", json: {} }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.automationCommercial }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.automationCommercial });
+      void qc.invalidateQueries({ queryKey: queryKeys.automationHistory });
+    },
   });
 
   const busy = !!cfg.data?.running || run.isPending;
@@ -236,8 +227,9 @@ function CommercialScheduleCard() {
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <h2>Base comercial (mensal)</h2>
-      <p style={{ fontSize: 12, color: "var(--muted)" }}>
-        Envia o relatório da base comercial sem recolher OLTs. Estado: <strong>{statusLabel(cfg.data?.last_status)}</strong>
+      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+        Envia o relatório da base comercial sem recolher OLTs. Resultados em <strong>Histórico</strong>.
+        {cfg.data?.running ? " · execução em curso…" : ""}
       </p>
       <label className="row" style={{ gap: 8, marginTop: 10 }}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
@@ -389,12 +381,19 @@ function SmtpPanel() {
 }
 
 export function ScheduledReportsPanel() {
+  const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <>
-      <p style={{ color: "var(--muted)", fontSize: 13 }}>
-        Agende envios automáticos por Telegram e/ou e-mail. O relatório ONU mensal continua a recolher OLTs antes de enviar; a base comercial
-        abaixo envia apenas os totais já registados.
-      </p>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <p style={{ color: "var(--muted)", fontSize: 13, margin: 0, flex: 1 }}>
+          Agende envios automáticos por Telegram e/ou e-mail. A verificação dos horários é feita a cada 30 segundos. O relatório ONU mensal
+          continua a recolher OLTs antes de enviar; a base comercial abaixo envia apenas os totais já registados.
+        </p>
+        <button type="button" className="btn" onClick={() => setHistoryOpen(true)}>
+          Histórico
+        </button>
+      </div>
+      <AutomationHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <OnuMonthlyReportPanel />
       <DigestScheduleCard />
       <CommercialScheduleCard />

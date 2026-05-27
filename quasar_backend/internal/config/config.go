@@ -115,7 +115,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		HTTPAddr:         getenv("NETQUASAR_HTTP_ADDR", ":8080"),
 		HTTPReadTimeout:  durationEnv("NETQUASAR_HTTP_READ_TIMEOUT", 15*time.Second),
-		HTTPWriteTimeout: durationEnv("NETQUASAR_HTTP_WRITE_TIMEOUT", 120*time.Second),
+		HTTPWriteTimeout: durationEnv("NETQUASAR_HTTP_WRITE_TIMEOUT", 20*time.Minute),
 		ShutdownTimeout:  durationEnv("NETQUASAR_SHUTDOWN_TIMEOUT", 20*time.Second),
 		LogLevel:         getenv("NETQUASAR_LOG_LEVEL", "info"),
 		DBHost:           getenv("NETQUASAR_DB_HOST", "127.0.0.1"),

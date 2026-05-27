@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpprofile"
+	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
 
 type CollectResult struct {
@@ -287,7 +288,24 @@ func loadDefaultOIDProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 			}
 		}
 	}
+	if prefix == "olt" {
+		applyVsolUptimeDefault(brand, &d)
+	}
 	return d
+}
+
+func applyVsolUptimeDefault(brand string, d *defaultOIDProfile) {
+	if d == nil {
+		return
+	}
+	b := strings.ToLower(strings.TrimSpace(brand))
+	if !strings.Contains(b, "vsol") && !strings.Contains(b, "v1600") && !strings.Contains(b, "1600g") {
+		return
+	}
+	u := strings.TrimSpace(d.UptimeOID)
+	if u == "" || u == "1.3.6.1.2.1.1.3.0" {
+		d.UptimeOID = vsolparse.OIDVsolUptime
+	}
 }
 
 func appendUniqueOID(list []string, v string) []string {

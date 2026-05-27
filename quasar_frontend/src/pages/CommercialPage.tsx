@@ -1,5 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
@@ -8,6 +20,7 @@ import { formatAlertDateTimePt } from "../lib/alertLabels";
 import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
 import { useFloatingMenu } from "../hooks/useFloatingMenu";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
+import { useAppToast } from "../lib/appToast";
 
 type Locality = { id: string; name: string; region_code?: string | null; created_at?: string };
 type MonthlyRecord = {
@@ -81,6 +94,7 @@ function seededYearMonth(): string {
 
 export function CommercialPage() {
   const canMutate = isAdminUser();
+  const { push: pushToast } = useAppToast();
   const qc = useQueryClient();
   const seed = seededYearMonth();
   const monthChoices = useMemo(() => recentYearMonthChoices(72), []);
@@ -103,6 +117,24 @@ export function CommercialPage() {
     queryKey: ["commercial-cmp", month],
     queryFn: () => apiFetch<{ month: string; previous_month: string; rows: MonthCompareRow[] }>(`/api/v1/commercial/comparison?month=${encodeURIComponent(month)}`),
   });
+  const totalsHist = useQuery({
+    queryKey: ["commercial-totals-history"],
+    queryFn: () =>
+      apiFetch<{ months: Array<{ year_month: string; total: number; delta: number; delta_percent?: number }> }>(
+        "/api/v1/commercial/totals-history?months=18",
+      ),
+  });
+  const totalsChartData = useMemo(() => {
+    const rows = totalsHist.data?.months ?? [];
+    return rows.map((r) => ({
+      month: formatYearMonthPt(r.year_month),
+      monthKey: r.year_month,
+      total: r.total,
+      delta: r.delta,
+      delta_percent: r.delta_percent,
+      isSelected: r.year_month === month,
+    }));
+  }, [totalsHist.data?.months, month]);
   const [cmpSort, setCmpSort] = useState<{ key: CmpSortKey; dir: "asc" | "desc" }>({ key: "locality", dir: "asc" });
 
   const cmpSortedRows = useMemo(() => {
@@ -294,6 +326,12 @@ export function CommercialPage() {
   });
 
   const [tgMsg, setTgMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!tgMsg) return;
+    const text = tgMsg.text.length > 320 ? `${tgMsg.text.slice(0, 317)}…` : tgMsg.text;
+    pushToast({ tone: tgMsg.ok ? "ok" : "err", text, autoMs: 8000 });
+  }, [tgMsg, pushToast]);
   const [oltCollectModalOpen, setOltCollectModalOpen] = useState(false);
   const [oltCollectConfirmOpen, setOltCollectConfirmOpen] = useState(false);
   const [oltCollectRunning, setOltCollectRunning] = useState(false);
@@ -540,14 +578,6 @@ export function CommercialPage() {
         </h1>
         <PageCountPill label="Registros comerciais" count={(recs.data?.records ?? []).length} />
       </div>
-      {tgMsg && (
-        <div className={`page-toast ${tgMsg.ok ? "page-toast--ok" : "page-toast--err"}`} role="alert">
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setTgMsg(null)}>
-            ×
-          </button>
-          {tgMsg.text}
-        </div>
-      )}
       <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 16 }}>
         <button type="button" className={mainTab === "resumo" ? "active" : ""} onClick={() => setMainTab("resumo")}>
           Resumo
@@ -866,6 +896,81 @@ export function CommercialPage() {
           </div>
         </div>
       )}
+
+      <div className="card">
+        <h2>Comparativo do total (evolução mensal)</h2>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
+          Total de clientes em todos os registos mensais, mês a mês. O mês seleccionado no filtro abaixo destaca-se na tabela.
+        </p>
+        {totalsHist.isError && <div className="msg msg--err">{(totalsHist.error as Error).message}</div>}
+        {totalsHist.isLoading ? (
+          <p style={{ color: "var(--muted)" }}>A carregar histórico…</p>
+        ) : (
+          <>
+            <div className="report-chart-grid" style={{ marginTop: 12 }}>
+              <div className="report-chart-cell" style={{ minHeight: 280 }}>
+                <h3 style={{ marginTop: 0, fontSize: 13 }}>Total por mês</h3>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={totalsChartData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="month" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      formatter={(v: number) => [v.toLocaleString("pt-PT"), "Clientes"]}
+                      labelFormatter={(l) => String(l)}
+                    />
+                    <Bar dataKey="total" name="Total clientes" fill="#58a6ff" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="report-chart-cell" style={{ minHeight: 280 }}>
+                <h3 style={{ marginTop: 0, fontSize: 13 }}>Variação mês a mês</h3>
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={totalsChartData.slice(1)} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="month" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip formatter={(v: number) => [v.toLocaleString("pt-PT"), "Δ clientes"]} />
+                    <Legend />
+                    <Line type="monotone" dataKey="delta" name="Variação" stroke="#3fb950" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table style={{ fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th>Mês</th>
+                    <th className="mono">Total clientes</th>
+                    <th className="mono">Variação</th>
+                    <th className="mono">Variação %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...(totalsHist.data?.months ?? [])].reverse().map((r) => (
+                    <tr key={r.year_month} style={r.year_month === month ? { background: "rgba(88,166,255,0.08)" } : undefined}>
+                      <td>
+                        {formatYearMonthPt(r.year_month)}
+                        {r.year_month === month ? " (seleccionado)" : ""}
+                      </td>
+                      <td className="mono">{r.total.toLocaleString("pt-PT")}</td>
+                      <td className="mono" style={{ color: r.delta > 0 ? "var(--ok)" : r.delta < 0 ? "var(--err)" : "var(--muted)" }}>
+                        {r.delta > 0 ? `+${r.delta}` : r.delta}
+                      </td>
+                      <td className="mono">
+                        {r.delta_percent != null && Number.isFinite(r.delta_percent)
+                          ? `${r.delta_percent >= 0 ? "+" : ""}${r.delta_percent.toFixed(1)}%`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="card">
         <h2>Agregados</h2>

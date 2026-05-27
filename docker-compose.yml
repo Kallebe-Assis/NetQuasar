@@ -22,6 +22,7 @@ services:
       # NETQUASAR_DATABASE_URL vem só do env_file (.env na raiz), não da shell do Windows
       # (evita que `docker compose` substitua ${...} com um valor antigo na sessão e parta o :8080).
       NETQUASAR_HTTP_ADDR: ":8080"
+      NETQUASAR_HTTP_WRITE_TIMEOUT: "20m"
       NETQUASAR_EMBEDDED_UI: "true"
       NETQUASAR_DB_HOST: postgres
       NETQUASAR_DB_PORT: "5432"

@@ -63,9 +63,16 @@ func SnapshotComputed(summaryJSON, ponsJSON []byte) map[string]any {
 	}
 	tot, on, off := 0, 0, 0
 	for _, m := range ponsMaps {
+		oltifderive.NormalizePonONUCounts(m)
 		tot += pickInt(m, "onu_total", "total_onu", "onus", "onus_total", "onu_count")
 		on += pickInt(m, "onu_online", "online", "onu_ok")
 		off += pickInt(m, "onu_offline", "offline", "onu_down")
+	}
+	if on+off > tot && tot > 0 {
+		off = tot - on
+		if off < 0 {
+			off = 0
+		}
 	}
 	if tot > 0 || on > 0 || off > 0 {
 		out["onu_total_sum"] = tot
@@ -155,20 +162,26 @@ func PonRows(ponsJSON []byte) []map[string]any {
 	ponsMaps = oltifderive.DedupePonMaps(ponsMaps)
 	var out []map[string]any
 	for i, m := range ponsMaps {
+		oltifderive.NormalizePonONUCounts(m)
 		id := firstStr(m, "pon", "pon_id", "id", "name", "if_index")
 		name := firstStr(m, "name", "description", "descr", "pon")
 		if name == "" {
 			name = id
 		}
 		row := map[string]any{
-			"_index":       i,
-			"id":           id,
-			"name":         name,
-			"tx_dbm":       nil,
-			"onu_total":    pickInt(m, "onu_total", "total_onu", "onus", "onus_total", "onu_count"),
-			"onu_online":   pickInt(m, "onu_online", "online", "onu_ok"),
-			"onu_offline":  pickInt(m, "onu_offline", "offline", "onu_down"),
-			"status":       firstStr(m, "status", "state", "oper_status"),
+			"_index":      i,
+			"id":          id,
+			"name":        name,
+			"rx_dbm":      nil,
+			"tx_dbm":      nil,
+			"onu_total":   pickInt(m, "onu_total", "total_onu", "onus", "onus_total", "onu_count"),
+			"onu_online":  pickInt(m, "onu_online", "online", "onu_ok"),
+			"onu_offline": pickInt(m, "onu_offline", "offline", "onu_down"),
+			"status":      firstStr(m, "status", "state", "oper_status"),
+		}
+		oltifderive.NormalizePonONUCounts(row)
+		if f, ok := firstFloat(m, "rx_dbm", "rx", "pon_rx", "optical_rx"); ok {
+			row["rx_dbm"] = f
 		}
 		if f, ok := firstFloat(m, "tx_dbm", "tx", "pon_tx", "optical_tx"); ok {
 			row["tx_dbm"] = f

@@ -281,16 +281,7 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		if tab, ok := payload["interface_table"].([]map[string]any); ok {
 			oltifderive.AnnotateInterfaceTable(tab)
 		}
-		if !strings.Contains(strings.ToLower(strings.TrimSpace(devBrand)), "zte") {
-			parsedVars := walkJSONToSNMPVars(b)
-			ifRows := snmpifparse.BuildIfTable(parsedVars)
-			optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, parsedVars)
-			derivedPons, sumPatch := oltifderive.DeriveFromIfRows(ifRows, optMap)
-			sumPatch["if_mib_derived_at"] = time.Now().UTC().Format(time.RFC3339)
-			if err := upsertOltSnapshotAfterInterfaceRefresh(ctx, s.DB(), id, derivedPons, sumPatch); err != nil {
-				s.Log.Warn().Err(err).Str("device", id.String()).Msg("olt_snapshots IF-MIB merge")
-			}
-		}
+		// Snapshot OLT/PON só via refresh manual (perfil em Definições).
 	}
 	if isMikrotik && s.DB() != nil {
 		parsedVars := walkJSONToSNMPVars(b)

@@ -128,9 +128,55 @@ func loadOnuZeroStreaks(prevSummary map[string]any) map[string]int {
 	return out
 }
 
+// PreserveMissingPonRows repõe PONs do snapshot anterior ausentes na leitura nova (walk truncado/incompleto).
+func PreserveMissingPonRows(prevPons, newPons []map[string]any, collectionIncomplete bool) []map[string]any {
+	dedup := DedupePonMaps(newPons)
+	if !collectionIncomplete {
+		return dedup
+	}
+	idx := map[string]map[string]any{}
+	var order []string
+	for _, row := range dedup {
+		k := StablePonRowKey(row)
+		if k == "" {
+			continue
+		}
+		idx[k] = row
+		order = append(order, k)
+	}
+	for _, prow := range prevPons {
+		k := StablePonRowKey(prow)
+		if k == "" {
+			continue
+		}
+		if _, ok := idx[k]; ok {
+			continue
+		}
+		carry := cloneMap(prow)
+		carry["pon_row_carried_forward"] = true
+		idx[k] = carry
+		order = append(order, k)
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, k := range order {
+		row := idx[k]
+		if k != "" {
+			row["id"] = k
+		}
+		NormalizePonONUCounts(row)
+		out = append(out, row)
+	}
+	return out
+}
+
+func ponRowIsVsolSNMP(row map[string]any) bool {
+	return strings.TrimSpace(fmt.Sprint(row["status"])) == "vsol_snmp"
+}
+
 // StabilizePonSnapshotRows devolve cópias das linhas de `newPons` onde uma leitura 0 duvidosa
 // (snapshot anterior alto) mantém temporariamente a contagem anterior até segunda coleta igual.
-func StabilizePonSnapshotRows(prevPons []map[string]any, newPons []map[string]any, prevSummary map[string]any) ([]map[string]any, map[string]any) {
+func StabilizePonSnapshotRows(prevPons []map[string]any, newPons []map[string]any, prevSummary map[string]any, collectionIncomplete bool) ([]map[string]any, map[string]any) {
+	newPons = PreserveMissingPonRows(prevPons, newPons, collectionIncomplete)
 	streak := loadOnuZeroStreaks(prevSummary)
 
 	prevOnlineByKey := map[string]float64{}
@@ -165,7 +211,10 @@ func StabilizePonSnapshotRows(prevPons []map[string]any, newPons []map[string]an
 		suspiciousZero := prevOn >= float64(MinPrevOnlineToDoubtZeroRead) && cur <= 0.5 && prevOn > 0.5
 		delete(rowCopy, "onu_online_snap_held")
 
-		if suspiciousZero {
+		if suspiciousZero && ponRowIsVsolSNMP(row) && collectionIncomplete {
+			// Leitura VSOL incompleta: não forçar 0 offline nem aceitar queda por truncamento.
+			streak[k] = 0
+		} else if suspiciousZero {
 			streak[k]++
 			if streak[k] < SuspiciousZeroReadsBeforeAccept {
 				on := int(prevOn + 0.5)

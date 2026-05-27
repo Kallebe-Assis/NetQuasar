@@ -214,8 +214,9 @@ func TestIntegrationAPI_FullStack(t *testing.T) {
 		if len(brands) < 3 {
 			t.Fatalf("esperava várias marcas, veio %+v", m)
 		}
-		hc.slurp(hc.do(http.MethodGet, "/settings/olt-vendors/ZTE", nil), http.StatusOK)
-		hc.slurp(hc.do(http.MethodPatch, "/settings/olt-vendors/ZTE",
+		hc.slurp(hc.do(http.MethodGet, "/settings/olt-vendors/catalog", nil), http.StatusOK)
+		hc.slurp(hc.do(http.MethodGet, "/settings/olt-vendors/ZTE/models", nil), http.StatusOK)
+		hc.slurp(hc.do(http.MethodPatch, "/settings/olt-vendors/ZTE/models/Padr%C3%A3o",
 			strings.NewReader(`{"onu_online_oid":"1.3.6.1.4.1.3902.1012.3.1.1.1"}`)), http.StatusOK)
 	})
 

@@ -12,12 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
+	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 	"github.com/rs/zerolog"
 )
 
 const alertTypeUptimeRestartLow = "uptime_restart_low"
 
-// SnmpUptimeMinutes devolve minutos de uptime a partir de sysUpTime (centésimos de segundo) nas vars SNMP.
+// SnmpUptimeMinutes devolve minutos de uptime (sysUpTime em ticks ou texto VSOL).
 func SnmpUptimeMinutes(sn probing.SNMPGetResult) (minutes float64, ok bool) {
 	for _, v := range sn.Vars {
 		oid := strings.Trim(strings.TrimSpace(v.OID), ".")
@@ -25,7 +26,13 @@ func SnmpUptimeMinutes(sn probing.SNMPGetResult) (minutes float64, ok bool) {
 		if val == "" || strings.Contains(strings.ToLower(val), "nosuch") {
 			continue
 		}
+		if vsolparse.IsVsolUptimeOID(oid) {
+			return vsolparse.UptimeMinutesFromValue(val)
+		}
 		if strings.HasSuffix(oid, "1.3.6.1.2.1.1.3.0") || oid == "1.3.6.1.2.1.1.3.0" {
+			if m, ok := vsolparse.UptimeMinutesFromValue(val); ok {
+				return m, true
+			}
 			ticks, err := parseUintFlexible(val)
 			if err != nil {
 				return 0, false

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmetrics"
+	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
 
 func snmpVarsMapFromSNMPBlock(block map[string]any) map[string]string {
@@ -352,7 +353,17 @@ func extractExtendedMetrics(vars map[string]string, prof metricsProfile) (cpu *f
 		}
 	}
 	// Não usamos hrMemorySize como "used" porque ele representa capacidade total.
-	uptime = formatSysUpTimeTicks(uptimeTicks)
+	uptime = vsolparse.FormatUptimeDisplay(uptimeTicks)
+	if uptime == "" {
+		for oid, val := range vars {
+			if vsolparse.IsVsolUptimeOID(oid) {
+				if u := vsolparse.FormatUptimeDisplay(val); u != "" {
+					uptime = u
+					break
+				}
+			}
+		}
+	}
 	if uptime == "" {
 		uptime = "—"
 	}

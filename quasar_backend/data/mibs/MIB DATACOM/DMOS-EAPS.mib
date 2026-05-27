@@ -1,0 +1,205 @@
+DMOS-EAPS DEFINITIONS ::= BEGIN
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE,
+    Integer32, Unsigned32, Counter32, Counter64,
+    Gauge32, IpAddress
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION, RowStatus, DateAndTime,
+    TruthValue
+        FROM SNMPv2-TC
+    datacomDevicesMIBs
+        FROM DATACOM-SMI
+;
+
+dmosEapsMIB MODULE-IDENTITY
+    LAST-UPDATED "202211040000Z"
+    ORGANIZATION "DATACOM"
+    CONTACT-INFO
+                 "DATACOM
+
+                  Postal: DATACOM
+                      Rua America, 1000
+                      Eldorado do Sul, RS
+                      CEP 92990-000
+                              BRAZIL
+
+                  Tel:+55(51)3933 3000
+                  Fax:+55(51)3933 3003
+
+                  E-mail: datacom@datacom.com.br "
+    DESCRIPTION "This module contains the YANG definitions for EAPS protocol."
+    REVISION "202211040000Z"
+    DESCRIPTION "Initial revision."
+    ::= { datacomDevicesMIBs 17 }
+
+UnsignedByte ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "d"
+    STATUS      current
+    DESCRIPTION "xs:unsignedByte"
+    SYNTAX      Unsigned32 (0 .. 255)
+
+UnsignedShort ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "d"
+    STATUS      current
+    DESCRIPTION "xs:unsignedShort"
+    SYNTAX      Unsigned32 (0 .. 65535)
+
+ConfdString ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs: and confd: types mapped to strings"
+    SYNTAX      OCTET STRING
+
+String ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs:string"
+    SYNTAX      OCTET STRING
+
+Port-state ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "Port current state, where Up and Down refer
+                 to port link status and Enable and Blocked refer to the port traffic
+                 block state."
+    SYNTAX      INTEGER {up-enabled(0),up-blocked(1),down-enabled(2),down-blocked(3)}
+
+Fail-action ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION ""
+    SYNTAX      INTEGER {send-alert(0)}
+
+Node-mode ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION "Node mode object, 0 for Master and 1 for Transit."
+    SYNTAX      INTEGER {master(0),transit(1)}
+
+eapsStateTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF EapsStateEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "This table holds all EAPS domain entries with status and current config
+                 information."
+    ::= { dmosEapsMIB 1 }
+
+eapsStateEntry OBJECT-TYPE
+    SYNTAX      EapsStateEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Each entry represents status or current config of their EAPS domain."
+    INDEX { eapsDomainID }
+        ::= { eapsStateTable 1 }
+
+EapsStateEntry ::=
+    SEQUENCE {
+        eapsDomainID UnsignedByte,
+        eapsDomainName String,
+        eapsDomainState INTEGER,
+        eapsDomainMode Node-mode,
+        eapsDomainPrimaryPortState Port-state,
+        eapsDomainSecondaryPortState Port-state,
+        eapsDomainHealthCheckState INTEGER
+    }
+
+eapsDomainID OBJECT-TYPE
+    SYNTAX      UnsignedByte (0 .. 63)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "EAPS configured domain."
+    ::= { eapsStateEntry 1 }
+
+eapsDomainName OBJECT-TYPE
+    SYNTAX      String (SIZE (1 .. 48))
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Current text name configured for EAPS domain. If not configured, this OID will
+                 return 'No such instance currently exists at this OID'."
+    ::= { eapsStateEntry 2 }
+
+eapsDomainState OBJECT-TYPE
+    SYNTAX      INTEGER {idle(0),init(1),complete(2),failed(3),pre-forwarding(4),links-up(5),link-down(6)}
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The current state of the EAPS domain. The possible states are Idle, Init,
+                 Complete, Failed, Pre Forwarding, Links Up and Link Down."
+    ::= { eapsStateEntry 3 }
+
+eapsDomainMode OBJECT-TYPE
+    SYNTAX      Node-mode
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Domain mode current configuration. A ring is allowed to have
+                 a single Master(0) node and multiple Transit(1) nodes."
+    DEFVAL { transit }
+    ::= { eapsStateEntry 4 }
+
+eapsDomainPrimaryPortState OBJECT-TYPE
+    SYNTAX      Port-state
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The state of the domain primary port, where Up and Down refer
+                 to port link status and Enable and Blocked refer to the port traffic
+                 block state."
+    ::= { eapsStateEntry 5 }
+
+eapsDomainSecondaryPortState OBJECT-TYPE
+    SYNTAX      Port-state
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The state of the domain secondary port, where Up and Down refer
+                 to port link status and Enable and Blocked refer to the port traffic
+                 block state."
+    ::= { eapsStateEntry 6 }
+
+eapsDomainHealthCheckState OBJECT-TYPE
+    SYNTAX      INTEGER {ok(0),failed(1)}
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Holds the health check state of the domain, wich can be OK or Failed. It'll return
+                 'No such instance currently exists at this OID' until it assumes Ok or Failed state"
+    ::= { eapsStateEntry 7 }
+
+eapsConfigTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF EapsConfigEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Table that holds all entries for reading current configuration of EAPS domains."
+    ::= { dmosEapsMIB 2 }
+
+eapsConfigEntry OBJECT-TYPE
+    SYNTAX      EapsConfigEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Each entry represents current configuration of their EAPS domain. For read only
+                 purposes."
+    INDEX { eapsCfgDomainID }
+        ::= { eapsConfigTable 1 }
+
+EapsConfigEntry ::=
+    SEQUENCE {
+        eapsCfgDomainID UnsignedByte,
+        eapsCfgDomainPrimaryPort String,
+        eapsCfgDomainSecondaryPort String
+    }
+
+eapsCfgDomainID OBJECT-TYPE
+    SYNTAX      UnsignedByte (0 .. 63)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "EAPS configured domain."
+    ::= { eapsConfigEntry 1 }
+
+eapsCfgDomainPrimaryPort OBJECT-TYPE
+    SYNTAX      String
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The primary port configured in the domain."
+    ::= { eapsConfigEntry 2 }
+
+eapsCfgDomainSecondaryPort OBJECT-TYPE
+    SYNTAX      String
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The secondary port configured in the domain."
+    ::= { eapsConfigEntry 3 }
+
+END

@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpcatalog"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 )
 
@@ -733,6 +734,7 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.IP = ip
+	prevPing := d.PingEnabled
 	prevTelemetry := d.TelemetryEnabled
 	mergeDeviceJSON(&d, body)
 	if strings.TrimSpace(d.NetworkStatus) == "" {
@@ -771,6 +773,9 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.TelemetryEnabled && !prevTelemetry {
 		s.scheduleSNMPDiscovery(id)
+	}
+	if prevPing && !d.PingEnabled {
+		monitorworker.ClosePingUnreachableOnMonitoringDisabled(r.Context(), s.DB(), &s.Log, id)
 	}
 	s.appendAuditLog(r.Context(), "device", id.String(), "patch", actorFromRequest(r), nil, d)
 	s.getDevice(w, r)

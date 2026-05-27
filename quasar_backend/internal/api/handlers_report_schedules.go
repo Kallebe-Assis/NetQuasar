@@ -17,17 +17,18 @@ import (
 )
 
 func (s *Server) ensureReportSchedulers() {
-	if s.WorkerCtx == nil {
-		return
-	}
 	s.automationReportsOnce.Do(func() {
-		go s.runReportSchedulersLoop(s.WorkerCtx)
+		ctx := s.WorkerCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go s.runReportSchedulersLoop(ctx)
 	})
 }
 
 func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 	l := s.Log.With().Str("component", "report_schedulers").Logger()
-	runHourly := func(trigger string) {
+	runScheduled := func(trigger string) {
 		l.Debug().Str("trigger", trigger).Msg("verificação relatórios agendados (alertas/comercial)")
 		s.tryScheduledAlertsDigest(ctx, &l)
 		s.tryScheduledCommercialReport(ctx, &l)
@@ -35,9 +36,9 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 	corr := time.NewTicker(5 * time.Minute)
 	defer corr.Stop()
 	alertcorrelation.Reconcile(ctx, s.DB(), &l)
-	runHourly("startup")
-	hourly := time.NewTicker(time.Hour)
-	defer hourly.Stop()
+	runScheduled("startup")
+	minute := time.NewTicker(30 * time.Second)
+	defer minute.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -45,10 +46,21 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 			return
 		case <-corr.C:
 			alertcorrelation.Reconcile(ctx, s.DB(), &l)
-		case <-hourly.C:
-			runHourly("hourly")
+		case <-minute.C:
+			runScheduled("minute")
 		}
 	}
+}
+
+func (s *Server) clearStaleAutomationRunning(ctx context.Context, table string) {
+	pool := s.DB()
+	if pool == nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+		UPDATE `+table+` SET running = false, updated_at = now()
+		WHERE id = 1 AND running = true AND updated_at < now() - interval '30 minutes'
+	`)
 }
 
 func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logger) {
@@ -56,6 +68,7 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 	if pool == nil {
 		return
 	}
+	s.clearStaleAutomationRunning(ctx, "automation_alerts_digest")
 	var en, running, tg, em bool
 	var freq, th, tz, lastKey, emailTo *string
 	var dow *int
@@ -80,7 +93,7 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 	if th != nil {
 		thStr = *th
 	}
-	runKey, due := scheduleutil.DailyWeeklyDue(en, frequency, tzStr, thStr, dow, lastKey, running, time.Now())
+	runKey, due := scheduleutil.DailyWeeklyDue(en, frequency, tzStr, thStr, dow, lastKey, lr, running, time.Now())
 	if !due {
 		return
 	}
@@ -94,14 +107,16 @@ func (s *Server) tryScheduledCommercialReport(ctx context.Context, log *zerolog.
 	if pool == nil {
 		return
 	}
+	s.clearStaleAutomationRunning(ctx, "automation_commercial_report")
 	var en, running, tg, em bool
 	var dom *int
 	var th, tz, lastPeriod, emailTo *string
+	var lr *time.Time
 	err := pool.QueryRow(ctx, `
 		SELECT enabled, day_of_month, time_hhmm, timezone,
-			channel_telegram, channel_email, email_to, last_run_period, running
+			channel_telegram, channel_email, email_to, last_run_period, last_run_at, running
 		FROM automation_commercial_report WHERE id = 1
-	`).Scan(&en, &dom, &th, &tz, &tg, &em, &emailTo, &lastPeriod, &running)
+	`).Scan(&en, &dom, &th, &tz, &tg, &em, &emailTo, &lastPeriod, &lr, &running)
 	if err != nil || !en {
 		return
 	}
@@ -117,7 +132,7 @@ func (s *Server) tryScheduledCommercialReport(ctx context.Context, log *zerolog.
 	if th != nil {
 		thStr = *th
 	}
-	period, due := scheduleutil.MonthlyDue(en, tzStr, thStr, domVal, lastPeriod, running, time.Now())
+	period, due := scheduleutil.MonthlyDue(en, tzStr, thStr, domVal, lastPeriod, lr, running, time.Now())
 	if !due {
 		return
 	}
@@ -127,6 +142,11 @@ func (s *Server) tryScheduledCommercialReport(ctx context.Context, log *zerolog.
 }
 
 func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) error {
+	started := time.Now()
+	trigger := "manual"
+	if actor == "scheduler" {
+		trigger = "scheduled"
+	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
@@ -139,6 +159,10 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
+		sum := s.alertsDigestSummary(ctx)
+		sum["run_key"] = runKey
+		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false,
+			"Não iniciado (desativado, já em execução ou bloqueado)", nil, sum, runKey)
 		return nil
 	}
 	defer func() {
@@ -153,6 +177,9 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 	subject, body, err := s.composeAlertsDigest(ctx)
 	if err != nil {
 		s.setAlertsDigestStatus(ctx, "failed", strPtr(err.Error()), runKey)
+		sum := s.alertsDigestSummary(ctx)
+		sum["run_key"] = runKey
+		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false, "Falha ao compor resumo", err, sum, runKey)
 		return err
 	}
 	var sendErr error
@@ -180,9 +207,16 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 	}
 	if sendErr != nil {
 		s.setAlertsDigestStatus(ctx, "failed", strPtr(sendErr.Error()), runKey)
+		sum := s.alertsDigestSummary(ctx)
+		sum["run_key"] = runKey
+		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false, "Falha no envio", sendErr, sum, runKey)
 		return sendErr
 	}
 	s.setAlertsDigestStatus(ctx, "completed", nil, runKey)
+	sum := s.alertsDigestSummary(ctx)
+	sum["run_key"] = runKey
+	s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, true,
+		fmt.Sprintf("Resumo enviado (%s)", subject), nil, sum, runKey)
 	s.appendAuditLog(ctx, "automation_alerts_digest", "1", "run", actor, nil, map[string]any{"run_key": runKey})
 	return nil
 }
@@ -193,8 +227,6 @@ func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string,
 		return "", "", fmt.Errorf("pool nil")
 	}
 	var openTotal, openCrit, openWarn, openInfo int64
-	var closed24h, opened24h int64
-	var openIncidents int64
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM alert_instances WHERE closed_at IS NULL`).Scan(&openTotal)
 	_ = pool.QueryRow(ctx, `
 		SELECT
@@ -203,66 +235,50 @@ func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string,
 			COUNT(*) FILTER (WHERE severity = 'info')
 		FROM alert_instances WHERE closed_at IS NULL
 	`).Scan(&openCrit, &openWarn, &openInfo)
-	_ = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM alert_instances
-		WHERE closed_at IS NOT NULL AND closed_at >= now() - interval '24 hours'
-	`).Scan(&closed24h)
-	_ = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM alert_instances
-		WHERE active_since >= now() - interval '24 hours'
-	`).Scan(&opened24h)
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM alert_incidents WHERE status = 'open'`).Scan(&openIncidents)
 
 	var sb strings.Builder
-	now := time.Now().Format("02/01/2006 15:04")
-	subject = fmt.Sprintf("NetQuasar — Resumo de alertas (%s)", now)
-	sb.WriteString("NetQuasar — Resumo de alertas\n")
-	sb.WriteString("Gerado em: ")
-	sb.WriteString(now)
-	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("Alertas abertos: %d (críticos %d · aviso %d · info %d)\n", openTotal, openCrit, openWarn, openInfo))
-	sb.WriteString(fmt.Sprintf("Incidentes correlacionados abertos: %d\n", openIncidents))
-	sb.WriteString(fmt.Sprintf("Abertos nas últimas 24 h: %d · Resolvidos nas últimas 24 h: %d\n\n", opened24h, closed24h))
+	subject = "Resumo de alertas"
+	sb.WriteString(fmt.Sprintf("Alertas abertos: %d\n", openTotal))
+	if openCrit+openWarn+openInfo > 0 {
+		sb.WriteString(fmt.Sprintf("(críticos %d · aviso %d · info %d)\n", openCrit, openWarn, openInfo))
+	}
+	sb.WriteString("\n")
 
-	rows, err := pool.Query(ctx, `
-		SELECT alert_type, COUNT(*)::bigint
-		FROM alert_instances WHERE closed_at IS NULL
-		GROUP BY alert_type ORDER BY COUNT(*) DESC LIMIT 8
+	listRows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(trim(device_name), ''), '—'),
+			COALESCE(NULLIF(trim(ip), ''), '—'), message
+		FROM alert_instances
+		WHERE closed_at IS NULL
+		ORDER BY
+			CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+			active_since DESC
+		LIMIT 80
 	`)
 	if err == nil {
-		sb.WriteString("Por tipo (abertos):\n")
-		for rows.Next() {
-			var typ string
-			var n int64
-			if rows.Scan(&typ, &n) == nil {
-				sb.WriteString(fmt.Sprintf("  • %s: %d\n", typ, n))
+		for listRows.Next() {
+			var name, ipAddr, msg string
+			if listRows.Scan(&name, &ipAddr, &msg) == nil {
+				detail := strings.TrimSpace(msg)
+				if detail == "" {
+					detail = "Alerta"
+				}
+				if len(detail) > 160 {
+					detail = detail[:157] + "..."
+				}
+				sb.WriteString(fmt.Sprintf("%s (%s) - %s\n", name, ipAddr, detail))
 			}
 		}
-		rows.Close()
+		listRows.Close()
 	}
-
-	incRows, err := pool.Query(ctx, `
-		SELECT title, root_cause,
-			(SELECT COUNT(*) FROM alert_incident_alerts a WHERE a.incident_id = i.id) AS n
-		FROM alert_incidents i WHERE status = 'open'
-		ORDER BY opened_at DESC LIMIT 5
-	`)
-	if err == nil {
-		sb.WriteString("\nIncidentes em destaque:\n")
-		for incRows.Next() {
-			var title, cause string
-			var n int64
-			if incRows.Scan(&title, &cause, &n) == nil {
-				sb.WriteString(fmt.Sprintf("  • %s [%s] — %d alerta(s)\n", title, cause, n))
-			}
-		}
-		incRows.Close()
-	}
-	sb.WriteString("\n— Enviado automaticamente pelo NetQuasar\n")
-	return subject, sb.String(), nil
+	return subject, strings.TrimSpace(sb.String()), nil
 }
 
 func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor string) error {
+	started := time.Now()
+	trigger := "manual"
+	if actor == "scheduler" {
+		trigger = "scheduled"
+	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
@@ -275,6 +291,9 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
+		sum := s.commercialReportSummary(ctx, period)
+		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false,
+			"Não iniciado (desativado, já em execução ou bloqueado)", nil, sum, period)
 		return nil
 	}
 	defer func() {
@@ -289,6 +308,8 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 	text, err := s.commercialTelegramCompose(ctx, period, true)
 	if err != nil {
 		s.setCommercialReportStatus(ctx, "failed", strPtr(err.Error()), period)
+		sum := s.commercialReportSummary(ctx, period)
+		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false, "Falha ao compor relatório", err, sum, period)
 		return err
 	}
 	var sendErr error
@@ -319,9 +340,14 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 	}
 	if sendErr != nil {
 		s.setCommercialReportStatus(ctx, "failed", strPtr(sendErr.Error()), period)
+		sum := s.commercialReportSummary(ctx, period)
+		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false, "Falha no envio", sendErr, sum, period)
 		return sendErr
 	}
 	s.setCommercialReportStatus(ctx, "completed", nil, period)
+	sum := s.commercialReportSummary(ctx, period)
+	s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, true,
+		fmt.Sprintf("Base comercial %s enviada", period), nil, sum, period)
 	s.appendAuditLog(ctx, "automation_commercial_report", "1", "run", actor, nil, map[string]any{"period": period})
 	return nil
 }
@@ -538,6 +564,15 @@ func (s *Server) testSMTPSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func schedulePatchResetsLastRun(body map[string]any) bool {
+	for _, k := range []string{"time_hhmm", "timezone", "frequency", "day_of_week", "day_of_month"} {
+		if _, ok := body[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table string, body map[string]any) error {
 	if pool == nil {
 		return fmt.Errorf("pool nil")
@@ -545,6 +580,7 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 	th, _ := body["time_hhmm"].(string)
 	tz, _ := body["timezone"].(string)
 	emailTo, _ := body["email_to"].(string)
+	resetLast := schedulePatchResetsLastRun(body)
 	switch table {
 	case "automation_alerts_digest":
 		freq, _ := body["frequency"].(string)
@@ -563,9 +599,12 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 				channel_telegram = COALESCE($6, channel_telegram),
 				channel_email = COALESCE($7, channel_email),
 				email_to = COALESCE($8, email_to),
+				last_run_key = CASE WHEN $9 THEN NULL ELSE last_run_key END,
+				last_run_at = CASE WHEN $9 THEN NULL ELSE last_run_at END,
+				running = CASE WHEN $9 THEN false ELSE running END,
 				updated_at = now()
 			WHERE id = 1
-		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo))
+		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast)
 		return err
 	default:
 		var dom *int
@@ -582,9 +621,12 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 				channel_telegram = COALESCE($5, channel_telegram),
 				channel_email = COALESCE($6, channel_email),
 				email_to = COALESCE($7, email_to),
+				last_run_period = CASE WHEN $8 THEN NULL ELSE last_run_period END,
+				last_run_at = CASE WHEN $8 THEN NULL ELSE last_run_at END,
+				running = CASE WHEN $8 THEN false ELSE running END,
 				updated_at = now()
 			WHERE id = 1
-		`, boolPtr(body, "enabled"), dom, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo))
+		`, boolPtr(body, "enabled"), dom, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast)
 		return err
 	}
 }

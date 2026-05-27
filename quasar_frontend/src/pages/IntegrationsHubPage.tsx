@@ -8,6 +8,7 @@ import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
 import type { IntegrationSummary } from "../integrations/types";
+import { APP_ROUTES } from "../app/routes";
 
 export function IntegrationsHubPage() {
   const qc = useQueryClient();
@@ -36,7 +37,7 @@ export function IntegrationsHubPage() {
       setNewName("");
       setNewUrl("https://");
       setNewDesc("");
-      nav(`/integrations/${data.slug}/config`);
+      nav(APP_ROUTES.integrationConfig(data.slug));
     },
   });
 
@@ -125,7 +126,7 @@ export function IntegrationsHubPage() {
             </div>
             <div className="row" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
               <Link
-                to={`/integrations/${it.slug}/consulta`}
+                to={APP_ROUTES.integrationConsulta(it.slug)}
                 className="btn btn--primary"
                 style={{ flex: 1, minWidth: 100, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
@@ -133,7 +134,7 @@ export function IntegrationsHubPage() {
               </Link>
               {admin ? (
                 <Link
-                  to={`/integrations/${it.slug}/config`}
+                  to={APP_ROUTES.integrationConfig(it.slug)}
                   className="btn"
                   style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
                   title="Configuração API"

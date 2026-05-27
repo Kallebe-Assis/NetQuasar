@@ -495,6 +495,26 @@ export function DevicesPage() {
     clearReport();
   }, [focusReportId, devices.data?.devices, setSearchParams]);
 
+  const oltModelsCatalog = useQuery({
+    queryKey: ["olt-models-catalog"],
+    queryFn: () => apiFetch<{ catalog: Record<string, string[]> }>("/api/v1/settings/olt-vendors/catalog"),
+    staleTime: 120_000,
+  });
+
+  const oltModelOptions = useMemo(() => {
+    const b = normalizeBrand(form.brand);
+    if (!b) return [];
+    const cat = oltModelsCatalog.data?.catalog ?? {};
+    let list = cat[b] ?? [];
+    if (list.length === 0) {
+      const key = Object.keys(cat).find((k) => k.toLowerCase() === b.toLowerCase());
+      if (key) list = cat[key] ?? [];
+    }
+    const cur = (form.model ?? "").trim();
+    if (cur && !list.includes(cur)) return [cur, ...list];
+    return list;
+  }, [form.brand, form.model, oltModelsCatalog.data]);
+
   const categoryFilterOptions = useMemo(() => {
     const s = new Set<string>();
     for (const d of devices.data?.devices ?? []) {
@@ -692,6 +712,9 @@ export function DevicesPage() {
 
       if (form.telemetry_enabled && !form.ping_enabled && !bridge) {
         throw new Error("Telemetria exige ping ativo no equipamento.");
+      }
+      if (isOlt && !(form.model ?? "").trim()) {
+        throw new Error("Selecione o modelo da OLT (Definições → Perfis OLT para cadastrar modelos).");
       }
 
       const telOn = !!form.telemetry_enabled && !bridge;
@@ -1560,7 +1583,14 @@ export function DevicesPage() {
                   className="select"
                   style={{ width: "100%" }}
                   value={normalizeBrand(form.brand)}
-                  onChange={(e) => setForm({ ...form, brand: e.target.value.trim() === "" ? null : e.target.value })}
+                  onChange={(e) => {
+                    const brand = e.target.value.trim() === "" ? null : e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      brand,
+                      model: (f.category ?? "").trim() === "OLT" ? null : f.model,
+                    }));
+                  }}
                 >
                   <option value="">—</option>
                   {DEVICE_BRANDS.map((b) => (
@@ -1570,7 +1600,41 @@ export function DevicesPage() {
               </div>
               <div className="field">
                 <label>Modelo</label>
-                <input className="input" placeholder="Modelo" style={{ width: "100%" }} value={form.model ?? ""} onChange={(e) => setForm({ ...form, model: e.target.value })} />
+                {formIsOlt ? (
+                  <>
+                    <select
+                      className="select"
+                      style={{ width: "100%" }}
+                      value={form.model ?? ""}
+                      disabled={!normalizeBrand(form.brand)}
+                      onChange={(e) => setForm({ ...form, model: e.target.value.trim() === "" ? null : e.target.value })}
+                    >
+                      <option value="">
+                        {oltModelOptions.length
+                          ? "— escolher modelo —"
+                          : "Cadastre modelos em Definições → Perfis OLT"}
+                      </option>
+                      {oltModelOptions.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                    {formIsOlt && normalizeBrand(form.brand) && oltModelOptions.length === 0 && !oltModelsCatalog.isLoading && (
+                      <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                        Nenhum modelo para esta marca. Crie em <strong>Definições → Perfis OLT</strong>.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <input
+                    className="input"
+                    placeholder="Modelo"
+                    style={{ width: "100%" }}
+                    value={form.model ?? ""}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  />
+                )}
               </div>
               <div className="field">
                 <label>MAC</label>

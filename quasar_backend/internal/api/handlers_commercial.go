@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -308,4 +309,70 @@ func (s *Server) commercialAggregates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total_clients": total, "month": month})
+}
+
+// commercialTotalsHistory devolve totais agregados por mês (YYYY-MM) para gráficos de evolução.
+func (s *Server) commercialTotalsHistory(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("months"))
+	if limit <= 0 || limit > 60 {
+		limit = 18
+	}
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT year_month, COALESCE(SUM(client_count), 0)::bigint AS total
+		FROM commercial_monthly_records
+		GROUP BY year_month
+		ORDER BY year_month DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer rows.Close()
+	type row struct {
+		month string
+		total int64
+	}
+	var raw []row
+	for rows.Next() {
+		var ym string
+		var total int64
+		if err := rows.Scan(&ym, &total); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		raw = append(raw, row{month: ym, total: total})
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	// Ordem cronológica ascendente para gráficos.
+	for i, j := 0, len(raw)-1; i < j; i, j = i+1, j-1 {
+		raw[i], raw[j] = raw[j], raw[i]
+	}
+	out := make([]map[string]any, 0, len(raw))
+	var prev int64
+	for i, r := range raw {
+		delta := int64(0)
+		var deltaPct *float64
+		if i > 0 {
+			delta = r.total - prev
+			if prev > 0 {
+				p := float64(delta) / float64(prev) * 100
+				deltaPct = &p
+			}
+		}
+		item := map[string]any{
+			"year_month": r.month,
+			"total":      r.total,
+			"delta":      delta,
+		}
+		if deltaPct != nil {
+			item["delta_percent"] = *deltaPct
+		}
+		out = append(out, item)
+		prev = r.total
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"months": out})
 }

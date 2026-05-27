@@ -1,0 +1,206 @@
+DMOS-ERPS-MIB DEFINITIONS ::= BEGIN
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE,
+    Integer32, Unsigned32, Counter32, Counter64,
+    Gauge32, IpAddress
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION, RowStatus, DateAndTime,
+    TruthValue
+        FROM SNMPv2-TC
+    datacomDevicesMIBs
+        FROM DATACOM-SMI
+;
+
+dmosErpsMIB MODULE-IDENTITY
+    LAST-UPDATED "202211070000Z"
+    ORGANIZATION "DATACOM"
+    CONTACT-INFO
+                 "DATACOM
+
+                  Postal: DATACOM
+                      Rua America, 1000
+                      Eldorado do Sul, RS
+                      CEP 92990-000
+                              BRAZIL
+
+                  Tel:+55(51)3933 3000
+                  Fax:+55(51)3933 3003
+
+                  E-mail: datacom@datacom.com.br "
+    DESCRIPTION "This module contains the YANG definitions for ERPS protocol status."
+    REVISION "202211070000Z"
+    DESCRIPTION "Initial revision."
+    ::= { datacomDevicesMIBs 16 }
+
+ConfdString ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs: and confd: types mapped to strings"
+    SYNTAX      OCTET STRING
+
+String ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1t"
+    STATUS      current
+    DESCRIPTION "xs:string"
+    SYNTAX      OCTET STRING
+
+Erps-port-state ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION ""
+    SYNTAX      INTEGER {unknown(0),forward(1),blocked(2),data-Blocked(3),control-Channel-Blocked(4)}
+
+Erps-ring-status ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION ""
+    SYNTAX      INTEGER {init(0),idle(1),protection(2),manualSwitch(3),forcedSwitch(4),pending(5),unknown(6)}
+
+Erps-yes-or-no ::= TEXTUAL-CONVENTION
+    STATUS      current
+    DESCRIPTION ""
+    SYNTAX      INTEGER {yes(0),no(1)}
+
+erpsStateTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF ErpsStateEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Display ERPS rings information."
+    ::= { dmosErpsMIB 1 }
+
+erpsStateEntry OBJECT-TYPE
+    SYNTAX      ErpsStateEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "Each entry represents one ERPS ring, with unique name + ID combination."
+    INDEX { erpsRingId, erpsRingControlVlan }
+        ::= { erpsStateTable 1 }
+
+ErpsStateEntry ::=
+    SEQUENCE {
+        erpsRingId Integer32,
+        erpsRingControlVlan Unsigned32,
+        erpsRingName String,
+        erpsRingType INTEGER,
+        erpsRingParentRing String,
+        erpsRingState Erps-ring-status,
+        erpsRingPort0 String,
+        erpsRingPort0RplRole INTEGER,
+        erpsRingPort0LocalFailure Erps-yes-or-no,
+        erpsRingPort0State Erps-port-state,
+        erpsRingPort1 String,
+        erpsRingPort1RplRole INTEGER,
+        erpsRingPort1LocalFailure Erps-yes-or-no,
+        erpsRingPort1State Erps-port-state
+    }
+
+erpsRingId OBJECT-TYPE
+    SYNTAX      Integer32 (1 .. 239)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The ERPS ring identifier"
+    ::= { erpsStateEntry 1 }
+
+erpsRingControlVlan OBJECT-TYPE
+    SYNTAX      Unsigned32 (1 .. 4094)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The VLAN ID used for ERPS control packets, in this ring instance."
+    ::= { erpsStateEntry 2 }
+
+erpsRingName OBJECT-TYPE
+    SYNTAX      String (SIZE (1 .. 48))
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The textual name for this ERPS ring instance, according to
+                 the network manager's choice"
+    ::= { erpsStateEntry 3 }
+
+erpsRingType OBJECT-TYPE
+    SYNTAX      INTEGER {major-ring(0),sub-ring(1)}
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Ring Type of this instance. Possible types are Major-ring and Sub-ring."
+    ::= { erpsStateEntry 4 }
+
+erpsRingParentRing OBJECT-TYPE
+    SYNTAX      String (SIZE (1 .. 48))
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The parent-ring name for this ring instance. This information is available only
+                 when ring-type parameter is set to sub-ring. In major-rings it'll return
+                 'No such instance currently exists at this OID'."
+    ::= { erpsStateEntry 5 }
+
+erpsRingState OBJECT-TYPE
+    SYNTAX      Erps-ring-status
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The current state of the ring instance. The possible states are Init(0),
+                 Idle(1), Protection(2), ManualSwitch(3), ForcedSwitch(4), Pending(5) and Unknown(6)."
+    ::= { erpsStateEntry 6 }
+
+erpsRingPort0 OBJECT-TYPE
+    SYNTAX      String
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The first ring instance's port."
+    ::= { erpsStateEntry 7 }
+
+erpsRingPort0RplRole OBJECT-TYPE
+    SYNTAX      INTEGER {none(0),owner(1),neighbor(2)}
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The RPL role of the first ring instance's port. Possible values are
+                 none, owner and neighbor."
+    ::= { erpsStateEntry 8 }
+
+erpsRingPort0LocalFailure OBJECT-TYPE
+    SYNTAX      Erps-yes-or-no
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Inform if the first port has a local failure. Possible values are Yes(0) and No(1)."
+    ::= { erpsStateEntry 9 }
+
+erpsRingPort0State OBJECT-TYPE
+    SYNTAX      Erps-port-state
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The state of the first port. Possible values are Unknown(0), Forward(1), Blocked(2),
+                 Data-Blocked(3) and Control-Channel-Blocked(4)."
+    ::= { erpsStateEntry 10 }
+
+erpsRingPort1 OBJECT-TYPE
+    SYNTAX      String
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The second ring instance's port."
+    ::= { erpsStateEntry 11 }
+
+erpsRingPort1RplRole OBJECT-TYPE
+    SYNTAX      INTEGER {none(0),owner(1),neighbor(2)}
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The RPL role of the second ring instance's port. Possible values are
+                owner, neighbor, and none. It'll return 'No such instance currently exists at this
+                OID' on sub-rings interconnection nodes with virtual-channel configuration."
+    ::= { erpsStateEntry 12 }
+
+erpsRingPort1LocalFailure OBJECT-TYPE
+    SYNTAX      Erps-yes-or-no
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "Inform if the second port has a local failure. Possible values are Yes(0) and
+                 No(1). It'll return 'No such instance currently exists at this OID' on sub-rings
+                 interconnection nodes with virtual-channel configuration."
+    ::= { erpsStateEntry 13 }
+
+erpsRingPort1State OBJECT-TYPE
+    SYNTAX      Erps-port-state
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "The state of the second port. Possible values are Unknown(0), Forward(1), Blocked(2),
+                 Data-Blocked(3) and Control-Channel-Blocked(4). It'll return 'No such instance
+                 currently exists at this OID' on sub-rings interconnection nodes with
+                 virtual-channel configuration."
+    ::= { erpsStateEntry 14 }
+
+END

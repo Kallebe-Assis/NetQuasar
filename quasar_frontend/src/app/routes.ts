@@ -1,0 +1,40 @@
+/** Rotas da SPA — única fonte para menu e AppRouter. */
+export const APP_ROUTES = {
+  clientSetup: "/client-setup",
+  configSetup: "/config-setup",
+  login: "/login",
+  dashboard: "/dashboard",
+  monitoring: "/monitoring",
+  realtime: "/realtime",
+  integrations: "/integrations",
+  integrationConsulta: (slug: string) => `/integrations/${encodeURIComponent(slug)}/consulta`,
+  integrationConfig: (slug: string) => `/integrations/${encodeURIComponent(slug)}/config`,
+  pops: "/pops",
+  devices: "/devices",
+  commercial: "/commercial",
+  alerts: "/alerts",
+  map: "/map",
+  tools: "/tools",
+  olt: "/olt",
+  mikrotik: "/mikrotik",
+  events: "/events",
+  settings: "/settings",
+} as const;
+
+/** URLs antigas / alternativas → rota actual. */
+export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
+  "/database-setup": APP_ROUTES.configSetup,
+  "/bng": APP_ROUTES.mikrotik,
+  "/metrics": APP_ROUTES.integrations,
+  "/monitoramento": APP_ROUTES.monitoring,
+  "/equipamentos": APP_ROUTES.devices,
+  "/configuracoes": APP_ROUTES.settings,
+  "/ferramentas": APP_ROUTES.tools,
+  "/alertas": APP_ROUTES.alerts,
+  "/mapa": APP_ROUTES.map,
+  "/comercial": APP_ROUTES.commercial,
+  "/integracoes": APP_ROUTES.integrations,
+  "/tempo-real": APP_ROUTES.realtime,
+  "/eventos": APP_ROUTES.events,
+  "/overview": APP_ROUTES.dashboard,
+};

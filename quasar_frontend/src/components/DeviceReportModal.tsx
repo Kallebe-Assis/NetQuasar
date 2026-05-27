@@ -941,7 +941,8 @@ export function DeviceReportModal({ device, onClose }: Props) {
                         <tr>
                           <th>ID</th>
                           <th>Nome</th>
-                          <th className="mono">TX (dBm)</th>
+                          <th className="mono">RX PON</th>
+                          <th className="mono">TX PON</th>
                           <th className="mono">Total</th>
                           <th className="mono">Online</th>
                           <th className="mono">Offline</th>
@@ -951,13 +952,17 @@ export function DeviceReportModal({ device, onClose }: Props) {
                       <tbody>
                         {Array.isArray(reportOltDevice.data.pons_table)
                           ? (reportOltDevice.data.pons_table as Array<Record<string, unknown>>).map((p, i) => {
+                              const rx = p.rx_dbm;
                               const tx = p.tx_dbm;
+                              const rxStr =
+                                rx != null && Number.isFinite(Number(rx)) ? Number(rx).toFixed(1) : "—";
                               const txStr =
                                 tx != null && Number.isFinite(Number(tx)) ? Number(tx).toFixed(1) : "—";
                               return (
                                 <tr key={`${String(p.id ?? i)}`}>
                                   <td className="mono">{String(p.id ?? "—")}</td>
                                   <td>{String(p.name ?? "—")}</td>
+                                  <td className="mono">{rxStr}</td>
                                   <td className="mono">{txStr}</td>
                                   <td className="mono">{formatNum(Number.isFinite(Number(p.onu_total)) ? Number(p.onu_total) : null, 0)}</td>
                                   <td className="mono">{formatNum(Number.isFinite(Number(p.onu_online)) ? Number(p.onu_online) : null, 0)}</td>
@@ -990,8 +995,8 @@ export function DeviceReportModal({ device, onClose }: Props) {
                           <th>ONU</th>
                           <th>Perfil</th>
                           <th>Fase</th>
-                          <th className="mono">Pot. RX</th>
-                          <th className="mono">Pot. TX</th>
+                          <th className="mono">RX ONU</th>
+                          <th className="mono">TX ONU</th>
                           <th>Modelo</th>
                           <th>SN</th>
                         </tr>

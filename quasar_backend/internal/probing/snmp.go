@@ -281,14 +281,16 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 	if p.MaxRows <= 0 {
 		p.MaxRows = 4000
 	}
-	if p.MaxRows > 60000 {
-		p.MaxRows = 60000
+	const snmpWalkMaxRowsCap = 200000
+	if p.MaxRows > snmpWalkMaxRowsCap {
+		p.MaxRows = snmpWalkMaxRowsCap
 	}
 	if p.Timeout <= 0 {
 		p.Timeout = 60 * time.Second
 	}
-	if p.Timeout > 120*time.Second {
-		p.Timeout = 120 * time.Second
+	const snmpWalkMaxTimeout = 300 * time.Second
+	if p.Timeout > snmpWalkMaxTimeout {
+		p.Timeout = snmpWalkMaxTimeout
 	}
 	if p.Retries < 0 {
 		p.Retries = 0
@@ -337,7 +339,7 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 		}
 		val := snmpValueToString(pdu.Value)
 		out = append(out, SNMPVar{
-			OID:   pdu.Name,
+			OID:   NormalizeSNMPOID(pdu.Name),
 			Type:  fmt.Sprintf("%v", pdu.Type),
 			Value: val,
 		})

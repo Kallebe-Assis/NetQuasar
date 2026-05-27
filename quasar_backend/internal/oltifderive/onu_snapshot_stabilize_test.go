@@ -2,6 +2,7 @@ package oltifderive
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestStablePonRowKey_nameFallback(t *testing.T) {
 func TestStabilizePonSnapshotRows_firstZeroHoldsHighPrev(t *testing.T) {
 	prev := []map[string]any{{"id": "01", "onu_online": 40.0}}
 	cur := []map[string]any{{"id": "01", "onu_online": 0.0}}
-	out, patch := StabilizePonSnapshotRows(prev, cur, nil)
+	out, patch := StabilizePonSnapshotRows(prev, cur, nil, false)
 	if len(out) != 1 {
 		t.Fatalf("len(out)=%d", len(out))
 	}
@@ -38,7 +39,7 @@ func TestStabilizePonSnapshotRows_secondZeroStillHoldsUntilThird(t *testing.T) {
 	prevSumm := map[string]any{
 		summaryKeyOnuZeroConfirm: map[string]any{"01": 1},
 	}
-	out, _ := StabilizePonSnapshotRows(prev, cur, prevSumm)
+	out, _ := StabilizePonSnapshotRows(prev, cur, prevSumm, false)
 	on, ok := OnuOnlineFromRow(out[0])
 	if !ok || on != 40 {
 		t.Fatalf("expected still held at 40 on 2nd streak, got ok=%v on=%v", ok, on)
@@ -51,7 +52,7 @@ func TestStabilizePonSnapshotRows_thirdZeroAccepts(t *testing.T) {
 	prevSumm := map[string]any{
 		summaryKeyOnuZeroConfirm: map[string]any{"01": 2},
 	}
-	out, _ := StabilizePonSnapshotRows(prev, cur, prevSumm)
+	out, _ := StabilizePonSnapshotRows(prev, cur, prevSumm, false)
 	on, ok := OnuOnlineFromRow(out[0])
 	if !ok || on != 0 {
 		t.Fatalf("expected accepted 0 after 3ª leitura suspeita, got ok=%v on=%v", ok, on)
@@ -64,10 +65,31 @@ func TestStabilizePonSnapshotRows_thirdZeroAccepts(t *testing.T) {
 func TestStabilizePonSnapshotRows_smallPonNotHeld(t *testing.T) {
 	prev := []map[string]any{{"id": "01", "onu_online": 3.0}}
 	cur := []map[string]any{{"id": "01", "onu_online": 0.0}}
-	out, _ := StabilizePonSnapshotRows(prev, cur, nil)
+	out, _ := StabilizePonSnapshotRows(prev, cur, nil, false)
 	on, _ := OnuOnlineFromRow(out[0])
 	if on != 0 {
 		t.Fatalf("abaixo do mínimo de dúvida não deve segurar valor anterior, got on=%v", on)
+	}
+}
+
+func TestPreserveMissingPonRows_carriesPrevWhenIncomplete(t *testing.T) {
+	prev := []map[string]any{
+		{"id": "01", "onu_total": 10, "onu_online": 8, "status": "vsol_snmp"},
+		{"id": "02", "onu_total": 12, "onu_online": 11, "status": "vsol_snmp"},
+	}
+	cur := []map[string]any{
+		{"id": "01", "onu_total": 10, "onu_online": 0, "status": "vsol_snmp"},
+	}
+	out := PreserveMissingPonRows(prev, cur, true)
+	if len(out) != 2 {
+		t.Fatalf("len %d want 2: %+v", len(out), out)
+	}
+	keys := map[string]bool{}
+	for _, r := range out {
+		keys[fmt.Sprint(r["id"])] = true
+	}
+	if !keys["01"] || !keys["02"] {
+		t.Fatalf("missing pon keys: %+v", keys)
 	}
 }
 
