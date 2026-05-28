@@ -11,8 +11,12 @@ const (
 	MetricStatus      = "status"
 	MetricRxPower     = "rx_power"
 	MetricTxPower     = "tx_power"
+	MetricPonStatus   = "pon_status"
 	MetricPonRxPower  = "pon_rx_power"
 	MetricPonTxPower  = "pon_tx_power"
+	MetricPonVoltage  = "pon_voltage"
+	MetricPonCurrent  = "pon_current"
+	MetricPonTemp     = "pon_temperature"
 	MetricTemperature = "temperature"
 	MetricModel       = "model"
 )
@@ -27,6 +31,7 @@ const (
 type OnuMetricDef struct {
 	Enabled         bool   `json:"enabled"`
 	OID             string `json:"oid"`
+	ValueDivisor    int    `json:"value_divisor,omitempty"`
 	OnlineValues    []int  `json:"online_values,omitempty"`
 	OfflineValues   []int  `json:"offline_values,omitempty"`
 	StatusMode      string `json:"status_mode,omitempty"`
@@ -61,8 +66,12 @@ var PonMetricCatalog = []struct {
 	Description string
 	Placeholder string
 }{
+	{MetricPonStatus, "Estado da PON (OLT)", "Tabela SNMP do estado da interface PON (ex.: ifOperStatus por ifIndex da PON)", "1.3.6.1.2.1.2.2.1.8"},
 	{MetricPonRxPower, "RX da PON (OLT)", "Tabela SNMP da potência recebida na porta PON da OLT; sufixo .PON", ""},
 	{MetricPonTxPower, "TX da PON (OLT)", "Tabela SNMP da potência transmitida na porta PON da OLT; sufixo .PON", ""},
+	{MetricPonVoltage, "Voltagem da PON (OLT)", "Tabela SNMP da voltagem por porta PON da OLT; sufixo .PON", ""},
+	{MetricPonCurrent, "Corrente da PON (OLT)", "Tabela SNMP da corrente por porta PON da OLT; sufixo .PON", ""},
+	{MetricPonTemp, "Temperatura da PON (OLT)", "Tabela SNMP da temperatura por porta PON da OLT; sufixo .PON", ""},
 }
 
 func metricCatalogEntries() []struct {
@@ -97,6 +106,9 @@ func (c OnuMetricsConfig) Normalize() OnuMetricsConfig {
 			continue
 		}
 		v.OID = strings.TrimSpace(v.OID)
+		if v.ValueDivisor < 0 {
+			v.ValueDivisor = 0
+		}
 		v.StatusMode = strings.TrimSpace(v.StatusMode)
 		v.IfDescrOID = strings.TrimSpace(v.IfDescrOID)
 		v.IfOperOID = strings.TrimSpace(v.IfOperOID)

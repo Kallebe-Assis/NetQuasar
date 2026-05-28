@@ -41,7 +41,7 @@ export function OnuMonthlyReportPanel() {
 
   useEffect(() => {
     if (!saveToast) return;
-    const t = window.setTimeout(() => setSaveToast(null), 8000);
+    const t = window.setTimeout(() => setSaveToast(null), 10_000);
     return () => window.clearTimeout(t);
   }, [saveToast]);
 

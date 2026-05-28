@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,30 @@ func sumOnuOnlineInPonRows(pons []map[string]any) float64 {
 		}
 	}
 	return s
+}
+
+func applyMaxPonsLimitMapRows(pons []map[string]any, maxPons *int) []map[string]any {
+	if maxPons == nil || *maxPons <= 0 || len(pons) == 0 {
+		return pons
+	}
+	out := make([]map[string]any, 0, len(pons))
+	for _, p := range pons {
+		if p == nil {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(p["id"]))
+		if id == "" {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimLeft(id, "0"))
+		if err != nil || n <= 0 {
+			continue
+		}
+		if n <= *maxPons {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // shouldSecondOltIfWalk relê IF-MIB quando o walk falhou, truncou ou a agregação parece perda em massa vs. snapshot anterior.
@@ -194,7 +219,7 @@ func closeByKey(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, de
 
 // CollectOltPonAndEvaluate executa coleta periódica de ONUs por PON (derive IF-MIB) e avalia alarmes.
 // Omitido para fabricantes onde o derive IF-MIB é incorrecto/incompleto (ex.: ZTE, Datacom — usar refresh OLT/API).
-func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community, devDesc, category, brand, model string) {
+func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community, devDesc, category, brand, model string, maxPons *int) {
 	if pool == nil || strings.TrimSpace(host) == "" || strings.TrimSpace(community) == "" {
 		return
 	}
@@ -214,6 +239,7 @@ func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zero
 		FROM olt_snapshots WHERE device_id=$1
 	`, deviceID).Scan(&prevPonsRaw, &prevSumRaw)
 	prevMaps := oltifderive.PonsJSONToMaps(prevPonsRaw)
+	prevMaps = applyMaxPonsLimitMapRows(prevMaps, maxPons)
 	prevSumm := oltifderive.SummaryJSONBytesToMap(prevSumRaw)
 
 	truncated, walkErr := false, ""
@@ -247,6 +273,7 @@ deriveLoop:
 		ifRows := snmpifparse.BuildIfTable(vars)
 		optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, vars)
 		pons, sumPatch = oltifderive.DeriveFromIfRows(ifRows, optMap)
+		pons = applyMaxPonsLimitMapRows(pons, maxPons)
 		if log != nil {
 			log.Info().
 				Str("component", "olt_pon_collect").
@@ -293,6 +320,7 @@ deriveLoop:
 	incomplete := truncated || len(pons) < len(prevMaps)
 	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, pons, prevSumm, incomplete)
 	pons = stabMaps
+	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 
 	prevOn := map[string]float64{}
 	for _, p := range prevMaps {
@@ -351,9 +379,9 @@ deriveLoop:
 	}
 
 	summary := map[string]any{
-		"if_mib_derived_at": time.Now().UTC().Format(time.RFC3339),
+		"if_mib_derived_at":    time.Now().UTC().Format(time.RFC3339),
 		"if_mib_merge_applied": true,
-		"derived_from_worker": true,
+		"derived_from_worker":  true,
 	}
 	for k, v := range sumPatch {
 		summary[k] = v
@@ -382,4 +410,3 @@ deriveLoop:
 			Msg("OLT PON: ciclo concluído (snapshot gravado)")
 	}
 }
-

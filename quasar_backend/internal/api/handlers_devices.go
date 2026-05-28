@@ -3,8 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/csv"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,9 +20,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpcatalog"
-	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 )
 
@@ -52,13 +52,14 @@ type deviceDTO struct {
 	MIBFolderPath         *string         `json:"mib_folder_path,omitempty"`
 	TelemetryOIDStrategy  *string         `json:"telemetry_oid_strategy,omitempty"`
 	TelemetryOIDOverrides json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
+	MaxPons               *int            `json:"max_pons,omitempty"`
 }
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	q := `SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
 		ping_enabled, telemetry_enabled, operational_mode,
 		latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-		telemetry_oid_strategy, telemetry_oid_overrides::text
+		telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
 		FROM devices ORDER BY description LIMIT 500`
 	rows, err := s.DB().Query(r.Context(), q)
 	if err != nil {
@@ -74,7 +75,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 			&d.PingEnabled, &d.TelemetryEnabled, &d.OperationalMode,
 			&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-			&d.TelemetryOIDStrategy, &overrides); err != nil {
+			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -111,6 +112,7 @@ func validateDeviceIP(networkStatus string, ip *string) error {
 func applyDeviceBridgeAndLocalityRules(d *deviceDTO) {
 	if strings.TrimSpace(d.Category) != "OLT" {
 		d.LocalityID = nil
+		d.MaxPons = nil
 	}
 	if strings.TrimSpace(d.Category) != "Outros" {
 		def := "default"
@@ -174,13 +176,13 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO devices (pop_id, locality_id, category, description, ip, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides)
+			telemetry_oid_strategy, telemetry_oid_overrides, max_pons)
 		VALUES ($1,$2,$3,$4, NULLIF($5::text,'')::inet, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::date, $21, $22,
-			COALESCE($23,'default'), COALESCE($24::jsonb,'{}'::jsonb))
+			COALESCE($23,'default'), COALESCE($24::jsonb,'{}'::jsonb), $25)
 		RETURNING id
 	`, body.PopID, body.LocalityID, body.Category, body.Description, ipArg, ns, body.AccessMode, body.TelemetryMode, body.PingEnabled, body.TelemetryEnabled, op,
 		body.Latitude, body.Longitude, body.Brand, body.Model, body.MAC, body.SerialNumber, body.SoftwareVersion, body.HardwareVersion, acquiredAtArg(body.AcquiredAt), body.SNMPCommunity, body.MIBFolderPath,
-		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides).Scan(&id)
+		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "telemetry_requires_ping") {
 			writeErr(w, 422, "VALIDATION", "telemetria exige ping", nil)
@@ -271,13 +273,13 @@ func (s *Server) importDevicesCSV(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO devices (pop_id, locality_id, category, description, ip, network_status, access_mode, telemetry_mode,
 				ping_enabled, telemetry_enabled, operational_mode,
 				latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at, snmp_community, mib_folder_path,
-				telemetry_oid_strategy, telemetry_oid_overrides)
+				telemetry_oid_strategy, telemetry_oid_overrides, max_pons)
 			VALUES ($1,$2,$3,$4, NULLIF($5::text,'')::inet, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::date, $21, $22,
-				COALESCE($23,'default'), COALESCE($24::jsonb,'{}'::jsonb))
+				COALESCE($23,'default'), COALESCE($24::jsonb,'{}'::jsonb), $25)
 			RETURNING id
 		`, d.PopID, d.LocalityID, d.Category, d.Description, ipArg, d.NetworkStatus, d.AccessMode, d.TelemetryMode, d.PingEnabled, d.TelemetryEnabled, d.OperationalMode,
 			d.Latitude, d.Longitude, d.Brand, d.Model, d.MAC, d.SerialNumber, d.SoftwareVersion, d.HardwareVersion, acquiredAtArg(d.AcquiredAt), d.SNMPCommunity, d.MIBFolderPath,
-			d.TelemetryOIDStrategy, d.TelemetryOIDOverrides).Scan(&id)
+			d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons).Scan(&id)
 		if err != nil {
 			failed = append(failed, map[string]any{"line": line, "error": err.Error()})
 			continue
@@ -684,12 +686,12 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides::text
+			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
 		FROM devices WHERE id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides)
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
@@ -719,12 +721,12 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides::text
+			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
 		FROM devices WHERE id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides)
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
@@ -761,12 +763,13 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 			acquired_at=$21::date, snmp_community=$22, mib_folder_path=$23,
 			telemetry_oid_strategy=COALESCE($24,'default'),
 			telemetry_oid_overrides=COALESCE($25::jsonb,'{}'::jsonb),
+			max_pons=$26,
 			updated_at=now()
 		WHERE id=$1
 	`, id, d.PopID, d.LocalityID, d.Category, d.Description, ipArg, d.NetworkStatus, d.AccessMode, d.TelemetryMode,
 		d.PingEnabled, d.TelemetryEnabled, d.OperationalMode,
 		d.Latitude, d.Longitude, d.Brand, d.Model, d.MAC, d.SerialNumber, d.SoftwareVersion, d.HardwareVersion, acquiredAtArg(d.AcquiredAt), d.SNMPCommunity, d.MIBFolderPath,
-		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides)
+		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -862,6 +865,12 @@ func mergeDeviceJSON(d *deviceDTO, body map[string]json.RawMessage) {
 		var raw json.RawMessage
 		if json.Unmarshal(v, &raw) == nil {
 			d.TelemetryOIDOverrides = raw
+		}
+	}
+	if v, ok := body["max_pons"]; ok {
+		var x *int
+		if json.Unmarshal(v, &x) == nil {
+			d.MaxPons = x
 		}
 	}
 }

@@ -71,13 +71,14 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			probe := probing.HostReachability(pctx, host, "443", icmpPart, tcpPart, cfg.ICMPPayloadBytes)
 			cancel()
 
-			reachOK, _ := probe["ok"].(bool)
+			probeReachOK, _ := probe["ok"].(bool)
 			var streakAfter int
-			if reachOK {
+			if probeReachOK {
 				streakAfter = 0
 			} else {
 				streakAfter = streak + 1
 			}
+			reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.OfflineThreshold)
 			method, _ := probe["method"].(string)
 			var lat int64
 			switch v := probe["latency_ms"].(type) {
@@ -94,13 +95,13 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				"latency_source": src,
 			}
 
-			if shouldOpenPingUnreachableAlert(reachOK, streakAfter, cfg.OfflineThreshold) {
+			if shouldOpenPingUnreachableAlert(probeReachOK, streakAfter, cfg.OfflineThreshold) {
 				InsertPingUnreachableIfNewForMonitoredDevice(ctx, pool, log, id, description, host, probe, src)
 			}
-			if reachOK {
+			if probeReachOK {
 				recoveredPing = append(recoveredPing, id)
 			}
-			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, reachOK, lat, latHighStreak)
+			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, latHighStreak)
 
 			overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
 			if overallOK {
@@ -212,7 +213,13 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 		}
 		_ = pool.QueryRow(ctx, `SELECT snmp_ok FROM device_probe_cache WHERE device_id=$1`, deviceID).Scan(&snmpPrev)
 
-		reachOK, _ := probe["ok"].(bool)
+		probeReachOK, _ := probe["ok"].(bool)
+		cfg, cfgErr := loadClampMonitoringIntervals(ctx, pool)
+		if cfgErr != nil {
+			outerErr = cfgErr
+			return
+		}
+		reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.OfflineThreshold)
 		method, _ := probe["method"].(string)
 		var lat int64
 		switch v := probe["latency_ms"].(type) {

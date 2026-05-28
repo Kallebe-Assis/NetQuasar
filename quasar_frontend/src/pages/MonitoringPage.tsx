@@ -97,7 +97,7 @@ type InventoryProfile = {
 };
 
 function statusFromReachability(row: ActiveEquipRow): "Online" | "Offline" | "Desconhecido" {
-  const reachable = row.ping_reachable ?? row.probe_ok;
+  const reachable = row.ping_reachable;
   if (reachable === true) return "Online";
   if (reachable === false) return "Offline";
   return "Desconhecido";
@@ -482,7 +482,7 @@ export function MonitoringPage() {
     queryKey: queryKeys.alertsPingUnreachable,
     queryFn: () => apiFetch<{ alerts: OfflineAlertRow[] }>("/api/v1/alerts/active?type=ping_unreachable&limit=50"),
     enabled: tab === "overview",
-    refetchInterval: tab === "overview" ? 6000 : false,
+    refetchInterval: tab === "overview" ? 3000 : false,
   });
 
   const invalidateActiveList = () => {
@@ -913,7 +913,7 @@ export function MonitoringPage() {
                   <tbody>
                     {filteredActiveEquipment.map((row) => {
                       const status = statusFromReachability(row);
-                      const reachable = row.ping_reachable ?? row.probe_ok;
+                      const reachable = row.ping_reachable;
                       return (
                         <tr key={row.id}>
                           <td>

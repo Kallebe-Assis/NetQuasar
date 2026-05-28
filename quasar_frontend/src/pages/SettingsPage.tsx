@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type CSSProperties } from "react";
-import { Blend, ClockFading, Cpu, Plus, Sun, ThermometerSun, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Blend, ClockFading, Copy, Cpu, Plus, Sun, ThermometerSun, Trash2 } from "lucide-react";
+import { InlinePageToastBanner, PAGE_TOAST_AUTO_MS, useAutoDismissToast, useInlinePageToast } from "../lib/pageToast";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
@@ -246,7 +247,7 @@ function DatabasePanel() {
 
   useEffect(() => {
     if (!dbToast) return;
-    const t = window.setTimeout(() => setDbToast(null), 9000);
+    const t = window.setTimeout(() => setDbToast(null), PAGE_TOAST_AUTO_MS);
     return () => window.clearTimeout(t);
   }, [dbToast]);
 
@@ -517,6 +518,7 @@ function UsersPanel() {
   const [ePass, setEPass] = useState("");
   const [eRole, setERole] = useState<"admin" | "viewer">("viewer");
   const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
+  useAutoDismissToast(saveToast, setSaveToast);
   const [userCreateErr, setUserCreateErr] = useState("");
 
   const create = useMutation({
@@ -718,14 +720,7 @@ function UsersPanel() {
             </button>
           </div>
           {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
-          {saveToast && (
-            <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 8 }}>
-              <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                ×
-              </button>
-              {saveToast.text}
-            </div>
-          )}
+          <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 8 }} />
         </div>
       )}
     </>
@@ -1894,6 +1889,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   const [chat, setChat] = useState("");
   const [topic, setTopic] = useState("");
   const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
+  useAutoDismissToast(saveToast, setSaveToast);
 
   useEffect(() => {
     if (!q.data) return;
@@ -1943,14 +1939,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
           Enviar mensagem de teste
         </button>
       </div>
-      {saveToast && (
-        <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-            ×
-          </button>
-          {saveToast.text}
-        </div>
-      )}
+      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
       <TelegramTestOutcome data={test.data} error={test.error as Error | null} />
     </div>
   );
@@ -1973,6 +1962,7 @@ type OltCollectionStep = {
 type OltOnuMetricDef = {
   enabled?: boolean;
   oid?: string;
+  value_divisor?: number;
   online_values?: number[];
   offline_values?: number[];
   status_mode?: "pon_onu_suffix" | "if_mib_index" | "pon_online_offline";
@@ -2035,18 +2025,50 @@ const OLT_PON_METRIC_FIELDS: Array<{
   label: string;
   hint: string;
   placeholder: string;
+  hasStatusValues?: boolean;
+  supportsDivisor?: boolean;
 }> = [
+  {
+    key: "pon_status",
+    label: "Estado da PON (OLT)",
+    hint: "Estado por porta PON (ex.: ifOperStatus por ifIndex da PON). Configure valores online/offline.",
+    placeholder: "1.3.6.1.2.1.2.2.1.8",
+    hasStatusValues: true,
+  },
   {
     key: "pon_rx_power",
     label: "RX da PON (OLT)",
     hint: "Potência recebida na porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON (sem ONU).",
     placeholder: "",
+    supportsDivisor: true,
   },
   {
     key: "pon_tx_power",
     label: "TX da PON (OLT)",
     hint: "Potência transmitida na porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON.",
     placeholder: "",
+    supportsDivisor: true,
+  },
+  {
+    key: "pon_voltage",
+    label: "Voltagem da PON (OLT)",
+    hint: "Voltagem por porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON.",
+    placeholder: "",
+    supportsDivisor: true,
+  },
+  {
+    key: "pon_current",
+    label: "Corrente da PON (OLT)",
+    hint: "Corrente (amperagem) por porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON.",
+    placeholder: "",
+    supportsDivisor: true,
+  },
+  {
+    key: "pon_temperature",
+    label: "Temperatura da PON (OLT)",
+    hint: "Temperatura por porta PON da OLT. OID da tabela SNMP; sufixo apenas .PON.",
+    placeholder: "",
+    supportsDivisor: true,
   },
 ];
 
@@ -2058,6 +2080,7 @@ function defaultMetricsForm(): OltMetricsForm {
     out[f.key] = {
       enabled: f.key === "status" || f.key === "model",
       oid: "",
+      value_divisor: f.key === "pon_tx_power" ? 100 : 0,
       online_values: f.hasStatusValues ? [3] : undefined,
       offline_values: f.hasStatusValues ? [] : undefined,
       status_mode: f.hasStatusValues ? "pon_onu_suffix" : undefined,
@@ -2080,6 +2103,7 @@ function metricsFromApi(raw: unknown): OltMetricsForm {
     base[f.key] = {
       enabled: m.enabled !== false,
       oid: m.oid ?? "",
+      value_divisor: Number.isFinite(Number(m.value_divisor)) ? Number(m.value_divisor) : 0,
       online_values: m.online_values ?? (f.hasStatusValues ? [3] : undefined),
       offline_values: m.offline_values ?? (f.hasStatusValues ? [] : undefined),
       status_mode:
@@ -2120,6 +2144,7 @@ function buildMetricsPayload(form: OltMetricsForm): OltMetricsForm {
     out[f.key] = {
       enabled: m.enabled !== false,
       oid,
+      value_divisor: Number.isFinite(Number(m.value_divisor)) ? Number(m.value_divisor) : 0,
       ...(f.hasStatusValues
         ? {
             online_values: Array.isArray(m.online_values) ? m.online_values : parseIntList(String(m.online_values ?? "3")),
@@ -2184,9 +2209,13 @@ function OltVendorsPanel() {
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saveToast, setSaveToast] = useInlinePageToast();
   const [metrics, setMetrics] = useState<OltMetricsForm>(() => defaultMetricsForm());
   const [steps, setSteps] = useState<OltCollectionStep[]>([]);
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [copyBrand, setCopyBrand] = useState("");
+  const [copyModel, setCopyModel] = useState("");
+  const [copyLoading, setCopyLoading] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createBrandNew, setCreateBrandNew] = useState(false);
   const [createBrand, setCreateBrand] = useState("");
@@ -2201,6 +2230,22 @@ function OltVendorsPanel() {
         `/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models`,
       ),
   });
+
+  const oltCatalog = useQuery({
+    queryKey: ["olt-models-catalog"],
+    queryFn: () => apiFetch<{ catalog: Record<string, string[]> }>("/api/v1/settings/olt-vendors/catalog"),
+    staleTime: 120_000,
+  });
+
+  const copyModelList = useMemo(() => {
+    const cat = oltCatalog.data?.catalog ?? {};
+    let list = cat[copyBrand] ?? [];
+    if (list.length === 0 && copyBrand) {
+      const key = Object.keys(cat).find((k) => k.toLowerCase() === copyBrand.toLowerCase());
+      if (key) list = cat[key] ?? [];
+    }
+    return filterOltModels(list.map((m) => ({ model: m }))).map((x) => x.model);
+  }, [oltCatalog.data, copyBrand]);
 
   const vendor = useQuery({
     queryKey: ["olt-vendor-model", brand, model],
@@ -2322,6 +2367,42 @@ function OltVendorsPanel() {
     createModel.mutate({ targetBrand, name });
   }
 
+  function openCopyModal() {
+    setCopyBrand(brand || brandOptions[0] || "");
+    setCopyModel("");
+    setCopyModalOpen(true);
+  }
+
+  async function applyCopyFromProfile() {
+    const srcBrand = copyBrand.trim();
+    const srcModel = copyModel.trim();
+    if (!srcBrand || !srcModel) return;
+    if (srcBrand === brand && srcModel === model) {
+      setSaveToast({ ok: false, text: "Escolha um perfil de origem diferente do perfil actual." });
+      return;
+    }
+    setCopyLoading(true);
+    try {
+      const src = await apiFetch<{
+        onu_metrics?: OltMetricsForm;
+        collection_steps?: OltCollectionStep[];
+      }>(
+        `/api/v1/settings/olt-vendors/${encodeURIComponent(srcBrand)}/models/${encodeURIComponent(srcModel)}`,
+      );
+      setMetrics(metricsFromApi(src.onu_metrics));
+      setSteps(Array.isArray(src.collection_steps) ? src.collection_steps : []);
+      setCopyModalOpen(false);
+      setSaveToast({
+        ok: true,
+        text: `Métricas copiadas de ${srcBrand} / ${srcModel}. Clique em Salvar para gravar neste modelo.`,
+      });
+    } catch (e) {
+      setSaveToast({ ok: false, text: (e as Error).message || "Falha ao copiar perfil." });
+    } finally {
+      setCopyLoading(false);
+    }
+  }
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -2332,6 +2413,16 @@ function OltVendorsPanel() {
           </p>
         </div>
         <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+          <button
+            type="button"
+            className="btn"
+            title="Copiar métricas de outro perfil"
+            aria-label="Copiar métricas de outro perfil"
+            disabled={!brand || !model}
+            onClick={openCopyModal}
+          >
+            <Copy size={16} aria-hidden />
+          </button>
           <button
             type="button"
             className="btn"
@@ -2573,9 +2664,9 @@ function OltVendorsPanel() {
           })}
           </div>
 
-          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Potência óptica das portas PON (OLT)</h3>
+          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Métricas das portas PON (OLT)</h3>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            RX/TX da porta GPON na OLT — distinto do RX/TX de cada ONU. Sufixo SNMP apenas .PON.
+            Estado e potência da porta GPON na OLT — distinto do estado/RX/TX de cada ONU. Sufixo SNMP apenas .PON.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
             {OLT_PON_METRIC_FIELDS.map((field) => {
@@ -2618,6 +2709,57 @@ function OltVendorsPanel() {
                       }
                     />
                   </div>
+                  {field.supportsDivisor && m.enabled !== false && (
+                    <div className="field" style={{ margin: "6px 0 0" }}>
+                      <label style={{ fontSize: 11 }}>Divisor do valor</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="100"
+                        value={Number.isFinite(Number(m.value_divisor)) ? String(m.value_divisor) : ""}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: { ...prev[field.key], value_divisor: Number(e.target.value || 0) },
+                          }))
+                        }
+                      />
+                    </div>
+                  )}
+                  {field.hasStatusValues && m.enabled !== false && (
+                    <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      <div className="field" style={{ margin: 0, flex: "1 1 120px" }}>
+                        <label style={{ fontSize: 11 }}>Valores = online</label>
+                        <input
+                          className="input mono"
+                          style={{ fontSize: 12 }}
+                          placeholder="1"
+                          value={(m.online_values ?? [1]).join(", ")}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], online_values: parseIntList(e.target.value) },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="field" style={{ margin: 0, flex: "1 1 120px" }}>
+                        <label style={{ fontSize: 11 }}>Valores = offline</label>
+                        <input
+                          className="input mono"
+                          style={{ fontSize: 12 }}
+                          placeholder="2"
+                          value={(m.offline_values ?? [2]).join(", ")}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], offline_values: parseIntList(e.target.value) },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -2730,14 +2872,81 @@ function OltVendorsPanel() {
           </div>
         </div>
       )}
-      {saveToast && (
-        <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-            ×
-          </button>
-          {saveToast.text}
+      {copyModalOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !copyLoading) setCopyModalOpen(false);
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="copy-olt-profile-title"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ maxWidth: 440 }}
+          >
+            <h3 id="copy-olt-profile-title" style={{ marginTop: 0 }}>
+              Copiar informações do perfil
+            </h3>
+            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+              Copia OIDs e opções SNMP do perfil de origem para <strong>{brand || "—"} / {model || "—"}</strong>. Os passos avançados também são copiados. Clique em Salvar para persistir.
+            </p>
+            <div className="field">
+              <label>Marca de origem</label>
+              <select
+                className="select"
+                style={{ width: "100%" }}
+                value={copyBrand}
+                onChange={(e) => {
+                  setCopyBrand(e.target.value);
+                  setCopyModel("");
+                }}
+              >
+                <option value="">— escolher —</option>
+                {brandOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Modelo de origem</label>
+              <select
+                className="select"
+                style={{ width: "100%" }}
+                value={copyModel}
+                disabled={!copyBrand}
+                onChange={(e) => setCopyModel(e.target.value)}
+              >
+                <option value="">— escolher —</option>
+                {copyModelList.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button type="button" className="btn" disabled={copyLoading} onClick={() => setCopyModalOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={copyLoading || !copyBrand.trim() || !copyModel.trim()}
+                onClick={() => void applyCopyFromProfile()}
+              >
+                {copyLoading ? "A copiar…" : "Copiar para este perfil"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
+      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
     </div>
   );
 }

@@ -415,7 +415,8 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		SELECT d.id, d.description, d.category::text,
 			COALESCE(NULLIF(TRIM(BOTH FROM d.brand), ''), '')::text,
 			host(d.ip)::text,
-			c.checked_at, c.latency_ms, c.ok, c.detail::text,
+			c.checked_at, c.latency_ms, c.ok, c.reach_ok, COALESCE(c.ping_fail_streak, 0),
+			c.detail::text,
 			(SELECT metrics::text FROM telemetry_samples t WHERE t.device_id = d.id ORDER BY t.collected_at DESC LIMIT 1) AS telemetry_metrics
 		FROM devices d
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
@@ -441,10 +442,12 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		var ca any
 		var lat *int64
 		var probeOK *bool
+		var reachOK *bool
+		var pingFailStreak int
 		var detail *string
 		var metrics *string
 
-		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &detail, &metrics); err != nil {
+		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &reachOK, &pingFailStreak, &detail, &metrics); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -459,25 +462,25 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		vars := snmpVarsFromMetricsOrDetail(metB, detB)
 		prof := profileFromMetrics(metB)
 		cpu, mem, uptime, temp := extractExtendedMetrics(vars, prof)
-		pr := reachabilityPingOK(detB, probeOK)
 
 		row := map[string]any{
-			"id":              id,
-			"description":     desc,
-			"category":        cat,
-			"brand":           brand,
-			"ip":              ip,
-			"checked_at":      ca,
-			"latency_ms":      nil,
-			"probe_ok":        probeOK,
-			"cpu_percent":     cpu,
-			"memory_percent":  mem,
-			"uptime":          uptime,
-			"temperature_c":   temp,
-			"ping_reachable":  nil,
+			"id":               id,
+			"description":      desc,
+			"category":         cat,
+			"brand":            brand,
+			"ip":               ip,
+			"checked_at":       ca,
+			"latency_ms":       nil,
+			"probe_ok":         probeOK,
+			"ping_fail_streak": pingFailStreak,
+			"cpu_percent":      cpu,
+			"memory_percent":   mem,
+			"uptime":           uptime,
+			"temperature_c":    temp,
+			"ping_reachable":   nil,
 		}
-		if pr != nil {
-			row["ping_reachable"] = *pr
+		if reachOK != nil {
+			row["ping_reachable"] = *reachOK
 		}
 		if lat != nil {
 			row["latency_ms"] = *lat

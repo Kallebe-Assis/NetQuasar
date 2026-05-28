@@ -8,6 +8,7 @@ import { isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNullable, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateAlertListQueries } from "../lib/queryKeys";
+import { InlinePageToastBanner, useInlinePageToast } from "../lib/pageToast";
 import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow } from "../lib/deviceReportHelpers";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { DropdownMenu } from "../components/DropdownMenu";
@@ -41,6 +42,9 @@ type PonTableRow = {
   name?: string;
   rx_dbm?: number | null;
   tx_dbm?: number | null;
+  voltage?: number | null;
+  current?: number | null;
+  temperature?: number | null;
   onu_total?: number;
   onu_online?: number;
   onu_offline?: number;
@@ -261,7 +265,7 @@ export function OltPage() {
   const [bulkCollectedRows, setBulkCollectedRows] = useState<
     Array<{ olt_id: string; olt_description: string; locality_id: string; locality_name: string; online: number; offline: number; total: number }>
   >([]);
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saveToast, setSaveToast] = useInlinePageToast();
   const [bulkMonth, setBulkMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -742,14 +746,7 @@ export function OltPage() {
                     {saveBulkToCommercial.isPending ? "Salvando…" : "Confirmar e salvar na Base comercial"}
                   </button>
                 </div>
-                {saveToast && (
-                  <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-                    <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                      ×
-                    </button>
-                    {saveToast.text}
-                  </div>
-                )}
+                <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
               </>
             )}
             </div>
@@ -954,18 +951,7 @@ export function OltPage() {
                   {refresh.isPending ? " · coleta em curso…" : ""}
                 </p>
 
-                {saveToast && (
-                  <div
-                    className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`}
-                    role="status"
-                    style={{ marginTop: 8 }}
-                  >
-                    <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-                      ×
-                    </button>
-                    {saveToast.text}
-                  </div>
-                )}
+                <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 8 }} />
 
                 {collectLogOpen ? (
                   <OltMetricsCollectLogModal
@@ -1002,6 +988,9 @@ export function OltPage() {
                         <th>Nome</th>
                         <th className="mono">RX PON</th>
                         <th className="mono">TX PON</th>
+                        <th className="mono">Voltagem</th>
+                        <th className="mono">Corrente</th>
+                        <th className="mono">Temp.</th>
                         <th className="mono">Total</th>
                         <th className="mono">On</th>
                         <th className="mono">Off</th>
@@ -1015,6 +1004,9 @@ export function OltPage() {
                           <td>{p.name ?? "—"}</td>
                           <td className="mono">{p.rx_dbm != null ? format1f(p.rx_dbm) : "—"}</td>
                           <td className="mono">{p.tx_dbm != null ? format1f(p.tx_dbm) : "—"}</td>
+                          <td className="mono">{p.voltage != null ? format1f(p.voltage) : "—"}</td>
+                          <td className="mono">{p.current != null ? format1f(p.current) : "—"}</td>
+                          <td className="mono">{p.temperature != null ? format1f(p.temperature) : "—"}</td>
                           <td className="mono">{formatNum(p.onu_total)}</td>
                           <td className="mono">{formatNum(p.onu_online)}</td>
                           <td className="mono">{formatNum(p.onu_offline)}</td>

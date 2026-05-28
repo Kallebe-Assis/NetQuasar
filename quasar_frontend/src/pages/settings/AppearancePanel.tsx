@@ -8,6 +8,7 @@ import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { applyUiTheme, uiThemeLabel, type UiTheme } from "../../lib/theme";
 import { fetchUiAppearance, normalizeUiAppearanceCacheValue, themeFromAppearancePayload } from "../../lib/uiAppearance";
+import { InlinePageToastBanner, useInlinePageToast } from "../../lib/pageToast";
 
 export function AppearancePanel() {
   const qc = useQueryClient();
@@ -17,7 +18,7 @@ export function AppearancePanel() {
     queryFn: fetchUiAppearance,
   });
   const [draft, setDraft] = useState<UiTheme>(activeTheme);
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saveToast, setSaveToast] = useInlinePageToast();
 
   useThemePreview(draft, activeTheme);
 
@@ -89,14 +90,7 @@ export function AppearancePanel() {
           Pré-visualização: <strong style={{ color: "var(--text)" }}>{uiThemeLabel(draft)}</strong> (restaura ao sair sem salvar)
         </p>
       </div>
-      {saveToast ? (
-        <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-            ×
-          </button>
-          {saveToast.text}
-        </div>
-      ) : null}
+      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
     </div>
   );
 }

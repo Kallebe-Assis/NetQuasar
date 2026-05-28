@@ -125,7 +125,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 				snmpDetail = c.SNMP
 			}
 			snippet, _ := json.Marshal(map[string]any{
-				"snmp": snmpDetail,
+				"snmp":            snmpDetail,
 				"telemetry_cycle": map[string]any{"source": src},
 			})
 			WithDeviceProbeRowLock(row.id, func() {
@@ -352,7 +352,7 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 				_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
 			}
 
-			CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model)
+			CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
 			lastOltByDevice[row.id] = time.Now()
 		}()
 	}

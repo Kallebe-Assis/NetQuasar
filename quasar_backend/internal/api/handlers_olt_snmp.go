@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,41 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
+
+func applyMaxPonsLimitAnyRows(pons []any, maxPons *int) []any {
+	if maxPons == nil || *maxPons <= 0 || len(pons) == 0 {
+		return pons
+	}
+	allowed := map[int]bool{}
+	for i := 1; i <= *maxPons; i++ {
+		allowed[i] = true
+	}
+	out := make([]any, 0, len(pons))
+	for _, row := range pons {
+		m, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		pon := 0
+		switch v := m["id"].(type) {
+		case string:
+			n, _ := strconv.Atoi(strings.TrimLeft(strings.TrimSpace(v), "0"))
+			pon = n
+		case int:
+			pon = v
+		case float64:
+			pon = int(v)
+		}
+		if pon <= 0 {
+			continue
+		}
+		if !allowed[pon] {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
 
 func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
@@ -197,12 +233,13 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 	var ip *string
 	var comm *string
 	var brand, model, devDesc string
+	var maxPons *int
 	_ = s.DB().QueryRow(r.Context(), `
 		SELECT host(d.ip)::text, d.snmp_community,
 			coalesce(trim(d.brand), ''), coalesce(trim(d.model), ''),
-			coalesce(trim(d.description), '')
+			coalesce(trim(d.description), ''), d.max_pons
 		FROM devices d WHERE d.id=$1
-	`, id).Scan(&ip, &comm, &brand, &model, &devDesc)
+	`, id).Scan(&ip, &comm, &brand, &model, &devDesc, &maxPons)
 	host := ""
 	if ip != nil {
 		host = strings.TrimSpace(*ip)
@@ -269,6 +306,7 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	pons = execSt.Pons
+	pons = applyMaxPonsLimitAnyRows(pons, maxPons)
 	for k, v := range execSt.Summary {
 		summary[k] = v
 	}

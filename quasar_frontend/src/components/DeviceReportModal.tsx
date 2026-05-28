@@ -24,6 +24,7 @@ import {
   type ReportPeriod,
   type TelemetryHistorySample,
 } from "../lib/deviceReportHelpers";
+import { formatSnmpMetricCell } from "../lib/formatDisplay";
 
 function fmtIfaceOctCell(v: number | null | undefined, saturated?: boolean): string {
   if (saturated && v == null) return "— (32b)";
@@ -582,7 +583,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                 void navigator.clipboard.writeText(text).then(
                   () => {
                     setCopyCadastroNote("Copiado para a área de transferência.");
-                    window.setTimeout(() => setCopyCadastroNote(null), 2800);
+                    window.setTimeout(() => setCopyCadastroNote(null), 10_000);
                   },
                   () => setCopyCadastroNote("Não foi possível copiar (permissão do navegador)."),
                 );
@@ -943,6 +944,9 @@ export function DeviceReportModal({ device, onClose }: Props) {
                           <th>Nome</th>
                           <th className="mono">RX PON</th>
                           <th className="mono">TX PON</th>
+                          <th className="mono">Voltagem</th>
+                          <th className="mono">Corrente</th>
+                          <th className="mono">Temp.</th>
                           <th className="mono">Total</th>
                           <th className="mono">Online</th>
                           <th className="mono">Offline</th>
@@ -952,18 +956,17 @@ export function DeviceReportModal({ device, onClose }: Props) {
                       <tbody>
                         {Array.isArray(reportOltDevice.data.pons_table)
                           ? (reportOltDevice.data.pons_table as Array<Record<string, unknown>>).map((p, i) => {
-                              const rx = p.rx_dbm;
-                              const tx = p.tx_dbm;
-                              const rxStr =
-                                rx != null && Number.isFinite(Number(rx)) ? Number(rx).toFixed(1) : "—";
-                              const txStr =
-                                tx != null && Number.isFinite(Number(tx)) ? Number(tx).toFixed(1) : "—";
+                              const fmtPonMetric = (v: unknown) =>
+                                v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : "—";
                               return (
                                 <tr key={`${String(p.id ?? i)}`}>
                                   <td className="mono">{String(p.id ?? "—")}</td>
                                   <td>{String(p.name ?? "—")}</td>
-                                  <td className="mono">{rxStr}</td>
-                                  <td className="mono">{txStr}</td>
+                                  <td className="mono">{fmtPonMetric(p.rx_dbm)}</td>
+                                  <td className="mono">{fmtPonMetric(p.tx_dbm)}</td>
+                                  <td className="mono">{fmtPonMetric(p.voltage)}</td>
+                                  <td className="mono">{fmtPonMetric(p.current)}</td>
+                                  <td className="mono">{fmtPonMetric(p.temperature)}</td>
                                   <td className="mono">{formatNum(Number.isFinite(Number(p.onu_total)) ? Number(p.onu_total) : null, 0)}</td>
                                   <td className="mono">{formatNum(Number.isFinite(Number(p.onu_online)) ? Number(p.onu_online) : null, 0)}</td>
                                   <td className="mono">{formatNum(Number.isFinite(Number(p.onu_offline)) ? Number(p.onu_offline) : null, 0)}</td>
@@ -1008,8 +1011,8 @@ export function DeviceReportModal({ device, onClose }: Props) {
                             <td className="mono">{fmtVsolReportCell(u.onu)}</td>
                             <td>{fmtVsolReportCell(u.profile_name)}</td>
                             <td>{fmtVsolReportCell(u.phase_sta)}</td>
-                            <td className="mono">{fmtVsolReportCell(u.rx_pwr)}</td>
-                            <td className="mono">{fmtVsolReportCell(u.tx_pwr)}</td>
+                            <td className="mono">{formatSnmpMetricCell(u.rx_pwr)}</td>
+                            <td className="mono">{formatSnmpMetricCell(u.tx_pwr)}</td>
                             <td>{fmtVsolReportCell(u.model)}</td>
                             <td className="mono" style={{ wordBreak: "break-all", maxWidth: 120 }}>
                               {fmtVsolReportCell(u.serial)}

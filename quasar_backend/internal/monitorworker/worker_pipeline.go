@@ -43,15 +43,54 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		return
 	}
 
+	if bootstrap {
+		LockLatencyCycle()
+		defer UnlockLatencyCycle()
+	}
+
 	if runLat {
 		setActivity(ctx, pool, "1/5 — Ping (ICMP/TCP) em todos os equipamentos")
-		if err := RunLatencySweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap}); err != nil {
+		err := RunLatencySweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap})
+		if err != nil {
 			log.Warn().Err(err).Msg("pipeline: latência")
 		}
 		setActivity(ctx, pool, "")
 	}
 
 	if mode != ModeFull {
+		return
+	}
+
+	runWorkerSNMPStepsFromFlags(ctx, pool, log, mode, src, bootstrap, runTel, runIf, runOlt)
+}
+
+// RunWorkerSNMPSteps executa telemetria e interfaces (modo full), sem ICMP/TCP.
+func RunWorkerSNMPSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, bootstrap bool) {
+	if pool == nil || log == nil || mode != ModeFull {
+		return
+	}
+	cfg, err := loadClampMonitoringIntervals(ctx, pool)
+	if err != nil {
+		log.Error().Err(err).Msg("snmp pipeline: intervalos")
+		return
+	}
+	var lastTel, lastIf, lastOlt *time.Time
+	_ = pool.QueryRow(ctx, `
+		SELECT last_telemetry_cycle_at, last_interface_snapshot_cycle_at, last_olt_if_derived_cycle_at
+		FROM monitoring_runtime WHERE id=1`).Scan(&lastTel, &lastIf, &lastOlt)
+	src := "worker"
+	if bootstrap {
+		src = "bootstrap"
+	}
+	runTel := bootstrap || cycleDue(lastTel, cfg.TelemetrySeconds)
+	runIf := bootstrap || cycleDue(lastIf, cfg.IfaceSeconds)
+	runOlt := false
+	_ = lastOlt
+	runWorkerSNMPStepsFromFlags(ctx, pool, log, mode, src, bootstrap, runTel, runIf, runOlt)
+}
+
+func runWorkerSNMPStepsFromFlags(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode, src string, bootstrap, runTel, runIf, runOlt bool) {
+	if !runTel && !runIf && !runOlt {
 		return
 	}
 
@@ -79,10 +118,9 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		setActivity(ctx, pool, "")
 	}
 
-	log.Info().Bool("bootstrap", bootstrap).Str("mode", mode).
-		Bool("ran_latency", runLat).Bool("ran_telemetry", runTel).
-		Bool("ran_interfaces", runIf).Bool("ran_olt_if", runOlt).
-		Msg("pipeline de monitorização concluído")
+	log.Info().Bool("bootstrap", bootstrap).
+		Bool("ran_telemetry", runTel).Bool("ran_interfaces", runIf).Bool("ran_olt_if", runOlt).
+		Msg("pipeline SNMP concluído")
 }
 
 // PipelineHasWorkDue indica se algum passo está em janela de execução (para o tick decidir se dispara goroutine).

@@ -6,6 +6,7 @@ import { ActionMenu } from "../components/ActionMenu";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
+import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { DeviceEditBackupTab } from "../components/device/DeviceEditBackupTab";
 import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistoricoTab";
@@ -43,6 +44,7 @@ type Device = {
     temp_oid?: string;
     uptime_oid?: string;
   } | null;
+  max_pons?: number | null;
 };
 
 const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
@@ -347,14 +349,14 @@ export function DevicesPage() {
   const [reloadNote, setReloadNote] = useState<string | null>(null);
   useEffect(() => {
     if (!reloadNote) return;
-    const t = window.setTimeout(() => setReloadNote(null), 5000);
+    const t = window.setTimeout(() => setReloadNote(null), PAGE_TOAST_AUTO_MS);
     return () => window.clearTimeout(t);
   }, [reloadNote]);
 
   const [actionToast, setActionToast] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => {
     if (!actionToast) return;
-    const t = window.setTimeout(() => setActionToast(null), 2800);
+    const t = window.setTimeout(() => setActionToast(null), PAGE_TOAST_AUTO_MS);
     return () => window.clearTimeout(t);
   }, [actionToast]);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
@@ -759,6 +761,7 @@ export function DevicesPage() {
                 uptime_oid: String(form.telemetry_oid_overrides?.uptime_oid ?? "").trim() || undefined,
               }
             : {},
+        max_pons: isOlt ? (form.max_pons != null && Number(form.max_pons) > 0 ? Number(form.max_pons) : null) : null,
       };
       if (modal === "create") {
         await apiFetch("/api/v1/devices", { method: "POST", json: body });
@@ -1247,6 +1250,7 @@ export function DevicesPage() {
                       ...f,
                       category,
                       locality_id: category === "OLT" ? f.locality_id : null,
+                      max_pons: category === "OLT" ? f.max_pons ?? null : null,
                       telemetry_oid_strategy: category === "Outros" ? (f.telemetry_oid_strategy ?? "default") : "default",
                       telemetry_oid_overrides: category === "Outros" ? f.telemetry_oid_overrides ?? {} : {},
                     }));
@@ -1328,6 +1332,27 @@ export function DevicesPage() {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div className="field">
+                    <label>Quantidade máxima de PONs</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      className="input"
+                      style={{ width: "100%" }}
+                      placeholder="Ex.: 4"
+                      value={form.max_pons ?? ""}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === "") {
+                          setForm({ ...form, max_pons: null });
+                          return;
+                        }
+                        const n = Number(raw);
+                        setForm({ ...form, max_pons: Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : null });
+                      }}
+                    />
                   </div>
                 </>
               )}

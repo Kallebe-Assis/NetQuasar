@@ -19,12 +19,13 @@ type pingableDeviceRow struct {
 	category         string
 	brand            string
 	model            string
+	maxPons          *int
 }
 
 func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUID) ([]pingableDeviceRow, error) {
 	base := `
 		SELECT d.id, host(d.ip)::text, d.snmp_community, d.description, d.telemetry_enabled,
-			coalesce(d.category, ''), coalesce(d.brand, ''), coalesce(d.model, '')
+			coalesce(d.category, ''), coalesce(d.brand, ''), coalesce(d.model, ''), d.max_pons
 		FROM devices d
 		WHERE d.ping_enabled AND d.ip IS NOT NULL AND trim(host(d.ip)::text) <> ''
 		  AND trim(both from coalesce(d.network_status, '')) = 'Normal'
@@ -44,7 +45,7 @@ func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUI
 	var out []pingableDeviceRow
 	for rows.Next() {
 		var r pingableDeviceRow
-		if err := rows.Scan(&r.id, &r.ip, &r.devComm, &r.description, &r.telemetryEnabled, &r.category, &r.brand, &r.model); err != nil {
+		if err := rows.Scan(&r.id, &r.ip, &r.devComm, &r.description, &r.telemetryEnabled, &r.category, &r.brand, &r.model, &r.maxPons); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

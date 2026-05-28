@@ -1,4 +1,4 @@
-import { EM_DASH, formatNullable } from "../lib/formatDisplay";
+import { EM_DASH, formatNullable, formatSnmpMetricCell } from "../lib/formatDisplay";
 
 export type VsOnuRow = {
   pon?: number;
@@ -21,6 +21,11 @@ export type VsOnuRow = {
 function cell(v: unknown): string {
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
   return formatNullable(v);
+}
+
+function metricCell(v: unknown): string {
+  if (v == null || (typeof v === "string" && v.trim() === "")) return EM_DASH;
+  return formatSnmpMetricCell(v);
 }
 
 function onlineBadge(u: VsOnuRow) {
@@ -81,10 +86,10 @@ export function OltVsolOnuTable({ rows, note, onuRefs }: Props) {
                 <td className="mono">{cell(u.onu)}</td>
                 <td>{onlineBadge(u)}</td>
                 <td>{cell(u.phase_sta)}</td>
-                <td className="mono">{cell(u.rx_pwr)}</td>
-                <td className="mono">{cell(u.tx_pwr)}</td>
-                <td className="mono">{cell(u.voltage)}</td>
-                <td className="mono">{cell(u.temp)}</td>
+                <td className="mono">{metricCell(u.rx_pwr)}</td>
+                <td className="mono">{metricCell(u.tx_pwr)}</td>
+                <td className="mono">{metricCell(u.voltage)}</td>
+                <td className="mono">{metricCell(u.temp)}</td>
                 <td>{cell(u.model)}</td>
                 <td className="mono" style={{ maxWidth: 140, wordBreak: "break-all" }}>
                   {cell(u.serial)}

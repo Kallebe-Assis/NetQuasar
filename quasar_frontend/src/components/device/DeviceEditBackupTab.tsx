@@ -21,6 +21,12 @@ export function DeviceEditBackupTab({ deviceId, deviceLabel, canMutate }: Props)
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
 
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 10_000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
   const backup = useQuery({
     queryKey: ["device-config-backup", deviceId],
     queryFn: () => apiFetch<BackupPayload>(`/api/v1/devices/${deviceId}/config-backup`),

@@ -126,11 +126,19 @@ func (s *Server) monitoringCycleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !monitorworker.TryLockMonitoringPipeline() {
-		writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrPipelineBusy.Error(), map[string]any{"cycle": slug})
-		return
+	if slug == monitorworker.CycleSlugLatency {
+		if !monitorworker.TryLockLatencyCycle() {
+			writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrLatencyCycleBusy.Error(), map[string]any{"cycle": slug})
+			return
+		}
+		defer monitorworker.UnlockLatencyCycle()
+	} else {
+		if !monitorworker.TryLockMonitoringPipeline() {
+			writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrPipelineBusy.Error(), map[string]any{"cycle": slug})
+			return
+		}
+		defer monitorworker.UnlockMonitoringPipeline()
 	}
-	defer monitorworker.UnlockMonitoringPipeline()
 
 	l := s.Log.With().Str("route", "monitoring/cycles").Str("cycle", slug).Logger()
 	sweepErr := monitorworker.RunMonitorCycleBySlug(ctx, s.DB(), &l, slug, effectiveMode, opts)

@@ -7,6 +7,7 @@ const METRIC_LABELS: Record<string, string> = {
   status: "Estado",
   rx_power: "RX da ONU",
   tx_power: "TX da ONU",
+  pon_status: "Estado da PON (OLT)",
   pon_rx_power: "RX da PON (OLT)",
   pon_tx_power: "TX da PON (OLT)",
   temperature: "Temperatura",

@@ -71,22 +71,39 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		return nil
 	}
 
-	hasWork, err := PipelineHasWorkDue(ctx, pool, mode)
+	cfg, err := loadClampMonitoringIntervals(ctx, pool)
 	if err != nil {
 		return err
 	}
-	if !hasWork {
-		return nil
+	var lastLat, lastTel, lastIf *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at
+		FROM monitoring_runtime WHERE id=1
+	`).Scan(&lastLat, &lastTel, &lastIf); err != nil {
+		return err
 	}
 
-	if !TryLockMonitoringPipeline() {
-		return nil
+	latencyDue := cycleDue(lastLat, cfg.PingSeconds)
+	if latencyDue && TryLockLatencyCycle() {
+		go func(mode string, log *zerolog.Logger) {
+			defer UnlockLatencyCycle()
+			l := log.With().Str("component", "monitor_worker").Str("cycle", "latency").Logger()
+			if err := RunLatencySweep(ctx, pool, &l, mode, SweepOpts{Source: "worker"}); err != nil {
+				l.Warn().Err(err).Msg("ciclo latência")
+			}
+		}(mode, log)
 	}
-	go func(mode string, log *zerolog.Logger) {
-		defer UnlockMonitoringPipeline()
-		l := log.With().Str("component", "monitor_worker").Logger()
-		RunWorkerOrderedSteps(ctx, pool, &l, mode, false)
-	}(mode, log)
+
+	if mode == ModeFull {
+		snmpDue := cycleDue(lastTel, cfg.TelemetrySeconds) || cycleDue(lastIf, cfg.IfaceSeconds)
+		if snmpDue && TryLockMonitoringPipeline() {
+			go func(log *zerolog.Logger) {
+				defer UnlockMonitoringPipeline()
+				l := log.With().Str("component", "monitor_worker").Str("cycle", "snmp").Logger()
+				RunWorkerSNMPSteps(ctx, pool, &l, mode, false)
+			}(log)
+		}
+	}
 
 	return nil
 }

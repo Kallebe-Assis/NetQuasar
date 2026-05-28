@@ -12,23 +12,61 @@ func TestParsePonOnuSuffix_modelTable(t *testing.T) {
 }
 
 func TestParseOpticalDbm(t *testing.T) {
-	if f, ok := parseOpticalDbm("-23.5"); !ok || f != -23.5 {
+	if f, ok := parseOpticalDbm("-23.5", 0); !ok || f != -23.5 {
 		t.Fatalf("float got %v ok=%v", f, ok)
 	}
-	if f, ok := parseOpticalDbm("INTEGER: -2350"); !ok || f != -23.5 {
+	if f, ok := parseOpticalDbm("INTEGER: -2350", 0); !ok || f != -23.5 {
 		t.Fatalf("centi got %v ok=%v", f, ok)
+	}
+	if f, ok := parseOpticalDbm("INTEGER: 509", 100); !ok || f != 5.09 {
+		t.Fatalf("divisor got %v ok=%v", f, ok)
+	}
+}
+
+func TestDecodeColonHexASCII_vsolRx(t *testing.T) {
+	got, ok := decodeColonHexASCII("2d:31:39:2e:35:31")
+	if !ok || got != "-19.51" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
+func TestDecodeColonHexASCII_macUnchanged(t *testing.T) {
+	_, ok := decodeColonHexASCII("aa:bb:cc:dd:ee:ff")
+	if ok {
+		t.Fatal("expected MAC-like hex to stay undecoded")
+	}
+}
+
+func TestNormalizeSnmpDisplayValue(t *testing.T) {
+	if normalizeSnmpDisplayValue("2d:31:39:2e:35:31") != "-19.51" {
+		t.Fatalf("normalize failed")
+	}
+	if normalizeSnmpDisplayValue("-23.5") != "-23.5" {
+		t.Fatalf("plain float changed")
+	}
+}
+
+func TestParseScaledFloat(t *testing.T) {
+	if f, ok := parseScaledFloat("INTEGER: 512", 0); !ok || f != 512 {
+		t.Fatalf("raw got %v ok=%v", f, ok)
+	}
+	if f, ok := parseScaledFloat("INTEGER: 512", 100); !ok || f != 5.12 {
+		t.Fatalf("scaled got %v ok=%v", f, ok)
 	}
 }
 
 func TestMergePonOpticalIntoPons(t *testing.T) {
 	pons := []map[string]any{{"id": "01", "name": "GPON0/01", "onu_total": 2}}
-	optical := map[int]map[string]any{1: {"rx_dbm": -24.1, "tx_dbm": 3.2}}
+	optical := map[int]map[string]any{1: {"rx_dbm": -24.1, "tx_dbm": 3.2, "voltage": 3.3, "current": 0.42, "temperature": 38.5}}
 	out := mergePonOpticalIntoPons(pons, optical)
 	if len(out) != 1 {
 		t.Fatalf("len %d", len(out))
 	}
 	if out[0]["rx_dbm"].(float64) != -24.1 || out[0]["tx_dbm"].(float64) != 3.2 {
 		t.Fatalf("optical merge %+v", out[0])
+	}
+	if out[0]["voltage"].(float64) != 3.3 || out[0]["current"].(float64) != 0.42 || out[0]["temperature"].(float64) != 38.5 {
+		t.Fatalf("electrical merge %+v", out[0])
 	}
 }
 
@@ -38,6 +76,15 @@ func TestParsePonOnuSuffix_statusTable(t *testing.T) {
 	pon, onu, ok := ParsePonOnuSuffix(base, full)
 	if !ok || pon != 2 || onu != 1 {
 		t.Fatalf("got %d.%d ok=%v", pon, onu, ok)
+	}
+}
+
+func TestParsePonFromSuffix_datacomLaneIndex(t *testing.T) {
+	base := "1.3.6.1.4.1.3709.3.6.8.2.1.1.3"
+	full := base + ".101744641.1"
+	pon, ok := ParsePonFromSuffix(base, full)
+	if !ok || pon != 1 {
+		t.Fatalf("expected pon 1, got %d (ok=%v)", pon, ok)
 	}
 }
 
@@ -79,6 +126,13 @@ func TestParsePonOnuFromIfDescr_fullSnmpLine(t *testing.T) {
 	pon, onu, ok := parsePonOnuFromIfDescr("IF-MIB::ifDescr.26 = STRING: GPON01ONU2")
 	if !ok || pon != 1 || onu != 2 {
 		t.Fatalf("got %d.%d ok=%v", pon, onu, ok)
+	}
+}
+
+func TestParsePonFromIfDescr(t *testing.T) {
+	pon, ok := parsePonFromIfDescr("STRING: gpon_olt-1/1/4")
+	if !ok || pon != 4 {
+		t.Fatalf("got %d ok=%v", pon, ok)
 	}
 }
 

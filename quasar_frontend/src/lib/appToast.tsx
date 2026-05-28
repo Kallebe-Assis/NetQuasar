@@ -73,7 +73,7 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
         onDismiss: input.onDismiss,
       };
       setItems((prev) => [row, ...prev].slice(0, 12));
-      const ms = input.autoMs ?? (input.tone === "err" ? 10_000 : 7000);
+      const ms = input.autoMs ?? 10_000;
       if (ms > 0) {
         const tid = window.setTimeout(() => dismiss(id), ms);
         timersRef.current.set(id, tid);

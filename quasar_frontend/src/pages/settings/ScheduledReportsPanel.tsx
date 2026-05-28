@@ -52,6 +52,12 @@ function DigestScheduleCard() {
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 10_000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
     if (!cfg.data) return;
     setEnabled(cfg.data.enabled);
     setFreq(cfg.data.frequency ?? "daily");

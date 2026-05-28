@@ -238,7 +238,7 @@ export function PopsPage() {
 
   const showToast = (text: string, tone: "ok" | "err" | "off" = "ok") => {
     setToast({ text, tone });
-    window.setTimeout(() => setToast(null), 2200);
+    window.setTimeout(() => setToast(null), 10_000);
   };
 
   return (

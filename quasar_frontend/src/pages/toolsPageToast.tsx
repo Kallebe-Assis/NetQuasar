@@ -23,7 +23,7 @@ export function useToolsPageToast() {
         timerRef.current = null;
       }
       setToast({ tone, text });
-      const ms = autoMs ?? (tone === "err" ? 10_000 : 7000);
+      const ms = autoMs ?? 10_000;
       if (ms > 0) {
         timerRef.current = window.setTimeout(() => {
           timerRef.current = null;

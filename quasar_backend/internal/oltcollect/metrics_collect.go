@@ -18,11 +18,14 @@ var retryableMetrics = map[string]bool{
 	MetricTxPower:     true,
 	MetricPonRxPower:  true,
 	MetricPonTxPower:  true,
+	MetricPonVoltage:  true,
+	MetricPonCurrent:  true,
+	MetricPonTemp:     true,
 	MetricTemperature: true,
 }
 
 func isPonOnlyMetric(key string) bool {
-	return key == MetricPonRxPower || key == MetricPonTxPower
+	return key == MetricPonStatus || key == MetricPonRxPower || key == MetricPonTxPower || key == MetricPonVoltage || key == MetricPonCurrent || key == MetricPonTemp
 }
 
 // CollectOnuMetrics executa snmpwalk em cada tabela OID configurada e agrega por PON/ONU.
@@ -38,7 +41,7 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	}
 	weight := func(metric string) int {
 		switch metric {
-		case MetricRxPower, MetricTxPower, MetricPonRxPower, MetricPonTxPower, MetricTemperature:
+		case MetricRxPower, MetricTxPower, MetricPonRxPower, MetricPonTxPower, MetricPonVoltage, MetricPonCurrent, MetricPonTemp, MetricTemperature:
 			return 2 // costumam ter mais linhas/latência; ganham mais budget
 		default:
 			return 1
@@ -76,6 +79,7 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	t0All := time.Now()
 	ponCountsByPon := map[int]ponCountPair{}
 	ponOptical := map[int]map[string]any{}
+	ponStatus := map[int]map[string]any{}
 
 	for _, key := range keys {
 		def := metrics[key]
@@ -158,6 +162,24 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 				entry["note"] = firstNonEmptyString(fmt.Sprint(entry["note"]), "status sem correspondência IF-MIB (ifDescr/ifOperStatus)")
 			}
 		} else if isPonOnlyMetric(key) {
+			if key == MetricPonStatus {
+				rows, statusMatches := collectPonStatusFromIfMib(ctx, host, community, perWalk, def, vars)
+				for pon, rowData := range rows {
+					if ponStatus[pon] == nil {
+						ponStatus[pon] = map[string]any{}
+					}
+					for rk, rv := range rowData {
+						ponStatus[pon][rk] = rv
+					}
+				}
+				matched = statusMatches
+				if matched == 0 {
+					entry["note"] = firstNonEmptyString(fmt.Sprint(entry["note"]), "status PON sem correspondência por ifDescr")
+				}
+				entry["matched_rows"] = matched
+				walkLog = append(walkLog, entry)
+				continue
+			}
 			for _, v := range vars {
 				pon, ok := ParsePonFromSuffix(base, v.OID)
 				if !ok {
@@ -170,16 +192,34 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 				val := strings.TrimSpace(v.Value)
 				switch key {
 				case MetricPonRxPower:
-					if f, ok := parseOpticalDbm(val); ok {
+					if f, ok := parseOpticalDbm(val, def.ValueDivisor); ok {
 						ponOptical[pon]["rx_dbm"] = f
 					} else {
 						ponOptical[pon]["rx_dbm_raw"] = val
 					}
 				case MetricPonTxPower:
-					if f, ok := parseOpticalDbm(val); ok {
+					if f, ok := parseOpticalDbm(val, def.ValueDivisor); ok {
 						ponOptical[pon]["tx_dbm"] = f
 					} else {
 						ponOptical[pon]["tx_dbm_raw"] = val
+					}
+				case MetricPonVoltage:
+					if f, ok := parseScaledFloat(val, def.ValueDivisor); ok {
+						ponOptical[pon]["voltage"] = f
+					} else {
+						ponOptical[pon]["voltage_raw"] = val
+					}
+				case MetricPonCurrent:
+					if f, ok := parseScaledFloat(val, def.ValueDivisor); ok {
+						ponOptical[pon]["current"] = f
+					} else {
+						ponOptical[pon]["current_raw"] = val
+					}
+				case MetricPonTemp:
+					if f, ok := parseScaledFloat(val, def.ValueDivisor); ok {
+						ponOptical[pon]["temperature"] = f
+					} else {
+						ponOptical[pon]["temperature_raw"] = val
 					}
 				}
 			}
@@ -191,7 +231,7 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 				}
 				matched++
 				row := getRow(pon, onu)
-				val := strings.TrimSpace(v.Value)
+				val := normalizeSnmpDisplayValue(v.Value)
 				switch key {
 				case MetricSerial:
 					row["serial"] = val
@@ -248,18 +288,20 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 			online += c.online
 			offline += c.offline
 		}
-	} else if len(ponCountsByPon) > 0 {
-		online, offline = 0, 0
-		for _, p := range pons {
-			online += intFromAny(p["onu_online"])
-			offline += intFromAny(p["onu_offline"])
-		}
 	}
 	pons = BuildPonsFromOnuRows(onuRows)
 	if len(ponCountsByPon) > 0 {
 		pons = mergePonsWithCountMaps(pons, ponCountsByPon)
 	}
 	pons = mergePonOpticalIntoPons(pons, ponOptical)
+	pons = mergePonStatusIntoPons(pons, ponStatus)
+	if len(ponCountsByPon) > 0 && len(onuRows) > 0 {
+		online, offline = 0, 0
+		for _, p := range pons {
+			online += intFromAny(p["onu_online"])
+			offline += intFromAny(p["onu_offline"])
+		}
+	}
 	arr := make([]any, 0, len(onuRows))
 	for _, r := range onuRows {
 		arr = append(arr, r)
@@ -410,12 +452,15 @@ func mergePonsWithCountMaps(fromOnus []map[string]any, counts map[int]ponCountPa
 	return out
 }
 
-func parseOpticalDbm(raw string) (float64, bool) {
+func parseOpticalDbm(raw string, divisor int) (float64, bool) {
 	s := sanitizeSNMPValue(raw)
 	if s == "" {
 		return 0, false
 	}
 	normalizeDbm := func(f float64) float64 {
+		if divisor > 1 {
+			return f / float64(divisor)
+		}
 		if f > 100 || f < -100 {
 			return f / 100
 		}
@@ -437,6 +482,74 @@ func parseOpticalDbm(raw string) (float64, bool) {
 		return normalizeDbm(f), true
 	}
 	return 0, false
+}
+
+func parseScaledFloat(raw string, divisor int) (float64, bool) {
+	s := sanitizeSNMPValue(raw)
+	if s == "" {
+		return 0, false
+	}
+	normalize := func(f float64) float64 {
+		if divisor > 1 {
+			return f / float64(divisor)
+		}
+		return f
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return normalize(f), true
+	}
+	if mm := reParenNumber.FindStringSubmatch(s); len(mm) == 2 {
+		if f, err := strconv.ParseFloat(mm[1], 64); err == nil {
+			return normalize(f), true
+		}
+	}
+	parts := reDigits.FindAllString(s, -1)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	if f, err := strconv.ParseFloat(parts[len(parts)-1], 64); err == nil {
+		return normalize(f), true
+	}
+	return 0, false
+}
+
+func mergePonStatusIntoPons(pons []map[string]any, statusByPon map[int]map[string]any) []map[string]any {
+	if len(statusByPon) == 0 {
+		return pons
+	}
+	byPon := map[int]map[string]any{}
+	for _, p := range pons {
+		pon := ponIndexFromRow(p)
+		if pon > 0 {
+			byPon[pon] = p
+		}
+	}
+	for pon, st := range statusByPon {
+		row := byPon[pon]
+		if row == nil {
+			id := fmt.Sprintf("%02d", pon)
+			row = map[string]any{
+				"id": id, "name": "GPON0/" + id,
+				"onu_total": 0, "onu_online": 0, "onu_offline": 0,
+				"source_slice": "onu_metrics_collect",
+			}
+			pons = append(pons, row)
+			byPon[pon] = row
+		}
+		if v, ok := st["pon_oper_status"]; ok {
+			row["pon_oper_status"] = v
+		}
+		if v, ok := st["pon_oper_status_raw"]; ok {
+			row["pon_oper_status_raw"] = v
+		}
+		if v, ok := st["status"]; ok {
+			row["status"] = v
+		}
+	}
+	sort.Slice(pons, func(i, j int) bool {
+		return ponIndexFromRow(pons[i]) < ponIndexFromRow(pons[j])
+	})
+	return pons
 }
 
 func mergePonOpticalIntoPons(pons []map[string]any, optical map[int]map[string]any) []map[string]any {
@@ -468,6 +581,15 @@ func mergePonOpticalIntoPons(pons []map[string]any, optical map[int]map[string]a
 		}
 		if v, ok := opt["tx_dbm"]; ok && v != nil {
 			row["tx_dbm"] = v
+		}
+		if v, ok := opt["voltage"]; ok && v != nil {
+			row["voltage"] = v
+		}
+		if v, ok := opt["current"]; ok && v != nil {
+			row["current"] = v
+		}
+		if v, ok := opt["temperature"]; ok && v != nil {
+			row["temperature"] = v
 		}
 	}
 	sort.Slice(pons, func(i, j int) bool {
@@ -512,9 +634,16 @@ func ParsePonFromSuffix(baseOID, fullOID string) (pon int, ok bool) {
 	if suffix == "" {
 		return 0, false
 	}
-	segStr := suffix
-	if i := strings.LastIndex(suffix, "."); i >= 0 {
-		segStr = suffix[i+1:]
+	segs := strings.Split(suffix, ".")
+	segStr := segs[len(segs)-1]
+	// Alguns OIDs Datacom trazem .ifIndex.lane (ex.: ...101744641.1).
+	// Nesses casos a PON está no penúltimo segmento (ifIndex), não no lane.
+	if len(segs) >= 2 {
+		last, errLast := strconv.Atoi(strings.TrimSpace(segs[len(segs)-1]))
+		prev, errPrev := strconv.Atoi(strings.TrimSpace(segs[len(segs)-2]))
+		if errLast == nil && errPrev == nil && last > 0 && last <= 8 && prev > 10000 {
+			segStr = segs[len(segs)-2]
+		}
 	}
 	seg, err := strconv.Atoi(strings.TrimSpace(segStr))
 	if err != nil || seg <= 0 {
@@ -664,6 +793,84 @@ func collectStatusFromIfMib(
 	return out, matched
 }
 
+func collectPonStatusFromIfMib(
+	ctx context.Context,
+	host, community string,
+	perWalk time.Duration,
+	def OnuMetricDef,
+	operVars []probing.SNMPVar,
+) (map[int]map[string]any, int) {
+	out := map[int]map[string]any{}
+	ifDescrOID := strings.TrimSpace(def.IfDescrOID)
+	if ifDescrOID == "" {
+		ifDescrOID = "1.3.6.1.2.1.2.2.1.2"
+	}
+	ifOperOID := strings.TrimSpace(def.IfOperOID)
+	if ifOperOID == "" {
+		ifOperOID = "1.3.6.1.2.1.2.2.1.8"
+	}
+	wCtx1, cancel1 := context.WithTimeout(ctx, perWalk)
+	descrVars, _, _ := probing.SNMPWalk(wCtx1, probing.SNMPWalkParams{
+		Host: host, Port: 161, Community: community, RootOID: ifDescrOID,
+		Version: "2c", Timeout: perWalk, Retries: 1, MaxRows: 25000,
+	})
+	cancel1()
+	if len(operVars) == 0 {
+		wCtx2, cancel2 := context.WithTimeout(ctx, perWalk)
+		operVars, _, _ = probing.SNMPWalk(wCtx2, probing.SNMPWalkParams{
+			Host: host, Port: 161, Community: community, RootOID: ifOperOID,
+			Version: "2c", Timeout: perWalk, Retries: 1, MaxRows: 25000,
+		})
+		cancel2()
+	}
+
+	descrByIdx := map[int]string{}
+	for _, v := range descrVars {
+		idx, ok := suffixIndex(v.OID)
+		if !ok {
+			continue
+		}
+		descrByIdx[idx] = strings.TrimSpace(v.Value)
+	}
+	statusByIdx := map[int]int{}
+	statusRawByIdx := map[int]string{}
+	for _, v := range operVars {
+		idx, ok := suffixIndex(v.OID)
+		if !ok {
+			continue
+		}
+		n, err := parseStatusInt(v.Value)
+		if err != nil {
+			continue
+		}
+		statusByIdx[idx] = n
+		statusRawByIdx[idx] = strings.TrimSpace(v.Value)
+	}
+	matched := 0
+	for idx, descr := range descrByIdx {
+		status, ok := statusByIdx[idx]
+		if !ok {
+			continue
+		}
+		pon, ok := parsePonFromIfDescr(descr)
+		if !ok {
+			continue
+		}
+		on := StatusIsOnline(status, def)
+		st := "down"
+		if on {
+			st = "up"
+		}
+		out[pon] = map[string]any{
+			"pon_oper_status":     status,
+			"pon_oper_status_raw": statusRawByIdx[idx],
+			"status":              st,
+		}
+		matched++
+	}
+	return out, matched
+}
+
 func suffixIndex(oid string) (int, bool) {
 	norm := strings.TrimSpace(probing.NormalizeSNMPOID(oid))
 	if norm == "" {
@@ -711,6 +918,30 @@ func parsePonOnuFromIfDescr(raw string) (pon, onu int, ok bool) {
 	return ponNum, onuIdx, true
 }
 
+func parsePonFromIfDescr(raw string) (pon int, ok bool) {
+	s := sanitizeSNMPValue(raw)
+	if s == "" {
+		return 0, false
+	}
+	compact := oltifderive.PonCompactFromPhy(s, s)
+	if compact == "" {
+		return 0, false
+	}
+	nums := reDigits.FindAllString(compact, -1)
+	if len(nums) == 0 {
+		return 0, false
+	}
+	last := nums[len(nums)-1]
+	n, err := strconv.Atoi(strings.TrimLeft(last, "0"))
+	if err != nil || n <= 0 {
+		n, err = strconv.Atoi(last)
+		if err != nil || n <= 0 {
+			return 0, false
+		}
+	}
+	return n, true
+}
+
 func parseStatusInt(raw string) (int, error) {
 	s := sanitizeSNMPValue(raw)
 	if s == "" {
@@ -739,8 +970,61 @@ func sanitizeSNMPValue(raw string) string {
 		s = strings.TrimSpace(s[i+len("STRING:"):])
 	} else if i := strings.Index(upper, "INTEGER:"); i >= 0 {
 		s = strings.TrimSpace(s[i+len("INTEGER:"):])
+	} else if i := strings.Index(upper, "HEX-STRING:"); i >= 0 {
+		s = strings.TrimSpace(s[i+len("HEX-STRING:"):])
 	}
 	return strings.TrimSpace(strings.Trim(s, `"`))
+}
+
+// normalizeSnmpDisplayValue converte OctetString em hex (ex.: 2d:31:39:2e:35:31) para texto legível (-19.51).
+func normalizeSnmpDisplayValue(raw string) string {
+	s := sanitizeSNMPValue(raw)
+	if s == "" {
+		return s
+	}
+	if decoded, ok := decodeColonHexASCII(s); ok {
+		return decoded
+	}
+	return s
+}
+
+func decodeColonHexASCII(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.Contains(s, ":") {
+		return "", false
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 {
+		return "", false
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		if len(p) != 2 {
+			return "", false
+		}
+		n, err := strconv.ParseUint(p, 16, 8)
+		if err != nil {
+			return "", false
+		}
+		if n < 32 || n > 126 {
+			return "", false
+		}
+		b.WriteByte(byte(n))
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "", false
+	}
+	if matched, _ := regexp.MatchString(`^-?\d+(\.\d+)?$`, out); matched {
+		return out, true
+	}
+	if len(parts) == 6 && strings.ContainsAny(out, ".-") {
+		return out, true
+	}
+	if len(parts) != 6 {
+		return out, true
+	}
+	return "", false
 }
 
 func firstNonEmptyString(values ...string) string {

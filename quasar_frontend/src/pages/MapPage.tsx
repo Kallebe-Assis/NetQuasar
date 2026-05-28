@@ -161,7 +161,7 @@ export function MapPage() {
 
   useEffect(() => {
     if (!mapToast) return;
-    const t = window.setTimeout(() => setMapToast(null), 3200);
+    const t = window.setTimeout(() => setMapToast(null), 10_000);
     return () => window.clearTimeout(t);
   }, [mapToast]);
 

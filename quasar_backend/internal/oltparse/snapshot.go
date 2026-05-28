@@ -174,6 +174,9 @@ func PonRows(ponsJSON []byte) []map[string]any {
 			"name":        name,
 			"rx_dbm":      nil,
 			"tx_dbm":      nil,
+			"voltage":     nil,
+			"current":     nil,
+			"temperature": nil,
 			"onu_total":   pickInt(m, "onu_total", "total_onu", "onus", "onus_total", "onu_count"),
 			"onu_online":  pickInt(m, "onu_online", "online", "onu_ok"),
 			"onu_offline": pickInt(m, "onu_offline", "offline", "onu_down"),
@@ -185,6 +188,15 @@ func PonRows(ponsJSON []byte) []map[string]any {
 		}
 		if f, ok := firstFloat(m, "tx_dbm", "tx", "pon_tx", "optical_tx"); ok {
 			row["tx_dbm"] = f
+		}
+		if f, ok := firstFloat(m, "voltage", "pon_voltage"); ok {
+			row["voltage"] = f
+		}
+		if f, ok := firstFloat(m, "current", "pon_current", "amperage"); ok {
+			row["current"] = f
+		}
+		if f, ok := firstFloat(m, "temperature", "pon_temperature", "temp"); ok {
+			row["temperature"] = f
 		}
 		out = append(out, row)
 	}
