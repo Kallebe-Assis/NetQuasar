@@ -24,6 +24,7 @@ type oltCollectExecState struct {
 	Brand          string
 	Model          string
 	DevDesc        string
+	MaxPons        int
 	Profile        oltcollect.Profile
 	Summary        map[string]any
 	Pons           []any
@@ -179,7 +180,7 @@ func (s *Server) oltStepOnuMetricsCollect(ctx context.Context, st *oltCollectExe
 			budget = left
 		}
 	}
-	sum, pons, _, err := oltcollect.CollectOnuMetrics(ctx, st.Host, st.Community, metrics, budget)
+	sum, pons, _, err := oltcollect.CollectOnuMetrics(ctx, st.Host, st.Community, metrics, budget, st.MaxPons)
 	if err != nil {
 		return err
 	}

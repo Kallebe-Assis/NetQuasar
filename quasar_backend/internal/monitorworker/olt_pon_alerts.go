@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,27 +93,10 @@ func sumOnuOnlineInPonRows(pons []map[string]any) float64 {
 }
 
 func applyMaxPonsLimitMapRows(pons []map[string]any, maxPons *int) []map[string]any {
-	if maxPons == nil || *maxPons <= 0 || len(pons) == 0 {
+	if maxPons == nil || *maxPons <= 0 {
 		return pons
 	}
-	out := make([]map[string]any, 0, len(pons))
-	for _, p := range pons {
-		if p == nil {
-			continue
-		}
-		id := strings.TrimSpace(fmt.Sprint(p["id"]))
-		if id == "" {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimLeft(id, "0"))
-		if err != nil || n <= 0 {
-			continue
-		}
-		if n <= *maxPons {
-			out = append(out, p)
-		}
-	}
-	return out
+	return oltifderive.FilterPonRowsByMaxSlots(pons, *maxPons)
 }
 
 // shouldSecondOltIfWalk relê IF-MIB quando o walk falhou, truncou ou a agregação parece perda em massa vs. snapshot anterior.

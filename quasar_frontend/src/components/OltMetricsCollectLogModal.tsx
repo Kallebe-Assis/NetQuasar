@@ -4,14 +4,14 @@ export type MetricsWalkRow = Record<string, unknown>;
 
 const METRIC_LABELS: Record<string, string> = {
   serial: "Serial",
-  status: "Estado",
+  status: "Status (online / offline)",
   rx_power: "RX da ONU",
   tx_power: "TX da ONU",
-  pon_status: "Estado da PON (OLT)",
+  pon_status: "Status da PON (OLT)",
+  model: "Modelo da ONU",
   pon_rx_power: "RX da PON (OLT)",
   pon_tx_power: "TX da PON (OLT)",
   temperature: "Temperatura",
-  model: "Modelo",
 };
 
 function fmtMs(ms: unknown): string {

@@ -1730,7 +1730,7 @@ function ConnectionPanel() {
             <input className="input mono" value={oltPonTxOid} onChange={(e) => setOltPonTxOid(e.target.value)} />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
-            <label>Estado da PON</label>
+            <label>Status da PON</label>
             <input className="input mono" value={oltPonStatusOid} onChange={(e) => setOltPonStatusOid(e.target.value)} />
           </div>
         </div>
@@ -1743,7 +1743,7 @@ function ConnectionPanel() {
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
           <div className="field" style={{ minWidth: 260 }}>
-            <label>Estado das interfaces (ligado / desligado)</label>
+            <label>Status das interfaces (ligado / desligado)</label>
             <input className="input mono" value={mkInterfacesStatusOid} onChange={(e) => setMkInterfacesStatusOid(e.target.value)} />
           </div>
           <div className="field" style={{ minWidth: 260 }}>
@@ -1965,8 +1965,10 @@ type OltOnuMetricDef = {
   value_divisor?: number;
   online_values?: number[];
   offline_values?: number[];
-  status_mode?: "pon_onu_suffix" | "if_mib_index" | "pon_online_offline";
+  status_mode?: "pon_onu_suffix" | "if_mib_index" | "pon_online_offline" | "rx_power_threshold";
+  offline_rx_dbm?: number;
   ifdescr_oid?: string;
+  ifname_oid?: string;
   ifoper_oid?: string;
   online_count_oid?: string;
   offline_count_oid?: string;
@@ -1989,15 +1991,15 @@ const OLT_METRIC_FIELDS: Array<{
   },
   {
     key: "status",
-    label: "Estado (online / offline)",
-    hint: "OID da tabela de estado. Configure quais valores significam online e offline.",
-    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.5.2",
+    label: "Status (online / offline)",
+    hint: "VSOL fase: …1.1.1.1.5 com sufixo .PON.ONU (ex. …5.1.5 = PON 1 ONU 5). Online=3 (working).",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.5",
     hasStatusValues: true,
   },
   {
     key: "rx_power",
     label: "RX da ONU (dBm)",
-    hint: "Potência recebida na ONU. OID da tabela SNMP; sufixo .PON.ONU.",
+    hint: "VSOL Pirapetinga: 1.3.6.1.4.1.37950.1.1.6.1.1.3.1.7 (não use .3 temperatura nem .2 índice). Sufixo .PON.ONU — ex. …3.1.7.1.1 = PON 1 ONU 1.",
     placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.7",
   },
   {
@@ -2014,9 +2016,15 @@ const OLT_METRIC_FIELDS: Array<{
   },
   {
     key: "model",
-    label: "Modelo",
+    label: "Modelo da ONU",
     hint: "OID da tabela de modelo (ex.: …2.1.6.3.10 = modelo da ONU 10 na PON 3).",
     placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.6",
+  },
+  {
+    key: "vlan",
+    label: "VLAN da ONU",
+    hint: "VLAN padrão da porta (gOnuCfgPortVlanDefVlan). Walk com sufixo .PON.ONU; na VSOL pode ser necessário walk em 1.3.6.1.4.1.37950.1.1.6.1.1.7.5.8.",
+    placeholder: "1.3.6.1.4.1.37950.1.1.6.1.1.7.5.8",
   },
 ];
 
@@ -2026,12 +2034,14 @@ const OLT_PON_METRIC_FIELDS: Array<{
   hint: string;
   placeholder: string;
   hasStatusValues?: boolean;
+  hasStatusMode?: boolean;
   supportsDivisor?: boolean;
 }> = [
   {
     key: "pon_status",
-    label: "Estado da PON (OLT)",
-    hint: "Estado por porta PON (ex.: ifOperStatus por ifIndex da PON). Configure valores online/offline.",
+    label: "Status da PON (OLT)",
+    hint: "Status por porta PON (ex.: ifOperStatus por ifIndex da PON). Configure valores online/offline.",
+    hasStatusMode: true,
     placeholder: "1.3.6.1.2.1.2.2.1.8",
     hasStatusValues: true,
   },
@@ -2078,13 +2088,15 @@ function defaultMetricsForm(): OltMetricsForm {
   const out: OltMetricsForm = {};
   for (const f of OLT_ALL_METRIC_FIELDS) {
     out[f.key] = {
-      enabled: f.key === "status" || f.key === "model",
-      oid: "",
-      value_divisor: f.key === "pon_tx_power" ? 100 : 0,
-      online_values: f.hasStatusValues ? [3] : undefined,
-      offline_values: f.hasStatusValues ? [] : undefined,
-      status_mode: f.hasStatusValues ? "pon_onu_suffix" : undefined,
+      enabled: f.key === "status" || f.key === "model" || f.key === "rx_power",
+      oid: f.key === "status" ? "1.3.6.1.4.1.3902.1082.500.1.2.4.2.1.2" : "",
+      value_divisor: f.key === "status" ? 1000 : f.key === "pon_tx_power" ? 100 : 0,
+      online_values: f.key === "pon_status" ? [1] : f.hasStatusValues ? [3] : undefined,
+      offline_values: f.key === "pon_status" ? [2] : f.hasStatusValues ? [] : undefined,
+      status_mode: f.key === "pon_status" ? "if_mib_index" : f.key === "status" ? "rx_power_threshold" : f.hasStatusValues ? "pon_onu_suffix" : undefined,
+      offline_rx_dbm: f.key === "status" ? -70 : undefined,
       ifdescr_oid: f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.2" : undefined,
+      ifname_oid: f.hasStatusValues ? "1.3.6.1.2.1.31.1.1.1.1" : undefined,
       ifoper_oid: f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.8" : undefined,
       online_count_oid: "",
       offline_count_oid: "",
@@ -2107,12 +2119,15 @@ function metricsFromApi(raw: unknown): OltMetricsForm {
       online_values: m.online_values ?? (f.hasStatusValues ? [3] : undefined),
       offline_values: m.offline_values ?? (f.hasStatusValues ? [] : undefined),
       status_mode:
-        (m.status_mode as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline" | undefined) ??
+        (m.status_mode as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline" | "rx_power_threshold" | undefined) ??
         (f.hasStatusValues ? "pon_onu_suffix" : undefined),
+      offline_rx_dbm: Number.isFinite(Number(m.offline_rx_dbm)) ? Number(m.offline_rx_dbm) : f.key === "status" ? -70 : undefined,
       ifdescr_oid: m.ifdescr_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.2" : undefined),
+      ifname_oid: m.ifname_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.31.1.1.1.1" : undefined),
       ifoper_oid: m.ifoper_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.8" : undefined),
       online_count_oid: m.online_count_oid ?? "",
       offline_count_oid: m.offline_count_oid ?? "",
+      offline_rx_dbm: Number.isFinite(Number(m.offline_rx_dbm)) ? Number(m.offline_rx_dbm) : undefined,
     };
   }
   return base;
@@ -2122,7 +2137,7 @@ function buildMetricsPayload(form: OltMetricsForm): OltMetricsForm {
   const out: OltMetricsForm = {};
   for (const f of OLT_ALL_METRIC_FIELDS) {
     const m = form[f.key] ?? {};
-    const statusMode = m.status_mode ?? "pon_onu_suffix";
+    const statusMode = m.status_mode ?? (f.key === "pon_status" ? "if_mib_index" : "pon_onu_suffix");
     if (f.hasStatusValues && statusMode === "pon_online_offline") {
       const onlineOID = (m.online_count_oid ?? "").trim();
       const offlineOID = (m.offline_count_oid ?? "").trim();
@@ -2147,13 +2162,20 @@ function buildMetricsPayload(form: OltMetricsForm): OltMetricsForm {
       value_divisor: Number.isFinite(Number(m.value_divisor)) ? Number(m.value_divisor) : 0,
       ...(f.hasStatusValues
         ? {
-            online_values: Array.isArray(m.online_values) ? m.online_values : parseIntList(String(m.online_values ?? "3")),
+            online_values: Array.isArray(m.online_values)
+              ? m.online_values
+              : parseIntList(String(m.online_values ?? (statusMode === "if_mib_index" ? "1" : "3"))),
             offline_values: Array.isArray(m.offline_values) ? m.offline_values : parseIntList(String(m.offline_values ?? "")),
             status_mode: statusMode,
             ifdescr_oid: (m.ifdescr_oid ?? "").trim(),
+            ifname_oid: (m.ifname_oid ?? "").trim(),
             ifoper_oid: (m.ifoper_oid ?? "").trim(),
             online_count_oid: (m.online_count_oid ?? "").trim(),
             offline_count_oid: (m.offline_count_oid ?? "").trim(),
+            offline_rx_dbm:
+              statusMode === "rx_power_threshold" && Number.isFinite(Number(m.offline_rx_dbm))
+                ? Number(m.offline_rx_dbm)
+                : undefined,
           }
         : {}),
     };
@@ -2180,6 +2202,9 @@ function hasEnabledMetrics(form: OltMetricsForm): boolean {
     }
     if (f.hasStatusValues && mode === "if_mib_index") {
       return (m?.oid ?? "").trim() !== "" || (m?.ifoper_oid ?? "").trim() !== "";
+    }
+    if (f.hasStatusValues && mode === "rx_power_threshold") {
+      return (m?.oid ?? "").trim() !== "" || (form.rx_power?.oid ?? "").trim() !== "";
     }
     return (m?.oid ?? "").trim() !== "";
   });
@@ -2515,7 +2540,7 @@ function OltVendorsPanel() {
                 </div>
                 {field.hasStatusValues && m.enabled !== false && (
                   <div className="field" style={{ margin: "0 0 6px" }}>
-                    <label style={{ fontSize: 11 }}>Modo de leitura do estado</label>
+                    <label style={{ fontSize: 11 }}>Modo de leitura do status</label>
                     <select
                       className="input"
                       style={{ fontSize: 12, padding: "4px 8px" }}
@@ -2525,7 +2550,11 @@ function OltVendorsPanel() {
                           ...prev,
                           [field.key]: {
                             ...prev[field.key],
-                            status_mode: e.target.value as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline",
+                            status_mode: e.target.value as
+                              | "pon_onu_suffix"
+                              | "if_mib_index"
+                              | "pon_online_offline"
+                              | "rx_power_threshold",
                           },
                         }))
                       }
@@ -2533,7 +2562,48 @@ function OltVendorsPanel() {
                       <option value="pon_onu_suffix">Tabela PON/ONU (sufixo .PON.ONU)</option>
                       <option value="if_mib_index">Interfaces (ifDescr + ifOperStatus)</option>
                       <option value="pon_online_offline">Contagem por PON (OID online + OID offline)</option>
+                      <option value="rx_power_threshold">RX da ONU (limiar dBm)</option>
                     </select>
+                  </div>
+                )}
+                {field.hasStatusValues && m.enabled !== false && statusMode === "rx_power_threshold" && (
+                  <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                    <div className="field" style={{ margin: 0, flex: "1 1 140px" }}>
+                      <label style={{ fontSize: 11 }}>Limiar (dBm) — online se RX ≥ valor</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="-70"
+                        value={Number.isFinite(Number(m.offline_rx_dbm)) ? String(m.offline_rx_dbm) : "-70"}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: {
+                              ...prev[field.key],
+                              offline_rx_dbm: Number(e.target.value.replace(",", ".")),
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="field" style={{ margin: 0, flex: "1 1 140px" }}>
+                      <label style={{ fontSize: 11 }}>Divisor SNMP (ZTE: 1000)</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="1000"
+                        value={Number.isFinite(Number(m.value_divisor)) && Number(m.value_divisor) > 0 ? String(m.value_divisor) : "1000"}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: {
+                              ...prev[field.key],
+                              value_divisor: Number(e.target.value || 0),
+                            },
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
                 )}
                 {field.hasStatusValues && m.enabled !== false && statusMode === "pon_online_offline" ? (
@@ -2592,6 +2662,21 @@ function OltVendorsPanel() {
                     {field.hasStatusValues && m.enabled !== false && statusMode === "if_mib_index" && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                         <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 11 }}>OID ifName (ONU — ZTE)</label>
+                          <input
+                            className="input mono"
+                            style={{ width: "100%", fontSize: 12 }}
+                            placeholder="1.3.6.1.2.1.31.1.1.1.1"
+                            value={m.ifname_oid ?? "1.3.6.1.2.1.31.1.1.1.1"}
+                            onChange={(e) =>
+                              setMetrics((prev) => ({
+                                ...prev,
+                                [field.key]: { ...prev[field.key], ifname_oid: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
                           <label style={{ fontSize: 11 }}>OID ifDescr</label>
                           <input
                             className="input mono"
@@ -2623,7 +2708,7 @@ function OltVendorsPanel() {
                         </div>
                       </div>
                     )}
-                    {field.hasStatusValues && m.enabled !== false && statusMode !== "pon_online_offline" && (
+                    {field.hasStatusValues && m.enabled !== false && statusMode !== "pon_online_offline" && statusMode !== "rx_power_threshold" && (
                       <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                         <div className="field" style={{ margin: 0, flex: "1 1 120px" }}>
                           <label style={{ fontSize: 11 }}>Valores = online</label>
@@ -2666,11 +2751,12 @@ function OltVendorsPanel() {
 
           <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Métricas das portas PON (OLT)</h3>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Estado e potência da porta GPON na OLT — distinto do estado/RX/TX de cada ONU. Sufixo SNMP apenas .PON.
+            Status e potência da porta GPON na OLT — distinto do status/RX/TX de cada ONU. Sufixo SNMP apenas .PON.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
             {OLT_PON_METRIC_FIELDS.map((field) => {
               const m = metrics[field.key] ?? {};
+              const ponStatusMode = m.status_mode ?? (field.key === "pon_status" ? "if_mib_index" : "pon_onu_suffix");
               return (
                 <div
                   key={field.key}
@@ -2693,22 +2779,95 @@ function OltVendorsPanel() {
                     </label>
                     <InfoHint label={field.label}>{field.hint}</InfoHint>
                   </div>
-                  <div className="field" style={{ margin: 0 }}>
-                    <label style={{ fontSize: 11 }}>OID da tabela SNMP</label>
-                    <input
-                      className="input mono"
-                      style={{ width: "100%", fontSize: 12 }}
-                      placeholder={field.placeholder}
-                      value={m.oid ?? ""}
-                      disabled={m.enabled === false}
-                      onChange={(e) =>
-                        setMetrics((prev) => ({
-                          ...prev,
-                          [field.key]: { ...prev[field.key], oid: e.target.value },
-                        }))
-                      }
-                    />
-                  </div>
+                  {field.hasStatusMode && m.enabled !== false && (
+                    <div className="field" style={{ margin: "0 0 6px" }}>
+                      <label style={{ fontSize: 11 }}>Modo de leitura do status</label>
+                      <select
+                        className="input"
+                        style={{ fontSize: 12, padding: "4px 8px" }}
+                        value={ponStatusMode}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: {
+                              ...prev[field.key],
+                              status_mode: e.target.value as "pon_onu_suffix" | "if_mib_index",
+                            },
+                          }))
+                        }
+                      >
+                        <option value="if_mib_index">Interfaces (ifDescr + ifOperStatus)</option>
+                        <option value="pon_onu_suffix">Tabela SNMP (sufixo .PON)</option>
+                      </select>
+                    </div>
+                  )}
+                  {!(field.hasStatusValues && ponStatusMode === "if_mib_index") && (
+                    <div className="field" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>OID da tabela SNMP</label>
+                      <input
+                        className="input mono"
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder={field.placeholder}
+                        value={m.oid ?? ""}
+                        disabled={m.enabled === false}
+                        onChange={(e) =>
+                          setMetrics((prev) => ({
+                            ...prev,
+                            [field.key]: { ...prev[field.key], oid: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  )}
+                  {field.hasStatusValues && m.enabled !== false && ponStatusMode === "if_mib_index" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: 11 }}>OID ifName (PON — ex. gpon_olt-1/1/N)</label>
+                        <input
+                          className="input mono"
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder="1.3.6.1.2.1.31.1.1.1.1"
+                          value={m.ifname_oid ?? "1.3.6.1.2.1.31.1.1.1.1"}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], ifname_oid: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: 11 }}>OID ifDescr (ex. PON-1/1/N)</label>
+                        <input
+                          className="input mono"
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder="1.3.6.1.2.1.2.2.1.2"
+                          value={m.ifdescr_oid ?? "1.3.6.1.2.1.2.2.1.2"}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], ifdescr_oid: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label style={{ fontSize: 11 }}>OID ifOperStatus</label>
+                        <input
+                          className="input mono"
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder="1.3.6.1.2.1.2.2.1.8"
+                          value={m.ifoper_oid ?? "1.3.6.1.2.1.2.2.1.8"}
+                          onChange={(e) =>
+                            setMetrics((prev) => ({
+                              ...prev,
+                              [field.key]: { ...prev[field.key], ifoper_oid: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
                   {field.supportsDivisor && m.enabled !== false && (
                     <div className="field" style={{ margin: "6px 0 0" }}>
                       <label style={{ fontSize: 11 }}>Divisor do valor</label>

@@ -696,7 +696,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
           </div>
         </div>
         <div className="card" style={{ marginBottom: 10 }}>
-          <h4 style={{ marginTop: 0 }}>Estado e leituras colectadas</h4>
+          <h4 style={{ marginTop: 0 }}>Status e leituras colectadas</h4>
           <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
             Valores da última colecta (ping e telemetria) e outras leituras SNMP da mesma amostra, com descrição legível — sem identificadores técnicos de OID.
           </p>
@@ -950,7 +950,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                           <th className="mono">Total</th>
                           <th className="mono">Online</th>
                           <th className="mono">Offline</th>
-                          <th>Estado</th>
+                          <th>Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1071,7 +1071,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                                   <th>Suffix</th>
                                   <th>Porta</th>
                                   <th>Valor</th>
-                                  <th>Estado</th>
+                                  <th>Status</th>
                                   <th>Tipo</th>
                                   <th>OID</th>
                                 </tr>

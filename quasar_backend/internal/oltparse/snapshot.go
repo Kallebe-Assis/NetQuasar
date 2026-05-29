@@ -180,7 +180,14 @@ func PonRows(ponsJSON []byte) []map[string]any {
 			"onu_total":   pickInt(m, "onu_total", "total_onu", "onus", "onus_total", "onu_count"),
 			"onu_online":  pickInt(m, "onu_online", "online", "onu_ok"),
 			"onu_offline": pickInt(m, "onu_offline", "offline", "onu_down"),
-			"status":      firstStr(m, "status", "state", "oper_status"),
+			"status":      firstStr(m, "if_oper_status", "status", "state", "oper_status"),
+			"if_oper_status": firstStr(m, "if_oper_status", "status", "state", "oper_status"),
+		}
+		if ix := pickInt(m, "if_index"); ix > 0 {
+			row["if_index"] = ix
+		}
+		if c := firstStr(m, "pon_compact"); c != "" {
+			row["pon_compact"] = c
 		}
 		oltifderive.NormalizePonONUCounts(row)
 		if f, ok := firstFloat(m, "rx_dbm", "rx", "pon_rx", "optical_rx"); ok {

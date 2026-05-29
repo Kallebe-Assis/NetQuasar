@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,38 +21,10 @@ import (
 )
 
 func applyMaxPonsLimitAnyRows(pons []any, maxPons *int) []any {
-	if maxPons == nil || *maxPons <= 0 || len(pons) == 0 {
+	if maxPons == nil || *maxPons <= 0 {
 		return pons
 	}
-	allowed := map[int]bool{}
-	for i := 1; i <= *maxPons; i++ {
-		allowed[i] = true
-	}
-	out := make([]any, 0, len(pons))
-	for _, row := range pons {
-		m, ok := row.(map[string]any)
-		if !ok {
-			continue
-		}
-		pon := 0
-		switch v := m["id"].(type) {
-		case string:
-			n, _ := strconv.Atoi(strings.TrimLeft(strings.TrimSpace(v), "0"))
-			pon = n
-		case int:
-			pon = v
-		case float64:
-			pon = int(v)
-		}
-		if pon <= 0 {
-			continue
-		}
-		if !allowed[pon] {
-			continue
-		}
-		out = append(out, row)
-	}
-	return out
+	return oltifderive.FilterPonAnyRows(pons, *maxPons)
 }
 
 func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
@@ -288,9 +259,14 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		scope = oltcollect.ScopeOnu
 	}
 	refreshT0 := time.Now()
+	maxPonsVal := 0
+	if maxPons != nil && *maxPons > 0 {
+		maxPonsVal = *maxPons
+	}
 	execSt := &oltCollectExecState{
 		DeviceID: id, Host: host, Community: c,
 		Brand: brand, Model: model, DevDesc: devDesc,
+		MaxPons: maxPonsVal,
 		Profile: profile, Summary: summary, Pons: pons,
 		FullTelemetry: fullTelemetry, TelnetTO: telnetTO,
 		Scope: scope,

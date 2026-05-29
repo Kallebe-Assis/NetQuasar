@@ -49,6 +49,8 @@ type PonTableRow = {
   onu_online?: number;
   onu_offline?: number;
   status?: string;
+  if_oper_status?: string;
+  pon_compact?: string;
 };
 
 type IfRow = Omit<InterfaceMonitorTableRow, "if_index"> & { if_index: number };
@@ -97,6 +99,19 @@ function badgeOper(s: string | undefined): string {
   if (x === "up" || x === "online" || x === "ok") return "badge badge--ok";
   if (x === "down" || x === "offline") return "badge badge--err";
   return "badge badge--off";
+}
+
+function ponStatusCell(p: PonTableRow) {
+  const ifSt = String(p.if_oper_status ?? p.status ?? "").trim();
+  const meta = ifSt.toLowerCase();
+  if (!ifSt || meta === "snmp_metrics") return EM_DASH;
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      <span className={badgeOper(ifSt)} title="Interface PON (IF-MIB / ifOperStatus)">
+        IF: {ifSt}
+      </span>
+    </span>
+  );
 }
 
 function fmtOctCell(v: number | null | undefined, saturated?: boolean): string {
@@ -528,6 +543,14 @@ export function OltPage() {
       : null;
   const metricsLogElapsed =
     typeof summaryObj?.onu_metrics_elapsed_ms === "number" ? summaryObj.onu_metrics_elapsed_ms : null;
+  const onuMetricsEnabled = Array.isArray(summaryObj?.onu_metrics_enabled_keys)
+    ? (summaryObj.onu_metrics_enabled_keys as string[])
+    : undefined;
+  const onuStatusByRx = summaryObj?.onu_status_by_rx === true;
+  const offlineRxDbm =
+    typeof summaryObj?.offline_rx_dbm === "number" && Number.isFinite(summaryObj.offline_rx_dbm)
+      ? (summaryObj.offline_rx_dbm as number)
+      : undefined;
   const selectedOlt = rows.find((x) => x.id === sel);
   const isZte =
     String(selectedOlt?.brand ?? "")
@@ -994,7 +1017,7 @@ export function OltPage() {
                         <th className="mono">Total</th>
                         <th className="mono">On</th>
                         <th className="mono">Off</th>
-                        <th>Estado</th>
+                        <th>Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1010,7 +1033,7 @@ export function OltPage() {
                           <td className="mono">{formatNum(p.onu_total)}</td>
                           <td className="mono">{formatNum(p.onu_online)}</td>
                           <td className="mono">{formatNum(p.onu_offline)}</td>
-                          <td><span className={badgeOper(p.status)}>{p.status ?? "—"}</span></td>
+                          <td>{ponStatusCell(p)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1025,11 +1048,14 @@ export function OltPage() {
               {vsolHint && (
                 <>
                   <h2 style={{ marginTop: 20 }}>
-                    ONUs — estado e telemetria{" "}
+                    ONUs — status e telemetria{" "}
                     <span style={{ fontWeight: 400, fontSize: 12, color: "var(--muted)" }}>({vsolOnuRows.length})</span>
                   </h2>
                   <OltVsolOnuTable
                     rows={vsolOnuRows}
+                    enabledMetrics={onuMetricsEnabled}
+                    rxStatusMode={onuStatusByRx}
+                    offlineRxDbm={offlineRxDbm}
                     onuRefs={typeof summaryObj?.vsol_onu_refs_count === "number" ? summaryObj.vsol_onu_refs_count : undefined}
                     note={
                       summaryObj?.onu_metrics_note
@@ -1100,7 +1126,7 @@ export function OltPage() {
                             <th>Suffix</th>
                             <th>Porta</th>
                             <th>Valor</th>
-                            <th>Estado</th>
+                            <th>Status</th>
                             <th>Tipo</th>
                             <th style={{ width: "28%" }}>OID</th>
                           </tr>

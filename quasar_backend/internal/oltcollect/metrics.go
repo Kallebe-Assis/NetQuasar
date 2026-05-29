@@ -19,13 +19,21 @@ const (
 	MetricPonTemp     = "pon_temperature"
 	MetricTemperature = "temperature"
 	MetricModel       = "model"
+	MetricVlan        = "vlan"
 )
 
+// VSOL gOnuStaInfoPonInx — índice PON por ONU (sufixo .ONU) para tabelas com instância única.
+const VSOLOnuPonIndexOID = "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.1.1"
+
 const (
-	StatusModePonOnuSuffix = "pon_onu_suffix"
-	StatusModeIfMibIndex   = "if_mib_index"
-	StatusModePonCounts    = "pon_online_offline"
+	StatusModePonOnuSuffix      = "pon_onu_suffix"
+	StatusModeIfMibIndex        = "if_mib_index"
+	StatusModePonCounts         = "pon_online_offline"
+	StatusModeRxPowerThreshold  = "rx_power_threshold"
 )
+
+// DefaultOfflineRxDbm limiar dBm (≤ valor ⇒ ONU offline). -70 cobre típico -80 em ZTE offline.
+const DefaultOfflineRxDbm = -70.0
 
 // OnuMetricDef uma métrica SNMP (tabela → snmpwalk → sufixo .PON.ONU).
 type OnuMetricDef struct {
@@ -36,9 +44,11 @@ type OnuMetricDef struct {
 	OfflineValues   []int  `json:"offline_values,omitempty"`
 	StatusMode      string `json:"status_mode,omitempty"`
 	IfDescrOID      string `json:"ifdescr_oid,omitempty"`
+	IfNameOID       string `json:"ifname_oid,omitempty"`
 	IfOperOID       string `json:"ifoper_oid,omitempty"`
-	OnlineCountOID  string `json:"online_count_oid,omitempty"`
-	OfflineCountOID string `json:"offline_count_oid,omitempty"`
+	OnlineCountOID  string  `json:"online_count_oid,omitempty"`
+	OfflineCountOID string  `json:"offline_count_oid,omitempty"`
+	OfflineRxDbm    float64 `json:"offline_rx_dbm,omitempty"`
 }
 
 // OnuMetricsConfig mapa métrica → definição.
@@ -52,11 +62,12 @@ var MetricCatalog = []struct {
 	Placeholder string
 }{
 	{MetricSerial, "Número de série", "Tabela SNMP do serial da ONU", "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.5"},
-	{MetricStatus, "Estado (online/offline)", "Tabela SNMP do estado; valores 3=online e 4=offline (ajustável)", "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.5.2"},
+	{MetricStatus, "Status (online / offline)", "Tabela SNMP, IF-MIB, contagem por PON ou RX: online se potência RX for maior que o limiar (ex. > -70 dBm; ZTE offline ~ -80). VSOL fase: …1.1.1.1.5 (working=3).", "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.5"},
 	{MetricRxPower, "RX da ONU (dBm)", "Tabela SNMP da potência recebida na ONU; sufixo .PON.ONU", "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.7"},
 	{MetricTxPower, "TX da ONU", "Tabela SNMP da potência transmitida pela ONU; sufixo .PON.ONU", "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.6"},
 	{MetricTemperature, "Temperatura", "Tabela SNMP da temperatura", "1.3.6.1.4.1.37950.1.1.6.1.1.3.1.3"},
-	{MetricModel, "Modelo", "Tabela SNMP do modelo; sufixo .PON.ONU (ex.: …2.1.6.3.10)", "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.6"},
+	{MetricModel, "Modelo da ONU", "Tabela SNMP do modelo; sufixo .PON.ONU (ex.: …2.1.6.3.10)", "1.3.6.1.4.1.37950.1.1.6.1.1.2.1.6"},
+	{MetricVlan, "VLAN (ONU)", "VLAN padrão da porta ONU (gOnuCfgPortVlanDefVlan); sufixo .PON.ONU", "1.3.6.1.4.1.37950.1.1.6.1.1.7.5.8"},
 }
 
 // PonMetricCatalog métricas por porta PON (sufixo .PON apenas).
@@ -66,7 +77,7 @@ var PonMetricCatalog = []struct {
 	Description string
 	Placeholder string
 }{
-	{MetricPonStatus, "Estado da PON (OLT)", "Tabela SNMP do estado da interface PON (ex.: ifOperStatus por ifIndex da PON)", "1.3.6.1.2.1.2.2.1.8"},
+	{MetricPonStatus, "Status da PON (OLT)", "Tabela SNMP do estado da interface PON (ex.: ifOperStatus por ifIndex da PON)", "1.3.6.1.2.1.2.2.1.8"},
 	{MetricPonRxPower, "RX da PON (OLT)", "Tabela SNMP da potência recebida na porta PON da OLT; sufixo .PON", ""},
 	{MetricPonTxPower, "TX da PON (OLT)", "Tabela SNMP da potência transmitida na porta PON da OLT; sufixo .PON", ""},
 	{MetricPonVoltage, "Voltagem da PON (OLT)", "Tabela SNMP da voltagem por porta PON da OLT; sufixo .PON", ""},
@@ -111,10 +122,41 @@ func (c OnuMetricsConfig) Normalize() OnuMetricsConfig {
 		}
 		v.StatusMode = strings.TrimSpace(v.StatusMode)
 		v.IfDescrOID = strings.TrimSpace(v.IfDescrOID)
+		v.IfNameOID = strings.TrimSpace(v.IfNameOID)
 		v.IfOperOID = strings.TrimSpace(v.IfOperOID)
 		v.OnlineCountOID = strings.TrimSpace(v.OnlineCountOID)
 		v.OfflineCountOID = strings.TrimSpace(v.OfflineCountOID)
+		if key == MetricStatus || key == MetricPonStatus {
+			if strings.EqualFold(v.StatusMode, StatusModeIfMibIndex) {
+				if len(v.OnlineValues) == 0 || (len(v.OnlineValues) == 1 && v.OnlineValues[0] == 3) {
+					v.OnlineValues = []int{1}
+				}
+			}
+			if key == MetricPonStatus && v.StatusMode == "" {
+				v.StatusMode = StatusModeIfMibIndex
+			}
+		}
 		out[key] = v
+	}
+	if st, ok := out[MetricStatus]; ok && strings.EqualFold(st.StatusMode, StatusModeRxPowerThreshold) {
+		if strings.TrimSpace(st.OID) == "" {
+			if rx, ok := out[MetricRxPower]; ok && strings.TrimSpace(rx.OID) != "" {
+				st.OID = rx.OID
+			}
+		}
+		if rx, ok := out[MetricRxPower]; ok {
+			if st.ValueDivisor <= 1 && rx.ValueDivisor > 1 {
+				st.ValueDivisor = rx.ValueDivisor
+			}
+			if rx.ValueDivisor <= 1 && st.ValueDivisor > 1 {
+				rx.ValueDivisor = st.ValueDivisor
+				out[MetricRxPower] = rx
+			}
+		}
+		if st.OfflineRxDbm == 0 {
+			st.OfflineRxDbm = DefaultOfflineRxDbm
+		}
+		out[MetricStatus] = st
 	}
 	return out
 }
@@ -137,6 +179,18 @@ func (c OnuMetricsConfig) EnabledMetrics() []string {
 		}
 		oid := strings.TrimSpace(def.OID)
 		if m.Key == MetricStatus && strings.EqualFold(strings.TrimSpace(def.StatusMode), StatusModeIfMibIndex) {
+			if oid == "" {
+				oid = strings.TrimSpace(def.IfOperOID)
+			}
+		}
+		if m.Key == MetricStatus && strings.EqualFold(strings.TrimSpace(def.StatusMode), StatusModeRxPowerThreshold) {
+			if oid == "" {
+				if rx, ok := c[MetricRxPower]; ok {
+					oid = strings.TrimSpace(rx.OID)
+				}
+			}
+		}
+		if m.Key == MetricPonStatus && strings.EqualFold(strings.TrimSpace(def.StatusMode), StatusModeIfMibIndex) {
 			if oid == "" {
 				oid = strings.TrimSpace(def.IfOperOID)
 			}

@@ -25,7 +25,8 @@ var (
 	reOnuIface    = regexp.MustCompile(`(?i)^GPON(\d+)ONU(\d+)`)
 	rePonPhyZTE   = regexp.MustCompile(`(?i)^PON-(\d+)/(\d+)/(\d+)`)
 	rePonPhyZTEIf = regexp.MustCompile(`(?i)^GPON_OLT-(\d+)/(\d+)/(\d+)`)
-	reOnuIfaceZTE = regexp.MustCompile(`(?i)^(?:GPON-ONU_|EPON-ONU_|ONU-)(\d+)/(\d+)/(\d+):(\d+)`)
+	reOnuIfaceZTE     = regexp.MustCompile(`(?i)^(?:GPON[-_]?ONU[-_]?|EPON[-_]?ONU[-_]?|ONU[-_])(\d+)/(\d+)/(\d+):(\d+)`)
+	reOnuIfaceZTELoose = regexp.MustCompile(`(?i)(?:GPON[-_]?ONU|EPON[-_]?ONU|ONU)[-_]?(\d+)/(\d+)/(\d+):(\d+)`)
 	reVlan        = regexp.MustCompile(`(?i)^VLAN\d+`)
 	reGE          = regexp.MustCompile(`(?i)^GE\d+/\d+`)
 	reVsolPonName = regexp.MustCompile(`(?i)^PON\s+(\d+)\s*$`)
@@ -53,6 +54,9 @@ func ClassifyKind(displayName, descr string) Kind {
 		return KindVLAN
 	}
 	if reGE.MatchString(up) {
+		return KindManagement
+	}
+	if strings.HasPrefix(up, "XGEI") || strings.HasPrefix(up, "XGE") {
 		return KindManagement
 	}
 	if reOnuIface.MatchString(tok) {
@@ -132,13 +136,26 @@ func PonCompactFromPhy(displayName, descr string) string {
 	return ""
 }
 
-// PonCompactFromOnuIface ex.: "GPON01ONU2 ..." → "01", onu=2.
+// PonCompactFromOnuIface ex.: "GPON01ONU2 ..." → "01", onu=2; ZTE "GPON-ONU_1/1/1:1" → "1/1/1", onu=1.
 func PonCompactFromOnuIface(displayName, descr string) (ponCompact string, onu int, ok bool) {
-	s := firstToken(displayName)
-	if s == "" {
-		s = firstToken(descr)
+	if pc, n, ok := ponCompactFromOnuToken(firstToken(displayName)); ok {
+		return pc, n, true
 	}
-	m := reOnuIface.FindStringSubmatch(s)
+	if pc, n, ok := ponCompactFromOnuToken(firstToken(descr)); ok {
+		return pc, n, true
+	}
+	joined := strings.TrimSpace(displayName + " " + descr)
+	if m := reOnuIfaceZTELoose.FindStringSubmatch(joined); len(m) == 5 {
+		return zteOnuCompactFromMatch(m)
+	}
+	return "", 0, false
+}
+
+func ponCompactFromOnuToken(tok string) (ponCompact string, onu int, ok bool) {
+	if tok == "" {
+		return "", 0, false
+	}
+	m := reOnuIface.FindStringSubmatch(tok)
 	if m != nil {
 		n, err := strconv.Atoi(m[2])
 		if err != nil {
@@ -146,15 +163,58 @@ func PonCompactFromOnuIface(displayName, descr string) (ponCompact string, onu i
 		}
 		return m[1], n, true
 	}
-	m = reOnuIfaceZTE.FindStringSubmatch(s)
-	if m == nil {
-		return "", 0, false
+	m = reOnuIfaceZTE.FindStringSubmatch(tok)
+	if len(m) == 5 {
+		return zteOnuCompactFromMatch(m)
 	}
+	return "", 0, false
+}
+
+func zteOnuCompactFromMatch(m []string) (ponCompact string, onu int, ok bool) {
 	n, err := strconv.Atoi(m[4])
+	compact := m[1] + "/" + m[2] + "/" + m[3]
 	if err != nil {
-		return m[1] + "/" + m[2] + "/" + m[3], 0, true
+		return compact, 0, true
 	}
-	return m[1] + "/" + m[2] + "/" + m[3], n, true
+	return compact, n, true
+}
+
+// PonPortFromCompact devolve o número da porta PON (último segmento de "01" ou "1/1/16").
+func PonPortFromCompact(compact string) int {
+	compact = strings.TrimSpace(compact)
+	if compact == "" {
+		return 0
+	}
+	parts := strings.Split(compact, "/")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	n, err := strconv.Atoi(strings.TrimLeft(last, "0"))
+	if err != nil || n <= 0 {
+		n, err = strconv.Atoi(last)
+	}
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// ParseOnuIfLabels identifica interface ONU (ifName/ifDescr) e devolve porta PON + índice ONU.
+func ParseOnuIfLabels(ifName, descr string) (ponPort, onu int, compact string, ok bool) {
+	disp := strings.TrimSpace(ifName)
+	if disp == "" {
+		disp = strings.TrimSpace(descr)
+	}
+	if ClassifyKind(disp, descr) != KindONU {
+		return 0, 0, "", false
+	}
+	c, onuN, parsed := PonCompactFromOnuIface(ifName, descr)
+	if !parsed || c == "" || onuN <= 0 {
+		return 0, 0, "", false
+	}
+	port := PonPortFromCompact(c)
+	if port <= 0 {
+		return 0, 0, "", false
+	}
+	return port, onuN, c, true
 }
 
 // Saturated32Counters true se contadores parecem 32-bit max (inválidos para tráfego HC).
