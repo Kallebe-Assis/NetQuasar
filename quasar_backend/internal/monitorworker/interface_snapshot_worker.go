@@ -28,7 +28,7 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	if cfg, err := loadClampMonitoringIntervals(ctx, pool); err == nil {
 		total = cfg.interfaceTimeout(false)
 	}
-	walkRes := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description))
+	walkRes := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description), pool)
 	if len(walkRes.Merged) == 0 {
 		if log != nil {
 			log.Debug().Str("device", deviceID.String()).Str("host", h).Msg("interface snapshot worker: walk vazio")

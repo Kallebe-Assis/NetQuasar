@@ -93,6 +93,15 @@ function parseNumber(v: string | undefined): number | null {
 
 export function parseTelemetryKPIs(sample: TelemetryHistorySample): { cpu: number | null; memory: number | null; temp: number | null } {
   const metrics = sample.metrics ?? {};
+  const mk = metrics.mikrotik_collection as { fields?: Record<string, { ok?: boolean; value?: unknown }> } | undefined;
+  const mkFields = mk?.fields;
+  const mkNum = (key: string): number | null => {
+    const fr = mkFields?.[key];
+    if (!fr?.ok || fr.value == null) return null;
+    const n = typeof fr.value === "number" ? fr.value : parseNumber(String(fr.value));
+    return n;
+  };
+
   const profile = (metrics.profile as Record<string, unknown> | undefined) ?? {};
   const vars = snmpVarsFromMetrics(metrics);
   const cpuOID = String(profile.cpu_primary_oid ?? "").trim().replace(/^\./, "");
@@ -101,21 +110,26 @@ export function parseTelemetryKPIs(sample: TelemetryHistorySample): { cpu: numbe
   const memSizeOID = String(profile.memory_size_oid ?? "").trim().replace(/^\./, "");
   const tempOID = String(profile.temp_primary_oid ?? "").trim().replace(/^\./, "");
 
-  let cpu: number | null = null;
-  if (cpuOID && vars[cpuOID] != null) {
+  let cpu: number | null = mkNum("cpu_load") ?? mkNum("cpu_hr");
+  if (cpu == null && cpuOID && vars[cpuOID] != null) {
     const v = parseNumber(vars[cpuOID]);
     if (v != null) {
       if (cpuOID === "1.3.6.1.4.1.2021.11.11.0") cpu = 100 - v;
       else if (cpuOID === "1.3.6.1.4.1.14988.1.1.3.10.0") cpu = v > 100 ? v / 10 : v;
       else cpu = v;
     }
-  } else if (cpuAvailOID && vars[cpuAvailOID] != null) {
+  } else if (cpu == null && cpuAvailOID && vars[cpuAvailOID] != null) {
     const v = parseNumber(vars[cpuAvailOID]);
     if (v != null) cpu = 100 - v;
   }
 
   let memory: number | null = null;
-  if (memUsedOID && memSizeOID && vars[memUsedOID] != null && vars[memSizeOID] != null) {
+  const mkMemUsed = mkNum("memory_used");
+  const mkMemTotal = mkNum("memory_total");
+  if (mkMemUsed != null && mkMemTotal != null && mkMemTotal > 0) {
+    memory = (mkMemUsed / mkMemTotal) * 100;
+  }
+  if (memory == null && memUsedOID && memSizeOID && vars[memUsedOID] != null && vars[memSizeOID] != null) {
     const used = parseNumber(vars[memUsedOID]);
     const size = parseNumber(vars[memSizeOID]);
     if (used != null && size != null && size > 0) {
@@ -124,8 +138,8 @@ export function parseTelemetryKPIs(sample: TelemetryHistorySample): { cpu: numbe
     }
   }
 
-  let temp: number | null = null;
-  if (tempOID && vars[tempOID] != null) {
+  let temp: number | null = mkNum("temperature") ?? mkNum("board_temperature") ?? mkNum("cpu_temperature");
+  if (temp == null && tempOID && vars[tempOID] != null) {
     const t = parseNumber(vars[tempOID]);
     if (t != null) temp = t > 100 ? t / 10 : t;
   }
@@ -136,6 +150,38 @@ export function parseTelemetryKPIs(sample: TelemetryHistorySample): { cpu: numbe
     return n;
   };
   return { cpu: normalize(cpu), memory: normalize(memory), temp: normalize(temp) };
+}
+
+export type MikrotikCollectionStatusView = {
+  message?: string;
+  missingOid: string[];
+  skipped: Array<{ key: string; label: string; reason: string }>;
+  enabled: number;
+  collected: number;
+  failed: number;
+};
+
+export function parseMikrotikCollectionStatus(metrics: Record<string, unknown> | undefined): MikrotikCollectionStatusView | null {
+  if (!metrics) return null;
+  const raw = metrics.mikrotik_collection as Record<string, unknown> | undefined;
+  if (!raw) return null;
+  const status = (raw.status as Record<string, unknown> | undefined) ?? {};
+  const missing = Array.isArray(status.missing_oid) ? (status.missing_oid as string[]) : [];
+  const skipped = Array.isArray(status.skipped)
+    ? (status.skipped as Array<{ key?: string; label?: string; reason?: string }>).map((s) => ({
+        key: String(s.key ?? ""),
+        label: String(s.label ?? s.key ?? ""),
+        reason: String(s.reason ?? ""),
+      }))
+    : [];
+  return {
+    message: typeof status.message === "string" ? status.message : undefined,
+    missingOid: missing,
+    skipped,
+    enabled: Number(status.enabled ?? 0),
+    collected: Number(status.collected ?? 0),
+    failed: Number(status.failed ?? 0),
+  };
 }
 
 /** OIDs já representados pelos indicadores principais (CPU, memória, temperatura, etc.) — não repetir como “extra”. */

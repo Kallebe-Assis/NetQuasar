@@ -125,6 +125,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/olt-vendors/{brand}/models/{model}", s.getOltVendorModel)
 				r.Patch("/olt-vendors/{brand}/models/{model}", s.patchOltVendorModel)
 				r.Delete("/olt-vendors/{brand}/models/{model}", s.deleteOltVendorModel)
+				r.Get("/mikrotik-collection", s.getMikrotikCollection)
+				r.Patch("/mikrotik-collection", s.patchMikrotikCollection)
 				r.Get("/notifications/telegram/monitoring", s.getTelegramMonitoring)
 				r.Patch("/notifications/telegram/monitoring", s.patchTelegramMonitoring)
 				r.Post("/notifications/telegram/monitoring/test", s.testTelegramMonitoring)

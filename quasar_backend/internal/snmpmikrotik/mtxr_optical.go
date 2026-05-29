@@ -26,21 +26,29 @@ const (
 	colName         = 2
 	colTx           = 9
 	colRx           = 10
+	colTemperature  = 6
+	colSupplyV      = 7
+	colTxBias       = 8
 )
 
 const mtxrOpticalMIBPrefix = "1.3.6.1.4.1.14988.1.1.19"
 
-// OpticalPower dBm por ifIndex (IF-MIB).
 type OpticalPower struct {
-	TxDBm *float64
-	RxDBm *float64
+	TxDBm          *float64
+	RxDBm          *float64
+	TemperatureC   *float64
+	SupplyVoltageV *float64
+	BiasCurrentMA  *float64
 }
 
 type mtxrModule struct {
-	name              string
-	objectIndexHint   int // mtxrOpticalIndex (col.1); por vezes coincide com ifIndex
-	tx                *float64
-	rx                *float64
+	name            string
+	objectIndexHint int
+	tx              *float64
+	rx              *float64
+	temperatureC    *float64
+	supplyVoltageV  *float64
+	biasCurrentMA   *float64
 }
 
 // parseMtxrCell devolve (coluna, índice da linha mtxr) para OIDs ...19.1.1.<col>.<mtxIdx>.
@@ -60,7 +68,8 @@ func parseMtxrCell(oid string) (col, mtxrIdx int, ok bool) {
 	if err1 != nil || err2 != nil {
 		return 0, 0, false
 	}
-	if col != colOpticalIndex && col != colName && col != colTx && col != colRx {
+	if col != colOpticalIndex && col != colName && col != colTx && col != colRx &&
+		col != colTemperature && col != colSupplyV && col != colTxBias {
 		return 0, 0, false
 	}
 	if mtxrIdx < 1 {
@@ -246,11 +255,23 @@ func OpticalPowerByIfIndex(rows []snmpifparse.IfRow, vars []probing.SNMPVar) map
 			if f, ok := parseMikrotikMilliDbm(v.Value); ok {
 				m.rx = &f
 			}
+		case colTemperature:
+			if f, ok := parseMikrotikGauge(v.Value, 1); ok {
+				m.temperatureC = &f
+			}
+		case colSupplyV:
+			if f, ok := parseMikrotikGauge(v.Value, 1000); ok {
+				m.supplyVoltageV = &f
+			}
+		case colTxBias:
+			if f, ok := parseMikrotikGauge(v.Value, 1); ok {
+				m.biasCurrentMA = &f
+			}
 		}
 	}
 	out := map[int]OpticalPower{}
 	for mtxrIdx, mod := range byMtxr {
-		if mod.tx == nil && mod.rx == nil {
+		if mod.tx == nil && mod.rx == nil && mod.temperatureC == nil && mod.supplyVoltageV == nil && mod.biasCurrentMA == nil {
 			continue
 		}
 		ifIdx, ok := resolveMtxrToIfIndex(mtxrIdx, mod, statsNames, rows)
@@ -264,10 +285,19 @@ func OpticalPowerByIfIndex(rows []snmpifparse.IfRow, vars []probing.SNMPVar) map
 		if mod.rx != nil {
 			row.RxDBm = mod.rx
 		}
+		if mod.temperatureC != nil {
+			row.TemperatureC = mod.temperatureC
+		}
+		if mod.supplyVoltageV != nil {
+			row.SupplyVoltageV = mod.supplyVoltageV
+		}
+		if mod.biasCurrentMA != nil {
+			row.BiasCurrentMA = mod.biasCurrentMA
+		}
 		out[ifIdx] = row
 	}
 	for ix, row := range out {
-		if row.TxDBm == nil && row.RxDBm == nil {
+		if row.TxDBm == nil && row.RxDBm == nil && row.TemperatureC == nil && row.SupplyVoltageV == nil && row.BiasCurrentMA == nil {
 			delete(out, ix)
 		}
 	}
@@ -276,6 +306,10 @@ func OpticalPowerByIfIndex(rows []snmpifparse.IfRow, vars []probing.SNMPVar) map
 
 // parseMikrotikMilliDbm — IDiv1000 do MIB (milésimos de dBm).
 func parseMikrotikMilliDbm(s string) (float64, bool) {
+	return parseMikrotikGauge(s, 1000)
+}
+
+func parseMikrotikGauge(s string, div int) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, false
@@ -288,7 +322,10 @@ func parseMikrotikMilliDbm(s string) (float64, bool) {
 	case 0, 2147483647, -2147483648, 65535, 4294967295:
 		return 0, false
 	}
-	return float64(n) / 1000.0, true
+	if div <= 0 {
+		div = 1
+	}
+	return float64(n) / float64(div), true
 }
 
 // LooksLikeSfpInterface heurística quando a tabela óptica ainda não tem linha.

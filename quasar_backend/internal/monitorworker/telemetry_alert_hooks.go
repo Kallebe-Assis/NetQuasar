@@ -21,7 +21,58 @@ func normalizeTelemetryOID(oid string) string {
 	return strings.TrimPrefix(strings.TrimSpace(oid), ".")
 }
 
+func mikrotikScalarFromMetrics(metrics map[string]any, fieldKey string) *float64 {
+	if metrics == nil {
+		return nil
+	}
+	raw, ok := metrics["mikrotik_collection"]
+	if !ok || raw == nil {
+		return nil
+	}
+	doc, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	fields, ok := doc["fields"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	fr, ok := fields[fieldKey].(map[string]any)
+	if !ok {
+		return nil
+	}
+	okVal, _ := fr["ok"].(bool)
+	if !okVal {
+		return nil
+	}
+	val := fr["value"]
+	switch x := val.(type) {
+	case float64:
+		return &x
+	case int:
+		f := float64(x)
+		return &f
+	case int64:
+		f := float64(x)
+		return &f
+	case string:
+		f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(x), ",", "."), 64)
+		if err != nil {
+			return nil
+		}
+		return &f
+	default:
+		return nil
+	}
+}
+
 func parseTempCFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
+	if f := mikrotikScalarFromMetrics(metrics, "temperature"); f != nil {
+		v := snmpmetrics.NormalizeAmbientTempCelsius(*f)
+		if v > -273 && v < 500 {
+			return &v
+		}
+	}
 	if metrics == nil {
 		return nil
 	}
@@ -98,6 +149,18 @@ func parseFloatOID(vars map[string]string, oid string) *float64 {
 }
 
 func parseCPUFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
+	if f := mikrotikScalarFromMetrics(metrics, "cpu_load"); f != nil {
+		v := *f
+		if v > 100 {
+			v = v / 10.0
+		}
+		if v >= 0 && v <= 1000 {
+			return &v
+		}
+	}
+	if f := mikrotikScalarFromMetrics(metrics, "cpu_hr"); f != nil {
+		return f
+	}
 	byOID := telemetryVarsByOID(vars)
 	primary := profileOID(metrics, "cpu_primary_oid")
 	if f := parseFloatOID(byOID, primary); f != nil {
@@ -124,16 +187,22 @@ func parseCPUFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *floa
 }
 
 func parseMemoryFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
+	used := mikrotikScalarFromMetrics(metrics, "memory_used")
+	size := mikrotikScalarFromMetrics(metrics, "memory_total")
+	if used != nil && size != nil && *size > 0 {
+		pct := 100.0 * (*used) / (*size)
+		return &pct
+	}
 	byOID := telemetryVarsByOID(vars)
 	usedOID := profileOID(metrics, "memory_used_oid")
 	sizeOID := profileOID(metrics, "memory_size_oid")
-	used := parseFloatOID(byOID, usedOID)
-	size := parseFloatOID(byOID, sizeOID)
-	if used == nil || size == nil || *size <= 0 {
+	usedVal := parseFloatOID(byOID, usedOID)
+	sizeVal := parseFloatOID(byOID, sizeOID)
+	if usedVal == nil || sizeVal == nil || *sizeVal <= 0 {
 		return nil
 	}
-	u := *used
-	sz := *size
+	u := *usedVal
+	sz := *sizeVal
 	// memAvailReal (disponível) vira utilizado.
 	if usedOID == "1.3.6.1.4.1.2021.4.6.0" && sz >= u {
 		u = sz - u
@@ -146,6 +215,10 @@ func parseMemoryFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *f
 }
 
 func parseUptimeMinutesFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
+	if f := mikrotikScalarFromMetrics(metrics, "sys_uptime"); f != nil {
+		min := (*f / 100.0) / 60.0
+		return &min
+	}
 	byOID := telemetryVarsByOID(vars)
 	uOID := profileOID(metrics, "uptime_oid")
 	if f := parseFloatOID(byOID, uOID); f != nil {
@@ -238,7 +311,9 @@ func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zer
 	category, brand, model string,
 	col telemetryengine.CollectResult,
 ) {
-	if !col.OK || len(col.SNMP.Vars) == 0 {
+	hasVars := len(col.SNMP.Vars) > 0
+	_, hasMk := col.Metrics["mikrotik_collection"]
+	if !hasVars && !hasMk {
 		return
 	}
 	if c := parseCPUFromTelemetry(col.Metrics, col.SNMP.Vars); c != nil {

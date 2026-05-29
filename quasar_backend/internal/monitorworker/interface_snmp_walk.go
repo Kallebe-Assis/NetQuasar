@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 )
@@ -38,12 +40,40 @@ type WorkerInterfaceWalkResult struct {
 }
 
 // collectWorkerInterfaceSNMPWalks walks IF-MIB (+ Mikrotik) com limites altos para equipamentos com muitas interfaces.
-func collectWorkerInterfaceSNMPWalks(ctx context.Context, host, community string, total time.Duration, isMikrotik bool) WorkerInterfaceWalkResult {
+func collectWorkerInterfaceSNMPWalks(ctx context.Context, host, community string, total time.Duration, isMikrotik bool, pool *pgxpool.Pool) WorkerInterfaceWalkResult {
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
 	if host == "" || community == "" {
 		return WorkerInterfaceWalkResult{}
 	}
+
+	if isMikrotik && pool != nil {
+		profile := mikrotikcollect.LoadGlobalProfile(ctx, pool)
+		roots := mikrotikcollect.InterfaceWalkOIDs(profile.Metrics)
+		if len(roots) > 0 {
+			var merged []probing.SNMPVar
+			trunc := false
+			perRoot := total / time.Duration(len(roots)+1)
+			if perRoot < 8*time.Second {
+				perRoot = 8 * time.Second
+			}
+			for _, root := range roots {
+				walk, t, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+					Host: host, Port: 161, Community: community, RootOID: root,
+					Version: "2c", Timeout: perRoot, Retries: 0, MaxRows: workerIFMibMaxRows,
+				})
+				merged = append(merged, walk...)
+				trunc = trunc || t
+			}
+			walkSen, truncSen, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+				Host: host, Port: 161, Community: community, RootOID: "1.3.6.1.2.1.99.1.1.1.4",
+				Version: "2c", Timeout: workerWalkShareTimeout(total, 0.08, 5*time.Second, 20*time.Second),
+				Retries: 0, MaxRows: workerIfSensorsMaxRows,
+			})
+			return WorkerInterfaceWalkResult{Merged: append(merged, walkSen...), Truncated: trunc || truncSen}
+		}
+	}
+
 	walkIF, truncIF, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 		Host: host, Port: 161, Community: community, RootOID: "1.3.6.1.2.1.2.2.1",
 		Version: "2c", Timeout: workerWalkShareTimeout(total, 0.40, 15*time.Second, 100*time.Second),

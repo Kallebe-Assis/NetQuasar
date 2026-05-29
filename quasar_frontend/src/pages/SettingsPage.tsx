@@ -9,6 +9,7 @@ import { AppearancePanel } from "./settings/AppearancePanel";
 import { MonitoringPingIntervalsCard } from "./settings/MonitoringIntervalsCard";
 import { AuditingPanel } from "./settings/AuditingPanel";
 import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
+import { MikrotikCollectionPanel } from "./settings/MikrotikCollectionPanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -20,6 +21,7 @@ type SettingsTab =
   | "connection"
   | "telegram"
   | "olt"
+  | "mikrotik"
   | "automation";
 
 export function SettingsPage() {
@@ -28,7 +30,7 @@ export function SettingsPage() {
     <>
       <h1>Configurações</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo e relatórios automáticos.
+        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
@@ -41,6 +43,7 @@ export function SettingsPage() {
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
             ["olt", "Perfis OLT"],
+            ["mikrotik", "MikroTik"],
             ["automation", "Relatórios agendados"],
           ] as const
         ).map(([k, lab]) => (
@@ -67,6 +70,7 @@ export function SettingsPage() {
         </div>
       )}
       {tab === "olt" && <OltVendorsPanel />}
+      {tab === "mikrotik" && <MikrotikCollectionPanel />}
       {tab === "automation" && <ScheduledReportsPanel />}
     </>
   );

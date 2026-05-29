@@ -118,6 +118,17 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 
 			c, telErr := telemetryengine.CollectAndStore(sctx, pool, row.id, strings.TrimSpace(row.ip), comm)
 			snmpOK := telErr == nil && c.OK
+			if telErr == nil && c.Metrics != nil {
+				if mk, ok := c.Metrics["mikrotik_collection"]; ok {
+					if doc, ok := mk.(map[string]any); ok {
+						if st, ok := doc["status"].(map[string]any); ok {
+							if coll, _ := st["collected"].(float64); coll > 0 {
+								snmpOK = true
+							}
+						}
+					}
+				}
+			}
 			var snmpDetail any
 			if telErr != nil {
 				snmpDetail = map[string]any{"ok": false, "error": telErr.Error(), "source": "telemetryengine"}
@@ -125,8 +136,9 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 				snmpDetail = c.SNMP
 			}
 			snippet, _ := json.Marshal(map[string]any{
-				"snmp":            snmpDetail,
-				"telemetry_cycle": map[string]any{"source": src},
+				"snmp":                 snmpDetail,
+				"telemetry_cycle":      map[string]any{"source": src},
+				"mikrotik_collection":  c.Metrics["mikrotik_collection"],
 			})
 			WithDeviceProbeRowLock(row.id, func() {
 				if _, uerr := pool.Exec(sctx, `
@@ -142,7 +154,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			})
 
 			lastTel[row.id] = time.Now()
-			if telErr == nil && c.OK {
+			if telErr == nil {
 				RunPostTelemetryAlertEval(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), comm, row.category, row.brand, row.model, c)
 			}
 		}()

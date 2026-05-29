@@ -7,7 +7,8 @@ import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
-import { formatCollectedPt, parseTelemetryKPIs, snmpVarsFromMetrics } from "../lib/deviceReportHelpers";
+import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
+import { MikrotikMetricsOverview } from "../components/MikrotikMetricsOverview";
 
 type DeviceRow = {
   id: string;
@@ -157,6 +158,16 @@ export function MikrotikPage() {
     queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown> }>(`/api/v1/telemetry/devices/${sel}/latest`),
   });
 
+  const mikrotikConfig = useQuery({
+    queryKey: ["mikrotik-collection"],
+    queryFn: () =>
+      apiFetch<{
+        metrics: Record<string, { enabled?: boolean; oid?: string; collect_mode?: string; value_divisor?: number }>;
+        catalog: Array<{ key: string; section: string; label: string; unit?: string; default_divisor?: number }>;
+        sections: Record<string, string>;
+      }>("/api/v1/settings/mikrotik-collection"),
+  });
+
   const refreshIf = useMutation({
     mutationFn: (id: string) =>
       apiFetch<{
@@ -237,23 +248,10 @@ export function MikrotikPage() {
   const table = liveTable;
   const interfaceTotal = iface.data?.interface_count ?? table.length;
   const walkTruncated = Boolean(iface.data?.walk_truncated) || /truncad/i.test(String(iface.data?.walk_note ?? iface.data?.note ?? ""));
-  const telemetryKpis = useMemo(() => {
-    if (!telemetry.data?.metrics) return { cpu: null, memory: null, temp: null };
-    return parseTelemetryKPIs({
-      id: 0,
-      collected_at: String(telemetry.data?.collected_at ?? ""),
-      metrics: telemetry.data.metrics,
-    });
-  }, [telemetry.data?.metrics, telemetry.data?.collected_at]);
-
-  const telemetryUptime = useMemo(() => {
-    const m = telemetry.data?.metrics;
-    const profile = (m?.profile as Record<string, unknown> | undefined) ?? {};
-    const uptimeOID = String(profile.uptime_oid ?? "").trim().replace(/^\./, "");
-    if (!uptimeOID) return "—";
-    const vars = snmpVarsFromMetrics((m as Record<string, unknown> | undefined) ?? undefined);
-    return vars[uptimeOID] ?? "—";
-  }, [telemetry.data?.metrics]);
+  const collectionStatus = useMemo(
+    () => parseMikrotikCollectionStatus(telemetry.data?.metrics as Record<string, unknown> | undefined),
+    [telemetry.data?.metrics],
+  );
 
   const onOffSummary = useMemo(() => {
     let up = 0;
@@ -414,22 +412,33 @@ export function MikrotikPage() {
                     Últ. interfaces: <span className="mono">{formatCollectedPt(iface.data?.collected_at)}</span> · Últ. telemetria:{" "}
                     <span className="mono">{formatCollectedPt(telemetry.data?.collected_at)}</span>
                   </p>
-                  <div className="grid cols-4" style={{ marginBottom: 12 }}>
-                    <div className="card"><strong>Descrição</strong><div>{selectedDevice.description ?? "—"}</div></div>
-                    <div className="card"><strong>Modelo</strong><div>{selectedDevice.model ?? "—"}</div></div>
-                    <div className="card"><strong>IP</strong><div className="mono">{selectedDevice.ip ?? "—"}</div></div>
-                    <div className="card"><strong>Uptime</strong><div>{telemetryUptime || "—"}</div></div>
-                  </div>
-                  <div className="grid cols-4">
-                    <div className="card"><strong>Interfaces UP</strong><div className="mono">{onOffSummary.up}</div></div>
-                    <div className="card"><strong>Interfaces DOWN</strong><div className="mono">{onOffSummary.down}</div></div>
-                    <div className="card"><strong>CPU</strong><div className="mono">{telemetryKpis.cpu != null ? `${telemetryKpis.cpu.toFixed(1)}%` : "—"}</div></div>
-                    <div className="card"><strong>Memória</strong><div className="mono">{telemetryKpis.memory != null ? `${telemetryKpis.memory.toFixed(1)}%` : "—"}</div></div>
-                  </div>
-                  <div className="card" style={{ marginTop: 10 }}>
-                    <strong>Temperatura</strong>
-                    <div className="mono">{telemetryKpis.temp != null ? `${telemetryKpis.temp.toFixed(1)} C` : "—"}</div>
-                  </div>
+                  {collectionStatus && (collectionStatus.missingOid.length > 0 || collectionStatus.message) ? (
+                    <div className="msg msg--warn" style={{ fontSize: 12, marginBottom: 10 }}>
+                      {collectionStatus.message ||
+                        "Algumas métricas activas no perfil não têm OID configurado e não foram colectadas."}
+                      {collectionStatus.missingOid.length > 0 ? (
+                        <span>
+                          {" "}
+                          Campos:{" "}
+                          <span className="mono">{collectionStatus.missingOid.join(", ")}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <MikrotikMetricsOverview
+                    metrics={telemetry.data?.metrics as Record<string, unknown> | undefined}
+                    catalog={mikrotikConfig.data?.catalog ?? []}
+                    config={mikrotikConfig.data?.metrics ?? {}}
+                    sectionLabels={mikrotikConfig.data?.sections ?? {}}
+                    deviceLabel={selectedDevice.description ?? "—"}
+                    deviceModel={selectedDevice.model}
+                    deviceIp={selectedDevice.ip}
+                    collectedAt={telemetry.data?.collected_at}
+                    formatCollectedAt={formatCollectedPt}
+                    ifaceUp={onOffSummary.up}
+                    ifaceDown={onOffSummary.down}
+                    ifaceTotal={onOffSummary.total}
+                  />
                 </>
               )}
             </div>
@@ -574,7 +583,7 @@ export function MikrotikPage() {
                         <td className="mono">{formatBitrate(r.in_bps)}</td>
                         <td className="mono">{formatDbm(r.tx_dbm)}</td>
                         <td className="mono">{formatDbm(r.rx_dbm)}</td>
-                        <td className="mono">{r.speed_bps != null && r.speed_bps > 0 ? `${(r.speed_bps / 1e6).toFixed(0)} Mbps` : "—"}</td>
+                        <td className="mono">{r.speed_bps != null && r.speed_bps > 0 ? formatBitrate(r.speed_bps) : "—"}</td>
                         <td>
                           <label
                             style={{

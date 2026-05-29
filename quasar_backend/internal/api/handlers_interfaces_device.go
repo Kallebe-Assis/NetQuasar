@@ -226,7 +226,7 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	host := strings.TrimSpace(*ip)
 	isMikrotik := isLikelyMikrotikDevice(devCat, devBrand, devModel, devDesc)
-	walkRes := collectInterfaceSNMPWalks(ctx, host, c, ifRefreshTO, isMikrotik)
+	walkRes := collectInterfaceSNMPWalks(ctx, s.DB(), host, c, ifRefreshTO, isMikrotik)
 	merged := walkRes.Merged
 	note := walkRes.Note
 	arr := make([]map[string]any, 0, len(merged)+1)

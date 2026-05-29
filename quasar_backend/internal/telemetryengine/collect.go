@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpprofile"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
@@ -323,6 +324,16 @@ func appendUniqueOID(list []string, v string) []string {
 
 // CollectAndStore executa GET SNMP dinâmico e persiste em telemetry_samples.
 func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+	var category, brand, model, description string
+	_ = pool.QueryRow(ctx, `
+		SELECT coalesce(category,''), coalesce(brand,''), coalesce(model,''), coalesce(description,'')
+		FROM devices WHERE id=$1
+	`, deviceID).Scan(&category, &brand, &model, &description)
+
+	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
+		return collectMikrotikProfile(ctx, pool, deviceID, host, community)
+	}
+
 	profJSON := profileJSONForDevice(ctx, pool, deviceID)
 	oids := oidsFromProfileJSON(profJSON)
 
@@ -371,4 +382,32 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 		return CollectResult{}, err
 	}
 	return CollectResult{OK: sn.OK, OIDs: oids, SNMP: sn, Metrics: metrics}, nil
+}
+
+func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+	out, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, 12*time.Second)
+	snmpOK := err == nil && out.Status.Collected > 0
+	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
+		snmpOK = false
+	}
+	var oids []string
+	for _, fr := range out.Fields {
+		if fr.OID != "" {
+			oids = append(oids, fr.OID)
+		}
+	}
+	sn := probing.SNMPGetResult{
+		OK:    snmpOK,
+		Note:  out.Status.Message,
+		Error: out.Status.Message,
+	}
+	if snmpOK {
+		sn.Error = ""
+	}
+	metrics := map[string]any{
+		"mikrotik_collection": out,
+		"oids":                oids,
+		"profile_source":        "settings_mikrotik_collection",
+	}
+	return CollectResult{OK: snmpOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
 }
