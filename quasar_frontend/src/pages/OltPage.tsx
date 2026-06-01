@@ -7,6 +7,7 @@ import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNullable, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
+import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 import { invalidateAlertListQueries } from "../lib/queryKeys";
 import { InlinePageToastBanner, useInlinePageToast } from "../lib/pageToast";
 import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow } from "../lib/deviceReportHelpers";
@@ -27,6 +28,9 @@ type OltRow = {
   locality_name?: string | null;
   /** ISO — última gravação do snapshot OLT (SNMP / PONs). */
   olt_snapshot_at?: string | null;
+  snmp_health_status?: "unknown" | "ok" | "partial" | "failed" | null;
+  snmp_health_reason?: string | null;
+  snmp_health_checked_at?: string | null;
   summary: unknown;
   pons: unknown;
   computed?: {
@@ -280,7 +284,8 @@ export function OltPage() {
   const [bulkCollectedRows, setBulkCollectedRows] = useState<
     Array<{ olt_id: string; olt_description: string; locality_id: string; locality_name: string; online: number; offline: number; total: number }>
   >([]);
-  const [saveToast, setSaveToast] = useInlinePageToast();
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const [bulkIncludeInterfaces, setBulkIncludeInterfaces] = useState(true);
   const [bulkMonth, setBulkMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -377,6 +382,7 @@ export function OltPage() {
       qc.invalidateQueries({ queryKey: ["olt-devices"] });
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
+      invalidateDashboardAfterCollect(qc);
     },
     onError: (err) => {
       setSaveToast({ ok: false, text: (err as Error).message || "Falha na coleta OLT" });
@@ -388,6 +394,7 @@ export function OltPage() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
+      invalidateDashboardAfterCollect(qc);
     },
   });
 
@@ -411,8 +418,10 @@ export function OltPage() {
         const label = (o.description && String(o.description).trim()) || o.id;
         setBulkLog((m) => [...m, `${label}: snapshot OLT…`]);
         const snap = await apiFetch<{ computed?: { onu_online_sum?: number; onu_offline_sum?: number; onu_total_sum?: number } }>(`/api/v1/olt/devices/${o.id}/refresh`, { method: "POST", json: {} });
-        setBulkLog((m) => [...m, `${label}: interfaces (SNMP)…`]);
-        await apiFetch(`/api/v1/interfaces/devices/${o.id}/refresh`, { method: "POST", json: {} });
+        if (bulkIncludeInterfaces) {
+          setBulkLog((m) => [...m, `${label}: interfaces (SNMP)…`]);
+          await apiFetch(`/api/v1/interfaces/devices/${o.id}/refresh`, { method: "POST", json: {} });
+        }
         const online = toInt(snap.computed?.onu_online_sum);
         const offline = toInt(snap.computed?.onu_offline_sum);
         const total = toInt(snap.computed?.onu_total_sum);
@@ -435,6 +444,7 @@ export function OltPage() {
       await qc.invalidateQueries({ queryKey: ["olt-devices"] });
       if (sel) await qc.invalidateQueries({ queryKey: ["olt-device", sel] });
       await invalidateAlertListQueries(qc);
+      invalidateDashboardAfterCollect(qc);
     } catch (e) {
       setBulkLog((m) => [...m, (e as Error).message || String(e)]);
     } finally {
@@ -647,12 +657,25 @@ export function OltPage() {
                 Actualizar OLTs em massa
               </h2>
               <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}>
-                {bulkPhase === "results" ? "Colecta concluída. Revise os totais abaixo." : "Snapshot OLT e interfaces por OLT seleccionada."}
+                {bulkPhase === "results"
+                  ? "Colecta concluída. Revise os totais abaixo."
+                  : bulkIncludeInterfaces
+                    ? "Snapshot OLT + interfaces SNMP por OLT seleccionada."
+                    : "Apenas snapshot OLT (PONs/ONUs) — sem walk de interfaces."}
               </p>
             </div>
             <div className="olt-bulk-modal__body">
             {bulkPhase !== "results" && (
             <>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={bulkIncludeInterfaces}
+                disabled={bulkRunning}
+                onChange={(e) => setBulkIncludeInterfaces(e.target.checked)}
+              />
+              Incluir actualização de interfaces (IF-MIB / SNMP walk)
+            </label>
             <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <input
                 className="input"
@@ -699,9 +722,11 @@ export function OltPage() {
                         </td>
                         <td>
                           {label}
-                          <div className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
-                            {o.ip ?? ""} · {o.id}
-                          </div>
+                          {o.ip ? (
+                            <div className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
+                              {o.ip}
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -769,7 +794,7 @@ export function OltPage() {
                     {saveBulkToCommercial.isPending ? "Salvando…" : "Confirmar e salvar na Base comercial"}
                   </button>
                 </div>
-                <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
+                <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
               </>
             )}
             </div>
@@ -833,6 +858,7 @@ export function OltPage() {
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("onus")}>ONUs {sortArrow("onus")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("online")}>Online {sortArrow("online")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("offline")}>Offline {sortArrow("offline")}</th>
+                <th>SNMP saúde</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("updated")}>Última atualização {sortArrow("updated")}</th>
               </tr>
             </thead>
@@ -847,6 +873,9 @@ export function OltPage() {
                     <td className="mono">{formatNum(c?.onu_total_sum)}</td>
                     <td className="mono">{formatNum(c?.onu_online_sum)}</td>
                     <td className="mono">{formatNum(c?.onu_offline_sum)}</td>
+                    <td title={r.snmp_health_reason ?? ""}>
+                      {r.snmp_health_status === "ok" ? "🟢 OK" : r.snmp_health_status === "partial" ? "🟡 Parcial" : r.snmp_health_status === "failed" ? "🔴 Falha" : "—"}
+                    </td>
                     <td className="mono">{formatCollectedPt(r.olt_snapshot_at)}</td>
                   </tr>
                 );
@@ -974,7 +1003,7 @@ export function OltPage() {
                   {refresh.isPending ? " · coleta em curso…" : ""}
                 </p>
 
-                <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 8 }} />
+                <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 8 }} />
 
                 {collectLogOpen ? (
                   <OltMetricsCollectLogModal

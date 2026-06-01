@@ -137,7 +137,7 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 			offBase := probing.NormalizeSNMPOID(def.OfflineCountOID)
 			onVars, onTrunc, onNote := snmpWalkMetric(ctx, host, community, onBase, perWalk, key)
 			offVars, offTrunc, offNote := snmpWalkMetric(ctx, host, community, offBase, perWalk, key)
-			counts, matched := mergePonCountWalks(onBase, onVars, offBase, offVars)
+			counts, matched := mergePonCountWalks(onBase, onVars, offBase, offVars, ponByIfIndex)
 			for pon, c := range counts {
 				ponCountsByPon[pon] = c
 			}
@@ -478,10 +478,10 @@ func needsMetricRetry(metricKey string, trunc bool, note string, rowCount int) b
 	return rowCount > 0 && rowCount < 50 && note != ""
 }
 
-func mergePonCountWalks(onBase string, onVars []probing.SNMPVar, offBase string, offVars []probing.SNMPVar) (map[int]ponCountPair, int) {
+func mergePonCountWalks(onBase string, onVars []probing.SNMPVar, offBase string, offVars []probing.SNMPVar, ponByIfIndex map[int]ponIfRef) (map[int]ponCountPair, int) {
 	out := map[int]ponCountPair{}
 	for _, v := range onVars {
-		pon, ok := ParsePonFromSuffix(onBase, v.OID, nil)
+		pon, ok := ParsePonFromSuffix(onBase, v.OID, ponByIfIndex)
 		if !ok {
 			continue
 		}
@@ -494,7 +494,7 @@ func mergePonCountWalks(onBase string, onVars []probing.SNMPVar, offBase string,
 		out[pon] = c
 	}
 	for _, v := range offVars {
-		pon, ok := ParsePonFromSuffix(offBase, v.OID, nil)
+		pon, ok := ParsePonFromSuffix(offBase, v.OID, ponByIfIndex)
 		if !ok {
 			continue
 		}

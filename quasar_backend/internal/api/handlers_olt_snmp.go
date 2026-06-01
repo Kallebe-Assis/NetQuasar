@@ -30,10 +30,12 @@ func applyMaxPonsLimitAnyRows(pons []any, maxPons *int) []any {
 func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
 		SELECT d.id, d.description, host(d.ip)::text, d.brand, d.model, d.locality_id, l.name,
-			COALESCE(o.summary::text, '{}'), COALESCE(o.pons::text, '[]'), o.updated_at
+			COALESCE(o.summary::text, '{}'), COALESCE(o.pons::text, '[]'), o.updated_at,
+			c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at
 		FROM devices d
 		LEFT JOIN commercial_localities l ON l.id = d.locality_id
 		LEFT JOIN olt_snapshots o ON o.device_id = d.id
+		LEFT JOIN device_probe_cache c ON c.device_id = d.id
 		WHERE lower(trim(d.category)) = 'olt'
 		ORDER BY d.description
 	`)
@@ -49,7 +51,9 @@ func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 		var locID *uuid.UUID
 		var sum, pons string
 		var snapAt *time.Time
-		if err := rows.Scan(&id, &desc, &ip, &brand, &model, &locID, &locName, &sum, &pons, &snapAt); err != nil {
+		var hStatus, hReason *string
+		var hAt *time.Time
+		if err := rows.Scan(&id, &desc, &ip, &brand, &model, &locID, &locName, &sum, &pons, &snapAt, &hStatus, &hReason, &hAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -61,6 +65,11 @@ func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 		item["computed"] = oltparse.SnapshotComputed([]byte(sum), []byte(pons))
 		if snapAt != nil {
 			item["olt_snapshot_at"] = snapAt.UTC().Format(time.RFC3339)
+		}
+		item["snmp_health_status"] = hStatus
+		item["snmp_health_reason"] = hReason
+		if hAt != nil {
+			item["snmp_health_checked_at"] = hAt.UTC().Format(time.RFC3339)
 		}
 		list = append(list, item)
 	}

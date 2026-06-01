@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { PAGE_TOAST_AUTO_MS, PAGE_TOAST_LEAVE_MS } from "./pageToast";
 
 export type AppToastTone = "ok" | "err" | "info";
 
@@ -43,20 +44,41 @@ let toastSeq = 0;
 
 export function AppToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<AppToastItem[]>([]);
+  const [leaving, setLeaving] = useState<Set<string>>(() => new Set());
   const timersRef = useRef<Map<string, number>>(new Map());
+  const leaveTimersRef = useRef<Map<string, number>>(new Map());
 
-  const dismiss = useCallback((id: string) => {
-    const t = timersRef.current.get(id);
-    if (t != null) {
-      window.clearTimeout(t);
-      timersRef.current.delete(id);
-    }
+  const removeItem = useCallback((id: string) => {
     setItems((prev) => {
       const row = prev.find((x) => x.id === id);
       if (row?.onDismiss) row.onDismiss();
       return prev.filter((x) => x.id !== id);
     });
+    setLeaving((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
+
+  const dismiss = useCallback(
+    (id: string) => {
+      const autoT = timersRef.current.get(id);
+      if (autoT != null) {
+        window.clearTimeout(autoT);
+        timersRef.current.delete(id);
+      }
+      if (leaveTimersRef.current.has(id)) return;
+      setLeaving((prev) => new Set(prev).add(id));
+      const tid = window.setTimeout(() => {
+        leaveTimersRef.current.delete(id);
+        removeItem(id);
+      }, PAGE_TOAST_LEAVE_MS);
+      leaveTimersRef.current.set(id, tid);
+    },
+    [removeItem],
+  );
 
   const push = useCallback(
     (input: PushInput) => {
@@ -73,7 +95,7 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
         onDismiss: input.onDismiss,
       };
       setItems((prev) => [row, ...prev].slice(0, 12));
-      const ms = input.autoMs ?? 10_000;
+      const ms = input.autoMs ?? PAGE_TOAST_AUTO_MS;
       if (ms > 0) {
         const tid = window.setTimeout(() => dismiss(id), ms);
         timersRef.current.set(id, tid);
@@ -85,9 +107,12 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const timers = timersRef.current;
+    const leaveTimers = leaveTimersRef.current;
     return () => {
       timers.forEach((tid) => window.clearTimeout(tid));
       timers.clear();
+      leaveTimers.forEach((tid) => window.clearTimeout(tid));
+      leaveTimers.clear();
     };
   }, []);
 
@@ -96,7 +121,7 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
   return (
     <AppToastContext.Provider value={value}>
       {children}
-      <AppToastStack items={items} onDismiss={dismiss} />
+      <AppToastStack items={items} leaving={leaving} onDismiss={dismiss} />
     </AppToastContext.Provider>
   );
 }
@@ -115,14 +140,27 @@ function toneClass(tone: AppToastTone): string {
   return "page-toast--info";
 }
 
-export function AppToastStack({ items, onDismiss }: { items: AppToastItem[]; onDismiss: (id: string) => void }) {
+export function AppToastStack({
+  items,
+  leaving,
+  onDismiss,
+}: {
+  items: AppToastItem[];
+  leaving: Set<string>;
+  onDismiss: (id: string) => void;
+}) {
   if (items.length === 0) return null;
   const sorted = [...items].sort((a, b) => b.at - a.at);
   return (
     <div className="app-toast-stack" aria-live="polite">
-      {sorted.map((t) =>
-        t.kind === "offline" ? (
-          <div key={t.id} className="page-toast page-toast--err page-toast--offline app-toast-stack__item" role="status">
+      {sorted.map((t) => {
+        const leaveClass = leaving.has(t.id) ? " page-toast--leave" : "";
+        return t.kind === "offline" ? (
+          <div
+            key={t.id}
+            className={`page-toast page-toast--err page-toast--offline app-toast-stack__item${leaveClass}`}
+            role="status"
+          >
             <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => onDismiss(t.id)}>
               ×
             </button>
@@ -130,14 +168,14 @@ export function AppToastStack({ items, onDismiss }: { items: AppToastItem[]; onD
             {t.offlineIp ? <div className="app-toast-stack__offline-ip mono">{t.offlineIp}</div> : null}
           </div>
         ) : (
-          <div key={t.id} className={`page-toast ${toneClass(t.tone)} app-toast-stack__item`} role="status">
+          <div key={t.id} className={`page-toast ${toneClass(t.tone)} app-toast-stack__item${leaveClass}`} role="status">
             <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => onDismiss(t.id)}>
               ×
             </button>
             <div className="app-toast-stack__text">{t.text}</div>
           </div>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

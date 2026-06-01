@@ -141,12 +141,21 @@ function Section({
 }) {
   return (
     <section id={id} className="card" style={{ marginTop: 16, padding: "14px 16px 18px" }}>
-      <h2 style={{ marginBottom: subtitle ? 4 : 8, color: "var(--text)", textTransform: "none", letterSpacing: 0 }}>{title}</h2>
-      {subtitle && (
-        <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", maxWidth: 900 }}>
-          {subtitle}
-        </p>
-      )}
+      <h2
+        style={{
+          marginBottom: 12,
+          color: "var(--text)",
+          textTransform: "none",
+          letterSpacing: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        {title}
+        {subtitle ? <InfoHint label={title}>{subtitle}</InfoHint> : null}
+      </h2>
       {children}
     </section>
   );
@@ -502,7 +511,6 @@ export function DashboardPage() {
                     <th>#</th>
                     <th>Equipamento</th>
                     <th className="mono">Média</th>
-                    <th className="mono">N</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -511,7 +519,6 @@ export function DashboardPage() {
                       <td>{i + 1}</td>
                       <td>{trunc(String(r.description ?? ""), 28)}</td>
                       <td className="mono">{fmt1(r.avg_latency_ms)}</td>
-                      <td className="mono">{fmtInt(r.samples)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -527,7 +534,6 @@ export function DashboardPage() {
                     <th>#</th>
                     <th>Equipamento</th>
                     <th className="mono">Média</th>
-                    <th className="mono">N</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -536,7 +542,6 @@ export function DashboardPage() {
                       <td>{i + 1}</td>
                       <td>{trunc(String(r.description ?? ""), 28)}</td>
                       <td className="mono">{fmt1(r.avg_latency_ms)}</td>
-                      <td className="mono">{fmtInt(r.samples)}</td>
                     </tr>
                   ))}
                 </tbody>

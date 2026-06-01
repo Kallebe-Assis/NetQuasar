@@ -450,6 +450,9 @@ func (s *Server) realtimePing(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
+	if s.rt != nil {
+		s.rt.publish(r.Context(), "realtime.ping.samples", map[string]any{"samples": out})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"samples": out, "note": "Leitura do cache do worker; WebSocket pode ser adicionado depois."})
 }
 

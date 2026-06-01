@@ -59,7 +59,7 @@ type Tab =
 
 export function ToolsPage() {
   const [tab, setTab] = useState<Tab>("host_ping");
-  const { toast, show, dismiss } = useToolsPageToast();
+  const { toast, leaving, show, dismiss } = useToolsPageToast();
 
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");
   const [hostPingTimeout, setHostPingTimeout] = useState("4000");
@@ -471,7 +471,7 @@ export function ToolsPage() {
 
   return (
     <div className="tools-page">
-      <ToolsPageToastHost toast={toast} onDismiss={dismiss} />
+      <ToolsPageToastHost toast={toast} leaving={leaving} onDismiss={dismiss} />
       <h1 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
         Ferramentas de rede
         <InfoHint label="Sobre as ferramentas de rede">

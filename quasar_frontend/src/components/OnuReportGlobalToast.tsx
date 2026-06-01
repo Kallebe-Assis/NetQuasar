@@ -22,7 +22,7 @@ export function OnuReportGlobalToast() {
   useEffect(() => {
     if (!activity) {
       if (prev.current === TELEGRAM) {
-        const id = push({ tone: "ok", text: "Relatório ONU enviado para o Telegram.", autoMs: 6000 });
+        const id = push({ tone: "ok", text: "Relatório ONU enviado para o Telegram." });
         toastIds.current.push(id);
       }
       prev.current = "";
@@ -30,10 +30,10 @@ export function OnuReportGlobalToast() {
     }
     if (activity === prev.current) return;
     if (activity === COLLECT) {
-      const id = push({ tone: "info", text: "A recolher dados para o relatório ONU mensal…", autoMs: 8000 });
+      const id = push({ tone: "info", text: "A recolher dados para o relatório ONU mensal…" });
       toastIds.current.push(id);
     } else if (activity === TELEGRAM) {
-      const id = push({ tone: "info", text: "A enviar relatório ONU para o Telegram…", autoMs: 8000 });
+      const id = push({ tone: "info", text: "A enviar relatório ONU para o Telegram…" });
       toastIds.current.push(id);
     }
     prev.current = activity;

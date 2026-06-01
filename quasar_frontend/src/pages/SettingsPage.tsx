@@ -521,8 +521,7 @@ function UsersPanel() {
   const [ePhone, setEPhone] = useState("");
   const [ePass, setEPass] = useState("");
   const [eRole, setERole] = useState<"admin" | "viewer">("viewer");
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
-  useAutoDismissToast(saveToast, setSaveToast);
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
   const [userCreateErr, setUserCreateErr] = useState("");
 
   const create = useMutation({
@@ -724,7 +723,7 @@ function UsersPanel() {
             </button>
           </div>
           {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
-          <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 8 }} />
+          <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 8 }} />
         </div>
       )}
     </>
@@ -778,6 +777,8 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "uptime_minutes", label: "Uptime (minutos)", unit: "min", scope: "equipamento", enabled: true, operator: "lte", green_min: "120", warning_min: "60", critical_min: "15", apply_categories: [] },
     { id: "olt_pon_tx_dbm", label: "PON TX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-14", critical_min: "-20", apply_categories: ["olt"] },
     { id: "olt_pon_rx_dbm", label: "PON RX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-10", warning_min: "-16", critical_min: "-22", apply_categories: ["olt"] },
+    { id: "olt_onu_tx_dbm", label: "ONU TX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-15", critical_min: "-20", apply_categories: ["olt"] },
+    { id: "olt_onu_rx_dbm", label: "ONU RX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-12", warning_min: "-20", critical_min: "-28", apply_categories: ["olt"] },
     { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
     { id: "olt_onu_drop_count", label: "Queda de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
     { id: "olt_onu_drop_percent", label: "Queda de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
@@ -1892,8 +1893,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   const [token, setToken] = useState("");
   const [chat, setChat] = useState("");
   const [topic, setTopic] = useState("");
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
-  useAutoDismissToast(saveToast, setSaveToast);
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
 
   useEffect(() => {
     if (!q.data) return;
@@ -1943,7 +1943,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
           Enviar mensagem de teste
         </button>
       </div>
-      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
+      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
       <TelegramTestOutcome data={test.data} error={test.error as Error | null} />
     </div>
   );
@@ -2130,8 +2130,16 @@ function metricsFromApi(raw: unknown): OltMetricsForm {
       ifname_oid: m.ifname_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.31.1.1.1.1" : undefined),
       ifoper_oid: m.ifoper_oid ?? (f.hasStatusValues ? "1.3.6.1.2.1.2.2.1.8" : undefined),
       online_count_oid: m.online_count_oid ?? "",
-      offline_count_oid: m.offline_count_oid ?? "",
-      offline_rx_dbm: Number.isFinite(Number(m.offline_rx_dbm)) ? Number(m.offline_rx_dbm) : undefined,
+      offline_count_oid: (() => {
+        const off = (m.offline_count_oid ?? "").trim();
+        const mode =
+          (m.status_mode as "pon_onu_suffix" | "if_mib_index" | "pon_online_offline" | "rx_power_threshold" | undefined) ??
+          (f.hasStatusValues ? "pon_onu_suffix" : undefined);
+        if (mode === "pon_online_offline" && off.endsWith(".2.1.4")) {
+          return "1.3.6.1.4.1.3709.3.6.18.2.1.6";
+        }
+        return off;
+      })(),
     };
   }
   return base;
@@ -2238,7 +2246,7 @@ function OltVendorsPanel() {
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [saveToast, setSaveToast] = useInlinePageToast();
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
   const [metrics, setMetrics] = useState<OltMetricsForm>(() => defaultMetricsForm());
   const [steps, setSteps] = useState<OltCollectionStep[]>([]);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
@@ -2549,19 +2557,27 @@ function OltVendorsPanel() {
                       className="input"
                       style={{ fontSize: 12, padding: "4px 8px" }}
                       value={statusMode}
-                      onChange={(e) =>
-                        setMetrics((prev) => ({
-                          ...prev,
-                          [field.key]: {
-                            ...prev[field.key],
-                            status_mode: e.target.value as
-                              | "pon_onu_suffix"
-                              | "if_mib_index"
-                              | "pon_online_offline"
-                              | "rx_power_threshold",
-                          },
-                        }))
-                      }
+                      onChange={(e) => {
+                        const mode = e.target.value as
+                          | "pon_onu_suffix"
+                          | "if_mib_index"
+                          | "pon_online_offline"
+                          | "rx_power_threshold";
+                        setMetrics((prev) => {
+                          const cur = prev[field.key] ?? {};
+                          const patch: Partial<OltOnuMetricDef> = { status_mode: mode };
+                          if (mode === "pon_online_offline") {
+                            if (!(cur.online_count_oid ?? "").trim()) {
+                              patch.online_count_oid = "1.3.6.1.4.1.3709.3.6.18.2.1.5";
+                            }
+                            const off = (cur.offline_count_oid ?? "").trim();
+                            if (!off || off.endsWith(".2.1.4")) {
+                              patch.offline_count_oid = "1.3.6.1.4.1.3709.3.6.18.2.1.6";
+                            }
+                          }
+                          return { ...prev, [field.key]: { ...cur, ...patch } };
+                        });
+                      }}
                     >
                       <option value="pon_onu_suffix">Tabela PON/ONU (sufixo .PON.ONU)</option>
                       <option value="if_mib_index">Interfaces (ifDescr + ifOperStatus)</option>
@@ -2628,7 +2644,7 @@ function OltVendorsPanel() {
                       />
                     </div>
                     <div className="field" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>OID ONUs offline por PON</label>
+                      <label style={{ fontSize: 11 }}>OID ONUs offline por PON (col. 6 Datacom)</label>
                       <input
                         className="input mono"
                         style={{ width: "100%", fontSize: 12 }}
@@ -2642,6 +2658,9 @@ function OltVendorsPanel() {
                         }
                       />
                     </div>
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                      Datacom ponIfTable: col. 3 = total, col. 5 = online (up), col. 6 = offline (down). Col. 4 = não provisionadas (geralmente 0).
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -3109,7 +3128,7 @@ function OltVendorsPanel() {
           </div>
         </div>
       )}
-      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
+      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
     </div>
   );
 }

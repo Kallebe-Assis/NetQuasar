@@ -21,6 +21,7 @@ import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
 import { useFloatingMenu } from "../hooks/useFloatingMenu";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { useAppToast } from "../lib/appToast";
+import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 
 type Locality = { id: string; name: string; region_code?: string | null; created_at?: string };
 type MonthlyRecord = {
@@ -330,7 +331,7 @@ export function CommercialPage() {
   useEffect(() => {
     if (!tgMsg) return;
     const text = tgMsg.text.length > 320 ? `${tgMsg.text.slice(0, 317)}…` : tgMsg.text;
-    pushToast({ tone: tgMsg.ok ? "ok" : "err", text, autoMs: 8000 });
+    pushToast({ tone: tgMsg.ok ? "ok" : "err", text });
   }, [tgMsg, pushToast]);
   const [oltCollectModalOpen, setOltCollectModalOpen] = useState(false);
   const [oltCollectConfirmOpen, setOltCollectConfirmOpen] = useState(false);
@@ -470,6 +471,7 @@ export function CommercialPage() {
       setOltCollectRows(out);
       setOltSelectedIds(out.filter((r) => !r.error).map((r) => r.olt_id));
       setOltCollectLog((m) => [...m, "Coleta finalizada. Revise e confirme a gravação."]);
+      invalidateDashboardAfterCollect(qc);
     } finally {
       setOltCollectRunning(false);
     }

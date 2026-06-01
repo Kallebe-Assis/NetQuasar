@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ToolOutputError } from "../components/ToolsOutputViews";
 import { apiFetch } from "../lib/api";
+import { apiUrl, getStoredApiKey } from "../lib/auth";
 
 type DeviceRow = {
   id: string;
@@ -47,12 +48,37 @@ export function RealtimePage() {
   }, [normalDevices]);
 
   const idsCsv = useMemo(() => picked.join(","), [picked]);
+  const [liveSamples, setLiveSamples] = useState<RealtimeSample[] | null>(null);
   const rt = useQuery({
     queryKey: ["realtime-ping", idsCsv],
     queryFn: () => apiFetch<{ samples: RealtimeSample[]; note?: string }>(`/api/v1/realtime/ping?device_ids=${encodeURIComponent(idsCsv)}`),
     enabled: picked.length > 0 && picked.length <= 3,
-    refetchInterval: picked.length ? 4000 : false,
+    refetchInterval: false,
   });
+
+  useEffect(() => {
+    setLiveSamples(rt.data?.samples ?? null);
+  }, [rt.data?.samples]);
+
+  useEffect(() => {
+    if (picked.length === 0 || picked.length > 3) return;
+    const base = apiUrl("/api/v1/realtime/ws");
+    const token = getStoredApiKey();
+    const wsUrl = base.replace(/^http/i, "ws") + (token ? `?api_key=${encodeURIComponent(token)}` : "");
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data ?? "{}")) as { type?: string; data?: { samples?: RealtimeSample[] } };
+        if (msg.type === "realtime.ping.samples" && Array.isArray(msg.data?.samples)) {
+          const allow = new Set(picked);
+          setLiveSamples(msg.data.samples.filter((s) => allow.has(String(s.device_id))));
+        }
+      } catch {
+        // noop
+      }
+    };
+    return () => ws.close();
+  }, [picked]);
 
   function toggle(id: string) {
     setPicked((prev) => {
@@ -126,9 +152,9 @@ export function RealtimePage() {
           {rt.isLoading && <p>A obter dados…</p>}
           <ToolOutputError err={rt.error as Error | null} />
           {rt.data?.note ? <p style={{ color: "var(--muted)", fontSize: 12 }}>{rt.data.note}</p> : null}
-          {rt.data && !rt.isError ? (
+          {(liveSamples ?? rt.data?.samples) && !rt.isError ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-              {(rt.data.samples ?? []).map((s) => {
+              {(liveSamples ?? rt.data?.samples ?? []).map((s) => {
                 const dev = deviceById.get(s.device_id);
                 const ok = s.ok === true;
                 const lat = typeof s.latency_ms === "number" ? s.latency_ms : null;

@@ -239,16 +239,14 @@ func buildDatacomPonRowsFromTable(rows []map[string]any) []map[string]any {
 				a.total = v
 			}
 		case 4:
-			if v, ok := r["value_int"].(int); ok {
-				a.offline = v
-			}
+			// ponIfNonProvisionedOnus — ignorado (não é offline)
 		case 5:
 			if v, ok := r["value_int"].(int); ok {
 				a.online = v
 			}
 		case 6:
 			if v, ok := r["value_int"].(int); ok {
-				a.status = statusLabelFromInt(v)
+				a.offline = v
 			}
 		}
 	}

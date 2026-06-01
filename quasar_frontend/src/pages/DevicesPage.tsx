@@ -45,6 +45,9 @@ type Device = {
     uptime_oid?: string;
   } | null;
   max_pons?: number | null;
+  snmp_health_status?: "unknown" | "ok" | "partial" | "failed" | null;
+  snmp_health_reason?: string | null;
+  snmp_health_checked_at?: string | null;
 };
 
 const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
@@ -1107,6 +1110,7 @@ export function DevicesPage() {
               <th style={{ cursor: "pointer" }} onClick={() => toggleSort("operational_mode")}>
                 Modo op. {sortArrow("operational_mode")}
               </th>
+              <th>SNMP saúde</th>
               <th style={{ width: 52 }}>{canMutate ? "Ações" : ""}</th>
             </tr>
           </thead>
@@ -1144,6 +1148,9 @@ export function DevicesPage() {
                   />
                 </td>
                 <td>{d.operational_mode}</td>
+                <td title={d.snmp_health_reason ?? ""}>
+                  {d.snmp_health_status === "ok" ? "🟢 OK" : d.snmp_health_status === "partial" ? "🟡 Parcial" : d.snmp_health_status === "failed" ? "🔴 Falha" : "—"}
+                </td>
                 <td>
                   {canMutate ? (
                     <ActionMenu

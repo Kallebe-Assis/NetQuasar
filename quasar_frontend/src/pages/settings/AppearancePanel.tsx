@@ -18,7 +18,7 @@ export function AppearancePanel() {
     queryFn: fetchUiAppearance,
   });
   const [draft, setDraft] = useState<UiTheme>(activeTheme);
-  const [saveToast, setSaveToast] = useInlinePageToast();
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
 
   useThemePreview(draft, activeTheme);
 
@@ -90,7 +90,7 @@ export function AppearancePanel() {
           Pré-visualização: <strong style={{ color: "var(--text)" }}>{uiThemeLabel(draft)}</strong> (restaura ao sair sem salvar)
         </p>
       </div>
-      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} style={{ marginTop: 10 }} />
+      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
     </div>
   );
 }

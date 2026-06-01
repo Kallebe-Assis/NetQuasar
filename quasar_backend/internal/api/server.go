@@ -22,6 +22,7 @@ type Server struct {
 	Cfg               *config.Config
 	DBHolder          *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
 	WorkerCtx         context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
+	rt                *realtimeBroker
 	ensureMonitorOnce   sync.Once
 	automationONUOnce      sync.Once
 	automationReportsOnce  sync.Once
@@ -56,6 +57,10 @@ func (s *Server) ensureBackgroundSchedulers() {
 
 func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[pgxpool.Pool], workerCtx context.Context) http.Handler {
 	s := &Server{Log: log, Cfg: cfg, DBHolder: dbHolder, WorkerCtx: workerCtx}
+	s.rt = newRealtimeBroker(log, cfg.RedisURL)
+	if workerCtx != nil {
+		s.rt.Start(workerCtx)
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
@@ -348,6 +353,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		})
 
 		r.Get("/realtime/ping", s.realtimePing)
+		r.Get("/realtime/ws", s.realtimeWS)
 		r.Get("/events", s.listEvents)
 		r.Get("/metrics", s.metricsSeries)
 

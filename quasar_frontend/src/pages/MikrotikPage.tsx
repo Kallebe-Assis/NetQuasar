@@ -7,6 +7,7 @@ import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
+import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
 import { MikrotikMetricsOverview } from "../components/MikrotikMetricsOverview";
 
@@ -242,6 +243,7 @@ export function MikrotikPage() {
     mutationFn: (id: string) => apiFetch(`/api/v1/telemetry/devices/${id}/collect`, { method: "POST", json: {} }),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ["mikrotik-tel", id] });
+      invalidateDashboardAfterCollect(qc);
     },
   });
 

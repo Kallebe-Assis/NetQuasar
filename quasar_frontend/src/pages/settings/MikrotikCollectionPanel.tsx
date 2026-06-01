@@ -102,7 +102,7 @@ function countEnabled(metrics: MikrotikMetricsForm, catalog: CatalogEntry[]) {
 
 export function MikrotikCollectionPanel() {
   const qc = useQueryClient();
-  const [saveToast, setSaveToast] = useInlinePageToast();
+  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
   const [metrics, setMetrics] = useState<MikrotikMetricsForm>({});
   const [steps, setSteps] = useState<MikrotikCollectionStep[]>([]);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
@@ -164,7 +164,7 @@ export function MikrotikCollectionPanel() {
 
   return (
     <div style={{ marginTop: 8 }}>
-      <InlinePageToastBanner toast={saveToast} onDismiss={() => setSaveToast(null)} />
+      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} />
 
       <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — MikroTik</h2>

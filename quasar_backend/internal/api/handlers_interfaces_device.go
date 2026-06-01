@@ -479,6 +479,14 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 		"traffic_interval_seconds": dtSec,
 		"updates":                  updates,
 	})
+	if s.rt != nil {
+		s.rt.publish(r.Context(), "realtime.interfaces", map[string]any{
+			"device_id":                id.String(),
+			"collected_at":             time.Now().UTC().Format(time.RFC3339),
+			"traffic_interval_seconds": dtSec,
+			"updates":                  updates,
+		})
+	}
 }
 
 func (s *Server) interfacesHistory(w http.ResponseWriter, r *http.Request) {

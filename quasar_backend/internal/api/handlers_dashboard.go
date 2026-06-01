@@ -21,6 +21,14 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 	if days <= 0 || days > 90 {
 		days = 30
 	}
+	if s.rt != nil && s.rt.redis != nil {
+		cacheKey := "netquasar:dashboard:analytics:" + strconv.Itoa(days)
+		if txt, err := s.rt.redis.Get(ctx, cacheKey).Result(); err == nil && strings.TrimSpace(txt) != "" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(txt))
+			return
+		}
+	}
 	since := time.Now().UTC().AddDate(0, 0, -days)
 
 	var nDev, nPops, nClients, telDev, pingDev int64
@@ -330,6 +338,15 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 		out["mikrotik_interface_traffic_latest"] = []any{}
 	}
 
+	if s.rt != nil && s.rt.redis != nil {
+		if raw, err := json.Marshal(out); err == nil {
+			cacheKey := "netquasar:dashboard:analytics:" + strconv.Itoa(days)
+			_ = s.rt.redis.Set(ctx, cacheKey, string(raw), 45*time.Second).Err()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

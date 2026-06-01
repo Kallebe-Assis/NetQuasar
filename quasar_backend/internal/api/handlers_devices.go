@@ -53,14 +53,20 @@ type deviceDTO struct {
 	TelemetryOIDStrategy  *string         `json:"telemetry_oid_strategy,omitempty"`
 	TelemetryOIDOverrides json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
 	MaxPons               *int            `json:"max_pons,omitempty"`
+	SNMPHealthStatus      *string         `json:"snmp_health_status,omitempty"`
+	SNMPHealthReason      *string         `json:"snmp_health_reason,omitempty"`
+	SNMPHealthCheckedAt   *string         `json:"snmp_health_checked_at,omitempty"`
 }
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
-	q := `SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
-		ping_enabled, telemetry_enabled, operational_mode,
-		latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-		telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
-		FROM devices ORDER BY description LIMIT 500`
+	q := `SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
+		d.ping_enabled, d.telemetry_enabled, d.operational_mode,
+		d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
+		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons,
+		c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at::text
+		FROM devices d
+		LEFT JOIN device_probe_cache c ON c.device_id = d.id
+		ORDER BY d.description LIMIT 500`
 	rows, err := s.DB().Query(r.Context(), q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -75,7 +81,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 			&d.PingEnabled, &d.TelemetryEnabled, &d.OperationalMode,
 			&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons); err != nil {
+			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &d.SNMPHealthStatus, &d.SNMPHealthReason, &d.SNMPHealthCheckedAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}

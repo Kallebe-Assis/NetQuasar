@@ -9,6 +9,7 @@ import { isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
 import { prettyAuditDiff } from "../lib/auditDisplay";
 import { useAppToast } from "../lib/appToast";
+import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 import { queryKeys } from "../lib/queryKeys";
 
 type ActiveEquipRow = {
@@ -325,7 +326,7 @@ export function MonitoringPage() {
 
   const showPageToast = useCallback(
     (ok: boolean, text: string) => {
-      pushToast({ tone: ok ? "ok" : "err", text: ok ? text : friendlyApiMessage(text), autoMs: 4800 });
+      pushToast({ tone: ok ? "ok" : "err", text: ok ? text : friendlyApiMessage(text) });
     },
     [pushToast],
   );
@@ -509,7 +510,6 @@ export function MonitoringPage() {
           kind: "offline",
           offlineTitle: a.device_name || "Equipamento offline",
           offlineIp: a.ip || "—",
-          autoMs: 0,
           onDismiss: () => {
             handledOfflineAlertsRef.current.add(alertId);
             offlineToastIdsRef.current.delete(alertId);
@@ -548,6 +548,7 @@ export function MonitoringPage() {
     mutationFn: (id: string) => apiFetch(`/api/v1/telemetry/devices/${id}/collect`, { method: "POST", json: {} }),
     onSuccess: () => {
       invalidateActiveList();
+      invalidateDashboardAfterCollect(qc);
       showPageToastRef.current(true, "Telemetria solicitada.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),

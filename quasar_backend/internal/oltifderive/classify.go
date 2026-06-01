@@ -25,6 +25,7 @@ var (
 	reOnuIface    = regexp.MustCompile(`(?i)^GPON(\d+)ONU(\d+)`)
 	rePonPhyZTE   = regexp.MustCompile(`(?i)^PON-(\d+)/(\d+)/(\d+)`)
 	rePonPhyZTEIf = regexp.MustCompile(`(?i)^GPON_OLT-(\d+)/(\d+)/(\d+)`)
+	rePonPhyDatacom  = regexp.MustCompile(`(?i)^gpon-(\d+)/(\d+)/(\d+)`)
 	reOnuIfaceZTE     = regexp.MustCompile(`(?i)^(?:GPON[-_]?ONU[-_]?|EPON[-_]?ONU[-_]?|ONU[-_])(\d+)/(\d+)/(\d+):(\d+)`)
 	reOnuIfaceZTELoose = regexp.MustCompile(`(?i)(?:GPON[-_]?ONU|EPON[-_]?ONU|ONU)[-_]?(\d+)/(\d+)/(\d+):(\d+)`)
 	reVlan        = regexp.MustCompile(`(?i)^VLAN\d+`)
@@ -72,6 +73,9 @@ func ClassifyKind(displayName, descr string) Kind {
 		return KindPON
 	}
 	if rePonPhyZTEIf.MatchString(tok) {
+		return KindPON
+	}
+	if rePonPhyDatacom.MatchString(tok) {
 		return KindPON
 	}
 	// GE sem barra ou outras VLAN por nome
@@ -130,6 +134,10 @@ func PonCompactFromPhy(displayName, descr string) string {
 		return m[1] + "/" + m[2] + "/" + m[3]
 	}
 	m = rePonPhyZTEIf.FindStringSubmatch(tok)
+	if m != nil {
+		return m[1] + "/" + m[2] + "/" + m[3]
+	}
+	m = rePonPhyDatacom.FindStringSubmatch(tok)
 	if m != nil {
 		return m[1] + "/" + m[2] + "/" + m[3]
 	}

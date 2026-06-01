@@ -9,6 +9,7 @@ func TestClassifyKind(t *testing.T) {
 		{"GPON0/1", "", KindPON},
 		{"PON-1/1/1", "", KindPON},
 		{"gpon_olt-1/1/1", "", KindPON},
+		{"gpon-1/1/1", "", KindPON},
 		{"GPON01ONU2 ROGERIO", "", KindONU},
 		{"ONU-1/1/1:2", "", KindONU},
 		{"gpon-onu_1/1/1:3", "", KindONU},

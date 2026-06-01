@@ -118,6 +118,18 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 
 			c, telErr := telemetryengine.CollectAndStore(sctx, pool, row.id, strings.TrimSpace(row.ip), comm)
 			snmpOK := telErr == nil && c.OK
+			healthStatus := "ok"
+			healthReason := ""
+			if telErr != nil {
+				healthStatus = "failed"
+				healthReason = strings.TrimSpace(telErr.Error())
+			} else if !c.OK {
+				healthStatus = "partial"
+				healthReason = strings.TrimSpace(c.SNMP.Error)
+				if healthReason == "" {
+					healthReason = "SNMP sem retorno útil"
+				}
+			}
 			if telErr == nil && c.Metrics != nil {
 				if mk, ok := c.Metrics["mikrotik_collection"]; ok {
 					if doc, ok := mk.(map[string]any); ok {
@@ -146,9 +158,12 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 					snmp_ok = $2,
 					ok = CASE WHEN monitoring_mode = $3 THEN reach_ok ELSE (reach_ok AND $2::bool) END,
 					detail = COALESCE(detail, '{}'::jsonb) || $4::jsonb,
+					snmp_health_status = $5::text,
+					snmp_health_reason = NULLIF(trim($6::text), ''),
+					snmp_health_checked_at = now(),
 					checked_at = now()
 				WHERE device_id = $1
-			`, row.id, snmpOK, ModeSimplePing, string(snippet)); uerr != nil && log != nil {
+			`, row.id, snmpOK, ModeSimplePing, string(snippet), healthStatus, healthReason); uerr != nil && log != nil {
 					log.Warn().Err(uerr).Str("device", row.id.String()).Msg("telemetry_sweep probe cache")
 				}
 			})

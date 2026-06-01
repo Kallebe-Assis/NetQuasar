@@ -11,12 +11,13 @@ import (
 func APIKeyMatches(cfg *config.Config, r *http.Request) bool {
 	xKey := strings.TrimSpace(r.Header.Get("X-API-Key"))
 	bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	qKey := strings.TrimSpace(r.URL.Query().Get("api_key"))
 	for _, k := range cfg.APIKeys {
 		kk := strings.TrimSpace(k)
 		if kk == "" {
 			continue
 		}
-		if xKey == kk || bearer == kk {
+		if xKey == kk || bearer == kk || qKey == kk {
 			return true
 		}
 	}

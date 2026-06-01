@@ -38,6 +38,7 @@ type Config struct {
 
 	// EmbeddedUI — servir frontend estático compilado incluído no binário (NetQuasar em único processo).
 	EmbeddedUI bool
+	RedisURL   string
 }
 
 // RequireAuth indica se requisições /api/* exigem X-API-Key ou JWT de utilizador (ambiente de produção típico).
@@ -126,6 +127,7 @@ func Load() (*Config, error) {
 		DBSSLMode:        getenv("NETQUASAR_DB_SSLMODE", "disable"),
 		DBSSLRootCert:    strings.TrimSpace(os.Getenv("NETQUASAR_DB_SSLROOTCERT")),
 		DatabaseURL:      os.Getenv("NETQUASAR_DATABASE_URL"),
+		RedisURL:         strings.TrimSpace(os.Getenv("NETQUASAR_REDIS_URL")),
 	}
 
 	if cors := os.Getenv("NETQUASAR_CORS_ORIGINS"); cors != "" {
