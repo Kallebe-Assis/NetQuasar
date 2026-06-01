@@ -12,7 +12,7 @@ COPY quasar_frontend/ ./
 ARG CACHEBUST=0
 RUN echo "ui cachebust=${CACHEBUST}" && npm run build
 
-FROM golang:1.22-bookworm AS backend
+FROM golang:1.24-bookworm AS backend
 WORKDIR /app
 COPY quasar_backend/ ./
 COPY --from=frontend /build/dist ./internal/embedui/dist
