@@ -95,26 +95,6 @@ function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
   );
 }
 
-function formatServiceStatus(status?: string): string {
-  if (!status?.trim()) return "";
-  const key = status.trim().toLowerCase().replace(/\s+/g, "_");
-  const labels: Record<string, string> = {
-    servico_habilitado: "Serviço habilitado",
-    servico_desabilitado: "Serviço desabilitado",
-    servico_suspenso: "Serviço suspenso",
-    servico_cancelado: "Serviço cancelado",
-  };
-  if (labels[key]) return labels[key];
-  if (key.includes("_")) {
-    return key
-      .split("_")
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-  }
-  return status.trim();
-}
-
 function normalizeForSearch(s: string): string {
   return s
     .toLowerCase()

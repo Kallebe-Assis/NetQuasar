@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Blend, ClockFading, Copy, Cpu, Plus, Sun, ThermometerSun, Trash2 } from "lucide-react";
-import { InlinePageToastBanner, PAGE_TOAST_AUTO_MS, useAutoDismissToast, useInlinePageToast } from "../lib/pageToast";
+import { InlinePageToastBanner, PAGE_TOAST_AUTO_MS, useInlinePageToast } from "../lib/pageToast";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";

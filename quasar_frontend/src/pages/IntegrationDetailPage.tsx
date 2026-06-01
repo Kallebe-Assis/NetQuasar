@@ -1553,8 +1553,16 @@ function FieldMappingsEditor({
   const patch = (buscaKey: string, field: keyof SearchFieldMapping, value: string) => {
     const next = { ...mappings };
     const cur = { ...(next[buscaKey] ?? {}) };
-    if (value === "") delete cur[field];
-    else cur[field] = value as SearchFieldMapping[typeof field];
+    if (value === "") {
+      delete cur[field];
+    } else if (field === "termo_format") {
+      const fmt = value as SearchFieldMapping["termo_format"];
+      if (fmt === "digits" || fmt === "raw" || fmt === "br_document") {
+        cur.termo_format = fmt;
+      }
+    } else {
+      cur[field] = value;
+    }
     if (Object.keys(cur).length === 0) delete next[buscaKey];
     else next[buscaKey] = cur;
     onChange(next);

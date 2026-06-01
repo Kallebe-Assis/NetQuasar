@@ -5,7 +5,7 @@ import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
-import { EM_DASH, format1f, formatNullable, formatNum } from "../lib/formatDisplay";
+import { EM_DASH, format1f, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 import { invalidateAlertListQueries } from "../lib/queryKeys";
