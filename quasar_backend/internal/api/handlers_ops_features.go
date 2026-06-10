@@ -79,6 +79,9 @@ func actorFromRequest(r *http.Request) string {
 }
 
 func (s *Server) appendAuditLog(ctx context.Context, entityType, entityID, action, actor string, beforeData, afterData any) {
+	if s.DB() == nil {
+		return
+	}
 	bb, _ := json.Marshal(beforeData)
 	ab, _ := json.Marshal(afterData)
 	_, _ = s.DB().Exec(ctx, `

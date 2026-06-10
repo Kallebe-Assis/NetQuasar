@@ -8,7 +8,7 @@ import { isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
-import { monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
+import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -330,6 +330,7 @@ export function OltPage() {
 
   const monState = useQuery({
     queryKey: queryKeys.monState,
+    queryFn: () => apiFetch<MonitoringStateSync>("/api/v1/monitoring/state"),
     staleTime: 1000,
   });
 

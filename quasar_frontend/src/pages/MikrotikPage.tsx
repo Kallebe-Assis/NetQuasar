@@ -7,7 +7,6 @@ import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
-import { errorMessageFromUnknown } from "../lib/apiErrors";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";

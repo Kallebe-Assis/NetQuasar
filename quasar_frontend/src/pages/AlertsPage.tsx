@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
-import { useMonitoringLiveSync } from "../lib/monitoringLiveSync";
+import { type MonitoringStateSync, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
@@ -100,16 +100,6 @@ type HistoryEvent = {
   meta?: unknown;
 };
 
-type MonStateLite = {
-  runtime_updated_at?: string | null;
-  last_alerts_change_at?: string | null;
-  last_telemetry_cycle_at?: string | null;
-  last_latency_cycle_at?: string | null;
-  last_interface_snapshot_cycle_at?: string | null;
-  last_olt_if_derived_cycle_at?: string | null;
-  activity_updated_at?: string | null;
-};
-
 /** Recarrega alertas periodicamente — mesma instância pode ter message/meta novos (ex.: latência 243→210). */
 const ALERTS_ACTIVE_REFRESH_MS = 2_500;
 const ALERTS_HISTORY_REFRESH_MS = 45_000;
@@ -144,6 +134,7 @@ export function AlertsPage() {
 
   const monState = useQuery({
     queryKey: queryKeys.monState,
+    queryFn: () => apiFetch<MonitoringStateSync>("/api/v1/monitoring/state"),
     staleTime: 1000,
   });
 

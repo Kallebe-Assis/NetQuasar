@@ -123,7 +123,7 @@ function normMedium(v: string): "fibra" | "radio" | "cabo_utp" | null {
   return null;
 }
 
-function parseRow(rec: string[], col: Record<string, number>, line: number): ConnCsvPayload | string {
+function parseRow(rec: string[], col: Record<string, number>): ConnCsvPayload | string {
   const client_name = getCell(rec, col, "client_name");
   const login = getCell(rec, col, "login");
   if (!client_name || !login) return "client_name e login obrigatórios";
@@ -206,7 +206,7 @@ export async function parseConnectionsCsvFile(file: File): Promise<{
     const line = i + 1;
     const rec = parseCsvLine(lines[i], sep);
     if (rowEmpty(rec)) continue;
-    const parsed = parseRow(rec, col, line);
+    const parsed = parseRow(rec, col);
     if (typeof parsed === "string") {
       errors.push({ line, login: getCell(rec, col, "login") || undefined, error: parsed });
       continue;
