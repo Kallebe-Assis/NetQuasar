@@ -14,6 +14,8 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
+	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
+	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/rs/zerolog"
 )
 
@@ -88,16 +90,25 @@ func VerifyAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, a
 			head := alertnotify.ResolutionHeadlineForAlertType(row.AlertType)
 			alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, closedID, head, msg)
 		}
-	} else if len(patch) > 0 {
-		patch["source"] = "alert_verify"
-		patch["verify"] = collected
-		metaRaw, _ := json.Marshal(patch)
-		newMsg := buildUpdatedMessage(row, collected)
-		_, _ = pool.Exec(ctx, `
-			UPDATE alert_instances SET message = $3, meta = COALESCE(meta,'{}'::jsonb) || $2::jsonb
-			WHERE id = $1::uuid AND closed_at IS NULL
-		`, alertID, metaRaw, newMsg)
-		out.UpdatedMeta = patch
+	} else {
+		if v, ok := collected["dbm"]; ok {
+			if patch == nil {
+				patch = map[string]any{}
+			}
+			patch["dbm"] = v
+			patch["value"] = v
+		}
+		if len(patch) > 0 {
+			patch["source"] = "alert_verify"
+			patch["verify"] = collected
+			metaRaw, _ := json.Marshal(patch)
+			newMsg := buildUpdatedMessage(row, collected)
+			_, _ = pool.Exec(ctx, `
+				UPDATE alert_instances SET message = $3, meta = COALESCE(meta,'{}'::jsonb) || $2::jsonb
+				WHERE id = $1::uuid AND closed_at IS NULL
+			`, alertID, metaRaw, newMsg)
+			out.UpdatedMeta = patch
+		}
 	}
 
 	verifyStore := map[string]any{"summary": summary, "resolved": resolved, "collected": collected, "at": time.Now().UTC().Format(time.RFC3339)}
@@ -122,7 +133,7 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	case "olt_onu_rx", "olt_onu_tx":
 		return verifyOltOnuOptical(ctx, pool, row)
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
-		return verifySfp(ctx, pool, row)
+		return verifySfp(ctx, pool, log, row)
 	default:
 		_ = log
 		collected["note"] = "verificação genérica via cache"
@@ -323,27 +334,139 @@ func verifyOltOnuOptical(ctx context.Context, pool *pgxpool.Pool, row *alertRow)
 	return false, fmt.Sprintf("%s PON %s: %.2f dBm — ainda abaixo do limiar.", label, pon, *dbm), collected, map[string]any{"dbm": *dbm, "value": *dbm}
 }
 
-func verifySfp(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+func verifySfp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, row *alertRow) (bool, string, map[string]any, map[string]any) {
 	collected := map[string]any{}
-	dbm := toFloat(row.Meta["dbm"])
-	if dbm != nil {
+	wantRx := row.AlertType == "mikrotik_sfp_rx"
+	ifIndex := metaIfIndex(row.Meta)
+	dbm, snapAt := loadSfpDbmFromSnapshot(ctx, pool, row.DeviceID, ifIndex, wantRx)
+	if dbm == nil && ifIndex > 0 {
+		host, comm, cat, brand, model, desc := loadDeviceSnmpFields(ctx, pool, row.DeviceID)
+		if host != "" && comm != "" {
+			monitorworker.CollectInterfaceSnapshotWorker(ctx, pool, log, row.DeviceID, host, comm, cat, brand, model, desc)
+			collected["snapshot_refreshed"] = true
+			dbm, snapAt = loadSfpDbmFromSnapshot(ctx, pool, row.DeviceID, ifIndex, wantRx)
+		}
+	}
+	if snapAt != "" {
+		collected["snapshot_at"] = snapAt
+	}
+	if dbm == nil {
+		if old := toFloat(row.Meta["dbm"]); old != nil {
+			dbm = old
+			collected["dbm"] = *dbm
+			collected["note"] = "sem leitura nova — valor do alerta"
+		} else {
+			return false, "Sem leitura óptica SFP (snapshot ou coleta).", collected, nil
+		}
+	} else {
 		collected["dbm"] = *dbm
 	}
 	metricID := "mikrotik_sfp_rx_dbm"
-	if row.AlertType == "mikrotik_sfp_tx" {
+	if !wantRx {
 		metricID = "mikrotik_sfp_tx_dbm"
 	}
 	var devCat string
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
 	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, metricID, devCat)
-	if !ok || dbm == nil {
-		return false, "Sem valor óptico SFP no alerta.", collected, nil
+	if !ok {
+		return false, fmt.Sprintf("Potência actual %.2f dBm (sem limiar global).", *dbm), collected, map[string]any{"dbm": *dbm, "value": *dbm}
 	}
 	sev := severityGte(*dbm, th)
+	patch := map[string]any{"dbm": *dbm, "value": *dbm}
 	if sev == "ok" {
-		return true, fmt.Sprintf("%s: %.2f dBm — dentro do limiar.", label, *dbm), collected, map[string]any{"dbm": *dbm}
+		return true, fmt.Sprintf("%s: %.2f dBm — dentro do limiar.", label, *dbm), collected, patch
 	}
-	return false, fmt.Sprintf("%s: %.2f dBm — ainda fora do limiar.", label, *dbm), collected, map[string]any{"dbm": *dbm}
+	return false, fmt.Sprintf("%s: %.2f dBm — ainda fora do limiar.", label, *dbm), collected, patch
+}
+
+func metaIfIndex(meta map[string]any) int {
+	if meta == nil {
+		return 0
+	}
+	switch x := meta["if_index"].(type) {
+	case float64:
+		return int(x)
+	case json.Number:
+		n, _ := x.Int64()
+		return int(n)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	}
+	return 0
+}
+
+func loadDeviceSnmpFields(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) (host, community, category, brand, model, description string) {
+	var ip, devComm, defComm *string
+	_ = pool.QueryRow(ctx, `
+		SELECT host(d.ip)::text, d.snmp_community,
+			COALESCE(trim(d.category),''), COALESCE(trim(d.brand),''), COALESCE(trim(d.model),''),
+			COALESCE(trim(d.description),'')
+		FROM devices d WHERE d.id=$1
+	`, deviceID).Scan(&ip, &devComm, &category, &brand, &model, &description)
+	if ip != nil {
+		host = strings.TrimSpace(*ip)
+	}
+	if devComm != nil && strings.TrimSpace(*devComm) != "" {
+		community = strings.TrimSpace(*devComm)
+	} else {
+		_ = pool.QueryRow(ctx, `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&defComm)
+		if defComm != nil {
+			community = strings.TrimSpace(*defComm)
+		}
+	}
+	return host, community, category, brand, model, description
+}
+
+func loadSfpDbmFromSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, ifIndex int, wantRx bool) (*float64, string) {
+	if pool == nil || ifIndex <= 0 {
+		return nil, ""
+	}
+	var raw []byte
+	var at time.Time
+	err := pool.QueryRow(ctx, `
+		SELECT interfaces::text, collected_at FROM interface_snapshots
+		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
+	`, deviceID).Scan(&raw, &at)
+	if err != nil || len(raw) == 0 {
+		return nil, ""
+	}
+	vars := snmpVarsFromSnapshotJSON(raw)
+	if len(vars) == 0 {
+		return nil, ""
+	}
+	ifRows := snmpifparse.BuildIfTable(vars)
+	optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, vars)
+	if op, ok := optMap[ifIndex]; ok {
+		if wantRx && op.RxDBm != nil {
+			v := *op.RxDBm
+			return &v, at.UTC().Format(time.RFC3339)
+		}
+		if !wantRx && op.TxDBm != nil {
+			v := *op.TxDBm
+			return &v, at.UTC().Format(time.RFC3339)
+		}
+	}
+	return nil, at.UTC().Format(time.RFC3339)
+}
+
+func snmpVarsFromSnapshotJSON(raw []byte) []probing.SNMPVar {
+	var arr []map[string]any
+	if json.Unmarshal(raw, &arr) != nil {
+		return nil
+	}
+	out := make([]probing.SNMPVar, 0, len(arr))
+	for _, m := range arr {
+		oid, _ := m["oid"].(string)
+		if strings.TrimSpace(oid) == "" || strings.HasPrefix(oid, "__") {
+			continue
+		}
+		val := fmt.Sprint(m["value"])
+		typ, _ := m["type"].(string)
+		out = append(out, probing.SNMPVar{OID: oid, Value: val, Type: typ})
+	}
+	return out
 }
 
 func severityGte(v float64, th alertthresholds.GteMetricThreshold) string {

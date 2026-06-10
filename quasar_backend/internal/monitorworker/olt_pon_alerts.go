@@ -153,9 +153,6 @@ func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zero
 	if !OltUsesIfDerivedPonSnapshots(category, brand, model) {
 		return
 	}
-	if !alertthresholds.OltOnuQuantityAlertsEnabled(ctx, pool) {
-		return
-	}
 
 	tAll := time.Now()
 

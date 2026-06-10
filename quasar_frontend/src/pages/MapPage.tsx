@@ -339,9 +339,19 @@ export function MapPage() {
               ))}
             </select>
           </label>
-          <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }} title="Carrega conexões só na área visível do mapa (melhor desempenho com milhares de logins)">
-            <input type="checkbox" checked={showConnections} onChange={(e) => setShowConnections(e.target.checked)} />
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>Conexões de clientes (área visível)</span>
+          <label className="toggle" title="Carrega logins só na área visível do mapa (melhor desempenho com milhares de pontos)">
+            <span className="toggle__track">
+              <input
+                id="map-show-connections"
+                type="checkbox"
+                role="switch"
+                className="toggle__input"
+                checked={showConnections}
+                onChange={(e) => setShowConnections(e.target.checked)}
+              />
+              <span className="toggle__thumb" aria-hidden />
+            </span>
+            <span className="toggle__label">Logins no mapa</span>
           </label>
           <label className="row" style={{ gap: 8, alignItems: "center", flex: "2 1 240px", minWidth: 200 }}>
             <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Equipamento</span>

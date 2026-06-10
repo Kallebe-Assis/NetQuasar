@@ -75,11 +75,12 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	if err != nil {
 		return err
 	}
-	var lastLat, lastTel, lastIf *time.Time
+	var lastLat, lastTel, lastIf, lastOlt *time.Time
 	if err := pool.QueryRow(ctx, `
-		SELECT last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at
+		SELECT last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at,
+			last_olt_if_derived_cycle_at
 		FROM monitoring_runtime WHERE id=1
-	`).Scan(&lastLat, &lastTel, &lastIf); err != nil {
+	`).Scan(&lastLat, &lastTel, &lastIf, &lastOlt); err != nil {
 		return err
 	}
 
@@ -95,7 +96,9 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	}
 
 	if mode == ModeFull {
-		snmpDue := cycleDue(lastTel, cfg.TelemetrySeconds) || cycleDue(lastIf, cfg.IfaceSeconds)
+		snmpDue := cycleDue(lastTel, cfg.TelemetrySeconds) ||
+			cycleDue(lastIf, cfg.IfaceSeconds) ||
+			cycleDue(lastOlt, cfg.OltDerivedSeconds)
 		if snmpDue && TryLockMonitoringPipeline() {
 			go func(log *zerolog.Logger) {
 				defer UnlockMonitoringPipeline()

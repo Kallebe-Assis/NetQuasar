@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telemetryengine"
@@ -305,13 +304,6 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 	if err != nil {
 		return err
 	}
-	if !alertthresholds.OltOnuQuantityAlertsEnabled(ctx, pool) {
-		if log != nil {
-			log.Debug().Msg("OLT IF-derived: omitido — nenhum limiar global de quantidade/queda de ONUs activo")
-		}
-		_, err = pool.Exec(ctx, `UPDATE monitoring_runtime SET last_olt_if_derived_cycle_at = now(), last_cycle_at = now(), updated_at = now() WHERE id=1`)
-		return err
-	}
 	devices, err := loadPingableDevices(ctx, pool, opts.DeviceID)
 	if err != nil {
 		return err
@@ -335,20 +327,6 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 		if !strings.EqualFold(strings.TrimSpace(row.category), "olt") {
 			continue
 		}
-		if !OltUsesIfDerivedPonSnapshots(row.category, row.brand, row.model) {
-			// Evita alerta "preso" de queda PON por pipeline IF-MIB em vendors não suportados (ZTE/Datacom).
-			if _, cerr := pool.Exec(ctx, `
-				UPDATE alert_instances
-				SET closed_at = now(),
-					meta = COALESCE(meta,'{}'::jsonb) || '{"resolved":"incompatible_if_mib_vendor","source":"monitor_worker"}'::jsonb
-				WHERE device_id = $1::uuid
-				  AND alert_type = 'olt_onu_drop'
-				  AND closed_at IS NULL
-			`, row.id); cerr != nil && log != nil {
-				log.Warn().Err(cerr).Str("device", row.id.String()).Msg("close incompatible IF-MIB olt_onu_drop")
-			}
-			continue
-		}
 		if !row.telemetryEnabled {
 			continue
 		}
@@ -369,19 +347,22 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 			continue
 		}
 
+		usesIfDerived := OltUsesIfDerivedPonSnapshots(row.category, row.brand, row.model)
 		unlock := snmpdevicelock.Acquire(row.id)
 		func() {
 			defer unlock()
-			// Mantém limite curto por OLT para não bloquear ciclo por muitos minutos.
 			sctx, scancel := context.WithTimeout(ctx, cfg.oltIfDerivedTimeout())
 			defer scancel()
 
-			invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
-			if invEmptyBefore {
-				_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
+			if usesIfDerived {
+				invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
+				if invEmptyBefore {
+					_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
+				}
+				CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
+			} else {
+				CollectOltVendorPeriodic(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.brand, row.model, row.maxPons)
 			}
-
-			CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
 			lastOltByDevice[row.id] = time.Now()
 			NudgeMonitoringRuntimeRefresh(sctx, pool)
 		}()

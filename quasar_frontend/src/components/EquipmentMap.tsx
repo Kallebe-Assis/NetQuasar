@@ -266,6 +266,20 @@ function dominantStatus(members: MapPoint[]): "online" | "offline" | "unknown" {
   return "unknown";
 }
 
+/** Marcador de login/conexão — círculo azul com ícone de utilizador (distinto dos equipamentos). */
+function connectionPinIcon(): L.DivIcon {
+  const fill = "#3b82f6";
+  const stroke = "rgba(0,0,0,0.28)";
+  const html = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/><circle cx="14" cy="11" r="4" fill="#fff" opacity="0.95"/><path d="M7 22c0-3.9 3.1-7 7-7s7 3.1 7 7" fill="#fff" opacity="0.95"/></svg>`;
+  return L.divIcon({
+    className: "map-conn-pin-wrap",
+    html,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+  });
+}
+
 /** Pin em forma de gota (SVG), verde / vermelho / cinza — modo «estado». */
 function statusPinIcon(status: string): L.DivIcon {
   const st = status === "online" ? "online" : status === "offline" ? "offline" : "unknown";
@@ -285,12 +299,18 @@ function statusPinIcon(status: string): L.DivIcon {
  * Nunca passar `icon={undefined}` ao Marker: o Leaflet faz `options.icon = undefined` e apaga o Icon.Default
  * (origem do erro «Cannot read properties of undefined (reading 'createIcon')» com react-leaflet).
  */
+function isConnectionPoint(p: MapPoint): boolean {
+  return p.status === "connection";
+}
+
 function markerIconOpts(displayMode: MapDisplayMode, status: string): { icon: L.Icon | L.DivIcon } {
+  if (status === "connection") return { icon: connectionPinIcon() };
   if (displayMode !== "status") return { icon: defaultMarkerIcon() };
   return { icon: statusPinIcon(status) };
 }
 
 function markerIconOptsGroup(displayMode: MapDisplayMode, members: MapPoint[]): { icon: L.Icon | L.DivIcon } {
+  if (members.length > 0 && members.every(isConnectionPoint)) return { icon: connectionPinIcon() };
   if (displayMode !== "status") return { icon: defaultMarkerIcon() };
   return { icon: statusPinIcon(dominantStatus(members)) };
 }

@@ -921,6 +921,20 @@ tr:hover td {
   max-width: min(1120px, 96vw);
   width: 100%;
 }
+.ignored-alerts-modal {
+  max-height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+}
+.ignored-alerts-modal .table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.map-conn-pin-wrap {
+  background: transparent !important;
+  border: none !important;
+}
 .modal--alert-critical {
   border: 2px solid #f85149;
   box-shadow:

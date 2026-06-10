@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
 import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
@@ -679,15 +680,16 @@ export function AlertsPage() {
         </>
       )}
 
-      {ignoredOpen ? (
-        <div className="modal-overlay" role="presentation" onClick={() => setIgnoredOpen(false)}>
-          <div
-            className="modal conn-form-modal"
-            style={{ width: "min(920px, 92vw)", maxHeight: "85vh", overflow: "auto" }}
-            role="dialog"
-            aria-labelledby="ignored-alerts-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+      {ignoredOpen
+        ? createPortal(
+            <div className="modal-backdrop" role="presentation" onMouseDown={() => setIgnoredOpen(false)}>
+              <div
+                className="modal modal--wide ignored-alerts-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ignored-alerts-title"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <h2 id="ignored-alerts-title" style={{ margin: 0 }}>
                 Alertas ignorados
@@ -755,9 +757,11 @@ export function AlertsPage() {
                 ) : null}
               </div>
             ) : null}
-          </div>
-        </div>
-      ) : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
