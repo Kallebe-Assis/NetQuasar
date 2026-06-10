@@ -17,6 +17,7 @@ const ALERT_TYPE_PT: Record<string, string> = {
   mikrotik_sfp_rx: "SFP — potência RX",
   telemetry_threshold: "Telemetria — limiar global",
   olt_onu_drop: "Queda de ONUs online (OLT)",
+  olt_onu_rise: "Subida de ONUs online (OLT)",
 };
 
 export function displayAlertType(code: string | null | undefined): string {

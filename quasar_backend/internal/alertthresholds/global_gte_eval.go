@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -177,6 +178,9 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 
 	if sev == "ok" {
 		closeTelemetryThresholdAlert(ctx, pool, log, deviceID, key)
+		return
+	}
+	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeTelemetryThreshold, key) {
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): %s está em %.2f — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, value, sevPt)

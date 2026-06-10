@@ -298,8 +298,20 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 		out["olt_onu_by_device"] = olts
+		var fleetTotal, fleetOn, fleetOff int64
+		for _, o := range olts {
+			fleetTotal += o["onu_count"].(int64)
+			fleetOn += o["onu_online"].(int64)
+			fleetOff += o["onu_offline"].(int64)
+		}
+		out["olt_onu_fleet_totals"] = map[string]any{
+			"onu_count":   fleetTotal,
+			"onu_online":  fleetOn,
+			"onu_offline": fleetOff,
+		}
 	} else {
 		out["olt_onu_by_device"] = []any{}
+		out["olt_onu_fleet_totals"] = map[string]any{"onu_count": int64(0), "onu_online": int64(0), "onu_offline": int64(0)}
 	}
 
 	if rows, err := s.DB().Query(ctx, `

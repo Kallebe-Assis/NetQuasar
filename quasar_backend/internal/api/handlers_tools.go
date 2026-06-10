@@ -120,6 +120,7 @@ func (s *Server) toolsDNSRun(w http.ResponseWriter, r *http.Request) {
 	if len(results) == 0 && lastErr != nil {
 		out["error"] = lastErr.Error()
 	}
+	s.auditNetworkTool(r.Context(), r, "dns", map[string]any{"host": host, "record_types": types})
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -204,6 +205,7 @@ func (s *Server) toolsHTTPProbeStub(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(req)
 	latency := time.Since(t0).Milliseconds()
 	if err != nil {
+		s.auditNetworkTool(r.Context(), r, "http_probe", map[string]any{"url": u, "method": method, "ok": false, "error": err.Error()})
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":           false,
 			"url":          u,
@@ -219,6 +221,7 @@ func (s *Server) toolsHTTPProbeStub(w http.ResponseWriter, r *http.Request) {
 	if resp.TLS != nil {
 		tlsVer = tls.VersionName(resp.TLS.Version)
 	}
+	s.auditNetworkTool(r.Context(), r, "http_probe", map[string]any{"url": u, "method": method, "ok": true, "status": resp.StatusCode, "latency_ms": latency})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"url":            u,
@@ -249,6 +252,7 @@ func (s *Server) toolsICMPPing(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), to+200*time.Millisecond)
 	defer cancel()
 	out := probing.ICMPPing(ctx, body.Host, to, 32)
+	s.auditNetworkTool(r.Context(), r, "icmp_ping", map[string]any{"host": body.Host, "ok": out.OK})
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -297,6 +301,7 @@ func (s *Server) toolsSNMPGet(w http.ResponseWriter, r *http.Request) {
 		Retries:   body.Retries,
 	}
 	res := probing.SNMPGet(ctx, p)
+	s.auditNetworkTool(r.Context(), r, "snmp_get", map[string]any{"host": body.Host, "oids": len(body.OIDs), "ok": res.OK})
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -323,6 +328,7 @@ func (s *Server) toolsTelnetTest(w http.ResponseWriter, r *http.Request) {
 		Host: body.Host, Port: body.Port, Timeout: to,
 		User: body.User, Password: body.Password, MaxReadBytes: body.MaxReadBytes,
 	})
+	s.auditNetworkTool(r.Context(), r, "telnet", map[string]any{"host": body.Host, "port": body.Port, "ok": res.OK})
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -346,5 +352,6 @@ func (s *Server) toolsSSHTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	p := probing.SSHDialParams{Host: body.Host, Port: body.Port, User: body.User, Password: body.Password, Timeout: to}
 	res := probing.SSHDialWithPassword(ctx, p)
+	s.auditNetworkTool(r.Context(), r, "ssh", map[string]any{"host": body.Host, "port": body.Port, "user": body.User, "ok": res.OK})
 	writeJSON(w, http.StatusOK, res)
 }

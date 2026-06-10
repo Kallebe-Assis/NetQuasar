@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
@@ -297,71 +297,14 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	summary["olt_refresh_elapsed_ms"] = time.Since(refreshT0).Milliseconds()
 
+	curMaps := oltifderive.PonsAnySliceToMaps(pons)
+	oltifderive.ApplyPonOperStatusAll(curMaps)
+	pons = oltifderive.PonsMapsToAny(curMaps)
 	if pool := s.DB(); pool != nil {
-		thPct, okPct := loadGlobalMetricThreshold(r.Context(), pool, "olt_onu_drop_percent")
-		if okPct {
-			var prevSnapPons []byte
-			_ = pool.QueryRow(r.Context(), `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons)
-			prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
-			prevOn := map[string]float64{}
-			for _, p := range prevMaps {
-				k := oltifderive.StablePonRowKey(p)
-				if k == "" {
-					continue
-				}
-				if v, ok := oltifderive.OnuOnlineFromRow(p); ok {
-					prevOn[k] = v
-				}
-			}
-			for _, anyP := range pons {
-				p, okMap := anyP.(map[string]any)
-				if !okMap {
-					continue
-				}
-				k := oltifderive.StablePonRowKey(p)
-				if k == "" {
-					continue
-				}
-				curOn, curOK := oltifderive.OnuOnlineFromRow(p)
-				prev, prevOK := prevOn[k]
-				if !curOK || !prevOK || prev <= curOn {
-					continue
-				}
-				drop := prev - curOn
-				dropPct := 0.0
-				if prev > 0 {
-					dropPct = (drop / prev) * 100.0
-				}
-				prevSt := fmt.Sprintf("onu_online_%.0f", prev)
-				currSt := fmt.Sprintf("onu_online_%.0f", curOn)
-				// Critério único: queda percentual configurada em alert_rules (>= limiar).
-				closeAlertByMetaKey(r.Context(), pool, &s.Log, id, "olt_onu_drop", "onu_drop_count:"+k)
-				sevPct := evalThresholdSeverity(dropPct, thPct)
-				keyPct := "onu_drop_pct:" + k
-				oltLabel := strings.TrimSpace(devDesc)
-				if oltLabel == "" {
-					oltLabel = host
-				}
-				msgPct := fmt.Sprintf("Queda de %.0f%% (%.0f ONUs) das ONUs online na PON %s da OLT %s (%s).", dropPct, drop, k, oltLabel, host)
-				if sevPct != "ok" {
-					metaPct := alertnotify.WithStatusTransition(map[string]any{
-						"source":            "olt_refresh",
-						"pon":               k,
-						"drop_online_count": drop,
-						"drop_online_pct":   dropPct,
-						"prev_online":       prev,
-						"curr_online":       curOn,
-						"key":               keyPct,
-					}, prevSt, currSt, nil)
-					created, aid, err := openOrUpdateAlertWithMeta(r.Context(), pool, id, sevPct, "olt_onu_drop", msgPct, host, oltLabel, metaPct)
-					if err == nil && created && aid != uuid.Nil {
-						alertnotify.SendMonitoringTelegramAndPatchMeta(r.Context(), pool, &s.Log, aid, strings.ToUpper(sevPct), "Queda percentual de ONUs online — PON", msgPct)
-					}
-				} else {
-					closeAlertByMetaKey(r.Context(), pool, &s.Log, id, "olt_onu_drop", keyPct)
-				}
-			}
-		}
+		var prevSnapPons []byte
+		_ = pool.QueryRow(r.Context(), `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons)
+		prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
+		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(r.Context(), pool, &s.Log, id, devDesc, host, prevMaps, curMaps, "olt_refresh")
 	}
 
 	sb, _ := json.Marshal(summary)

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -85,6 +86,9 @@ func InsertPingUnreachableIfNewForMonitoredDevice(ctx context.Context, pool *pgx
 }
 
 func insertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
+	if alertignore.IsMuted(ctx, pool, deviceID, alertTypePingUnreachable, "") {
+		return
+	}
 	metaSource = strings.TrimSpace(metaSource)
 	if metaSource == "" {
 		metaSource = "monitor_worker"

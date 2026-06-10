@@ -7,7 +7,10 @@ import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
-import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
+import { errorMessageFromUnknown } from "../lib/apiErrors";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastOk } from "../lib/operationToast";
+import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
 import { MikrotikMetricsOverview } from "../components/MikrotikMetricsOverview";
 
@@ -110,6 +113,8 @@ function MiniTrafficChart({
 export function MikrotikPage() {
   const canMutate = isAdminUser();
   const qc = useQueryClient();
+  const { push: pushToast, dismiss: dismissToast } = useAppToast();
+  const [telCollecting, setTelCollecting] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "interfaces">("overview");
   const [realtimeOn, setRealtimeOn] = useState(false);
@@ -186,7 +191,13 @@ export function MikrotikPage() {
         qc.setQueryData(["mikrotik-if", id], data);
       }
       qc.invalidateQueries({ queryKey: ["mikrotik-if", id] });
+      const n = data.interface_count ?? data.interface_table?.length;
+      toastOk(
+        pushToast,
+        typeof n === "number" ? `Interfaces actualizadas (${n} interface(s)).` : "Interfaces actualizadas com sucesso.",
+      );
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
   });
 
   const realtimeTick = useMutation({
@@ -237,15 +248,21 @@ export function MikrotikPage() {
         }),
       );
     },
+    onError: (e) => toastErr(pushToast, e, "Falha na actualização em tempo real."),
   });
 
-  const collectTel = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/telemetry/devices/${id}/collect`, { method: "POST", json: {} }),
-    onSuccess: (_, id) => {
-      qc.invalidateQueries({ queryKey: ["mikrotik-tel", id] });
-      invalidateDashboardAfterCollect(qc);
-    },
-  });
+  const runTelCollect = async () => {
+    if (!sel || !selectedDevice) return;
+    setTelCollecting(true);
+    try {
+      await collectDeviceTelemetry(sel, selectedDevice.description ?? "", { push: pushToast, dismiss: dismissToast }, qc);
+      await qc.invalidateQueries({ queryKey: ["mikrotik-tel", sel] });
+    } catch {
+      /* toast já exibido */
+    } finally {
+      setTelCollecting(false);
+    }
+  };
 
   const table = liveTable;
   const interfaceTotal = iface.data?.interface_count ?? table.length;
@@ -401,8 +418,8 @@ export function MikrotikPage() {
                   ))}
                 </select>
                 {canMutate ? (
-                  <button type="button" className="btn" disabled={collectTel.isPending || !sel} onClick={() => sel && collectTel.mutate(sel)}>
-                    {collectTel.isPending ? "Coletando..." : "Atualizar telemetria"}
+                  <button type="button" className="btn" disabled={telCollecting || !sel} onClick={() => void runTelCollect()}>
+                    {telCollecting ? "Coletando..." : "Atualizar telemetria"}
                   </button>
                 ) : null}
               </div>

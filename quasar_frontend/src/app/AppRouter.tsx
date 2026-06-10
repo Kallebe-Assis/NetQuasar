@@ -24,6 +24,9 @@ const DevicesPage = lazy(() =>
 const CommercialPage = lazy(() =>
   import("../pages/CommercialPage").then((m) => ({ default: m.CommercialPage })),
 );
+const ClientConnectionsPage = lazy(() =>
+  import("../pages/ClientConnectionsPage").then((m) => ({ default: m.ClientConnectionsPage })),
+);
 const AlertsPage = lazy(() =>
   import("../pages/AlertsPage").then((m) => ({ default: m.AlertsPage })),
 );
@@ -74,6 +77,7 @@ export function AppRouter() {
         <Route path="alertas" element={<Navigate to={APP_ROUTES.alerts} replace />} />
         <Route path="mapa" element={<Navigate to={APP_ROUTES.map} replace />} />
         <Route path="comercial" element={<Navigate to={APP_ROUTES.commercial} replace />} />
+        <Route path="conexoes" element={<Navigate to={APP_ROUTES.connections} replace />} />
         <Route path="integracoes" element={<Navigate to={APP_ROUTES.integrations} replace />} />
         <Route path="tempo-real" element={<Navigate to={APP_ROUTES.realtime} replace />} />
         <Route path="eventos" element={<Navigate to={APP_ROUTES.events} replace />} />
@@ -99,6 +103,7 @@ export function AppRouter() {
           <Route path="pops" element={withSuspense(<PopsPage />)} />
           <Route path="devices" element={withSuspense(<DevicesPage />)} />
           <Route path="commercial" element={withSuspense(<CommercialPage />)} />
+          <Route path="connections" element={withSuspense(<ClientConnectionsPage />)} />
           <Route path="alerts" element={withSuspense(<AlertsPage />)} />
           <Route path="map" element={withSuspense(<MapPage />)} />
           <Route path="tools" element={withSuspense(<ToolsPage />)} />

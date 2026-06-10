@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
+import { ActionMenu } from "../components/ActionMenu";
 import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
+import { useAppToast } from "../lib/appToast";
+import { useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
@@ -59,6 +63,30 @@ function incidentCauseLabel(cause: string): string {
   }
 }
 
+type IgnoredAlert = {
+  id: string;
+  device_id: string;
+  type: string;
+  meta_key?: string;
+  device_name?: string;
+  ip?: string;
+  severity?: string;
+  message?: string;
+  meta?: unknown;
+  reason?: string;
+  ignored_at: string;
+  last_verified_at?: string | null;
+  last_verify_result?: Record<string, unknown>;
+};
+
+type VerifyResult = {
+  alert_id: string;
+  still_active: boolean;
+  resolved: boolean;
+  summary: string;
+  collected?: Record<string, unknown>;
+};
+
 type HistoryEvent = {
   id: string;
   device_id?: string | null;
@@ -73,10 +101,13 @@ type HistoryEvent = {
 };
 
 type MonStateLite = {
-  /** Atualiza em cada passo/ciclo do worker; usado para disparar refresh da tela de alertas. */
   runtime_updated_at?: string | null;
-  /** Dispara quando qualquer alert_instances é criado, fechado ou actualizado (trigger Postgres). */
   last_alerts_change_at?: string | null;
+  last_telemetry_cycle_at?: string | null;
+  last_latency_cycle_at?: string | null;
+  last_interface_snapshot_cycle_at?: string | null;
+  last_olt_if_derived_cycle_at?: string | null;
+  activity_updated_at?: string | null;
 };
 
 /** Recarrega alertas periodicamente — mesma instância pode ter message/meta novos (ex.: latência 243→210). */
@@ -85,7 +116,10 @@ const ALERTS_HISTORY_REFRESH_MS = 45_000;
 
 export function AlertsPage() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const [tab, setTab] = useState<"active" | "hist">("active");
+  const [ignoredOpen, setIgnoredOpen] = useState(false);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [agoTick, setAgoTick] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [sev, setSev] = useState("");
@@ -108,23 +142,12 @@ export function AlertsPage() {
     return () => window.clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    void invalidateAlertListQueries(qc);
-  }, [qc]);
-
   const monState = useQuery({
-    queryKey: ["mon-state-alerts-sync"],
-    queryFn: () => apiFetch<MonStateLite>("/api/v1/monitoring/state"),
-    refetchInterval: 3000,
-    refetchIntervalInBackground: true,
-    staleTime: 0,
+    queryKey: queryKeys.monState,
+    staleTime: 1000,
   });
 
-  useEffect(() => {
-    // Worker ou alteração em alert_instances (trigger) — força lista de alertas.
-    if (!monState.data?.runtime_updated_at && !monState.data?.last_alerts_change_at) return;
-    void invalidateAlertListQueries(qc);
-  }, [qc, monState.data?.runtime_updated_at, monState.data?.last_alerts_change_at]);
+  useMonitoringLiveSync(monState.data, { monitoring: false, alerts: true, olt: false });
 
   const incidents = useQuery({
     queryKey: queryKeys.alertsIncidents,
@@ -134,7 +157,7 @@ export function AlertsPage() {
   });
 
   const active = useQuery({
-    queryKey: ["alerts-active", sev, typ, limitActive],
+    queryKey: [...queryKeys.alertsActive, sev, typ, limitActive],
     queryFn: () => {
       const p = new URLSearchParams();
       if (sev.trim()) p.set("severity", sev.trim());
@@ -147,9 +170,8 @@ export function AlertsPage() {
     refetchOnMount: "always",
     /** Reverter o default global (main.tsx desativa refetch ao foco). */
     refetchOnWindowFocus: true,
-    /** Polling contínuo na página Alertas — lista ativa actualiza mesmo no separador Histórico. */
-    refetchInterval: ALERTS_ACTIVE_REFRESH_MS,
-    refetchIntervalInBackground: true,
+    refetchInterval: tab === "active" ? ALERTS_ACTIVE_REFRESH_MS : false,
+    refetchIntervalInBackground: tab === "active",
   });
 
   const histRange = useMemo(() => {
@@ -169,7 +191,8 @@ export function AlertsPage() {
       return apiFetch<{ events: HistoryEvent[] }>(`/api/v1/alerts/history?${p}`);
     },
     staleTime: Math.min(ALERTS_ACTIVE_REFRESH_MS / 2, 5_000),
-    refetchInterval: ALERTS_ACTIVE_REFRESH_MS,
+    enabled: tab === "active",
+    refetchInterval: tab === "active" ? ALERTS_ACTIVE_REFRESH_MS : false,
   });
 
   const hist = useQuery({
@@ -191,14 +214,73 @@ export function AlertsPage() {
     refetchIntervalInBackground: tab === "hist",
   });
 
-  const reval = useMutation({
-    mutationFn: () => apiFetch<{ ok: boolean; note?: string; closed_count?: number }>("/api/v1/alerts/revalidate", { method: "POST", json: {} }),
+  const ignoredQ = useQuery({
+    queryKey: queryKeys.alertsIgnored,
+    queryFn: () => apiFetch<{ ignored: IgnoredAlert[] }>("/api/v1/alerts/ignored"),
+    enabled: ignoredOpen,
+  });
+
+  const verifyAll = useMutation({
+    mutationFn: async () => {
+      await apiFetch<{ ok: boolean; closed_ping_count?: number; verified_count?: number; resolved_count?: number }>(
+        "/api/v1/alerts/verify-all",
+        { method: "POST", json: {} },
+      );
+      await active.refetch();
+      await incidents.refetch();
+      await resolved24h.refetch();
+    },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["alerts-active"] });
-      void qc.invalidateQueries({ queryKey: ["alerts-hist"] });
-      void qc.invalidateQueries({ queryKey: ["alerts-resolved-window"] });
+      void invalidateAlertListQueries(qc);
+      pushToast({ tone: "ok", text: "Alertas verificados e lista actualizada." });
+    },
+    onError: (e: unknown) => {
+      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao verificar alertas." });
     },
   });
+
+  const ignoreMut = useMutation({
+    mutationFn: (alertId: string) => apiFetch(`/api/v1/alerts/${alertId}/ignore`, { method: "POST", json: {} }),
+    onSuccess: () => {
+      void invalidateAlertListQueries(qc);
+      pushToast({ tone: "info", text: "Alerta ignorado — não voltará a alarmar nem no Telegram." });
+    },
+    onError: (e: unknown) => {
+      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Não foi possível ignorar." });
+    },
+  });
+
+  const verifyOneMut = useMutation({
+    mutationFn: (alertId: string) => apiFetch<VerifyResult>(`/api/v1/alerts/${alertId}/verify`, { method: "POST", json: {} }),
+    onSuccess: (res) => {
+      void invalidateAlertListQueries(qc);
+      pushToast({
+        tone: res.resolved ? "ok" : "info",
+        text: res.summary || (res.resolved ? "Problema normalizado." : "Verificação concluída."),
+      });
+    },
+    onError: (e: unknown) => {
+      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha na verificação." });
+    },
+    onSettled: () => setVerifyingId(null),
+  });
+
+  const reactivateMut = useMutation({
+    mutationFn: (ignoreId: string) => apiFetch(`/api/v1/alerts/ignored/${ignoreId}/reactivate`, { method: "POST", json: {} }),
+    onSuccess: () => {
+      void invalidateAlertListQueries(qc);
+      void ignoredQ.refetch();
+      pushToast({ tone: "ok", text: "Alerta reactivado — voltará a ser monitorizado." });
+    },
+    onError: (e: unknown) => {
+      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao reactivar." });
+    },
+  });
+
+  async function runVerifyOne(alertId: string) {
+    setVerifyingId(alertId);
+    verifyOneMut.mutate(alertId);
+  }
 
   const rawAlerts = active.data?.alerts ?? [];
   const filteredActive = useMemo(() => {
@@ -378,26 +460,27 @@ export function AlertsPage() {
                 ))}
               </select>
             </div>
-            <button type="button" className="btn" onClick={() => void active.refetch()}>
-              Actualizar lista
-            </button>
             <button
               type="button"
               className="btn btn--primary"
-              disabled={reval.isPending}
-              title="Fecha alertas de equipamento offline quando o ping está OK ou quando o equipamento não está em monitorização ativa (inativo, ping desligado, etc.)"
-              onClick={() => reval.mutate()}
+              disabled={verifyAll.isPending}
+              title="Recalcula estado no servidor (ping, limiares, OLT…) e actualiza a lista"
+              onClick={() => verifyAll.mutate()}
             >
-              Recalcular estado
+              {verifyAll.isPending ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={16} className="map-refresh-spin" aria-hidden />
+                  A verificar…
+                </span>
+              ) : (
+                "Verificar alertas"
+              )}
+            </button>
+            <button type="button" className="btn" onClick={() => setIgnoredOpen(true)}>
+              Alertas ignorados
             </button>
           </div>
-          {reval.isSuccess && reval.data?.note && (
-            <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-              {typeof reval.data.closed_count === "number" ? `${reval.data.closed_count} alerta(s) fechado(s). ` : ""}
-              Requisição processado no servidor.
-            </p>
-          )}
-          {reval.isError && <div className="msg msg--err margin-bottom mb-12">{(reval.error as Error).message}</div>}
+          {verifyAll.isError && <div className="msg msg--err margin-bottom mb-12">{(verifyAll.error as Error).message}</div>}
 
           <div className="alerts-panel">
             <div className="alerts-panel__head">
@@ -418,6 +501,7 @@ export function AlertsPage() {
                         <th>Valor</th>
                         <th>Equipamento</th>
                         <th>Estado</th>
+                        <th style={{ width: 48 }} />
                       </tr>
                     </thead>
                     <tbody>
@@ -425,6 +509,7 @@ export function AlertsPage() {
                         const cat = alertCategoryFromType(a.type);
                         const resolved = Boolean(a.closed_at);
                         const timeRef = resolved ? (a.closed_at as string) : a.active_since;
+                        const busy = verifyingId === a.id && verifyOneMut.isPending;
                         return (
                           <tr key={a.id}>
                             <td style={{ whiteSpace: "nowrap", fontSize: 12 }} title={formatAlertDateTimePt(timeRef)}>
@@ -461,6 +546,33 @@ export function AlertsPage() {
                               ) : (
                                 <span className="alerts-status-pill alerts-status-pill--open">● Ativo</span>
                               )}
+                              {a.incident_id ? (
+                                <span className="badge badge--off" style={{ marginLeft: 6, fontSize: 10 }} title="Incidente correlacionado">
+                                  incidente
+                                </span>
+                              ) : null}
+                            </td>
+                            <td>
+                              {!resolved ? (
+                                <ActionMenu
+                                  align="end"
+                                  title="Opções do alerta"
+                                  items={[
+                                    {
+                                      id: "verify",
+                                      label: busy ? "A verificar…" : "Verificar",
+                                      disabled: busy || ignoreMut.isPending,
+                                      onClick: () => void runVerifyOne(a.id),
+                                    },
+                                    {
+                                      id: "ignore",
+                                      label: "Ignorar alerta",
+                                      disabled: ignoreMut.isPending || busy,
+                                      onClick: () => ignoreMut.mutate(a.id),
+                                    },
+                                  ]}
+                                />
+                              ) : null}
                             </td>
                           </tr>
                         );
@@ -575,6 +687,86 @@ export function AlertsPage() {
           </div>
         </>
       )}
+
+      {ignoredOpen ? (
+        <div className="modal-overlay" role="presentation" onClick={() => setIgnoredOpen(false)}>
+          <div
+            className="modal conn-form-modal"
+            style={{ width: "min(920px, 92vw)", maxHeight: "85vh", overflow: "auto" }}
+            role="dialog"
+            aria-labelledby="ignored-alerts-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h2 id="ignored-alerts-title" style={{ margin: 0 }}>
+                Alertas ignorados
+              </h2>
+              <button type="button" className="btn" onClick={() => setIgnoredOpen(false)}>
+                Fechar
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+              Estes padrões de alerta estão silenciados na UI e no Telegram até serem reactivados.
+            </p>
+            {ignoredQ.isLoading ? <p>A carregar…</p> : null}
+            {ignoredQ.isError ? <div className="msg msg--err">{(ignoredQ.error as Error).message}</div> : null}
+            {ignoredQ.data ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ignorado em</th>
+                      <th>Severidade</th>
+                      <th>Problema</th>
+                      <th>Valor</th>
+                      <th>Equipamento</th>
+                      <th>Última verificação</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(ignoredQ.data.ignored ?? []).map((row) => (
+                      <tr key={row.id}>
+                        <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDateTimePt(row.ignored_at)}</td>
+                        <td>
+                          <span className={severityPillClass(row.severity)}>{displaySeverity(row.severity)}</span>
+                        </td>
+                        <td className="alerts-problem">{alertProblemTitle(row.type)}</td>
+                        <td className="alerts-msg">{alertValueText(row.type, row.message ?? "", row.meta)}</td>
+                        <td>
+                          <div className="alerts-dev">
+                            {alertEquipmentPrimary(row.type, row.device_name ?? null, row.message ?? "", row.meta)}
+                            {row.ip ? <div className="alerts-dev__ip">{row.ip}</div> : null}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: 11 }}>
+                          {row.last_verified_at ? formatAlertDateTimePt(row.last_verified_at) : "—"}
+                          {row.last_verify_result?.summary ? (
+                            <div style={{ color: "var(--muted)", marginTop: 4 }}>{String(row.last_verify_result.summary)}</div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={reactivateMut.isPending}
+                            onClick={() => reactivateMut.mutate(row.id)}
+                          >
+                            Reactivar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(ignoredQ.data.ignored ?? []).length === 0 ? (
+                  <p style={{ padding: 16, color: "var(--muted)" }}>Nenhum alerta ignorado.</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

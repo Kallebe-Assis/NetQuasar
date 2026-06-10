@@ -327,6 +327,11 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "integration", id.String(), "patch", actorFromRequest(r), nil, map[string]any{
+		"name":    strings.TrimSpace(name),
+		"enabled": en,
+		"slug":    slug,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "slug": slug})
 }
 

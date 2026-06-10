@@ -156,11 +156,21 @@ func (s *Server) deleteSuppression(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 	q := `
-		SELECT d.id, d.description, d.category, d.latitude, d.longitude, host(d.ip)::text, d.pop_id, d.operational_mode,
-			COALESCE(c.ok, false) AS up, c.checked_at
+		SELECT d.id, d.description, d.category,
+			COALESCE(d.latitude, p.latitude) AS latitude,
+			COALESCE(d.longitude, p.longitude) AS longitude,
+			host(d.ip)::text, d.pop_id, d.operational_mode,
+			COALESCE(c.ok, false) AS up, c.checked_at,
+			CASE
+				WHEN d.latitude IS NOT NULL AND d.longitude IS NOT NULL THEN 'device'
+				WHEN p.latitude IS NOT NULL AND p.longitude IS NOT NULL THEN 'pop'
+				ELSE 'none'
+			END AS coord_source
 		FROM devices d
+		LEFT JOIN pops p ON p.id = d.pop_id
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
-		WHERE d.latitude IS NOT NULL AND d.longitude IS NOT NULL
+		WHERE COALESCE(d.latitude, p.latitude) IS NOT NULL
+		  AND COALESCE(d.longitude, p.longitude) IS NOT NULL
 	`
 	args := []any{}
 	n := 1
@@ -183,22 +193,22 @@ func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 		n += 2
 	}
 	if mn, err := strconv.ParseFloat(r.URL.Query().Get("min_lat"), 64); err == nil {
-		q += ` AND d.latitude >= $` + strconv.Itoa(n)
+		q += ` AND COALESCE(d.latitude, p.latitude) >= $` + strconv.Itoa(n)
 		args = append(args, mn)
 		n++
 	}
 	if mx, err := strconv.ParseFloat(r.URL.Query().Get("max_lat"), 64); err == nil {
-		q += ` AND d.latitude <= $` + strconv.Itoa(n)
+		q += ` AND COALESCE(d.latitude, p.latitude) <= $` + strconv.Itoa(n)
 		args = append(args, mx)
 		n++
 	}
 	if mn, err := strconv.ParseFloat(r.URL.Query().Get("min_lon"), 64); err == nil {
-		q += ` AND d.longitude >= $` + strconv.Itoa(n)
+		q += ` AND COALESCE(d.longitude, p.longitude) >= $` + strconv.Itoa(n)
 		args = append(args, mn)
 		n++
 	}
 	if mx, err := strconv.ParseFloat(r.URL.Query().Get("max_lon"), 64); err == nil {
-		q += ` AND d.longitude <= $` + strconv.Itoa(n)
+		q += ` AND COALESCE(d.longitude, p.longitude) <= $` + strconv.Itoa(n)
 		args = append(args, mx)
 		n++
 	}
@@ -212,13 +222,13 @@ func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 	var pts []map[string]any
 	for rows.Next() {
 		var id uuid.UUID
-		var desc, cat, op string
+		var desc, cat, op, coordSource string
 		var lat, lon float64
 		var ip *string
 		var popID *uuid.UUID
 		var up bool
 		var checked *time.Time
-		if err := rows.Scan(&id, &desc, &cat, &lat, &lon, &ip, &popID, &op, &up, &checked); err != nil {
+		if err := rows.Scan(&id, &desc, &cat, &lat, &lon, &ip, &popID, &op, &up, &checked, &coordSource); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -233,6 +243,7 @@ func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 		pts = append(pts, map[string]any{
 			"id": id, "description": desc, "category": cat, "lat": lat, "lng": lon,
 			"ip": ip, "pop_id": popID, "operational_mode": op, "status": st, "last_check_at": checked,
+			"coord_source": coordSource,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"points": pts})
@@ -413,6 +424,13 @@ func (s *Server) pingRunStub(w http.ResponseWriter, r *http.Request) {
 		monitorworker.InsertPingUnreachableIfNewForMonitoredDevice(ctxBase, s.DB(), &l, id, deviceDesc, host, probe, "api_ping")
 	}
 
+	s.auditDeviceAction(ctxBase, r, id, "ping_run", map[string]any{
+		"description": deviceDesc,
+		"host":        host,
+		"ok":          okb,
+		"latency_ms":  probe["latency_ms"],
+		"method":      probe["method"],
+	})
 	writeJSON(w, http.StatusOK, resp)
 }
 

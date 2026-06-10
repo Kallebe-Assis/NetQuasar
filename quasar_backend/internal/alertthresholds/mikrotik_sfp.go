@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -184,11 +185,15 @@ func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, 
 		"if_index":     ifIndex,
 		"display_name": ifLabel,
 		"if_name":      ifLabel,
+		"key":          ifLabel,
 		"metric":       label,
 		"dbm":          v,
 	}
 	if sev == "ok" {
 		closeSfpAlert(ctx, pool, log, deviceID, alertType, ifIndex)
+		return
+	}
+	if alertignore.IsMuted(ctx, pool, deviceID, alertType, ifLabel) {
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): interface %s — potência SFP %s %.3f dBm (severidade: %s).", descOr(desc, "?"), addrOr(ip, "?"), ifLabel, label, v, sev)

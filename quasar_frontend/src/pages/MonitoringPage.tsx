@@ -7,9 +7,11 @@ import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
-import { prettyAuditDiff } from "../lib/auditDisplay";
+import { AuditLogTable } from "../components/AuditLogTable";
+import { friendlyApiMessage } from "../lib/apiErrors";
 import { useAppToast } from "../lib/appToast";
-import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
+import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
+import { monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { queryKeys } from "../lib/queryKeys";
 
 type ActiveEquipRow = {
@@ -57,6 +59,12 @@ type MonState = {
   last_internet_check_ok?: boolean | null;
   /** Última escrita em monitoring_runtime (ligar/desligar, ciclo, atividade) — útil para vários clientes. */
   runtime_updated_at?: string | null;
+  last_alerts_change_at?: string | null;
+  last_telemetry_cycle_at?: string | null;
+  last_latency_cycle_at?: string | null;
+  last_interface_snapshot_cycle_at?: string | null;
+  last_olt_if_derived_cycle_at?: string | null;
+  activity_updated_at?: string | null;
 };
 type NightlyCfg = {
   enabled: boolean;
@@ -70,6 +78,7 @@ type AuditRow = {
   id: number;
   entity_type: string;
   entity_id: string;
+  entity_label?: string | null;
   action: string;
   actor?: string | null;
   created_at: string;
@@ -272,30 +281,6 @@ function formatInternetCheckLine(ok: boolean | null | undefined, isoAt: string |
   return { status: "Última verificação de internet", when };
 }
 
-/** Evita mensagens técnicas (gRPC, Go, etc.) cruas nos toasts. */
-function friendlyApiMessage(raw: string): string {
-  const t = String(raw ?? "").trim();
-  if (!t) return "Ocorreu um erro inesperado.";
-  const lower = t.toLowerCase();
-  if (lower.includes("context deadline exceeded") || lower.includes("deadline exceeded")) {
-    return "A requisição demorou demasiado ou o servidor não respondeu a tempo. Tente novamente.";
-  }
-  if (lower.includes("connection reset") || lower.includes("econnreset")) {
-    return "A ligação foi interrompida. Verifique a rede e tente novamente.";
-  }
-  if (lower.includes("etimedout") || lower.includes("timeout") || lower.includes("i/o timeout")) {
-    return "Tempo de espera esgotado. Tente novamente.";
-  }
-  if (lower.includes("failed to fetch") || lower.includes("networkerror when attempting to fetch")) {
-    return "Sem ligação ao servidor. Verifique a API ou a rede.";
-  }
-  if (lower.includes("no_internet") || lower.includes("no internet") || (lower.includes("424") && lower.length < 80)) {
-    return "Sem acesso à internet conforme a verificação no servidor.";
-  }
-  if (t.length > 220) return `${t.slice(0, 217)}…`;
-  return t;
-}
-
 function formatNetCheckToast(data: NetCheck): string {
   const head = data.ok ? "Internet acessível" : "Internet inacessível";
   const at = new Date(data.checked_at);
@@ -346,10 +331,10 @@ export function MonitoringPage() {
   const state = useQuery({
     queryKey: queryKeys.monState,
     queryFn: () => apiFetch<MonState>("/api/v1/monitoring/state"),
-    refetchInterval: 1000,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 1000,
   });
+
+  useMonitoringLiveSync(state.data, { monitoring: true, alerts: true, olt: false });
   const intervals = useQuery({
     queryKey: queryKeys.monIntervals,
     queryFn: () =>
@@ -409,7 +394,7 @@ export function MonitoringPage() {
   });
   const audit = useQuery({
     queryKey: ["ops-audit"],
-    queryFn: () => apiFetch<{ items: AuditRow[] }>("/api/v1/ops/audit?limit=120"),
+    queryFn: () => apiFetch<{ items: AuditRow[] }>("/api/v1/ops/audit?today=1&limit=120"),
     enabled: tab === "ops",
   });
   const popsLite = useQuery({
@@ -423,11 +408,18 @@ export function MonitoringPage() {
     enabled: tab === "ops",
   });
 
+  const activeEquipPollMs = useMemo(
+    () => monitoringPollMs(pingListPollMs, state.data?.is_running),
+    [pingListPollMs, state.data?.is_running],
+  );
+
   const activeEquipList = useQuery({
-    queryKey: ["monitoring-active-equipment"],
+    queryKey: queryKeys.monitoringActiveEquipment,
     queryFn: () => apiFetch<{ devices: ActiveEquipRow[] }>("/api/v1/monitoring/active-equipment"),
     enabled: tab === "overview",
-    refetchInterval: tab === "overview" ? pingListPollMs : false,
+    staleTime: Math.max(activeEquipPollMs - 500, 1500),
+    refetchInterval: tab === "overview" && state.data?.is_running ? activeEquipPollMs : false,
+    refetchIntervalInBackground: true,
   });
 
   const [equipSort, setEquipSort] = useState<{ key: ActiveEquipSortKey; dir: "asc" | "desc" }>({ key: "description", dir: "asc" });
@@ -487,7 +479,7 @@ export function MonitoringPage() {
   });
 
   const invalidateActiveList = () => {
-    qc.invalidateQueries({ queryKey: ["monitoring-active-equipment"] });
+    qc.invalidateQueries({ queryKey: queryKeys.monitoringActiveEquipment });
     qc.invalidateQueries({ queryKey: queryKeys.alertsPingUnreachable });
   };
 
@@ -544,15 +536,18 @@ export function MonitoringPage() {
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
   });
-  const telOne = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/telemetry/devices/${id}/collect`, { method: "POST", json: {} }),
-    onSuccess: () => {
+  const [telCollectingId, setTelCollectingId] = useState<string | null>(null);
+  const runTelemetryCollect = async (row: { id: string; description?: string }) => {
+    setTelCollectingId(row.id);
+    try {
+      await collectDeviceTelemetry(row.id, row.description ?? "", { push: pushToast, dismiss: dismissToast }, qc);
       invalidateActiveList();
-      invalidateDashboardAfterCollect(qc);
-      showPageToastRef.current(true, "Telemetria solicitada.");
-    },
-    onError: (e: Error) => showPageToastRef.current(false, e.message),
-  });
+    } catch {
+      /* toast já exibido */
+    } finally {
+      setTelCollectingId(null);
+    }
+  };
   const reportOne = useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/api/v1/monitoring/full-report/devices/${id}`, { method: "POST", json: {} }),
@@ -581,7 +576,6 @@ export function MonitoringPage() {
     mutationFn: () => apiFetch<NetCheck>("/api/v1/monitoring/internet-check"),
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: queryKeys.monState });
-      void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(data.ok, formatNetCheckToast(data));
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
@@ -592,7 +586,6 @@ export function MonitoringPage() {
       apiFetch("/api/v1/monitoring/start", { method: "POST", json: args }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.monState });
-      void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(true, "Monitoramento iniciado.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
@@ -602,7 +595,6 @@ export function MonitoringPage() {
     mutationFn: () => apiFetch("/api/v1/monitoring/stop", { method: "POST", json: {} }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.monState });
-      void qc.invalidateQueries({ queryKey: ["mon-state-global-indicator"] });
       showPageToastRef.current(true, "Monitoramento parado.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
@@ -1096,39 +1088,14 @@ export function MonitoringPage() {
 
           <div className="card">
             <h2>Auditoria operacional</h2>
-            <div className="table-wrap">
-              <table style={{ fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th>Quando</th>
-                    <th>Entidade</th>
-                    <th>ID</th>
-                    <th>Ação</th>
-                    <th>Ator</th>
-                    <th>Diff</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(audit.data?.items ?? []).map((a) => (
-                    <tr key={a.id}>
-                      <td className="mono">{new Date(a.created_at).toLocaleString("pt-PT")}</td>
-                      <td>{a.entity_type}</td>
-                      <td className="mono">{a.entity_id}</td>
-                      <td>{a.action}</td>
-                      <td>{a.actor ?? "—"}</td>
-                      <td>
-                        <details>
-                          <summary style={{ cursor: "pointer", color: "var(--muted)" }}>ver</summary>
-                          <pre className="mono" style={{ margin: 0, fontSize: 10, whiteSpace: "pre-wrap" }}>
-                            {prettyAuditDiff(a.before_data, a.after_data)}
-                          </pre>
-                        </details>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+              Operações do dia actual. Para consultar o histórico completo, use Configurações → Auditoria.
+            </p>
+            <AuditLogTable
+              rows={audit.data?.items ?? []}
+              showDetailColumn={false}
+              emptyMessage="Nenhuma operação registrada hoje."
+            />
           </div>
         </>
       )}
@@ -1273,7 +1240,15 @@ export function MonitoringPage() {
                   <button type="button" className="btn" disabled={pingOne.isPending} onClick={() => { pingOne.mutate(actionMenuRow.id); setActionMenuRow(null); }}>
                     Ping ICMP
                   </button>
-                  <button type="button" className="btn" disabled={telOne.isPending} onClick={() => { telOne.mutate(actionMenuRow.id); setActionMenuRow(null); }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={telCollectingId === actionMenuRow.id}
+                    onClick={() => {
+                      void runTelemetryCollect(actionMenuRow);
+                      setActionMenuRow(null);
+                    }}
+                  >
                     Colectar telemetria (SNMP)
                   </button>
                   <button type="button" className="btn" disabled={discoverSNMP.isPending} onClick={() => { discoverSNMP.mutate(actionMenuRow.id); setActionMenuRow(null); }}>

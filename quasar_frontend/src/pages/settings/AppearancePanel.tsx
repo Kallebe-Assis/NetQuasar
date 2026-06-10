@@ -8,7 +8,8 @@ import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { applyUiTheme, uiThemeLabel, type UiTheme } from "../../lib/theme";
 import { fetchUiAppearance, normalizeUiAppearanceCacheValue, themeFromAppearancePayload } from "../../lib/uiAppearance";
-import { InlinePageToastBanner, useInlinePageToast } from "../../lib/pageToast";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 
 export function AppearancePanel() {
   const qc = useQueryClient();
@@ -18,7 +19,7 @@ export function AppearancePanel() {
     queryFn: fetchUiAppearance,
   });
   const [draft, setDraft] = useState<UiTheme>(activeTheme);
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
 
   useThemePreview(draft, activeTheme);
 
@@ -38,9 +39,9 @@ export function AppearancePanel() {
       applyUiTheme(theme);
       qc.setQueryData(queryKeys.uiAppearance, { theme, updated_at: new Date().toISOString() });
       void qc.invalidateQueries({ queryKey: queryKeys.uiAppearance });
-      setSaveToast({ ok: true, text: `Tema «${uiThemeLabel(theme)}» salvo para todos os usuários.` });
+      toastOk(pushToast, `Tema «${uiThemeLabel(theme)}» salvo para todos os usuários.`);
     },
-    onError: (e: Error) => setSaveToast({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e, "Falha ao salvar tema."),
   });
 
   const options: { id: UiTheme; title: string; hint: string; icon: typeof Sun }[] = [
@@ -90,7 +91,6 @@ export function AppearancePanel() {
           Pré-visualização: <strong style={{ color: "var(--text)" }}>{uiThemeLabel(draft)}</strong> (restaura ao sair sem salvar)
         </p>
       </div>
-      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
     </div>
   );
 }

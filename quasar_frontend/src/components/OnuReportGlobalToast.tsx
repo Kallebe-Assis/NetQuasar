@@ -11,9 +11,10 @@ const TELEGRAM = "Relatório ONU mensal: a enviar Telegram";
 export function OnuReportGlobalToast() {
   const { push } = useAppToast();
   const mon = useQuery({
-    queryKey: queryKeys.monStateGlobal,
+    queryKey: queryKeys.monState,
     queryFn: () => apiFetch<{ current_activity?: string | null }>("/api/v1/monitoring/state"),
-    refetchInterval: 1500,
+    staleTime: 1000,
+    refetchInterval: false,
   });
   const activity = (mon.data?.current_activity ?? "").trim();
   const prev = useRef("");

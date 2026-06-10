@@ -120,7 +120,7 @@ func reconcileOltOffline(ctx context.Context, pool *pgxpool.Pool, log *zerolog.L
 		_ = pool.QueryRow(ctx, `
 			SELECT COUNT(*)::int FROM alert_instances
 			WHERE device_id = $1 AND closed_at IS NULL
-			  AND alert_type IN ('olt_onu_drop', 'telemetry_threshold')
+			  AND alert_type IN ('olt_onu_drop', 'olt_onu_rise', 'telemetry_threshold')
 		`, oltID).Scan(&cascade)
 		title := fmt.Sprintf("OLT %s offline", oltName)
 		summary := "OLT inalcançável (ICMP/TCP)."
@@ -148,7 +148,7 @@ func reconcileOltOffline(ctx context.Context, pool *pgxpool.Pool, log *zerolog.L
 		cRows, err := pool.Query(ctx, `
 			SELECT id FROM alert_instances
 			WHERE device_id = $1 AND closed_at IS NULL
-			  AND alert_type IN ('olt_onu_drop', 'telemetry_threshold', 'latency_high')
+			  AND alert_type IN ('olt_onu_drop', 'olt_onu_rise', 'telemetry_threshold', 'latency_high')
 		`, oltID)
 		if err == nil {
 			for cRows.Next() {

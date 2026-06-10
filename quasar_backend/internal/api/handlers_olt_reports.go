@@ -152,7 +152,6 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 		Offline int    `json:"offline"`
 	}
 	byDevice := map[string]map[string]any{}
-	aggBuckets := map[string]*point{}
 
 	for rows.Next() {
 		var id uuid.UUID
@@ -176,12 +175,6 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 		pts = append(pts, point{T: ts, Total: total, Online: online, Offline: offline})
 		byDevice[key]["points"] = pts
 
-		if aggBuckets[ts] == nil {
-			aggBuckets[ts] = &point{T: ts}
-		}
-		aggBuckets[ts].Total += total
-		aggBuckets[ts].Online += online
-		aggBuckets[ts].Offline += offline
 	}
 
 	series := make([]map[string]any, 0, len(byDevice))
@@ -191,11 +184,75 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(series, func(i, j int) bool {
 		return fmt.Sprint(series[i]["description"]) < fmt.Sprint(series[j]["description"])
 	})
-	aggPts := make([]point, 0, len(aggBuckets))
-	for _, p := range aggBuckets {
-		aggPts = append(aggPts, *p)
+
+	interval := "1 day"
+	if bucket == "hour" {
+		interval = "1 hour"
 	}
-	sort.Slice(aggPts, func(i, j int) bool { return aggPts[i].T < aggPts[j].T })
+	aggRows, err := s.DB().Query(r.Context(), `
+		WITH bucket_series AS (
+			SELECT generate_series(
+				date_trunc($1, $2::timestamptz),
+				date_trunc($1, now() AT TIME ZONE 'UTC'),
+				$3::interval
+			) AS bucket_start
+		),
+		device_ids AS (
+			SELECT DISTINCT device_id FROM olt_onu_samples WHERE recorded_at >= $2
+		),
+		per_device_bucket AS (
+			SELECT DISTINCT ON (bs.bucket_start, di.device_id)
+				bs.bucket_start AS bucket,
+				di.device_id,
+				s.onu_total,
+				s.onu_online,
+				s.onu_offline
+			FROM bucket_series bs
+			CROSS JOIN device_ids di
+			INNER JOIN olt_onu_samples s ON s.device_id = di.device_id
+				AND s.recorded_at >= $2
+				AND s.recorded_at < bs.bucket_start + $3::interval
+			ORDER BY bs.bucket_start, di.device_id, s.recorded_at DESC
+		)
+		SELECT bucket, COALESCE(SUM(onu_total), 0), COALESCE(SUM(onu_online), 0), COALESCE(SUM(onu_offline), 0)
+		FROM per_device_bucket
+		GROUP BY bucket
+		ORDER BY bucket
+	`, bucket, since, interval)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer aggRows.Close()
+	aggPts := make([]point, 0)
+	for aggRows.Next() {
+		var bucketTime time.Time
+		var total, online, offline int
+		if err := aggRows.Scan(&bucketTime, &total, &online, &offline); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		aggPts = append(aggPts, point{
+			T:       bucketTime.UTC().Format(time.RFC3339),
+			Total:   total,
+			Online:  online,
+			Offline: offline,
+		})
+	}
+
+	var fleetTotal, fleetOn, fleetOff int64
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT
+			COALESCE(SUM(sub.onu_total), 0),
+			COALESCE(SUM(sub.onu_online), 0),
+			COALESCE(SUM(sub.onu_offline), 0)
+		FROM (
+			SELECT DISTINCT ON (s.device_id)
+				s.onu_total, s.onu_online, s.onu_offline
+			FROM olt_onu_samples s
+			ORDER BY s.device_id, s.recorded_at DESC
+		) sub
+	`).Scan(&fleetTotal, &fleetOn, &fleetOff)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"days":      days,
@@ -203,5 +260,10 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 		"since":     since.Format(time.RFC3339),
 		"series":    series,
 		"aggregate": map[string]any{"points": aggPts},
+		"current_fleet": map[string]any{
+			"onu_total":   fleetTotal,
+			"onu_online":  fleetOn,
+			"onu_offline": fleetOff,
+		},
 	})
 }

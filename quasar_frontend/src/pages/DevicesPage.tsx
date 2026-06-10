@@ -6,7 +6,9 @@ import { ActionMenu } from "../components/ActionMenu";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
-import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
+import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { DeviceEditBackupTab } from "../components/device/DeviceEditBackupTab";
 import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistoricoTab";
@@ -349,19 +351,8 @@ export function DevicesPage() {
   const [filterOperational, setFilterOperational] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterBrand, setFilterBrand] = useState("");
-  const [reloadNote, setReloadNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (!reloadNote) return;
-    const t = window.setTimeout(() => setReloadNote(null), PAGE_TOAST_AUTO_MS);
-    return () => window.clearTimeout(t);
-  }, [reloadNote]);
-
-  const [actionToast, setActionToast] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    if (!actionToast) return;
-    const t = window.setTimeout(() => setActionToast(null), PAGE_TOAST_AUTO_MS);
-    return () => window.clearTimeout(t);
-  }, [actionToast]);
+  const { push: pushToast, dismiss: dismissToast } = useAppToast();
+  const [telCollectingId, setTelCollectingId] = useState<string | null>(null);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [bulkForm, setBulkForm] = useState<BulkEditForm>(() => emptyBulkForm());
   const [bulkRunning, setBulkRunning] = useState(false);
@@ -647,7 +638,7 @@ export function DevicesPage() {
   async function runBulkApply() {
     const targets = filteredDevices;
     if (targets.length === 0) {
-      setActionToast({ ok: false, text: "Nenhum equipamento visível com os filtros actuais." });
+      toastErr(pushToast, new Error("Nenhum equipamento visível com os filtros actuais."));
       return;
     }
     let anyField = false;
@@ -669,7 +660,7 @@ export function DevicesPage() {
       anyField = true;
     }
     if (!anyField) {
-      setActionToast({ ok: false, text: "Marque pelo menos um campo a alterar." });
+      toastErr(pushToast, new Error("Marque pelo menos um campo a alterar."));
       return;
     }
     setBulkRunning(true);
@@ -688,19 +679,18 @@ export function DevicesPage() {
       }
       await qc.invalidateQueries({ queryKey: ["devices"] });
       if (ok === 0 && errors.length === 0) {
-        setActionToast({
-          ok: false,
-          text: "Nenhuma requisição enviada: confirme valores (ex.: categoria escolhida) ou que os equipamentos visíveis aceitem o PATCH.",
-        });
+        toastErr(
+          pushToast,
+          new Error(
+            "Nenhuma requisição enviada: confirme valores (ex.: categoria escolhida) ou que os equipamentos visíveis aceitem o PATCH.",
+          ),
+        );
         return;
       }
       if (errors.length) {
-        setActionToast({
-          ok: false,
-          text: `Actualizados ${ok}; ${errors.length} erro(s). ${errors.slice(0, 3).join(" · ")}`,
-        });
+        toastErr(pushToast, new Error(`Actualizados ${ok}; ${errors.length} erro(s). ${errors.slice(0, 3).join(" · ")}`));
       } else {
-        setActionToast({ ok: true, text: `Alteração em massa: ${ok} equipamento(s) actualizado(s).` });
+        toastOk(pushToast, `Alteração em massa: ${ok} equipamento(s) actualizado(s).`);
         setBulkModalOpen(false);
         setBulkForm(emptyBulkForm());
       }
@@ -774,20 +764,20 @@ export function DevicesPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["devices"] });
-      setActionToast({ ok: true, text: modal === "create" ? "Equipamento adicionado com sucesso." : "Equipamento atualizado com sucesso." });
+      toastOk(pushToast, modal === "create" ? "Equipamento adicionado com sucesso." : "Equipamento atualizado com sucesso.");
       setModal(null);
       setEditingId(null);
     },
-    onError: (e: Error) => setActionToast({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/devices/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["devices"] });
-      setActionToast({ ok: true, text: "Equipamento excluído com sucesso." });
+      toastOk(pushToast, "Equipamento excluído com sucesso.");
     },
-    onError: (e: Error) => setActionToast({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   async function exportCsv() {
@@ -808,18 +798,50 @@ export function DevicesPage() {
       "ping_enabled",
       "telemetry_enabled",
       "operational_mode",
+      "pop",
       "pop_id",
       "locality_id",
       "brand",
       "model",
+      "mac",
+      "serial_number",
+      "software_version",
+      "hardware_version",
+      "acquired_at",
       "access_mode",
       "telemetry_mode",
       "latitude",
       "longitude",
       "snmp_community",
       "mib_folder_path",
+      "max_pons",
     ];
-    const sample = ["OLT Exemplo", "OLT", "10.0.0.2", "Normal", "true", "true", "Ativo", "", "", "VSOL", "V1600D", "SNMP", "SNMP", "", "", "public", "C:\\mibs"];
+    const sample = [
+      "OLT Exemplo",
+      "OLT",
+      "10.0.0.2",
+      "Normal",
+      "true",
+      "true",
+      "Ativo",
+      "POP Centro",
+      "",
+      "",
+      "VSOL",
+      "V1600D",
+      "AA:BB:CC:DD:EE:FF",
+      "SN123456",
+      "1.2.3",
+      "v2.0",
+      "2024-01-15",
+      "SNMP",
+      "SNMP",
+      "",
+      "",
+      "public",
+      "C:\\mibs",
+      "16",
+    ];
     const csv = `${header.join(",")}\n${sample.join(",")}\n`;
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     downloadBlob("modelo_importacao_equipamentos.csv", blob);
@@ -842,12 +864,12 @@ export function DevicesPage() {
       const failedCount = data.failed?.length ?? 0;
       if (failedCount > 0) {
         const first = data.failed?.slice(0, 3).map((x) => `L${x.line}: ${x.error}`).join(" | ");
-        setReloadNote(`Importação parcial: ${data.imported} item(ns) importado(s), ${failedCount} falha(s). ${first ?? ""}`);
+        toastInfo(pushToast, `Importação parcial: ${data.imported} item(ns) importado(s), ${failedCount} falha(s). ${first ?? ""}`);
       } else {
-        setReloadNote(`Importação concluída: ${data.imported} item(ns) importado(s).`);
+        toastOk(pushToast, `Importação concluída: ${data.imported} item(ns) importado(s).`);
       }
     },
-    onError: (e: Error) => setReloadNote(`Erro: ${e.message}`),
+    onError: (e) => toastErr(pushToast, e, "Falha ao importar CSV."),
   });
 
   const pingRun = useMutation({
@@ -861,16 +883,22 @@ export function DevicesPage() {
     onSuccess: (data) => {
       const ms = data.latency_ms != null ? `${data.latency_ms} ms` : "—";
       const line = `${data.host ?? "?"}: ${data.ok ? "OK" : "FALHOU"} (${data.method ?? "?"}, ${ms})`;
-      setActionToast({ ok: !!data.ok, text: `Ping: ${line}` });
+      if (data.ok) toastOk(pushToast, `Ping: ${line}`);
+      else toastErr(pushToast, new Error(`Ping: ${line}`));
     },
-    onError: (e: Error) => setActionToast({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
-  const telCollect = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/telemetry/devices/${id}/collect`, { method: "POST", json: {} }),
-    onSuccess: () => setActionToast({ ok: true, text: "Telemetria solicitada." }),
-    onError: (e: Error) => setActionToast({ ok: false, text: e.message }),
-  });
+  const runTelCollect = async (d: Device) => {
+    setTelCollectingId(d.id);
+    try {
+      await collectDeviceTelemetry(d.id, d.description, { push: pushToast, dismiss: dismissToast }, qc);
+    } catch {
+      /* toast já exibido */
+    } finally {
+      setTelCollectingId(null);
+    }
+  };
 
   const reloadAllFromDb = useMutation({
     mutationFn: () =>
@@ -881,9 +909,12 @@ export function DevicesPage() {
       await qc.invalidateQueries({ queryKey: ["commercial-loc"] });
       await qc.invalidateQueries({ queryKey: ["map-points"] });
       const n = data?.device_count;
-      setReloadNote(typeof n === "number" ? `Lista sincronizada com a base de dados. ${n} equipamento(s).` : "Lista atualizada.");
+      toastOk(
+        pushToast,
+        typeof n === "number" ? `Lista sincronizada com a base de dados. ${n} equipamento(s).` : "Lista atualizada.",
+      );
     },
-    onError: (e: Error) => setReloadNote(`Erro: ${e.message}`),
+    onError: (e) => toastErr(pushToast, e, "Falha ao recarregar equipamentos."),
   });
 
   if (devices.isLoading || pops.isLoading || locs.isLoading) return <p>Carregando…</p>;
@@ -943,10 +974,7 @@ export function DevicesPage() {
               type="button"
               className="btn btn--primary"
               disabled={reloadAllFromDb.isPending}
-              onClick={() => {
-                setReloadNote(null);
-                reloadAllFromDb.mutate();
-              }}
+              onClick={() => reloadAllFromDb.mutate()}
             >
               Recarregar
             </button>
@@ -971,17 +999,6 @@ export function DevicesPage() {
         </div>
         <PageCountPill label="Equipamentos" count={filteredDevices.length} />
       </div>
-      {reloadNote && (
-        <div
-          className={`page-toast ${reloadNote.startsWith("Erro:") ? "page-toast--err" : "page-toast--ok"}`}
-          role="status"
-        >
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setReloadNote(null)}>
-            ×
-          </button>
-          {reloadNote}
-        </div>
-      )}
       <input
         ref={csvImportInputRef}
         type="file"
@@ -1158,7 +1175,12 @@ export function DevicesPage() {
                       items={[
                         { id: "edit", label: "Editar", onClick: () => openEdit(d) },
                         { id: "ping", label: "Ping", disabled: br || pingRun.isPending, onClick: () => pingRun.mutate(d.id) },
-                        { id: "snmp", label: "SNMP", disabled: br || telCollect.isPending, onClick: () => telCollect.mutate(d.id) },
+                        {
+                          id: "snmp",
+                          label: "SNMP",
+                          disabled: br || telCollectingId === d.id,
+                          onClick: () => void runTelCollect(d),
+                        },
                         {
                           id: "report",
                           label: "Relatório",
@@ -1202,14 +1224,6 @@ export function DevicesPage() {
         </table>
       </div>
 
-      {actionToast && (
-        <div className={`page-toast ${actionToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status">
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setActionToast(null)}>
-            ×
-          </button>
-          {actionToast.text}
-        </div>
-      )}
       {modal && canMutate && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>

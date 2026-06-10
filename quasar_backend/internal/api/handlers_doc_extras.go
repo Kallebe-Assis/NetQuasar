@@ -411,6 +411,11 @@ func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(out)
 		_, _ = pool.Exec(ctx, `UPDATE snmp_walk_jobs SET status='done', result=$2::jsonb, error_message=NULL, finished_at=now() WHERE id=$1`, jobID, b)
 	}(body.Host, body.Community, body.Version, body.Port, body.TimeoutMs, body.Retries, body.MaxRows)
+	s.auditNetworkTool(r.Context(), r, "mikrotik_walk", map[string]any{
+		"host":    body.Host,
+		"job_id":  jid.String(),
+		"root_oid": ifMibIfTable,
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"job_id":   jid,
 		"status":   "queued",
@@ -424,40 +429,106 @@ func (s *Server) deviceChecks(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Matriz de checks unificada não implementada.", nil)
 }
 
+var deviceExportCSVHeader = []string{
+	"id", "description", "category", "ip", "network_status", "ping_enabled", "telemetry_enabled",
+	"operational_mode", "pop", "pop_id", "locality_id",
+	"brand", "model", "mac", "serial_number", "software_version", "hardware_version", "acquired_at",
+	"access_mode", "telemetry_mode", "latitude", "longitude",
+	"snmp_community", "mib_folder_path", "max_pons",
+	"telemetry_oid_strategy", "telemetry_oid_overrides",
+	"snmp_health_status", "snmp_health_reason", "snmp_health_checked_at",
+}
+
 func (s *Server) devicesExport(w http.ResponseWriter, r *http.Request) {
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "csv"
 	}
+	if format != "csv" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "format=csv suportado nesta versão", nil)
+		return
+	}
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id::text, description, category, host(ip)::text, network_status, operational_mode FROM devices ORDER BY description LIMIT 2000
-	`)
+		SELECT d.id::text, d.description, d.category, host(d.ip)::text, d.network_status,
+			d.ping_enabled, d.telemetry_enabled, d.operational_mode,
+			p.description, d.pop_id::text, d.locality_id::text,
+			d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text,
+			d.access_mode, d.telemetry_mode, d.latitude, d.longitude,
+			d.snmp_community, d.mib_folder_path, d.max_pons,
+			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text,
+			c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at::text
+		FROM devices d
+		LEFT JOIN pops p ON p.id = d.pop_id
+		LEFT JOIN device_probe_cache c ON c.device_id = d.id
+		ORDER BY d.description
+		LIMIT 10000`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	defer rows.Close()
-	if format != "csv" {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "format=csv suportado nesta versão", nil)
-		return
-	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="devices_export.csv"`)
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"id", "description", "category", "ip", "network_status", "operational_mode"})
+	_ = cw.Write(deviceExportCSVHeader)
 	for rows.Next() {
 		var id, desc, cat, ns, op string
-		var ipn *string
-		if err := rows.Scan(&id, &desc, &cat, &ipn, &ns, &op); err != nil {
+		var pingEn, telEn bool
+		var popDesc, popID, localityID, brand, model, mac, serial, swVer, hwVer, acquired, accessMode, telMode, snmpComm, mibPath, telStrategy, telOverrides, snmpSt, snmpReason, snmpChecked *string
+		var ip *string
+		var lat, lon *float64
+		var maxPons *int
+		if err := rows.Scan(&id, &desc, &cat, &ip, &ns, &pingEn, &telEn, &op,
+			&popDesc, &popID, &localityID,
+			&brand, &model, &mac, &serial, &swVer, &hwVer, &acquired,
+			&accessMode, &telMode, &lat, &lon,
+			&snmpComm, &mibPath, &maxPons,
+			&telStrategy, &telOverrides,
+			&snmpSt, &snmpReason, &snmpChecked); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
-		ip := ""
-		if ipn != nil {
-			ip = *ipn
-		}
-		_ = cw.Write([]string{id, desc, cat, ip, ns, op})
+		_ = cw.Write([]string{
+			id, desc, cat, csvExportStr(ip), ns, csvExportBool(pingEn), csvExportBool(telEn), op,
+			csvExportStr(popDesc), csvExportStr(popID), csvExportStr(localityID),
+			csvExportStr(brand), csvExportStr(model), csvExportStr(mac), csvExportStr(serial),
+			csvExportStr(swVer), csvExportStr(hwVer), csvExportStr(acquired),
+			csvExportStr(accessMode), csvExportStr(telMode), csvExportFloat(lat), csvExportFloat(lon),
+			csvExportStr(snmpComm), csvExportStr(mibPath), csvExportInt(maxPons),
+			csvExportStr(telStrategy), csvExportStr(telOverrides),
+			csvExportStr(snmpSt), csvExportStr(snmpReason), csvExportStr(snmpChecked),
+		})
 	}
 	cw.Flush()
+}
+
+func csvExportStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func csvExportBool(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func csvExportFloat(p *float64) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*p, 'f', -1, 64)
+}
+
+func csvExportInt(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
 }
 
 func (s *Server) commercialReportsExport(w http.ResponseWriter, r *http.Request) {
@@ -808,11 +879,11 @@ func (s *Server) monitoringFullReportDevice(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
 		return
 	}
-	var ip, category string
+	var ip, category, deviceDesc string
 	var telemetryEnabled bool
 	var devComm, defComm *string
-	if err := s.DB().QueryRow(r.Context(), `SELECT host(ip)::text, category, telemetry_enabled, snmp_community FROM devices WHERE id=$1`, id).
-		Scan(&ip, &category, &telemetryEnabled, &devComm); err != nil {
+	if err := s.DB().QueryRow(r.Context(), `SELECT host(ip)::text, category, description, telemetry_enabled, snmp_community FROM devices WHERE id=$1`, id).
+		Scan(&ip, &category, &deviceDesc, &telemetryEnabled, &devComm); err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 			return
@@ -888,6 +959,12 @@ func (s *Server) monitoringFullReportDevice(w http.ResponseWriter, r *http.Reque
 	}
 
 	report["status"] = status
+	s.auditDeviceAction(r.Context(), r, id, "full_report", map[string]any{
+		"description": deviceDesc,
+		"ip":          ip,
+		"category":    category,
+		"status":      status,
+	})
 	writeJSON(w, http.StatusOK, report)
 }
 

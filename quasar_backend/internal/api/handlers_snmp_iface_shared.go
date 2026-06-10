@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
@@ -464,6 +465,9 @@ func evalThresholdSeverity(v float64, t alertMetricThreshold) string {
 // openOrUpdateAlertWithMeta cria uma instância nova ou, se já existir com a mesma meta.key, apenas
 // atualiza message / severity / meta (valor corrente na UI) — Telegram só quando created=true nos chamadores.
 func openOrUpdateAlertWithMeta(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, severity, alertType, message, ip, devName string, meta map[string]any) (created bool, alertID uuid.UUID, err error) {
+	if alertignore.IsMuted(ctx, pool, deviceID, alertType, alertignore.MetaKeyFromAlert(alertType, meta)) {
+		return false, uuid.Nil, nil
+	}
 	metaRaw, jerr := json.Marshal(meta)
 	if jerr != nil {
 		metaRaw = []byte("{}")
@@ -706,6 +710,7 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 	var existPons []map[string]any
 	_ = json.Unmarshal([]byte(ponsT), &existPons)
 	mergedPons := oltifderive.MergePonRowsForIfaceRefresh(existPons, derivedPons)
+	oltifderive.ApplyPonOperStatusAll(mergedPons)
 	newSum, err := oltifderive.MergeSummaryJSON([]byte(sumT), sumPatch)
 	if err != nil {
 		return err

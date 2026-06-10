@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { InfoHint } from "../../components/InfoHint";
 import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
+import { errorMessageFromUnknown } from "../../lib/apiErrors";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 
 type MonitoringIntervalsPayload = {
@@ -31,6 +34,7 @@ function effectiveMonitoringCycleSeconds(d: MonitoringIntervalsPayload): number 
 
 export function MonitoringPingIntervalsCard() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const q = useQuery({
     queryKey: queryKeys.monIntervals,
     queryFn: () => apiFetch<MonitoringIntervalsPayload>("/api/v1/settings/monitoring-intervals"),
@@ -66,7 +70,9 @@ export function MonitoringPingIntervalsCard() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.monIntervals });
       save.reset();
+      toastOk(pushToast, "Intervalos de monitoramento guardados.");
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao guardar intervalos."),
   });
 
   if (q.isLoading) return <div className="card"><p>A carregar intervalos de sondagem…</p></div>;
@@ -305,8 +311,7 @@ export function MonitoringPingIntervalsCard() {
           Salvar intervalos / ICMP
         </button>
       </div>
-      {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
-      {save.isSuccess && <div className="msg msg--ok">Definições salvas.</div>}
+      {save.isError && <div className="msg msg--err">{errorMessageFromUnknown(save.error)}</div>}
     </div>
   );
 }

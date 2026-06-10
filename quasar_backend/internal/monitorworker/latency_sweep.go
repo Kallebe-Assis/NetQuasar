@@ -172,6 +172,8 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				if log != nil {
 					log.Error().Err(err).Str("host", host).Msg("commit latency_sweep")
 				}
+			} else {
+				NudgeMonitoringRuntimeRefresh(ctx, pool)
 			}
 		})
 	}

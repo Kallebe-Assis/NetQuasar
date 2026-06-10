@@ -17,6 +17,7 @@ export type AppToastItem = {
   tone: AppToastTone;
   text: string;
   at: number;
+  loading?: boolean;
   kind?: "default" | "offline";
   offlineTitle?: string;
   offlineIp?: string;
@@ -27,6 +28,7 @@ type PushInput = {
   tone: AppToastTone;
   text: string;
   autoMs?: number;
+  loading?: boolean;
   kind?: "default" | "offline";
   offlineTitle?: string;
   offlineIp?: string;
@@ -89,13 +91,14 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
         tone: input.tone,
         text: input.text,
         at,
+        loading: input.loading,
         kind: input.kind ?? "default",
         offlineTitle: input.offlineTitle,
         offlineIp: input.offlineIp,
         onDismiss: input.onDismiss,
       };
       setItems((prev) => [row, ...prev].slice(0, 12));
-      const ms = input.autoMs ?? PAGE_TOAST_AUTO_MS;
+      const ms = input.loading ? 0 : input.autoMs ?? PAGE_TOAST_AUTO_MS;
       if (ms > 0) {
         const tid = window.setTimeout(() => dismiss(id), ms);
         timersRef.current.set(id, tid);
@@ -168,10 +171,11 @@ export function AppToastStack({
             {t.offlineIp ? <div className="app-toast-stack__offline-ip mono">{t.offlineIp}</div> : null}
           </div>
         ) : (
-          <div key={t.id} className={`page-toast ${toneClass(t.tone)} app-toast-stack__item${leaveClass}`} role="status">
-            <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => onDismiss(t.id)}>
+          <div key={t.id} className={`page-toast ${toneClass(t.tone)} app-toast-stack__item${leaveClass}${t.loading ? " page-toast--loading" : ""}`} role="status">
+            <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => onDismiss(t.id)} disabled={t.loading}>
               ×
             </button>
+            {t.loading ? <span className="page-toast__spinner" aria-hidden /> : null}
             <div className="app-toast-stack__text">{t.text}</div>
           </div>
         );

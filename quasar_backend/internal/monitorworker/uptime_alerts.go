@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
@@ -61,6 +62,9 @@ func parseUintFlexible(s string) (uint64, error) {
 // InsertUptimeRestartAlertIfNew cria alerta em aberto quando o uptime SNMP está abaixo do limiar configurado.
 func InsertUptimeRestartAlertIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, thresholdMin int, observedMin float64) {
 	if thresholdMin <= 0 || pool == nil {
+		return
+	}
+	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeUptimeRestartLow, "") {
 		return
 	}
 	desc := strings.TrimSpace(description)

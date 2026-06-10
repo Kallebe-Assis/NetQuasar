@@ -1,16 +1,19 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bolt,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Plug,
   ChartPie,
   ClockCheck,
   Cpu,
   MapPin,
   MonitorSmartphone,
+  Network,
   ShieldCheck,
   TriangleAlert,
   UsersRound,
@@ -26,6 +29,8 @@ import { AppToastProvider } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
 import { APP_ROUTES } from "./routes";
 
+const SIDEBAR_COLLAPSED_KEY = "netquasar.sidebar.collapsed";
+
 const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
   { to: APP_ROUTES.dashboard, label: "Dashboard", icons: [ChartPie] },
   { to: APP_ROUTES.monitoring, label: "Monitoramento", icons: [ShieldCheck] },
@@ -33,7 +38,8 @@ const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
   { to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
   { to: APP_ROUTES.pops, label: "POPs", icons: [Warehouse] },
   { to: APP_ROUTES.devices, label: "Equipamentos", icons: [MonitorSmartphone] },
-  { to: APP_ROUTES.commercial, label: "Base comercial", icons: [UsersRound] },
+  { to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
+  { to: APP_ROUTES.connections, label: "Conexões", icons: [Network] },
   { to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
   { to: APP_ROUTES.map, label: "Mapa", icons: [MapPin] },
   { to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
@@ -48,6 +54,21 @@ const ICON_STROKE = 2;
 
 export function ShellLayout() {
   const qc = useQueryClient();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (getAuthToken()) {
@@ -56,7 +77,7 @@ export function ShellLayout() {
   }, [qc]);
 
   const monState = useQuery({
-    queryKey: queryKeys.monStateGlobal,
+    queryKey: queryKeys.monState,
     queryFn: () =>
       apiFetch<{
         is_running?: boolean;
@@ -65,10 +86,16 @@ export function ShellLayout() {
         activity_updated_at?: string | null;
         last_activity?: string | null;
         last_activity_finished_at?: string | null;
+        runtime_updated_at?: string | null;
+        last_alerts_change_at?: string | null;
+        last_telemetry_cycle_at?: string | null;
+        last_latency_cycle_at?: string | null;
+        last_interface_snapshot_cycle_at?: string | null;
+        last_olt_if_derived_cycle_at?: string | null;
       }>("/api/v1/monitoring/state"),
-    refetchInterval: 1000,
+    refetchInterval: 1500,
     refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 1000,
   });
   const activity = (monState.data?.current_activity ?? "").trim();
   const running = !!monState.data?.is_running;
@@ -82,9 +109,11 @@ export function ShellLayout() {
     indicatorText = `Finalizado: ${monState.data.last_activity}`;
   }
 
+  const navItems = isAdminUser() ? nav : nav.filter((n) => n.to !== APP_ROUTES.settings);
+
   return (
     <AppToastProvider>
-    <div className="layout">
+    <div className={`layout${sidebarCollapsed ? " layout--sidebar-collapsed" : ""}`}>
       <OnuReportGlobalToast />
       {showIndicator ? (
         <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
@@ -92,10 +121,21 @@ export function ShellLayout() {
           <span className="runtime-indicator__txt">{indicatorText}</span>
         </div>
       ) : null}
-      <aside className="sidebar">
-        <div className="sidebar__brand">NetQuasar</div>
+      <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`}>
+        <div className="sidebar__head">
+          <div className="sidebar__brand">NetQuasar</div>
+          <button
+            type="button"
+            className="sidebar__collapse-btn"
+            aria-label={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+            title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+            onClick={() => setSidebarCollapsed((v) => !v)}
+          >
+            {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+        </div>
         <nav>
-          {(isAdminUser() ? nav : nav.filter((n) => n.to !== APP_ROUTES.settings)).map((n) => (
+          {navItems.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -115,11 +155,11 @@ export function ShellLayout() {
             </NavLink>
           ))}
         </nav>
-        <div style={{ marginTop: "auto", padding: "0.75rem 1rem", fontSize: 12, color: "var(--muted)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }} title="Sessão actual">
+        <div className="sidebar__foot">
+          <div className="sidebar__user" title="Sessão actual">
             {getStoredUserDisplayLabel() || "Usuário"}
           </div>
-          <button type="button" className="btn" style={{ marginTop: 4, width: "100%" }} onClick={() => { clearSession(); window.location.href = APP_ROUTES.login; }}>
+          <button type="button" className="btn sidebar__logout" onClick={() => { clearSession(); window.location.href = APP_ROUTES.login; }}>
             Sair
           </button>
         </div>

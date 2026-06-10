@@ -21,6 +21,7 @@ import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
 import { useFloatingMenu } from "../hooks/useFloatingMenu";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { useAppToast } from "../lib/appToast";
+import { toastErr, toastOk } from "../lib/operationToast";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
 
 type Locality = { id: string; name: string; region_code?: string | null; created_at?: string };
@@ -96,6 +97,14 @@ function seededYearMonth(): string {
 export function CommercialPage() {
   const canMutate = isAdminUser();
   const { push: pushToast } = useAppToast();
+  const notify = useCallback(
+    (text: string, ok = true) => {
+      const t = text.length > 320 ? `${text.slice(0, 317)}…` : text;
+      if (ok) toastOk(pushToast, t);
+      else toastErr(pushToast, new Error(t));
+    },
+    [pushToast],
+  );
   const qc = useQueryClient();
   const seed = seededYearMonth();
   const monthChoices = useMemo(() => recentYearMonthChoices(72), []);
@@ -231,9 +240,9 @@ export function CommercialPage() {
       setLocName("");
       setLocRc("");
       setLocModalOpen(false);
-      setTgMsg({ ok: true, text: "Localidade adicionada com sucesso." });
+      notify("Localidade adicionada com sucesso.");
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const [editingLocId, setEditingLocId] = useState<string | null>(null);
@@ -245,9 +254,9 @@ export function CommercialPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["commercial-loc"] });
       setEditingLocId(null);
-      setTgMsg({ ok: true, text: "Guardado com sucesso (localidade)." });
+      notify("Guardado com sucesso (localidade).");
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message || "Falha ao salvar (localidade)." }),
+    onError: (e) => toastErr(pushToast, e, "Falha ao salvar (localidade)."),
   });
   const delLoc = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/localities/${id}`, { method: "DELETE" }),
@@ -276,12 +285,9 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
       const locLabel = lid ? locById.get(lid) ?? lid : "—";
       setSingleRecModalOpen(false);
-      setTgMsg({
-        ok: true,
-        text: `Registo salvo: ${locLabel} — ${cnt} cliente(s) em ${formatYearMonthPt(ym)}.`,
-      });
+      notify(`Registo salvo: ${locLabel} — ${cnt} cliente(s) em ${formatYearMonthPt(ym)}.`);
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const bulkFillAllLocalities = useMutation({
@@ -293,12 +299,9 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-agg"] });
       qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
       setBulkModalOpen(false);
-      setTgMsg({
-        ok: true,
-        text: `${data.upserted} localidade(s) actualizada(s) de uma vez (${formatYearMonthPt(ymShown)}).`,
-      });
+      notify(`${data.upserted} localidade(s) actualizada(s) de uma vez (${formatYearMonthPt(ymShown)}).`);
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const patchRec = useMutation({
@@ -310,9 +313,9 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
       setRecEditOpen(false);
       setEditRecRow(null);
-      setTgMsg({ ok: true, text: "Registo actualizado." });
+      notify("Registo actualizado.");
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const delRec = useMutation({
@@ -321,18 +324,10 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-rec"] });
       qc.invalidateQueries({ queryKey: ["commercial-agg"] });
       qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
-      setTgMsg({ ok: true, text: "Registo eliminado." });
+      notify("Registo eliminado.");
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
-
-  const [tgMsg, setTgMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  useEffect(() => {
-    if (!tgMsg) return;
-    const text = tgMsg.text.length > 320 ? `${tgMsg.text.slice(0, 317)}…` : tgMsg.text;
-    pushToast({ tone: tgMsg.ok ? "ok" : "err", text });
-  }, [tgMsg, pushToast]);
   const [oltCollectModalOpen, setOltCollectModalOpen] = useState(false);
   const [oltCollectConfirmOpen, setOltCollectConfirmOpen] = useState(false);
   const [oltCollectRunning, setOltCollectRunning] = useState(false);
@@ -397,15 +392,8 @@ export function CommercialPage() {
         json: { month },
       }),
     onSuccess: () =>
-      setTgMsg({
-        ok: true,
-        text: `Relatório comercial enviado por Telegram (${formatYearMonthPt(month)}), com texto formatado pelo servidor.`,
-      }),
-    onError: (e: Error) =>
-      setTgMsg({
-        ok: false,
-        text: `Envio Telegram falhou: ${e.message}`,
-      }),
+      notify(`Relatório comercial enviado por Telegram (${formatYearMonthPt(month)}), com texto formatado pelo servidor.`),
+    onError: (e) => toastErr(pushToast, e, "Envio Telegram falhou."),
   });
 
   async function exportCsv() {
@@ -487,14 +475,11 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-rec"] });
       qc.invalidateQueries({ queryKey: ["commercial-agg"] });
       qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
-      setTgMsg({
-        ok: true,
-        text: `Registos comerciais actualizados (${data.upserted} localidade(s)) para ${formatYearMonthPt(month)}.`,
-      });
+      notify(`Registos comerciais actualizados (${data.upserted} localidade(s)) para ${formatYearMonthPt(month)}.`);
       setOltCollectConfirmOpen(false);
       setOltCollectModalOpen(false);
     },
-    onError: (e: Error) => setTgMsg({ ok: false, text: e.message }),
+    onError: (e) => toastErr(pushToast, e),
   });
 
   const seedBulkCountsForMonth = (m: string) => {
@@ -510,12 +495,12 @@ export function CommercialPage() {
   function openCommercialBulkModal() {
     const localities = locs.data?.localities ?? [];
     if (localities.length === 0) {
-      setTgMsg({ ok: false, text: "Não há localidades para preencher." });
+      notify("Não há localidades para preencher.", false);
       return;
     }
     const initialM = /^\d{4}-\d{2}$/.test(month) ? month : seed;
     if (!/^\d{4}-\d{2}$/.test(initialM)) {
-      setTgMsg({ ok: false, text: "Escolha um mês de referência válido no separador Resumo (agregados)." });
+      notify("Escolha um mês de referência válido no separador Resumo (agregados).", false);
       return;
     }
     setBulkModalMonth(initialM);
@@ -527,7 +512,7 @@ export function CommercialPage() {
     const localities = locs.data?.localities ?? [];
     if (localities.length === 0) return;
     if (!/^\d{4}-\d{2}$/.test(bulkModalMonth)) {
-      setTgMsg({ ok: false, text: "Escolha um mês de referência no modal." });
+      notify("Escolha um mês de referência no modal.", false);
       return;
     }
     const payloads: Array<{ locality_id: string; year_month: string; client_count: number }> = [];
@@ -535,7 +520,7 @@ export function CommercialPage() {
       const raw = (bulkCounts[loc.id] ?? "").trim();
       const v = raw === "" ? 0 : Number(raw);
       if (!Number.isFinite(v) || v < 0 || !Number.isInteger(v)) {
-        setTgMsg({ ok: false, text: `Quantidade inválida para «${loc.name}»: use número inteiro ≥ 0 ou deixe vazio (= 0).` });
+        notify(`Quantidade inválida para «${loc.name}»: use número inteiro ≥ 0 ou deixe vazio (= 0).`, false);
         return;
       }
       payloads.push({ locality_id: loc.id, year_month: bulkModalMonth, client_count: v });
@@ -573,12 +558,12 @@ export function CommercialPage() {
     <>
       <div className="page-heading">
         <h1>
-          Base comercial
-          <InfoHint label="Sobre a base comercial">
-            <p>Localidades, registos mensais por localidade e totais agregados (opcionalmente filtrados por mês).</p>
+          Clientes
+          <InfoHint label="Sobre clientes">
+            <p>Localidades, registos mensais e totais agregados por mês. Conexões PPPoE/DHCP ficam no menu Conexões.</p>
           </InfoHint>
         </h1>
-        <PageCountPill label="Registros comerciais" count={(recs.data?.records ?? []).length} />
+        <PageCountPill label="Registros mensais" count={(recs.data?.records ?? []).length} />
       </div>
       <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 16 }}>
         <button type="button" className={mainTab === "resumo" ? "active" : ""} onClick={() => setMainTab("resumo")}>
@@ -760,7 +745,7 @@ export function CommercialPage() {
                 disabled={oltCollectRunning || saveCollected.isPending}
                 onClick={() => {
                   if (oltPreSelectedIds.length === 0) {
-                    setTgMsg({ ok: false, text: "Selecione ao menos 1 OLT antes de iniciar a coleta." });
+                    notify("Selecione ao menos 1 OLT antes de iniciar a coleta.", false);
                     return;
                   }
                   if (!confirm(`Iniciar coleta de ONUs em ${oltPreSelectedIds.length} OLT(s) selecionada(s)?`)) return;
@@ -992,7 +977,7 @@ export function CommercialPage() {
           <button type="button" className="btn" disabled={agg.isFetching} onClick={() => setAggRefreshConfirmOpen(true)}>
             {agg.isFetching ? "A actualizar…" : "Atualizar totais"}
           </button>
-          <button type="button" className="btn" onClick={() => exportCsv().catch((e) => setTgMsg({ ok: false, text: String(e) }))}>
+          <button type="button" className="btn" onClick={() => exportCsv().catch((e) => toastErr(pushToast, e))}>
             Export CSV
           </button>
           {canMutate ? (
@@ -1454,7 +1439,7 @@ export function CommercialPage() {
                 onClick={() => {
                   const n = Number(cnt);
                   if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-                    setTgMsg({ ok: false, text: "Use um número inteiro ≥ 0 para clientes." });
+                    notify("Use um número inteiro ≥ 0 para clientes.", false);
                     return;
                   }
                   createRec.mutate();
@@ -1521,7 +1506,7 @@ export function CommercialPage() {
                 onClick={() => {
                   const n = Number(recEditCnt);
                   if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-                    setTgMsg({ ok: false, text: "Use um número inteiro ≥ 0 para clientes." });
+                    notify("Use um número inteiro ≥ 0 para clientes.", false);
                     return;
                   }
                   patchRec.mutate({ id: editRecRow.id, year_month: recEditYm, client_count: n });
@@ -1603,8 +1588,8 @@ export function CommercialPage() {
                 disabled={agg.isFetching}
                 onClick={() => {
                   void agg.refetch().then((r) => {
-                    if (r.error) setTgMsg({ ok: false, text: (r.error as Error).message });
-                    else setTgMsg({ ok: true, text: `Totais actualizados (${formatYearMonthPt(month)}).` });
+                    if (r.error) toastErr(pushToast, r.error);
+                    else notify(`Totais actualizados (${formatYearMonthPt(month)}).`);
                     setAggRefreshConfirmOpen(false);
                   });
                 }}

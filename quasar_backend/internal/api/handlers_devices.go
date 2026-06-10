@@ -297,6 +297,10 @@ func (s *Server) importDevicesCSV(w http.ResponseWriter, r *http.Request) {
 		s.appendAuditLog(r.Context(), "device", id.String(), "create", actorFromRequest(r), nil, d)
 	}
 	s.DB().Exec(r.Context(), `NOTIFY devices_changed, 'reload'`)
+	s.appendAuditLog(r.Context(), "device", "bulk", "import_csv", actorFromRequest(r), nil, map[string]any{
+		"imported": imported,
+		"failed":   len(failed),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       len(failed) == 0,
 		"imported": imported,

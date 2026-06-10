@@ -87,17 +87,107 @@ func (s *Server) appendAuditLog(ctx context.Context, entityType, entityID, actio
 	`, entityType, entityID, action, strings.TrimSpace(actor), bb, ab)
 }
 
+func (s *Server) auditDeviceAction(ctx context.Context, r *http.Request, deviceID uuid.UUID, action string, detail map[string]any) {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	s.appendAuditLog(ctx, "device", deviceID.String(), action, actorFromRequest(r), nil, detail)
+}
+
+func (s *Server) auditNetworkTool(ctx context.Context, r *http.Request, tool string, detail map[string]any) {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	detail["tool"] = tool
+	s.appendAuditLog(ctx, "network_tool", tool, "executed", actorFromRequest(r), nil, detail)
+}
+
 func (s *Server) listOpsAudit(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 2000 {
 		limit = 150
 	}
-	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, entity_type, entity_id, action, actor, before_data::text, after_data::text, created_at
-		FROM ops_audit_log
-		ORDER BY id DESC
-		LIMIT $1
-	`, limit)
+	todayOnly := queryTruthy(r.URL.Query().Get("today"))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	entityType := strings.TrimSpace(r.URL.Query().Get("entity_type"))
+	actionFilter := strings.TrimSpace(r.URL.Query().Get("action"))
+	actorFilter := strings.TrimSpace(r.URL.Query().Get("actor"))
+
+	args := []any{}
+	n := 1
+	sqlQ := `
+		SELECT a.id, a.entity_type, a.entity_id, a.action, a.actor,
+			a.before_data::text, a.after_data::text, a.created_at,
+			COALESCE(
+				NULLIF(trim(d.description), ''),
+				NULLIF(trim(p.description), ''),
+				NULLIF(trim(cl.name), ''),
+				NULLIF(trim(cc.client_name), ''),
+				NULLIF(trim(i.name), ''),
+				NULLIF(trim(a.after_data->>'description'), ''),
+				NULLIF(trim(a.before_data->>'description'), ''),
+				NULLIF(trim(a.after_data->>'name'), ''),
+				CASE a.entity_type
+					WHEN 'monitoring_runtime' THEN 'Sistema — Monitoramento'
+					WHEN 'monitoring_intervals' THEN 'Intervalos de monitoramento'
+					WHEN 'monitoring_settings' THEN 'Definições de monitoramento'
+					WHEN 'nightly_collection' THEN 'Automação — coleta noturna'
+					WHEN 'network_tool' THEN 'Ferramenta de rede'
+					WHEN 'settings_mikrotik_collection' THEN 'Coleta Mikrotik'
+					ELSE NULL
+				END,
+				a.entity_id
+			) AS entity_label
+		FROM ops_audit_log a
+		LEFT JOIN devices d ON a.entity_type IN ('device', 'device_config_backup')
+			AND d.id::text = a.entity_id
+		LEFT JOIN pops p ON a.entity_type = 'pop' AND p.id::text = a.entity_id
+		LEFT JOIN commercial_localities cl ON a.entity_type = 'commercial_locality' AND cl.id::text = a.entity_id
+		LEFT JOIN client_connections cc ON a.entity_type = 'client_connection' AND cc.id::text = a.entity_id
+		LEFT JOIN integrations i ON a.entity_type = 'integration' AND i.id::text = a.entity_id
+		WHERE 1=1
+	`
+	if todayOnly {
+		sqlQ += ` AND a.created_at >= date_trunc('day', now())`
+	}
+	if entityType != "" {
+		sqlQ += ` AND a.entity_type = $` + strconv.Itoa(n)
+		args = append(args, entityType)
+		n++
+	}
+	if actionFilter != "" {
+		sqlQ += ` AND a.action = $` + strconv.Itoa(n)
+		args = append(args, actionFilter)
+		n++
+	}
+	if actorFilter != "" {
+		pat := "%" + actorFilter + "%"
+		sqlQ += ` AND COALESCE(a.actor, '') ILIKE $` + strconv.Itoa(n)
+		args = append(args, pat)
+		n++
+	}
+	if q != "" {
+		pat := "%" + q + "%"
+		sqlQ += ` AND (
+			COALESCE(a.actor, '') ILIKE $` + strconv.Itoa(n) + `
+			OR a.action ILIKE $` + strconv.Itoa(n) + `
+			OR a.entity_type ILIKE $` + strconv.Itoa(n) + `
+			OR a.entity_id ILIKE $` + strconv.Itoa(n) + `
+			OR COALESCE(d.description, '') ILIKE $` + strconv.Itoa(n) + `
+			OR COALESCE(p.description, '') ILIKE $` + strconv.Itoa(n) + `
+			OR COALESCE(cl.name, '') ILIKE $` + strconv.Itoa(n) + `
+			OR COALESCE(cc.client_name, '') ILIKE $` + strconv.Itoa(n) + `
+			OR COALESCE(i.name, '') ILIKE $` + strconv.Itoa(n) + `
+			OR a.after_data::text ILIKE $` + strconv.Itoa(n) + `
+			OR a.before_data::text ILIKE $` + strconv.Itoa(n) + `
+		)`
+		args = append(args, pat)
+		n++
+	}
+	sqlQ += ` ORDER BY a.id DESC LIMIT $` + strconv.Itoa(n)
+	args = append(args, limit)
+
+	rows, err := s.DB().Query(r.Context(), sqlQ, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -106,23 +196,24 @@ func (s *Server) listOpsAudit(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id int64
-		var et, eid, action string
+		var et, eid, action, entityLabel string
 		var actor *string
 		var before, after []byte
 		var created time.Time
-		if err := rows.Scan(&id, &et, &eid, &action, &actor, &before, &after, &created); err != nil {
+		if err := rows.Scan(&id, &et, &eid, &action, &actor, &before, &after, &created, &entityLabel); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		out = append(out, map[string]any{
-			"id":          id,
-			"entity_type": et,
-			"entity_id":   eid,
-			"action":      action,
-			"actor":       actor,
-			"before_data": json.RawMessage(before),
-			"after_data":  json.RawMessage(after),
-			"created_at":  created,
+			"id":           id,
+			"entity_type":  et,
+			"entity_id":    eid,
+			"entity_label": entityLabel,
+			"action":       action,
+			"actor":        actor,
+			"before_data":  json.RawMessage(before),
+			"after_data":   json.RawMessage(after),
+			"created_at":   created,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})

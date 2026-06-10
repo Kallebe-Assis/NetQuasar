@@ -8,8 +8,10 @@ import { isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
-import { invalidateAlertListQueries } from "../lib/queryKeys";
-import { InlinePageToastBanner, useInlinePageToast } from "../lib/pageToast";
+import { monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
+import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastOk } from "../lib/operationToast";
 import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow } from "../lib/deviceReportHelpers";
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { DropdownMenu } from "../components/DropdownMenu";
@@ -54,6 +56,8 @@ type PonTableRow = {
   onu_offline?: number;
   status?: string;
   if_oper_status?: string;
+  pon_oper_status?: string;
+  pon_status_from_onu_counts?: boolean;
   pon_compact?: string;
 };
 
@@ -105,9 +109,31 @@ function badgeOper(s: string | undefined): string {
   return "badge badge--off";
 }
 
+function ponStatusFromOnuCounts(p: PonTableRow): "up" | "down" | null {
+  const n = p.onu_online;
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  return Number(n) >= 1 ? "up" : "down";
+}
+
 function ponStatusCell(p: PonTableRow) {
+  const derived = ponStatusFromOnuCounts(p);
   const ifSt = String(p.if_oper_status ?? p.status ?? "").trim();
   const meta = ifSt.toLowerCase();
+  const placeholder =
+    !ifSt ||
+    meta === "snmp_metrics" ||
+    meta === "pon_online_offline" ||
+    meta === "vsol_snmp" ||
+    ifSt === "—" ||
+    ifSt === "-";
+  if (derived != null && (placeholder || p.pon_status_from_onu_counts)) {
+    const label = derived === "up" ? "ON" : "OFF";
+    return (
+      <span className={badgeOper(derived)} title="PON ON se ≥1 ONU online; OFF se nenhuma online">
+        {label}
+      </span>
+    );
+  }
   if (!ifSt || meta === "snmp_metrics") return EM_DASH;
   return (
     <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
@@ -284,7 +310,7 @@ export function OltPage() {
   const [bulkCollectedRows, setBulkCollectedRows] = useState<
     Array<{ olt_id: string; olt_description: string; locality_id: string; locality_name: string; online: number; offline: number; total: number }>
   >([]);
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
   const [bulkIncludeInterfaces, setBulkIncludeInterfaces] = useState(true);
   const [bulkMonth, setBulkMonth] = useState(() => {
     const d = new Date();
@@ -302,14 +328,29 @@ export function OltPage() {
     setCollectLogOpen(false);
   }, [sel]);
 
+  const monState = useQuery({
+    queryKey: queryKeys.monState,
+    staleTime: 1000,
+  });
+
+  useMonitoringLiveSync(monState.data, { monitoring: false, alerts: false, olt: true });
+
+  const oltPollMs = useMemo(() => monitoringPollMs(8000, monState.data?.is_running), [monState.data?.is_running]);
+
   const list = useQuery({
-    queryKey: ["olt-devices"],
+    queryKey: queryKeys.oltDevices,
     queryFn: () => apiFetch<{ olts: OltRow[] }>("/api/v1/olt/devices"),
+    staleTime: 0,
+    refetchInterval: oltPollMs,
+    refetchIntervalInBackground: true,
   });
 
   const detail = useQuery({
     queryKey: ["olt-device", sel],
     enabled: !!sel,
+    staleTime: 0,
+    refetchInterval: sel ? oltPollMs : false,
+    refetchIntervalInBackground: true,
     queryFn: () =>
       apiFetch<{
         id: string;
@@ -375,18 +416,16 @@ export function OltPage() {
       }
       const on = comp?.onu_online_sum ?? 0;
       const tot = comp?.onu_total_sum ?? 0;
-      setSaveToast({
-        ok: true,
-        text: `Coleta concluída (${scope === "onu" ? "rápida" : scope === "telemetry" ? "telemetria" : "completa"}): ${on} online / ${tot} ONUs`,
-      });
-      qc.invalidateQueries({ queryKey: ["olt-devices"] });
+      toastOk(
+        pushToast,
+        `Coleta concluída (${scope === "onu" ? "rápida" : scope === "telemetry" ? "telemetria" : "completa"}): ${on} online / ${tot} ONUs`,
+      );
+      qc.invalidateQueries({ queryKey: queryKeys.oltDevices });
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
       invalidateDashboardAfterCollect(qc);
     },
-    onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error).message || "Falha na coleta OLT" });
-    },
+    onError: (err) => toastErr(pushToast, err, "Falha na coleta OLT"),
   });
 
   const refreshIf = useMutation({
@@ -395,7 +434,9 @@ export function OltPage() {
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
       invalidateDashboardAfterCollect(qc);
+      toastOk(pushToast, "Interfaces actualizadas com sucesso.");
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
   });
 
   async function runBulkSnapshotAndInterfaces() {
@@ -441,7 +482,7 @@ export function OltPage() {
       setBulkCollectedRows(collected);
       setBulkPhase("results");
       setBulkLog((m) => [...m.slice(-12), "Concluído."]);
-      await qc.invalidateQueries({ queryKey: ["olt-devices"] });
+      await qc.invalidateQueries({ queryKey: queryKeys.oltDevices });
       if (sel) await qc.invalidateQueries({ queryKey: ["olt-device", sel] });
       await invalidateAlertListQueries(qc);
       invalidateDashboardAfterCollect(qc);
@@ -470,12 +511,24 @@ export function OltPage() {
       await qc.invalidateQueries({ queryKey: ["commercial-agg"] });
       await qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
       setBulkLog((m) => [...m, `Base comercial actualizada para ${formatYearMonthPt(bulkMonth)}.`]);
-      setSaveToast({ ok: true, text: `Guardado com sucesso (Base comercial: ${formatYearMonthPt(bulkMonth)}).` });
+      toastOk(pushToast, `Guardado com sucesso (Base comercial: ${formatYearMonthPt(bulkMonth)}).`);
     },
-    onError: (err: Error) => setSaveToast({ ok: false, text: err.message || "Falha ao salvar (Base comercial)." }),
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar (Base comercial)."),
   });
 
   const rows = list.data?.olts ?? [];
+  const fleetOnu = useMemo(() => {
+    const toInt = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    let online = 0;
+    let offline = 0;
+    let total = 0;
+    for (const r of rows) {
+      online += toInt(r.computed?.onu_online_sum);
+      offline += toInt(r.computed?.onu_offline_sum);
+      total += toInt(r.computed?.onu_total_sum);
+    }
+    return { online, offline, total };
+  }, [rows]);
   const sortedRows = useMemo(() => {
     const out = [...rows];
     const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : -1);
@@ -643,6 +696,22 @@ export function OltPage() {
           </button>
         ) : null}
       </div>
+      {!sel && rows.length > 0 ? (
+        <div className="row" style={{ gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+          <div className="stat" style={{ minWidth: 140 }}>
+            <div className="stat__k">ONUs total (todas as OLTs)</div>
+            <div className="stat__v">{formatNum(fleetOnu.total)}</div>
+          </div>
+          <div className="stat" style={{ minWidth: 120 }}>
+            <div className="stat__k">Online</div>
+            <div className="stat__v">{formatNum(fleetOnu.online)}</div>
+          </div>
+          <div className="stat" style={{ minWidth: 120 }}>
+            <div className="stat__k">Offline</div>
+            <div className="stat__v">{formatNum(fleetOnu.offline)}</div>
+          </div>
+        </div>
+      ) : null}
       {bulkOpen && canMutate && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !bulkRunning && setBulkOpen(false)}>
           <div
@@ -794,7 +863,6 @@ export function OltPage() {
                     {saveBulkToCommercial.isPending ? "Salvando…" : "Confirmar e salvar na Base comercial"}
                   </button>
                 </div>
-                <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
               </>
             )}
             </div>
@@ -1003,7 +1071,6 @@ export function OltPage() {
                   {refresh.isPending ? " · coleta em curso…" : ""}
                 </p>
 
-                <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 8 }} />
 
                 {collectLogOpen ? (
                   <OltMetricsCollectLogModal

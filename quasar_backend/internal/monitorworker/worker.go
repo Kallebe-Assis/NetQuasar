@@ -117,6 +117,18 @@ func monitoringDeviceLabel(description, host string) string {
 	return strings.TrimSpace(host)
 }
 
+// NudgeMonitoringRuntimeRefresh sinaliza ao frontend que novas leituras foram gravadas (telemetria, OLT, etc.).
+func NudgeMonitoringRuntimeRefresh(ctx context.Context, pool *pgxpool.Pool) {
+	if pool == nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+		UPDATE monitoring_runtime
+		SET updated_at = now(), activity_updated_at = now()
+		WHERE id = 1
+	`)
+}
+
 func setActivity(ctx context.Context, pool *pgxpool.Pool, activity string) {
 	if pool == nil {
 		return

@@ -21,6 +21,7 @@ type HistoryResponse = {
   since: string;
   series: HistorySeries[];
   aggregate: { points: HistoryPoint[] };
+  current_fleet?: { onu_total?: number; onu_online?: number; onu_offline?: number };
 };
 
 const DAY_OPTIONS = [1, 3, 7, 30] as const;
@@ -84,7 +85,9 @@ export function OltReportsTab() {
 
   const aggPoints = q.data?.aggregate?.points ?? [];
   const series = q.data?.series ?? [];
+  const fleet = q.data?.current_fleet;
   const hasAny = useMemo(() => aggPoints.length > 0 || series.some((s) => s.points.length > 0), [aggPoints, series]);
+  const fmt = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString("pt-PT") : "—");
 
   return (
     <>
@@ -110,6 +113,22 @@ export function OltReportsTab() {
           </button>
         </div>
         {q.isError && <div className="msg msg--err" style={{ marginTop: 8 }}>{(q.error as Error).message}</div>}
+        {fleet ? (
+          <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <div className="stat" style={{ minWidth: 140 }}>
+              <div className="stat__k">Total actual (última amostra por OLT)</div>
+              <div className="stat__v">{fmt(fleet.onu_total)}</div>
+            </div>
+            <div className="stat" style={{ minWidth: 120 }}>
+              <div className="stat__k">Online</div>
+              <div className="stat__v">{fmt(fleet.onu_online)}</div>
+            </div>
+            <div className="stat" style={{ minWidth: 120 }}>
+              <div className="stat__k">Offline</div>
+              <div className="stat__v">{fmt(fleet.onu_offline)}</div>
+            </div>
+          </div>
+        ) : null}
         {!q.isLoading && !hasAny && (
           <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 8, marginBottom: 0 }}>
             Ainda não há histórico. Vá à lista de equipamentos e actualize snapshots, ou aguarde o relatório mensal automático.
@@ -121,7 +140,12 @@ export function OltReportsTab() {
         <p>A carregar histórico…</p>
       ) : (
         <>
-          <OnuHistoryChart title="Total geral (todas as OLTs)" data={aggPoints} days={days} height={260} />
+          <OnuHistoryChart
+            title="Total geral (soma da última amostra conhecida de cada OLT por período)"
+            data={aggPoints}
+            days={days}
+            height={260}
+          />
 
           {series.length > 0 && (
             <>

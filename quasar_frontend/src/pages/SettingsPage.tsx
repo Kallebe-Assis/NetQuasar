@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Blend, ClockFading, Copy, Cpu, Plus, Sun, ThermometerSun, Trash2 } from "lucide-react";
-import { InlinePageToastBanner, PAGE_TOAST_AUTO_MS, useInlinePageToast } from "../lib/pageToast";
+import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastOk } from "../lib/operationToast";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
@@ -521,7 +523,7 @@ function UsersPanel() {
   const [ePhone, setEPhone] = useState("");
   const [ePass, setEPass] = useState("");
   const [eRole, setERole] = useState<"admin" | "viewer">("viewer");
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
   const [userCreateErr, setUserCreateErr] = useState("");
 
   const create = useMutation({
@@ -558,9 +560,9 @@ function UsersPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-users"] });
       setEditId(null);
-      setSaveToast({ ok: true, text: "Guardado com sucesso (usuário)." });
+      toastOk(pushToast, "Guardado com sucesso (usuário).");
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (usuário)." }),
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar (usuário)."),
   });
 
   const del = useMutation({
@@ -710,7 +712,7 @@ function UsersPanel() {
               onClick={() => {
                 const pe = validateBRPhoneMessage(ePhone);
                 if (pe) {
-                  setSaveToast({ ok: false, text: pe });
+                  toastErr(pushToast, new Error(pe));
                   return;
                 }
                 patch.mutate();
@@ -723,7 +725,6 @@ function UsersPanel() {
             </button>
           </div>
           {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
-          <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 8 }} />
         </div>
       )}
     </>
@@ -780,8 +781,8 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "olt_onu_tx_dbm", label: "ONU TX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-15", critical_min: "-20", apply_categories: ["olt"] },
     { id: "olt_onu_rx_dbm", label: "ONU RX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-12", warning_min: "-20", critical_min: "-28", apply_categories: ["olt"] },
     { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
-    { id: "olt_onu_drop_count", label: "Queda de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
-    { id: "olt_onu_drop_percent", label: "Queda de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
+    { id: "olt_onu_drop_count", label: "Variação de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
+    { id: "olt_onu_drop_percent", label: "Variação de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
     { id: "iface_down_count", label: "Mudança de interface UP→DOWN", unit: "evento", scope: "interface", enabled: true, operator: "gte", green_min: "0", warning_min: "1", critical_min: "1", apply_categories: [] },
     { id: "mikrotik_sfp_tx_dbm", label: "SFP — potência TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
     { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "-20", apply_categories: ["mikrotik"] },
@@ -1893,7 +1894,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   const [token, setToken] = useState("");
   const [chat, setChat] = useState("");
   const [topic, setTopic] = useState("");
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
 
   useEffect(() => {
     if (!q.data) return;
@@ -1909,9 +1910,9 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-tg", id] });
-      setSaveToast({ ok: true, text: "Guardado com sucesso (Telegram)." });
+      toastOk(pushToast, "Guardado com sucesso (Telegram).");
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar (Telegram)." }),
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar (Telegram)."),
   });
 
   const test = useMutation({
@@ -1943,7 +1944,6 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
           Enviar mensagem de teste
         </button>
       </div>
-      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
       <TelegramTestOutcome data={test.data} error={test.error as Error | null} />
     </div>
   );
@@ -2246,7 +2246,7 @@ function OltVendorsPanel() {
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<OltMetricsForm>(() => defaultMetricsForm());
   const [steps, setSteps] = useState<OltCollectionStep[]>([]);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
@@ -2336,11 +2336,9 @@ function OltVendorsPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["olt-vendor-model", brand, model] });
       qc.invalidateQueries({ queryKey: ["olt-models-catalog"] });
-      setSaveToast({ ok: true, text: `Perfil guardado: ${brand} / ${model}` });
+      toastOk(pushToast, `Perfil guardado: ${brand} / ${model}`);
     },
-    onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao salvar." });
-    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
   const createModel = useMutation({
@@ -2360,11 +2358,9 @@ function OltVendorsPanel() {
       setCreateBrand("");
       setCreateBrandName("");
       setCreateModelName("");
-      setSaveToast({ ok: true, text: `Modelo «${name}» criado (${targetBrand}).` });
+      toastOk(pushToast, `Modelo «${name}» criado (${targetBrand}).`);
     },
-    onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao criar modelo." });
-    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao criar modelo."),
   });
 
   const removeModel = useMutation({
@@ -2376,11 +2372,9 @@ function OltVendorsPanel() {
       qc.invalidateQueries({ queryKey: ["olt-vendor-models", brand] });
       qc.invalidateQueries({ queryKey: ["olt-models-catalog"] });
       setModel("");
-      setSaveToast({ ok: true, text: "Modelo removido." });
+      toastOk(pushToast, "Modelo removido.");
     },
-    onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao remover." });
-    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao remover."),
   });
 
   if (brands.isLoading) return <p>A carregar…</p>;
@@ -2415,7 +2409,7 @@ function OltVendorsPanel() {
     const srcModel = copyModel.trim();
     if (!srcBrand || !srcModel) return;
     if (srcBrand === brand && srcModel === model) {
-      setSaveToast({ ok: false, text: "Escolha um perfil de origem diferente do perfil actual." });
+      toastErr(pushToast, new Error("Escolha um perfil de origem diferente do perfil actual."));
       return;
     }
     setCopyLoading(true);
@@ -2429,12 +2423,9 @@ function OltVendorsPanel() {
       setMetrics(metricsFromApi(src.onu_metrics));
       setSteps(Array.isArray(src.collection_steps) ? src.collection_steps : []);
       setCopyModalOpen(false);
-      setSaveToast({
-        ok: true,
-        text: `Métricas copiadas de ${srcBrand} / ${srcModel}. Clique em Salvar para gravar neste modelo.`,
-      });
+      toastOk(pushToast, `Métricas copiadas de ${srcBrand} / ${srcModel}. Clique em Salvar para gravar neste modelo.`);
     } catch (e) {
-      setSaveToast({ ok: false, text: (e as Error).message || "Falha ao copiar perfil." });
+      toastErr(pushToast, e, "Falha ao copiar perfil.");
     } finally {
       setCopyLoading(false);
     }
@@ -3128,7 +3119,6 @@ function OltVendorsPanel() {
           </div>
         </div>
       )}
-      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} style={{ marginTop: 10 }} />
     </div>
   );
 }

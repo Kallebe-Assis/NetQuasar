@@ -50,6 +50,19 @@ export async function apiFetch<T = unknown>(path: string, opts: Opt = {}): Promi
         "CLIENT_TIMEOUT",
       );
     }
+    const lower = msg.toLowerCase();
+    if (
+      lower.includes("failed to fetch") ||
+      lower.includes("networkerror") ||
+      lower.includes("load failed") ||
+      name === "TypeError"
+    ) {
+      throw new ApiError(
+        "Sem ligação ao servidor. Verifique se a API está a correr e se a rede está disponível.",
+        0,
+        "NETWORK",
+      );
+    }
     throw e;
   }
 

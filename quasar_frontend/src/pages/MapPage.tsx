@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { EquipmentMap, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
+import { EquipmentMap, type MapBounds, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
@@ -41,6 +41,20 @@ type Point = {
   operational_mode?: string;
   status: string;
   last_check_at?: string | null;
+  coord_source?: string;
+  point_type?: "equipment" | "connection";
+  login?: string;
+};
+
+type ConnectionPoint = {
+  id: string;
+  client_name: string;
+  login: string;
+  connection_kind: string;
+  lat: number;
+  lng: number;
+  address?: string;
+  neighborhood?: string;
 };
 
 type PointDetail = Point & {
@@ -60,6 +74,7 @@ type PointDetail = Point & {
 
 /** Alinhado com a lista de categorias em equipamentos. */
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
+const MAP_LIST_PAGE_SIZE = 100;
 
 function fmtIso(s: string | null | undefined): string {
   if (!s?.trim()) return "—";
@@ -91,8 +106,37 @@ export function MapPage() {
   const [flyKey, setFlyKey] = useState(0);
   const [mapDeviceSelect, setMapDeviceSelect] = useState("");
   const [mapToast, setMapToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [showConnections, setShowConnections] = useState(false);
+  const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+  const [listPage, setListPage] = useState(0);
+  const onMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
 
   const pops = useQuery({ queryKey: ["pops"], queryFn: () => apiFetch<{ pops: { id: string; description: string }[] }>("/api/v1/pops") });
+
+  const connPts = useQuery({
+    queryKey: [
+      "map-connection-points",
+      mapBounds?.minLat,
+      mapBounds?.maxLat,
+      mapBounds?.minLng,
+      mapBounds?.maxLng,
+    ],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (mapBounds) {
+        params.set("min_lat", String(mapBounds.minLat));
+        params.set("max_lat", String(mapBounds.maxLat));
+        params.set("min_lng", String(mapBounds.minLng));
+        params.set("max_lng", String(mapBounds.maxLng));
+      }
+      const qs = params.toString();
+      return apiFetch<{ points: ConnectionPoint[]; total?: number; truncated?: boolean }>(
+        `/api/v1/map/connection-points${qs ? `?${qs}` : ""}`,
+      );
+    },
+    enabled: showConnections && mapBounds != null,
+    placeholderData: keepPreviousData,
+  });
 
   const pts = useQuery({
     queryKey: ["map-points", popId, category],
@@ -108,16 +152,35 @@ export function MapPage() {
     placeholderData: keepPreviousData,
   });
 
-  const detail = useQuery({
-    queryKey: ["map-point-detail", selId],
-    enabled: !!selId,
-    queryFn: () => apiFetch<PointDetail>(`/api/v1/map/equipment-points/${selId}`),
-  });
+  const equipPoints = useMemo(() => (Array.isArray(pts.data?.points) ? pts.data.points : []), [pts.data?.points]);
 
   const displayedPoints = useMemo(() => {
-    const raw = pts.data?.points;
-    return Array.isArray(raw) ? raw : [];
-  }, [pts.data?.points]);
+    const equip = equipPoints;
+    const connRaw = showConnections && Array.isArray(connPts.data?.points) ? connPts.data.points : [];
+    const conn: Point[] = connRaw.map((c) => ({
+      id: `conn-${c.id}`,
+      description: `${c.client_name} (${c.login})`,
+      category: c.connection_kind === "dhcp" ? "Conexão DHCP" : "Conexão PPPoE",
+      lat: Number(c.lat),
+      lng: Number(c.lng),
+      status: "connection",
+      point_type: "connection" as const,
+      login: c.login,
+    }));
+    return [...equip, ...conn];
+  }, [equipPoints, connPts.data?.points, showConnections]);
+
+  const connTotal = connPts.data?.total;
+  const connTruncated = !!connPts.data?.truncated;
+
+  const selPoint = useMemo(() => displayedPoints.find((p) => p.id === selId) ?? null, [displayedPoints, selId]);
+  const isConnPoint = !!selId?.startsWith("conn-");
+
+  const detail = useQuery({
+    queryKey: ["map-point-detail", selId],
+    enabled: !!selId && !isConnPoint,
+    queryFn: () => apiFetch<PointDetail>(`/api/v1/map/equipment-points/${selId!}`),
+  });
 
   const displayedIdSet = useMemo(() => new Set(displayedPoints.map((p) => p.id)), [displayedPoints]);
 
@@ -144,10 +207,17 @@ export function MapPage() {
   );
 
   const sortedEquipOptions = useMemo(() => {
-    const arr = [...displayedPoints];
+    const arr = [...equipPoints];
     arr.sort((a, b) => String(a.description ?? "").localeCompare(String(b.description ?? ""), "pt"));
     return arr;
-  }, [displayedPoints]);
+  }, [equipPoints]);
+
+  const listPageCount = Math.max(1, Math.ceil(displayedPoints.length / MAP_LIST_PAGE_SIZE));
+  const safeListPage = Math.min(listPage, listPageCount - 1);
+  const listPageRows = useMemo(
+    () => displayedPoints.slice(safeListPage * MAP_LIST_PAGE_SIZE, safeListPage * MAP_LIST_PAGE_SIZE + MAP_LIST_PAGE_SIZE),
+    [displayedPoints, safeListPage],
+  );
 
   const popsOptions = useMemo(() => {
     const raw = pops.data?.pops;
@@ -157,7 +227,12 @@ export function MapPage() {
 
   useEffect(() => {
     setFitBoundsVersion((v) => v + 1);
-  }, [popId, category]);
+    setListPage(0);
+  }, [popId, category, showConnections]);
+
+  useEffect(() => {
+    setListPage(0);
+  }, [displayedPoints.length]);
 
   useEffect(() => {
     if (!mapToast) return;
@@ -204,14 +279,20 @@ export function MapPage() {
           Mapa
           <InfoHint label="Como usar o mapa">
             <p>
-              Equipamentos com coordenadas. POP e categoria pedem os pontos ao servidor; <strong>Vistas</strong> escolhe agrupamento fixo,
-              desagrupado ou cores de estado. Em <strong>Agrupado</strong>, a densidade dos grupos segue o zoom (aproximar separa os pins); clique num
-              grupo para expandir.
+              Equipamentos com coordenadas (inclui posição herdada do POP quando o equipamento não tem lat/lon próprias) e conexões de clientes
+              com coordenadas cadastradas em <strong>Clientes → Conexões</strong>.
             </p>
-            <p>Seleccione um equipamento na lista, no mapa ou no filtro «Equipamento».</p>
+            <p>Seleccione um ponto na lista, no mapa ou no filtro «Equipamento».</p>
           </InfoHint>
         </h1>
         <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
+        {showConnections && connTotal != null ? (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            Conexões na área: {connPts.data?.points?.length ?? 0}
+            {connTotal > 0 ? ` / ${connTotal} com coordenadas` : ""}
+            {connTruncated ? " (aproxime o mapa para ver mais)" : ""}
+          </span>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -257,6 +338,10 @@ export function MapPage() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }} title="Carrega conexões só na área visível do mapa (melhor desempenho com milhares de logins)">
+            <input type="checkbox" checked={showConnections} onChange={(e) => setShowConnections(e.target.checked)} />
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Conexões de clientes (área visível)</span>
           </label>
           <label className="row" style={{ gap: 8, alignItems: "center", flex: "2 1 240px", minWidth: 200 }}>
             <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Equipamento</span>
@@ -355,7 +440,7 @@ export function MapPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayedPoints.map((p) => (
+                  {listPageRows.map((p) => (
                     <tr
                       key={p.id}
                       className={selId === p.id ? "row-interactive row-interactive--selected" : "row-interactive"}
@@ -385,6 +470,27 @@ export function MapPage() {
                   ))}
                 </tbody>
               </table>
+              {displayedPoints.length > MAP_LIST_PAGE_SIZE ? (
+                <div className="row conn-table-pager" style={{ marginTop: 10, justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    {safeListPage * MAP_LIST_PAGE_SIZE + 1}–{Math.min(displayedPoints.length, (safeListPage + 1) * MAP_LIST_PAGE_SIZE)} de{" "}
+                    {displayedPoints.length}
+                  </span>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn" disabled={safeListPage <= 0} onClick={() => setListPage((p) => Math.max(0, p - 1))}>
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={safeListPage >= listPageCount - 1}
+                      onClick={() => setListPage((p) => Math.min(listPageCount - 1, p + 1))}
+                    >
+                      Seguinte
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <MapSectionErrorBoundary>
@@ -399,6 +505,7 @@ export function MapPage() {
                   flyTo={flyTo}
                   flyKey={flyKey}
                   fitBoundsVersion={fitBoundsVersion}
+                  onBoundsChange={showConnections ? onMapBoundsChange : undefined}
                 />
               </div>
             </MapSectionErrorBoundary>
@@ -407,9 +514,37 @@ export function MapPage() {
 
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Detalhe</h2>
-          {selId && detail.isLoading && <p>A carregar…</p>}
-          {selId && detail.isError && <div className="msg msg--err">{(detail.error as Error).message}</div>}
-          {selId && detail.data && (
+          {selId && isConnPoint && selPoint && (
+            <div style={{ fontSize: 13 }}>
+              <p style={{ marginTop: 0 }}>
+                <strong>{selPoint.description}</strong>
+              </p>
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <tbody>
+                  <tr>
+                    <td style={{ color: "var(--muted)", padding: "4px 8px 4px 0" }}>Login</td>
+                    <td className="mono">{selPoint.login ?? "—"}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ color: "var(--muted)", padding: "4px 8px 4px 0" }}>Tipo</td>
+                    <td>{selPoint.category}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ color: "var(--muted)", padding: "4px 8px 4px 0" }}>Coordenadas</td>
+                    <td className="mono">
+                      {selPoint.lat.toFixed(5)}, {selPoint.lng.toFixed(5)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
+                <Link to="/connections">Ver em Conexões</Link>
+              </p>
+            </div>
+          )}
+          {selId && !isConnPoint && detail.isLoading && <p>A carregar…</p>}
+          {selId && !isConnPoint && detail.isError && <div className="msg msg--err">{(detail.error as Error).message}</div>}
+          {selId && !isConnPoint && detail.data && (
             <div style={{ fontSize: 13 }}>
               <p style={{ marginTop: 0 }}>
                 <strong>{detail.data.description}</strong>

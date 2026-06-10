@@ -5,6 +5,8 @@ import { Plug, Plus, Search, Settings, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastOk } from "../lib/operationToast";
 import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
 import type { IntegrationSummary } from "../integrations/types";
@@ -13,6 +15,7 @@ import { APP_ROUTES } from "../app/routes";
 export function IntegrationsHubPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
+  const { push: pushToast } = useAppToast();
   const admin = isAdminUser();
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -37,8 +40,10 @@ export function IntegrationsHubPage() {
       setNewName("");
       setNewUrl("https://");
       setNewDesc("");
+      toastOk(pushToast, "Integração criada com sucesso.");
       nav(APP_ROUTES.integrationConfig(data.slug));
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao criar integração."),
   });
 
   const deleteM = useMutation({
@@ -46,7 +51,9 @@ export function IntegrationsHubPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.integrations });
       setDeleteTarget(null);
+      toastOk(pushToast, "Integração removida.");
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao remover integração."),
   });
 
   const items = listQ.data?.integrations ?? [];

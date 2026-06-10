@@ -171,6 +171,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			lastTel[row.id] = time.Now()
 			if telErr == nil {
 				RunPostTelemetryAlertEval(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), comm, row.category, row.brand, row.model, c)
+				NudgeMonitoringRuntimeRefresh(sctx, pool)
 			}
 		}()
 	}
@@ -269,6 +270,7 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 			CollectInterfaceSnapshotWorker(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm,
 				row.category, row.brand, row.model, row.description)
 			lastIfaceByDevice[row.id] = time.Now()
+			NudgeMonitoringRuntimeRefresh(sctx, pool)
 			if ph == InterfacePhaseOLT {
 				oltProcessed++
 				setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT) ["+strconv.Itoa(oltProcessed)+"/"+strconv.Itoa(oltEligible)+"]")
@@ -381,6 +383,7 @@ func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 
 			CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
 			lastOltByDevice[row.id] = time.Now()
+			NudgeMonitoringRuntimeRefresh(sctx, pool)
 		}()
 	}
 

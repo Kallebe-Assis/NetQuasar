@@ -17,9 +17,14 @@ export const queryKeys = {
   smtpSettings: ["smtp-settings"] as const,
   alertsIncidents: ["alerts-incidents"] as const,
   alertsActive: ["alerts-active"] as const,
+  alertsIgnored: ["alerts-ignored"] as const,
   alertsHist: ["alerts-hist"] as const,
   alertsResolvedWindow: ["alerts-resolved-window"] as const,
   alertsPingUnreachable: ["alerts-ping-unreachable"] as const,
+  monitoringActiveEquipment: ["monitoring-active-equipment"] as const,
+  oltDevices: ["olt-devices"] as const,
+  clientConnections: ["client-connections"] as const,
+  mapConnectionPoints: ["map-connection-points"] as const,
   settingsAlertThresholdRules: ["settings-alert-threshold-rules"] as const,
   alertRules: ["alert-rules"] as const,
   integrations: ["integrations"] as const,
@@ -34,5 +39,6 @@ export function invalidateAlertListQueries(qc: QueryClient): Promise<void> {
     qc.invalidateQueries({ queryKey: queryKeys.alertsHist }),
     qc.invalidateQueries({ queryKey: queryKeys.alertsResolvedWindow }),
     qc.invalidateQueries({ queryKey: queryKeys.alertsIncidents }),
+    qc.invalidateQueries({ queryKey: queryKeys.alertsIgnored }),
   ]).then(() => undefined);
 }

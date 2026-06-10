@@ -88,6 +88,10 @@ func (s *Server) patchMikrotikCollection(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "settings_mikrotik_collection", "1", "patch", actorFromRequest(r), nil, map[string]any{
+		"has_enabled": mikrotikcollect.HasEnabledMetrics(clean),
+		"steps":       len(steps),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":               true,
 		"metrics":          clean,

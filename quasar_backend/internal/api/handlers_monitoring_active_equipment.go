@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmetrics"
@@ -408,6 +409,114 @@ func cpuUsedFromAvailableOID(oid string, f float64) *float64 {
 
 func ptrFloat(f float64) *float64 { return &f }
 
+func mikrotikFieldFloat(fields map[string]any, key string) *float64 {
+	fr, _ := fields[key].(map[string]any)
+	if fr == nil {
+		return nil
+	}
+	ok, _ := fr["ok"].(bool)
+	if !ok {
+		return nil
+	}
+	v := fr["value"]
+	var f float64
+	switch x := v.(type) {
+	case float64:
+		f = x
+	case int:
+		f = float64(x)
+	case int64:
+		f = float64(x)
+	case string:
+		p, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		if err != nil {
+			return nil
+		}
+		f = p
+	default:
+		return nil
+	}
+	if f < -273 || f > 10000 || (f != f) {
+		return nil
+	}
+	return ptrFloat(f)
+}
+
+func mikrotikFieldString(fields map[string]any, key string) string {
+	fr, _ := fields[key].(map[string]any)
+	if fr == nil {
+		return ""
+	}
+	ok, _ := fr["ok"].(bool)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(anyString(fr["value"]))
+}
+
+// mergeMikrotikKPIs preenche CPU/memória/temperatura/uptime a partir de mikrotik_collection quando o parse SNMP genérico falha.
+func mergeMikrotikKPIs(metricsJSON []byte, cpu, mem, temp **float64, uptime *string) {
+	if len(metricsJSON) == 0 {
+		return
+	}
+	var root map[string]any
+	if json.Unmarshal(metricsJSON, &root) != nil {
+		return
+	}
+	mk, _ := root["mikrotik_collection"].(map[string]any)
+	if mk == nil {
+		return
+	}
+	fields, _ := mk["fields"].(map[string]any)
+	if fields == nil {
+		return
+	}
+	if *cpu == nil {
+		if v := mikrotikFieldFloat(fields, "cpu_load"); v != nil {
+			f := *v
+			if f > 100 {
+				f /= 10
+			}
+			if f >= 0 && f <= 100 {
+				*cpu = ptrFloat(f)
+			}
+		}
+		if *cpu == nil {
+			*cpu = mikrotikFieldFloat(fields, "cpu_hr")
+		}
+	}
+	if *mem == nil {
+		used := mikrotikFieldFloat(fields, "memory_used")
+		total := mikrotikFieldFloat(fields, "memory_total")
+		if used != nil && total != nil && *total > 0 {
+			pct := 100.0 * (*used) / (*total)
+			if pct >= 0 && pct <= 100.0001 {
+				*mem = ptrFloat(pct)
+			}
+		}
+	}
+	if *temp == nil {
+		for _, k := range []string{"temperature", "board_temperature", "cpu_temperature"} {
+			if v := mikrotikFieldFloat(fields, k); v != nil {
+				n := snmpmetrics.NormalizeAmbientTempCelsius(*v)
+				if n > -273 && n < 500 {
+					*temp = ptrFloat(n)
+					break
+				}
+			}
+		}
+	}
+	if uptime != nil && (*uptime == "" || *uptime == "—") {
+		if u := mikrotikFieldString(fields, "sys_uptime"); u != "" {
+			if formatted := vsolparse.FormatUptimeDisplay(u); formatted != "" {
+				*uptime = formatted
+			} else {
+				*uptime = u
+			}
+		}
+	}
+}
+
 // GET /monitoring/active-equipment
 // Lista equipamentos com rede Normal (não Bridge), ping ligado e operação Ativo; inclui última sondagem + última telemetria para campos SNMP conhecidos.
 func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Request) {
@@ -417,9 +526,17 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 			host(d.ip)::text,
 			c.checked_at, c.latency_ms, c.ok, c.reach_ok, COALESCE(c.ping_fail_streak, 0),
 			c.detail::text,
-			(SELECT metrics::text FROM telemetry_samples t WHERE t.device_id = d.id ORDER BY t.collected_at DESC LIMIT 1) AS telemetry_metrics
+			tel.metrics::text AS telemetry_metrics,
+			tel.collected_at AS telemetry_collected_at
 		FROM devices d
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
+		LEFT JOIN LATERAL (
+			SELECT metrics, collected_at
+			FROM telemetry_samples ts
+			WHERE ts.device_id = d.id
+			ORDER BY ts.collected_at DESC
+			LIMIT 1
+		) tel ON true
 		WHERE TRIM(BOTH FROM COALESCE(d.network_status, '')) = 'Normal'
 			AND COALESCE(TRIM(BOTH FROM d.network_status), '') <> ''
 			AND d.ping_enabled = true
@@ -446,8 +563,9 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		var pingFailStreak int
 		var detail *string
 		var metrics *string
+		var telemetryAt *time.Time
 
-		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &reachOK, &pingFailStreak, &detail, &metrics); err != nil {
+		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &reachOK, &pingFailStreak, &detail, &metrics, &telemetryAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -462,6 +580,7 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		vars := snmpVarsFromMetricsOrDetail(metB, detB)
 		prof := profileFromMetrics(metB)
 		cpu, mem, uptime, temp := extractExtendedMetrics(vars, prof)
+		mergeMikrotikKPIs(metB, &cpu, &mem, &temp, &uptime)
 
 		row := map[string]any{
 			"id":               id,
@@ -484,6 +603,9 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		}
 		if lat != nil {
 			row["latency_ms"] = *lat
+		}
+		if telemetryAt != nil {
+			row["telemetry_collected_at"] = telemetryAt.UTC().Format(time.RFC3339)
 		}
 		list = append(list, row)
 	}

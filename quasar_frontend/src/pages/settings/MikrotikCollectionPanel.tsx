@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Save } from "lucide-react";
-import { InlinePageToastBanner, useInlinePageToast } from "../../lib/pageToast";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 import { InfoHint } from "../../components/InfoHint";
 import { apiFetch } from "../../lib/api";
 
@@ -102,7 +103,7 @@ function countEnabled(metrics: MikrotikMetricsForm, catalog: CatalogEntry[]) {
 
 export function MikrotikCollectionPanel() {
   const qc = useQueryClient();
-  const [saveToast, setSaveToast, saveToastLeaving, dismissSaveToast] = useInlinePageToast();
+  const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<MikrotikMetricsForm>({});
   const [steps, setSteps] = useState<MikrotikCollectionStep[]>([]);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
@@ -135,11 +136,9 @@ export function MikrotikCollectionPanel() {
       }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["mikrotik-collection"] });
-      setSaveToast({ ok: true, text: data.message || "Perfil MikroTik guardado." });
+      toastOk(pushToast, data.message || "Perfil MikroTik guardado.");
     },
-    onError: (err) => {
-      setSaveToast({ ok: false, text: (err as Error)?.message || "Falha ao salvar." });
-    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
   if (config.isLoading) return <p>A carregar perfil MikroTik…</p>;
@@ -164,7 +163,6 @@ export function MikrotikCollectionPanel() {
 
   return (
     <div style={{ marginTop: 8 }}>
-      <InlinePageToastBanner toast={saveToast} leaving={saveToastLeaving} onDismiss={dismissSaveToast} />
 
       <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — MikroTik</h2>

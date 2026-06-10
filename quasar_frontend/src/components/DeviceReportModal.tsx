@@ -2,6 +2,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { DropdownMenu } from "./DropdownMenu";
 import { apiFetch, downloadBlob } from "../lib/api";
+import { useAppToast } from "../lib/appToast";
+import { toastErr, toastLoading, toastOk } from "../lib/operationToast";
 import { displayAlertType, displaySeverity } from "../lib/alertLabels";
 import {
   aggregatePingSamples,
@@ -191,6 +193,7 @@ type Props = {
 };
 
 export function DeviceReportModal({ device, onClose }: Props) {
+  const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("7d");
   const [reportTab, setReportTab] = useState<"dados" | "interface" | "graficos" | "outros">("dados");
   const [copyCadastroNote, setCopyCadastroNote] = useState<string | null>(null);
@@ -202,7 +205,19 @@ export function DeviceReportModal({ device, onClose }: Props) {
         `/api/v1/monitoring/full-report/devices/${devId}`,
         { method: "POST", json: {} },
       ),
-    onSuccess: (_, devId) => {
+    onMutate: () => {
+      const loadingId = toastLoading(pushToast, "A executar relatório completo…");
+      return { loadingId };
+    },
+    onSuccess: (data, devId, ctx) => {
+      if (ctx?.loadingId) dismissToast(ctx.loadingId);
+      const status = String(data?.status ?? "done").toLowerCase();
+      const note = data?.note?.trim();
+      if (status === "partial") {
+        pushToast({ tone: "info", text: note || "Relatório completo concluído com avisos parciais." });
+      } else {
+        toastOk(pushToast, note || "Relatório completo concluído.");
+      }
       void deviceCadastro.refetch();
       void reportPingLatest.refetch();
       void reportPingHistory.refetch();
@@ -217,6 +232,10 @@ export function DeviceReportModal({ device, onClose }: Props) {
       void reportAlertsHistory.refetch();
       void reportAlertsHistoryPrev.refetch();
       void devId;
+    },
+    onError: (e, _devId, ctx) => {
+      if (ctx?.loadingId) dismissToast(ctx.loadingId);
+      toastErr(pushToast, e, "Falha ao executar relatório completo.");
     },
   });
 

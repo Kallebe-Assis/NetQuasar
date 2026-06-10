@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
@@ -23,7 +24,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		limit = 5000
 	}
 	suppressOltOnuDrop := !alertthresholds.OltOnuQuantityAlertsEnabled(r.Context(), s.DB())
-	if suppressOltOnuDrop && typ == "olt_onu_drop" {
+	if suppressOltOnuDrop && (typ == "olt_onu_drop" || typ == "olt_onu_rise") {
 		writeJSON(w, http.StatusOK, map[string]any{"alerts": []any{}})
 		return
 	}
@@ -58,6 +59,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 				OR a.device_id IS NULL
 				OR (d.id IS NOT NULL AND `+monitorworker.SQLDeviceEligibleForPingAlerts+`)
 			)
+			`+alertignore.SQLActiveIgnoreNotExists+`
 			UNION ALL
 			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip, a.device_name, a.active_since, a.closed_at, a.meta, a.incident_id
 			FROM alert_instances a
@@ -96,7 +98,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
-		if suppressOltOnuDrop && typ == "olt_onu_drop" {
+		if suppressOltOnuDrop && (typ == "olt_onu_drop" || typ == "olt_onu_rise") {
 			continue
 		}
 		item := map[string]any{
@@ -364,7 +366,7 @@ func (s *Server) patchAlertRule(w http.ResponseWriter, r *http.Request) {
 			UPDATE alert_instances SET
 				closed_at = now(),
 				meta = COALESCE(meta, '{}'::jsonb) || '{"resolved":"olt_onu_threshold_disabled","source":"alert_rules"}'::jsonb
-			WHERE alert_type = 'olt_onu_drop' AND closed_at IS NULL
+			WHERE alert_type IN ('olt_onu_drop', 'olt_onu_rise') AND closed_at IS NULL
 		`)
 		if cerr != nil {
 			s.Log.Warn().Err(cerr).Msg("fechar olt_onu_drop após desactivar limiar")

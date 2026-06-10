@@ -182,6 +182,12 @@ func (s *Server) telemetryCollect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	monitorworker.RunPostTelemetryAlertEval(ctx, s.DB(), &s.Log, id, devDesc, strings.TrimSpace(*ip), comm, devCat, devBrand, devModel, col)
+	monitorworker.NudgeMonitoringRuntimeRefresh(ctx, s.DB())
+	s.auditDeviceAction(ctx, r, id, "collect_telemetry", map[string]any{
+		"description": devDesc,
+		"ip":          strings.TrimSpace(*ip),
+		"ok":          col.OK,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"device_id": id, "ok": col.OK, "metrics": col.Metrics})
 }
 

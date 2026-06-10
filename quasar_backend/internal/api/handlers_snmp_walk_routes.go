@@ -78,6 +78,11 @@ func (s *Server) snmpWalkDeviceRun(w http.ResponseWriter, r *http.Request) {
 		_, _ = pool.Exec(ctx, `UPDATE snmp_walk_jobs SET status='done', result=$2::jsonb, finished_at=now(), error_message=NULL WHERE id=$1`, jobID, rb)
 		s.setMonitoringActivity(context.Background(), "")
 	}()
+	s.auditDeviceAction(r.Context(), r, id, "snmp_discover", map[string]any{
+		"host":   host,
+		"job_id": jid.String(),
+		"scope":  "mib2_walk",
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": jid, "status": "queued", "note": "Walk SNMP em execução em background; consulte GET /snmp-walk/jobs/{jobId} ou GET /devices/{id}/snmp-inventory."})
 }
 

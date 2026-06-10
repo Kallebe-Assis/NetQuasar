@@ -3,14 +3,11 @@ package monitorworker
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
@@ -147,58 +144,6 @@ func logOltPonSnmpWalk(log *zerolog.Logger, deviceID uuid.UUID, host, pass strin
 	e.Msg("OLT PON: walk SNMP (IF-MIB + IF-MIB-X)")
 }
 
-// openOrUpdateByKey insere novo alerta ou atualiza message/meta/severity se já ativo (UI mostra último valor; Telegram só em criação).
-func openOrUpdateByKey(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, severity, alertType, message, ip, devName, key string, meta map[string]any) (bool, uuid.UUID, error) {
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	meta["key"] = key
-	metaRaw, _ := json.Marshal(meta)
-	var aid uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5), ''), NULLIF(trim($6), ''), COALESCE($7::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id=$1::uuid AND ai.alert_type=$3::text AND ai.closed_at IS NULL
-			  AND (ai.meta->>'key')=($7::jsonb->>'key')
-		)
-		RETURNING id
-	`, deviceID, severity, alertType, message, ip, devName, metaRaw).Scan(&aid)
-	if err == nil {
-		return true, aid, nil
-	}
-	if err != pgx.ErrNoRows {
-		return false, uuid.Nil, err
-	}
-	_, err = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity=$3::text,
-			message=$4,
-			meta=COALESCE(meta, '{}'::jsonb) || $5::jsonb
-		WHERE device_id=$1::uuid AND alert_type=$2::text AND closed_at IS NULL
-		  AND (meta->>'key')=($5::jsonb->>'key')
-	`, deviceID, alertType, severity, message, metaRaw)
-	return false, uuid.Nil, err
-}
-
-func closeByKey(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType, key string) {
-	metaRaw, _ := json.Marshal(map[string]any{"resolved": "normalized", "source": "monitor_worker", "key": key})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at=now(),
-			meta=COALESCE(meta,'{}'::jsonb) || $4::jsonb
-		WHERE device_id=$1::uuid AND alert_type=$2::text AND closed_at IS NULL AND (meta->>'key')=$3
-		RETURNING id, message
-	`, deviceID, alertType, key, metaRaw).Scan(&aid, &msg)
-	if err != nil {
-		return
-	}
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, alertnotify.ResolutionHeadlineForAlertType(alertType), msg)
-}
-
 // CollectOltPonAndEvaluate executa coleta periódica de ONUs por PON (derive IF-MIB) e avalia alarmes.
 // Omitido para fabricantes onde o derive IF-MIB é incorrecto/incompleto (ex.: ZTE, Datacom — usar refresh OLT/API).
 func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community, devDesc, category, brand, model string, maxPons *int) {
@@ -304,61 +249,8 @@ deriveLoop:
 	pons = stabMaps
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 
-	prevOn := map[string]float64{}
-	for _, p := range prevMaps {
-		k := oltifderive.StablePonRowKey(p)
-		if k == "" {
-			continue
-		}
-		if n, ok := oltifderive.OnuOnlineFromRow(p); ok {
-			prevOn[k] = n
-		}
-	}
-
-	thPct, _, okPct := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "olt_onu_drop_percent", "olt")
-	for _, p := range pons {
-		k := oltifderive.StablePonRowKey(p)
-		if k == "" {
-			continue
-		}
-		curOn, curOK := oltifderive.OnuOnlineFromRow(p)
-		prev, prevOK := prevOn[k]
-		if !curOK || !prevOK || prev <= curOn {
-			continue
-		}
-		drop := prev - curOn
-		dropPct := 0.0
-		if prev > 0 {
-			dropPct = (drop / prev) * 100.0
-		}
-		if okPct {
-			// Fecha alertas legados gerados apenas por queda absoluta de contagem.
-			closeByKey(ctx, pool, log, deviceID, "olt_onu_drop", "onu_drop_count:"+k)
-			sev := thresholdSeverity(dropPct, thPct)
-			key := "onu_drop_pct:" + k
-			oltLabel := strings.TrimSpace(devDesc)
-			if oltLabel == "" {
-				oltLabel = host
-			}
-			msg := fmt.Sprintf("Queda de %.0f%% (%.0f ONUs) das ONUs online na PON %s da OLT %s (%s).", dropPct, drop, k, oltLabel, host)
-			if sev != "ok" {
-				meta := alertnotify.WithStatusTransition(map[string]any{
-					"source":            "monitor_worker",
-					"pon":               k,
-					"drop_online_count": drop,
-					"drop_online_pct":   dropPct,
-					"prev_online":       prev,
-					"curr_online":       curOn,
-				}, fmt.Sprintf("onu_online_%.0f", prev), fmt.Sprintf("onu_online_%.0f", curOn), nil)
-				created, aid, err := openOrUpdateByKey(ctx, pool, deviceID, sev, "olt_onu_drop", msg, host, oltLabel, key, meta)
-				if err == nil && created && aid != uuid.Nil {
-					alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, aid, strings.ToUpper(sev), "Queda percentual de ONUs online — PON", msg)
-				}
-			} else {
-				closeByKey(ctx, pool, log, deviceID, "olt_onu_drop", key)
-			}
-		}
-	}
+	oltifderive.ApplyPonOperStatusAll(pons)
+	alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, log, deviceID, devDesc, host, pons)
 
 	summary := map[string]any{

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -46,6 +47,9 @@ func EvaluateOltOnuOpticalThreshold(
 		return
 	}
 	if streak < onuOpticalCycles {
+		return
+	}
+	if alertignore.IsMuted(ctx, pool, deviceID, alertType, key) {
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): PON %s — %s em %.2f dBm (%s por %d ciclos).",

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/rs/zerolog"
 )
@@ -87,6 +88,9 @@ func openLatencyHighAfterStreak(ctx context.Context, pool *pgxpool.Pool, log *ze
 	}
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
+	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeLatencyHigh, "") {
+		return
+	}
 	msg := fmt.Sprintf("%s (%s): latência ICMP/TCP em %d ms (≥ %d ms em %d leituras consecutivas).",
 		descOr(desc, "?"), addrOr(addr, "?"), currLat, latencyDegradedMinMS, latencyHighConsecutiveRequired)
 	meta := alertnotify.WithStatusTransition(map[string]any{
@@ -195,6 +199,9 @@ func syncLatencyAlertByGlobalThreshold(ctx context.Context, pool *pgxpool.Pool, 
 	sev := thresholdSeverity(float64(currLat), th)
 	if sev == "ok" {
 		resolveLatencyHighIfCalm(ctx, pool, log, deviceID, reachOK, 0)
+		return true
+	}
+	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeLatencyHigh, "") {
 		return true
 	}
 	desc := strings.TrimSpace(description)

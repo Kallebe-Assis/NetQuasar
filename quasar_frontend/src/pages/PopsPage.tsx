@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { errorMessageFromUnknown } from "../lib/apiErrors";
+import { useAppToast } from "../lib/appToast";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { isAdminUser } from "../lib/auth";
+import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
 import { ActionMenu } from "../components/ActionMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EquipmentMap } from "../components/EquipmentMap";
 import { PageCountPill } from "../components/PageCountPill";
 import { PopLocationPicker } from "../components/PopLocationPicker";
-import { ToastMessage } from "../components/ToastMessage";
 
 type Pop = {
   id: string;
@@ -64,6 +67,7 @@ function validateCoords(lat: number | null, lon: number | null): string | null {
 export function PopsPage() {
   const canMutate = isAdminUser();
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const list = useQuery({
     queryKey: ["pops"],
     queryFn: () => apiFetch<{ pops: Pop[] }>("/api/v1/pops"),
@@ -104,7 +108,9 @@ export function PopsPage() {
       setLat("");
       setLon("");
       setCreateOpen(false);
+      toastOk(pushToast, "POP criado com sucesso.");
     },
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao criar POP."),
   });
 
   const [edit, setEdit] = useState<Pop | null>(null);
@@ -138,21 +144,24 @@ export function PopsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pops"] });
       setEdit(null);
-      setToast({ text: "Guardado com sucesso (POP).", tone: "ok" });
+      toastOk(pushToast, "POP actualizado com sucesso.");
     },
-    onError: (err: Error) => setToast({ text: err.message || "Falha ao salvar (POP).", tone: "err" }),
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao guardar POP."),
   });
 
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/pops/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["pops"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pops"] });
+      toastOk(pushToast, "POP excluído.");
+    },
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao excluir POP."),
   });
 
   const [assignPop, setAssignPop] = useState<Pop | null>(null);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
   const [contactsPop, setContactsPop] = useState<Pop | null>(null);
   const [viewPop, setViewPop] = useState<Pop | null>(null);
-  const [toast, setToast] = useState<{ text: string; tone: "ok" | "err" | "off" } | null>(null);
   const [pendingDeletePop, setPendingDeletePop] = useState<Pop | null>(null);
   const [pendingDeleteContactId, setPendingDeleteContactId] = useState<string | null>(null);
   const [contactName, setContactName] = useState("");
@@ -176,13 +185,17 @@ export function PopsPage() {
       setContactInfo("");
       setContactShift("");
       setContactNotes("");
-      setToast({ text: "Guardado com sucesso (responsável).", tone: "ok" });
+      toastOk(pushToast, "Responsável adicionado.");
     },
-    onError: (err: Error) => setToast({ text: err.message || "Falha ao salvar (responsável).", tone: "err" }),
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao guardar responsável."),
   });
   const delContact = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/pops/contacts/${id}`, { method: "DELETE" }),
-    onSuccess: () => contacts.refetch(),
+    onSuccess: () => {
+      contacts.refetch();
+      toastOk(pushToast, "Responsável removido.");
+    },
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao remover responsável."),
   });
 
   const devicesWithoutPop = useMemo(() => {
@@ -195,12 +208,14 @@ export function PopsPage() {
         await apiFetch(`/api/v1/devices/${id}`, { method: "PATCH", json: { pop_id: popId } });
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, { ids }) => {
       qc.invalidateQueries({ queryKey: ["pops"] });
       qc.invalidateQueries({ queryKey: ["devices"] });
       setAssignPop(null);
       setSelectedDeviceIds(new Set());
+      toastOk(pushToast, `${ids.length} equipamento(s) associado(s) ao POP.`);
     },
+    onError: (err: Error) => toastErr(pushToast, err, "Falha ao associar equipamentos."),
   });
 
   function toggleDevice(id: string) {
@@ -213,7 +228,7 @@ export function PopsPage() {
   }
 
   if (list.isLoading) return <p>Carregando POPs…</p>;
-  if (list.isError) return <div className="msg msg--err">{(list.error as Error).message}</div>;
+  if (list.isError) return <div className="msg msg--err">{errorMessageFromUnknown(list.error)}</div>;
 
   const createLatNum = parseCoordInput(lat);
   const createLonNum = parseCoordInput(lon);
@@ -224,21 +239,16 @@ export function PopsPage() {
 
   const copyCoords = async (p: Pop) => {
     if (p.latitude == null || p.longitude == null) {
-      setToast({ text: "Este POP ainda não possui coordenadas.", tone: "off" });
+      toastInfo(pushToast, "Este POP ainda não possui coordenadas.");
       return;
     }
     const txt = `${p.latitude}, ${p.longitude}`;
-    try {
-      await navigator.clipboard.writeText(txt);
-      setToast({ text: "Coordenadas copiadas.", tone: "ok" });
-    } catch {
-      setToast({ text: `Falha ao copiar automaticamente: ${txt}`, tone: "err" });
+    const ok = await copyTextToClipboard(txt);
+    if (ok) {
+      toastOk(pushToast, "Coordenadas copiadas.");
+    } else {
+      toastErr(pushToast, new Error(`Não foi possível copiar automaticamente. Copie manualmente: ${txt}`));
     }
-  };
-
-  const showToast = (text: string, tone: "ok" | "err" | "off" = "ok") => {
-    setToast({ text, tone });
-    window.setTimeout(() => setToast(null), 10_000);
   };
 
   return (
@@ -310,8 +320,6 @@ export function PopsPage() {
         </table>
       </div>
 
-      {toast && <ToastMessage text={toast.text} tone={toast.tone} />}
-
       {viewPop && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setViewPop(null)}>
           <div className="modal modal--wide" style={{ maxWidth: 1100 }} onClick={(e) => e.stopPropagation()}>
@@ -355,7 +363,7 @@ export function PopsPage() {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setCreateOpen(false)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
             <h3>Novo POP</h3>
-            {create.isError && <div className="msg msg--err">{(create.error as Error).message}</div>}
+            {create.isError && <div className="msg msg--err">{errorMessageFromUnknown(create.error)}</div>}
             <div className="field">
               <label>Descrição *</label>
               <input className="input" style={{ width: "100%" }} value={desc} onChange={(e) => setDesc(e.target.value)} />
@@ -463,7 +471,7 @@ export function PopsPage() {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setEdit(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
             <h3>Editar POP</h3>
-            {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
+            {patch.isError && <div className="msg msg--err">{errorMessageFromUnknown(patch.error)}</div>}
             <div className="field">
               <label>Descrição *</label>
               <input className="input" style={{ width: "100%" }} value={eDesc} onChange={(e) => setEDesc(e.target.value)} />
@@ -511,7 +519,7 @@ export function PopsPage() {
               <strong>{assignPop.description}</strong> — só aparecem equipamentos <strong>sem POP</strong> (cada equipamento pode ter no máximo um POP).
             </p>
             {devices.isLoading && <p>A carregar equipamentos…</p>}
-            {devices.isError && <div className="msg msg--err">{(devices.error as Error).message}</div>}
+            {devices.isError && <div className="msg msg--err">{errorMessageFromUnknown(devices.error)}</div>}
             {devices.data && (
               <>
                 {devicesWithoutPop.length === 0 ? (
@@ -547,7 +555,7 @@ export function PopsPage() {
                     </table>
                   </div>
                 )}
-                {assignDevices.isError && <div className="msg msg--err">{(assignDevices.error as Error).message}</div>}
+                {assignDevices.isError && <div className="msg msg--err">{errorMessageFromUnknown(assignDevices.error)}</div>}
                 <div className="row" style={{ marginTop: 12 }}>
                   <button type="button" className="btn" onClick={() => setAssignPop(null)}>
                     Cancelar
@@ -576,13 +584,7 @@ export function PopsPage() {
         onCancel={() => setPendingDeletePop(null)}
         onConfirm={() => {
           if (!pendingDeletePop) return;
-          del.mutate(pendingDeletePop.id, {
-            onSuccess: () => {
-              setPendingDeletePop(null);
-              showToast("POP excluído.", "ok");
-            },
-            onError: () => showToast("Falha ao excluir POP.", "err"),
-          });
+          del.mutate(pendingDeletePop.id, { onSuccess: () => setPendingDeletePop(null) });
         }}
       />
       <ConfirmModal
@@ -595,13 +597,7 @@ export function PopsPage() {
         onCancel={() => setPendingDeleteContactId(null)}
         onConfirm={() => {
           if (!pendingDeleteContactId) return;
-          delContact.mutate(pendingDeleteContactId, {
-            onSuccess: () => {
-              setPendingDeleteContactId(null);
-              showToast("Responsável removido.", "ok");
-            },
-            onError: () => showToast("Falha ao remover responsável.", "err"),
-          });
+          delContact.mutate(pendingDeleteContactId, { onSuccess: () => setPendingDeleteContactId(null) });
         }}
       />
     </>

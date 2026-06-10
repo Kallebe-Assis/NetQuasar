@@ -34,10 +34,7 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	runLat := bootstrap || cycleDue(lastLat, cfg.PingSeconds)
 	runTel := bootstrap || (mode == ModeFull && cycleDue(lastTel, cfg.TelemetrySeconds))
 	runIf := bootstrap || (mode == ModeFull && cycleDue(lastIf, cfg.IfaceSeconds))
-	// Coleta OLT (IF-MIB derivada / refresh) é manual via perfil — não agendar no worker.
-	runOlt := false
-	_ = lastOlt
-	_ = cfg.OltDerivedSeconds
+	runOlt := bootstrap || (mode == ModeFull && cycleDue(lastOlt, cfg.OltDerivedSeconds))
 
 	if !runLat && !runTel && !runIf && !runOlt {
 		return
@@ -84,8 +81,7 @@ func RunWorkerSNMPSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 	}
 	runTel := bootstrap || cycleDue(lastTel, cfg.TelemetrySeconds)
 	runIf := bootstrap || cycleDue(lastIf, cfg.IfaceSeconds)
-	runOlt := false
-	_ = lastOlt
+	runOlt := bootstrap || cycleDue(lastOlt, cfg.OltDerivedSeconds)
 	runWorkerSNMPStepsFromFlags(ctx, pool, log, mode, src, bootstrap, runTel, runIf, runOlt)
 }
 
@@ -143,5 +139,6 @@ func PipelineHasWorkDue(ctx context.Context, pool *pgxpool.Pool, mode string) (b
 		return false, nil
 	}
 	return cycleDue(lastTel, cfg.TelemetrySeconds) ||
-		cycleDue(lastIf, cfg.IfaceSeconds), nil
+		cycleDue(lastIf, cfg.IfaceSeconds) ||
+		cycleDue(lastOlt, cfg.OltDerivedSeconds), nil
 }

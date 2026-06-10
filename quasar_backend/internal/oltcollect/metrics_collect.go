@@ -421,6 +421,7 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	if len(onuRows) == 0 && len(ponCountsByPon) == 0 {
 		summary["onu_metrics_note"] = "Nenhuma ONU encontrada nos walks SNMP — verifique OIDs, community e conectividade"
 	}
+	oltifderive.ApplyPonOperStatusAll(pons)
 	return summary, pons, walkLog, nil
 }
 

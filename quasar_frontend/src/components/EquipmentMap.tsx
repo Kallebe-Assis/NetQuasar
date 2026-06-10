@@ -118,6 +118,16 @@ function gridDecimalsForZoom(z: number): number {
   return 5;
 }
 
+/** Identificador leve para invalidar clusters — evita sort de milhares de IDs. */
+function pointsFingerprint(points: MapPoint[]): string {
+  let h = points.length;
+  for (let i = 0; i < points.length; i++) {
+    const id = points[i].id;
+    for (let j = 0; j < id.length; j++) h = (h * 33 + id.charCodeAt(j)) | 0;
+  }
+  return `${points.length}:${h}`;
+}
+
 function gridClusters(points: MapPoint[], decimals: number): { key: string; members: MapPoint[]; lat: number; lng: number }[] {
   const f = 10 ** decimals;
   const m = new Map<string, MapPoint[]>();
@@ -178,6 +188,38 @@ function FitBounds({ pointsRef, version }: { pointsRef: MutableRefObject<{ lat: 
       map.fitBounds(b, { padding: FIT_PADDING, maxZoom: FIT_MAX_ZOOM, animate: false });
     }
   }, [map, version]);
+  return null;
+}
+
+export type MapBounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
+
+function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!onBoundsChange) return;
+    let timer: number | null = null;
+    const emit = () => {
+      const b = map.getBounds();
+      onBoundsChange({
+        minLat: b.getSouth(),
+        maxLat: b.getNorth(),
+        minLng: b.getWest(),
+        maxLng: b.getEast(),
+      });
+    };
+    const schedule = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(emit, 280);
+    };
+    map.whenReady(emit);
+    map.on("moveend", schedule);
+    map.on("zoomend", schedule);
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+      map.off("moveend", schedule);
+      map.off("zoomend", schedule);
+    };
+  }, [map, onBoundsChange]);
   return null;
 }
 
@@ -430,7 +472,7 @@ function ClusterMarkersByView({
   const map = useMap();
   const [zoom, setZoom] = useState(() => map.getZoom());
   const decimals = gridDecimalsForZoom(zoom);
-  const pointsFingerprint = useMemo(() => points.map((p) => p.id).sort().join("|"), [points]);
+  const pointsFp = useMemo(() => pointsFingerprint(points), [points]);
 
   useEffect(() => {
     const bump = () => setZoom(map.getZoom());
@@ -448,7 +490,7 @@ function ClusterMarkersByView({
     setExpandedClusterKeys(new Set());
     setSpider(null);
     stopSpiderAnim();
-  }, [pointsFingerprint, decimals, stopSpiderAnim, setSpider]);
+  }, [pointsFp, decimals, stopSpiderAnim, setSpider]);
 
   const clustersGrid = useMemo(() => gridClusters(points, decimals), [points, decimals]);
 
@@ -537,6 +579,7 @@ export function EquipmentMap({
   flyTo,
   flyKey,
   fitBoundsVersion,
+  onBoundsChange,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -547,6 +590,8 @@ export function EquipmentMap({
   flyKey: number;
   /** Incrementar para voltar a ajustar o zoom aos pontos visíveis (refetch ou mudança de filtros). */
   fitBoundsVersion: number;
+  /** Vista actual do mapa (debounced) — útil para carregar conexões só na área visível. */
+  onBoundsChange?: (b: MapBounds) => void;
 }) {
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
@@ -556,11 +601,11 @@ export function EquipmentMap({
   spiderRef.current = spider;
   const rafRef = useRef<number | null>(null);
 
-  const pointsFingerprint = useMemo(() => valid.map((p) => p.id).sort().join("|"), [valid]);
+  const pointsFp = useMemo(() => pointsFingerprint(valid), [valid]);
 
   useEffect(() => {
     setSpider(null);
-  }, [pointsFingerprint, displayMode]);
+  }, [pointsFp, displayMode]);
 
   const stopSpiderAnim = useCallback(() => {
     if (rafRef.current != null) {
@@ -591,7 +636,10 @@ export function EquipmentMap({
     return () => stopSpiderAnim();
   }, [stopSpiderAnim]);
 
-  const stacksScatter = useMemo(() => mergeProximityStacks(valid, STACK_MERGE_M), [valid]);
+  const stacksScatter = useMemo(
+    () => (displayMode === "cluster" ? [] : mergeProximityStacks(valid, STACK_MERGE_M)),
+    [valid, displayMode],
+  );
 
   const fitPointsRef = useRef<{ lat: number; lng: number }[]>([]);
   fitPointsRef.current = valid.map((p) => ({ lat: p.lat, lng: p.lng }));
@@ -609,6 +657,7 @@ export function EquipmentMap({
     >
       <MapInvalidateSize />
       <FitBounds pointsRef={fitPointsRef} version={fitBoundsVersion} />
+      <MapBoundsReporter onBoundsChange={onBoundsChange} />
       <MapFlyTo target={flyTo} flyKey={flyKey} />
       <CloseSpiderOnMapClick active={!!spider && spider.phase >= 0.995} onClose={() => setSpider(null)} />
       <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />

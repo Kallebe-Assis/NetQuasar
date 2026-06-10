@@ -18,6 +18,7 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   mikrotik_sfp_tx: "optical",
   mikrotik_sfp_rx: "optical",
   olt_onu_drop: "olt",
+  olt_onu_rise: "olt",
   pon_down: "olt",
 };
 
@@ -63,6 +64,8 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "Limiar de métrica";
     case "olt_onu_drop":
       return "Queda de ONUs";
+    case "olt_onu_rise":
+      return "Subida de ONUs";
     default:
       return "Alerta";
   }
@@ -71,7 +74,7 @@ export function alertProblemTitle(type: string | null | undefined): string {
 export function alertEquipmentPrimary(type: string | null | undefined, deviceName: string | null | undefined, message: string | null | undefined, meta: unknown): string {
   const t = String(type ?? "").trim();
   const m = metaObj(meta);
-  if (t === "olt_onu_drop") {
+  if (t === "olt_onu_drop" || t === "olt_onu_rise") {
     const msgRaw = String(message ?? "");
     const oltFromMsg = msgRaw.match(/da\s+OLT\s+(.+)\s+\([^)]+\)\s*\.?\s*$/im)?.[1]?.trim() ?? "";
     const olt = String(deviceName ?? "").trim() || oltFromMsg;
@@ -140,6 +143,7 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "mikrotik_sfp_tx", label: "SFP — TX" },
   { value: "mikrotik_sfp_rx", label: "SFP — RX" },
   { value: "olt_onu_drop", label: "OLT — queda de ONUs" },
+  { value: "olt_onu_rise", label: "OLT — subida de ONUs" },
 ];
 
 export const ALERT_SEVERITY_FILTER_OPTIONS: { value: string; label: string }[] = [
@@ -204,12 +208,16 @@ export function alertValueText(type: string | null | undefined, message: string 
   const t = String(type ?? "").trim();
   if (t === "ping_unreachable") return "-";
 
-  if (t === "olt_onu_drop") {
-    const pct = m?.drop_online_pct;
-    const cnt = m?.drop_online_count;
+  if (t === "olt_onu_drop" || t === "olt_onu_rise") {
+    const pctKey = t === "olt_onu_rise" ? "rise_online_pct" : "drop_online_pct";
+    const cntKey = t === "olt_onu_rise" ? "rise_online_count" : "drop_online_count";
+    const pct = m?.[pctKey];
+    const cnt = m?.[cntKey];
     if (typeof pct === "number" && Number.isFinite(pct) && typeof cnt === "number" && Number.isFinite(cnt)) {
       return `${pct.toFixed(0)}% (${Math.round(cnt)} ONUs)`;
     }
+    const cntOnly = coerceFiniteNumber(cnt);
+    if (cntOnly !== null) return fmtByUnit(cntOnly, "ONUs");
   }
 
   const dbmN = coerceFiniteNumber(m?.dbm);

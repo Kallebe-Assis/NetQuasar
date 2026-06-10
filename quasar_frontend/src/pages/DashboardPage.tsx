@@ -73,6 +73,7 @@ type DashboardAnalytics = {
   alerts_open?: number;
   mikrotik_interface_traffic_latest?: MikTraffic[];
   olt_onu_by_device?: OltOnu[];
+  olt_onu_fleet_totals?: { onu_count?: number; onu_online?: number; onu_offline?: number };
 };
 type OltCapacityPON = {
   olt_id: string;
@@ -283,6 +284,22 @@ export function DashboardPage() {
       brand: r.brand ?? "",
     }));
   }, [dash.data?.olt_onu_by_device]);
+
+  const oltFleetTotals = useMemo(() => {
+    const ft = dash.data?.olt_onu_fleet_totals;
+    if (ft) {
+      return { total: num(ft.onu_count), online: num(ft.onu_online), offline: num(ft.onu_offline) };
+    }
+    let total = 0;
+    let online = 0;
+    let offline = 0;
+    for (const r of dash.data?.olt_onu_by_device ?? []) {
+      total += num(r.onu_count);
+      online += num(r.onu_online);
+      offline += num(r.onu_offline);
+    }
+    return { total, online, offline };
+  }, [dash.data?.olt_onu_fleet_totals, dash.data?.olt_onu_by_device]);
 
   const netDonut = useMemo(() => {
     return (dash.data?.devices_by_network_status ?? []).map((r) => ({
@@ -714,6 +731,20 @@ export function DashboardPage() {
           <p style={{ color: "var(--muted)", fontSize: 13 }}>Sem snapshots OLT. Associe equipamentos OLT e execute refresh de dados OLT.</p>
         ) : (
           <>
+            <div className="row" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+              <div className="stat" style={{ minWidth: 140 }}>
+                <div className="stat__k">ONUs total (todas as OLTs)</div>
+                <div className="stat__v">{fmtInt(oltFleetTotals.total)}</div>
+              </div>
+              <div className="stat" style={{ minWidth: 120 }}>
+                <div className="stat__k">Online</div>
+                <div className="stat__v">{fmtInt(oltFleetTotals.online)}</div>
+              </div>
+              <div className="stat" style={{ minWidth: 120 }}>
+                <div className="stat__k">Offline</div>
+                <div className="stat__v">{fmtInt(oltFleetTotals.offline)}</div>
+              </div>
+            </div>
             <ChartBox h={300}>
               <BarChart data={oltOnuBar} margin={{ left: 8, right: 8, top: 12, bottom: 52 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
