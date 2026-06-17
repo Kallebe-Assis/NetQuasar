@@ -1,9 +1,6 @@
 import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import "leaflet/dist/leaflet.css";
 
 export type MapPoint = {
@@ -35,36 +32,6 @@ const FIT_PADDING: [number, number] = [48, 48];
 const FIT_MAX_ZOOM = 16;
 const SINGLE_POINT_ZOOM = 14;
 const CLUSTER_EXPAND_MAX_ZOOM = 17;
-
-function fixLeafletIcons() {
-  const def = L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown };
-  delete def._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconUrl: markerIcon,
-    iconRetinaUrl: markerIcon2x,
-    shadowUrl: markerShadow,
-  });
-}
-
-/** Antes do primeiro paint dos Markers (o useEffect corre demasiado tarde). */
-fixLeafletIcons();
-
-/** Uma instância partilhada com URLs explícitos (evita tipos frágeis de `Icon.Default` no strict TS). */
-let sharedDefaultMarkerIcon: L.Icon | null = null;
-function defaultMarkerIcon(): L.Icon {
-  if (!sharedDefaultMarkerIcon) {
-    sharedDefaultMarkerIcon = L.icon({
-      iconUrl: markerIcon,
-      iconRetinaUrl: markerIcon2x,
-      shadowUrl: markerShadow,
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-      shadowSize: [41, 41],
-    });
-  }
-  return sharedDefaultMarkerIcon;
-}
 
 function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
