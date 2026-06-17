@@ -8,11 +8,16 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/rs/zerolog"
+)
+
+const (
+	globalThresholdRuleName = "Limiar global de alertas"
+	alertSchemaV1           = "netquasar.alert_thresholds.v1"
 )
 
 // GteMetricThreshold limiares estilo «warning_min» / «critical_min» com operador gte (métricas de equipamento).
@@ -155,6 +160,11 @@ func severityGteMetric(v float64, t GteMetricThreshold) string {
 	return "ok"
 }
 
+// EvalMetricSeverity avalia severidade de um valor face a um limiar global (exportado para interfacealerts e verify).
+func EvalMetricSeverity(v float64, t GteMetricThreshold) string {
+	return severityGteMetric(v, t)
+}
+
 const alertTypeTelemetryThreshold = "telemetry_threshold"
 
 // EvaluateGlobalGteMetric abre/atualiza ou fecha alerta conforme limiar global (ex.: temperature_c).
@@ -185,72 +195,38 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 	}
 	msg := fmt.Sprintf("%s (%s): %s está em %.2f — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, value, sevPt)
 	meta := alertnotify.WithStatusTransition(map[string]any{
-		"source":    "monitoring_telemetry",
-		"key":       key,
-		"metric_id": metricID,
-		"value":     value,
+		"source":     "monitoring_telemetry",
+		"key":        key,
+		"metric_id":  metricID,
+		"value":      value,
+		"value_text": formatTelemetryValueText(metricID, value),
 	}, "metric_normal", "threshold_"+sev, nil)
-	metaRaw, _ := json.Marshal(meta)
-	var newID uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5), ''), NULLIF(trim($6), ''),
-			COALESCE($7::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid
-			  AND ai.alert_type = $3::text
-			  AND ai.closed_at IS NULL
-			  AND (ai.meta->>'key') = ($8::jsonb->>'key')
-		)
-		RETURNING id
-	`, deviceID, sev, alertTypeTelemetryThreshold, msg, ip, desc, metaRaw, metaRaw).Scan(&newID)
-	if err == nil {
-		if log != nil {
-			log.Warn().Str("device", deviceID.String()).Str("metric", metricID).Str("sev", sev).Msg("alerta telemetria: limiar global")
-		}
-		alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, newID, strings.ToUpper(sev), "Telemetria — limiar global", msg)
-		return
-	}
-	if err != pgx.ErrNoRows {
-		if log != nil {
-			log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances insert telemetry_threshold")
-		}
-		return
-	}
-	// Já existe: atualiza valor / texto / severidade na UI sem novo Telegram.
-	updateMeta, _ := json.Marshal(map[string]any{
-		"source":    "monitoring_telemetry",
-		"metric_id": metricID,
-		"value":     value,
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: sev, AlertType: alertTypeTelemetryThreshold,
+		Message: msg, IP: ip, DeviceName: desc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+	}, &alertstore.NotifyCreate{
+		Log: log, Level: strings.ToUpper(sev), Headline: "Telemetria — limiar global",
 	})
-	_, _ = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity = $4::text,
-			message = $5,
-			meta = COALESCE(meta, '{}'::jsonb) || $6::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'key') = $3
-	`, deviceID, alertTypeTelemetryThreshold, key, sev, msg, updateMeta)
+	if err != nil {
+		if log != nil {
+			log.Error().Err(err).Str("device", deviceID.String()).Msg("alertstore telemetry_threshold")
+		}
+		return
+	}
+	if res.Created && log != nil {
+		log.Warn().Str("device", deviceID.String()).Str("metric", metricID).Str("sev", sev).Msg("alerta telemetria: limiar global")
+	}
 }
 
 func closeTelemetryThresholdAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, key string) {
-	metaPatch, _ := json.Marshal(map[string]any{"resolved": "metric_within_limits", "source": "monitoring_telemetry"})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at = now(),
-			meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'key') = $4
-		RETURNING id, message
-	`, deviceID, alertTypeTelemetryThreshold, metaPatch, key).Scan(&aid, &msg)
-	if err != nil {
-		return
-	}
-	head := alertnotify.ResolutionHeadlineForAlertType(alertTypeTelemetryThreshold)
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, head, msg)
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertTypeTelemetryThreshold,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved: map[string]any{
+			"resolved": "metric_within_limits", "source": "monitoring_telemetry", "key": key,
+		},
+	})
 }
 
 func descOrEmpty(s, fb string) string {
@@ -265,4 +241,22 @@ func addrOrEmpty(s, fb string) string {
 		return fb
 	}
 	return s
+}
+
+func formatTelemetryValueText(metricID string, value float64) string {
+	switch strings.TrimSpace(metricID) {
+	case "uptime_minutes":
+		return fmt.Sprintf("%.0f min", value)
+	case "cpu_usage_pct", "memory_usage_pct":
+		return fmt.Sprintf("%.1f%%", value)
+	case "temperature_c":
+		return fmt.Sprintf("%.1f °C", value)
+	case "latency_ms":
+		return fmt.Sprintf("%.0f ms", value)
+	default:
+		if strings.Contains(metricID, "dbm") {
+			return fmt.Sprintf("%.2f dBm", value)
+		}
+		return fmt.Sprintf("%.2f", value)
+	}
 }

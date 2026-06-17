@@ -16,8 +16,18 @@ export type MapPoint = {
   status: string;
 };
 
-/** Agrupado (grelha), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
+/** Agrupado (grelha por tipo), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
 export type MapDisplayMode = "cluster" | "scatter" | "status";
+
+export type MapColors = {
+  equipment: string;
+  connection: string;
+};
+
+export const DEFAULT_MAP_COLORS: MapColors = {
+  equipment: "#3388ff",
+  connection: "#3b82f6",
+};
 
 const STACK_MERGE_M = 22;
 const SPIDER_RADIUS_M = 28;
@@ -128,22 +138,35 @@ function pointsFingerprint(points: MapPoint[]): string {
   return `${points.length}:${h}`;
 }
 
-function gridClusters(points: MapPoint[], decimals: number): { key: string; members: MapPoint[]; lat: number; lng: number }[] {
+function pointClusterKind(p: MapPoint): string {
+  if (p.status === "connection") return "connection";
+  return p.category || "equipamento";
+}
+
+function clusterKindLabel(kind: string, count: number): string {
+  if (kind === "connection") return count === 1 ? "Conexão" : "Conexões";
+  return count === 1 ? kind : `${kind} (${count})`;
+}
+
+function gridClusters(points: MapPoint[], decimals: number): { key: string; kind: string; members: MapPoint[]; lat: number; lng: number }[] {
   const f = 10 ** decimals;
   const m = new Map<string, MapPoint[]>();
+  const kinds = new Map<string, string>();
   for (const p of points) {
     const gx = Math.round(p.lat * f) / f;
     const gy = Math.round(p.lng * f) / f;
-    const key = `${gx.toFixed(decimals)},${gy.toFixed(decimals)}`;
+    const kind = pointClusterKind(p);
+    const key = `${gx.toFixed(decimals)},${gy.toFixed(decimals)}|${kind}`;
     const arr = m.get(key);
     if (arr) arr.push(p);
     else m.set(key, [p]);
+    kinds.set(key, kind);
   }
-  const out: { key: string; members: MapPoint[]; lat: number; lng: number }[] = [];
+  const out: { key: string; kind: string; members: MapPoint[]; lat: number; lng: number }[] = [];
   for (const [key, members] of m) {
     const lat = members.reduce((s, x) => s + x.lat, 0) / members.length;
     const lng = members.reduce((s, x) => s + x.lng, 0) / members.length;
-    out.push({ key, members, lat, lng });
+    out.push({ key, kind: kinds.get(key) ?? "equipamento", members, lat, lng });
   }
   return out;
 }
@@ -191,7 +214,7 @@ function FitBounds({ pointsRef, version }: { pointsRef: MutableRefObject<{ lat: 
   return null;
 }
 
-export type MapBounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
+export type MapBounds = { minLat: number; maxLat: number; minLng: number; maxLng: number; zoom?: number };
 
 function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds) => void }) {
   const map = useMap();
@@ -205,6 +228,7 @@ function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds)
         maxLat: b.getNorth(),
         minLng: b.getWest(),
         maxLng: b.getEast(),
+        zoom: map.getZoom(),
       });
     };
     const schedule = () => {
@@ -266,18 +290,64 @@ function dominantStatus(members: MapPoint[]): "online" | "offline" | "unknown" {
   return "unknown";
 }
 
-/** Marcador de login/conexão — círculo azul com ícone de utilizador (distinto dos equipamentos). */
-function connectionPinIcon(): L.DivIcon {
-  const fill = "#3b82f6";
+const iconCache = new Map<string, L.DivIcon>();
+
+function equipmentPinIcon(color: string): L.DivIcon {
+  const key = `eq:${color}`;
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const fill = color;
+  const stroke = "rgba(0,0,0,0.32)";
+  const html = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38" aria-hidden="true"><path fill="${fill}" stroke="${stroke}" stroke-width="1" d="M15 2C8.4 2 3 7.3 3 13.8c0 6.2 9.8 16.5 11.6 18.4L15 36l0.4-3.8C17.2 30.3 27 20 27 13.8 27 7.3 21.6 2 15 2z"/><circle cx="15" cy="14" r="4.2" fill="#fff" opacity="0.95"/></svg>`;
+  const icon = L.divIcon({
+    className: "map-equip-pin-wrap",
+    html,
+    iconSize: [30, 38],
+    iconAnchor: [15, 36],
+    popupAnchor: [0, -34],
+  });
+  iconCache.set(key, icon);
+  return icon;
+}
+
+/** Marcador de login/conexão — círculo com ícone de utilizador. */
+function connectionPinIcon(color: string): L.DivIcon {
+  const key = `conn:${color}`;
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const fill = color;
   const stroke = "rgba(0,0,0,0.28)";
   const html = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/><circle cx="14" cy="11" r="4" fill="#fff" opacity="0.95"/><path d="M7 22c0-3.9 3.1-7 7-7s7 3.1 7 7" fill="#fff" opacity="0.95"/></svg>`;
-  return L.divIcon({
+  const icon = L.divIcon({
     className: "map-conn-pin-wrap",
     html,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
     popupAnchor: [0, -14],
   });
+  iconCache.set(key, icon);
+  return icon;
+}
+
+function clusterBadgeIcon(count: number, color: string, kind: string, isConnection: boolean): L.DivIcon {
+  const key = `badge:${count}:${color}:${kind}:${isConnection}`;
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const badge = count > 1 ? `<span style="position:absolute;top:-6px;right:-8px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#0f172a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)">${count > 999 ? "999+" : count}</span>` : "";
+  const stroke = "rgba(0,0,0,0.32)";
+  const inner = isConnection
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="12" fill="${color}" stroke="${stroke}" stroke-width="1.2"/><circle cx="14" cy="11" r="4" fill="#fff" opacity="0.95"/><path d="M7 22c0-3.9 3.1-7 7-7s7 3.1 7 7" fill="#fff" opacity="0.95"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38"><path fill="${color}" stroke="${stroke}" stroke-width="1" d="M15 2C8.4 2 3 7.3 3 13.8c0 6.2 9.8 16.5 11.6 18.4L15 36l0.4-3.8C17.2 30.3 27 20 27 13.8 27 7.3 21.6 2 15 2z"/><circle cx="15" cy="14" r="4.2" fill="#fff" opacity="0.95"/></svg>`;
+  const html = `<div style="position:relative;display:inline-block;line-height:0">${inner}${badge}</div>`;
+  const icon = L.divIcon({
+    className: "map-cluster-badge-wrap",
+    html,
+    iconSize: isConnection ? [28, 28] : [30, 38],
+    iconAnchor: isConnection ? [14, 14] : [15, 36],
+    popupAnchor: isConnection ? [0, -14] : [0, -34],
+  });
+  iconCache.set(key, icon);
+  return icon;
 }
 
 /** Pin em forma de gota (SVG), verde / vermelho / cinza — modo «estado». */
@@ -303,21 +373,31 @@ function isConnectionPoint(p: MapPoint): boolean {
   return p.status === "connection";
 }
 
-function markerIconOpts(displayMode: MapDisplayMode, status: string): { icon: L.Icon | L.DivIcon } {
-  if (status === "connection") return { icon: connectionPinIcon() };
-  if (displayMode !== "status") return { icon: defaultMarkerIcon() };
-  return { icon: statusPinIcon(status) };
+function markerIconOpts(displayMode: MapDisplayMode, p: MapPoint, colors: MapColors): { icon: L.Icon | L.DivIcon } {
+  if (p.status === "connection") return { icon: connectionPinIcon(colors.connection) };
+  if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
+  return { icon: statusPinIcon(p.status) };
 }
 
-function markerIconOptsGroup(displayMode: MapDisplayMode, members: MapPoint[]): { icon: L.Icon | L.DivIcon } {
-  if (members.length > 0 && members.every(isConnectionPoint)) return { icon: connectionPinIcon() };
-  if (displayMode !== "status") return { icon: defaultMarkerIcon() };
+function markerIconOptsGroup(
+  displayMode: MapDisplayMode,
+  members: MapPoint[],
+  colors: MapColors,
+  clusterKind?: string,
+): { icon: L.Icon | L.DivIcon } {
+  const isConn = members.length > 0 && members.every(isConnectionPoint);
+  if (members.length > 1 && clusterKind) {
+    const color = isConn ? colors.connection : colors.equipment;
+    return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn) };
+  }
+  if (isConn) return { icon: connectionPinIcon(colors.connection) };
+  if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
   return { icon: statusPinIcon(dominantStatus(members)) };
 }
 
 type SpiderState = { key: string; members: MapPoint[]; center: [number, number]; phase: number } | null;
 
-type ClusterCell = { key: string; members: MapPoint[]; lat: number; lng: number };
+type ClusterCell = { key: string; kind: string; members: MapPoint[]; lat: number; lng: number };
 
 function ClusterCellMarkers({
   c,
@@ -330,6 +410,7 @@ function ClusterCellMarkers({
   stopSpiderAnim,
   onSelectDevice,
   displayMode,
+  colors,
 }: {
   c: ClusterCell;
   expanded: Set<string>;
@@ -341,13 +422,14 @@ function ClusterCellMarkers({
   stopSpiderAnim: () => void;
   onSelectDevice?: (id: string) => void;
   displayMode: MapDisplayMode;
+  colors: MapColors;
 }) {
   const map = useMap();
 
   if (c.members.length === 1) {
     const p = c.members[0];
     return (
-      <Marker position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p.status)}>
+      <Marker position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
         <Popup>
           {devicePopupBody(p, displayMode)}
           {onSelectDevice && (
@@ -364,7 +446,7 @@ function ClusterCellMarkers({
     return (
       <Marker
         position={[c.lat, c.lng]}
-        {...markerIconOptsGroup(displayMode, c.members)}
+        {...markerIconOptsGroup(displayMode, c.members, colors, c.kind)}
         eventHandlers={{
           click: (e) => {
             L.DomEvent.stopPropagation(e);
@@ -377,8 +459,8 @@ function ClusterCellMarkers({
         }}
       >
         <Popup>
-          <strong>{c.members.length} equipamento(s)</strong>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 6px" }}>Clique no pin para aproximar e ver marcadores separados.</p>
+          <strong>{c.members.length} {clusterKindLabel(c.kind, c.members.length).toLowerCase()}</strong>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 6px" }}>Aproxime o mapa ou clique no pin para separar os pontos.</p>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, maxHeight: 200, overflow: "auto" }}>
             {c.members.map((m) => (
               <li key={m.id}>
@@ -405,7 +487,7 @@ function ClusterCellMarkers({
         if (grp.length === 1) {
           const p = grp[0];
           return (
-            <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p.status)}>
+            <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
                 {onSelectDevice && (
@@ -421,7 +503,7 @@ function ClusterCellMarkers({
           return spider.members.map((m, i) => {
             const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
             return (
-              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m.status)}>
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m, colors)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
                   {onSelectDevice && (
@@ -439,7 +521,7 @@ function ClusterCellMarkers({
           <Marker
             key={sk}
             position={[clat, clng]}
-            {...markerIconOptsGroup(displayMode, grp)}
+            {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]))}
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
@@ -479,6 +561,7 @@ function ClusterMarkersByView({
   spiderRef,
   runSpiderOpen,
   stopSpiderAnim,
+  colors,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -488,6 +571,7 @@ function ClusterMarkersByView({
   spiderRef: MutableRefObject<SpiderState>;
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
+  colors: MapColors;
 }) {
   const map = useMap();
   const [zoom, setZoom] = useState(() => map.getZoom());
@@ -533,6 +617,7 @@ function ClusterMarkersByView({
           stopSpiderAnim={stopSpiderAnim}
           onSelectDevice={onSelectDevice}
           displayMode={displayMode}
+          colors={colors}
         />
       ))}
     </>
@@ -547,6 +632,7 @@ function ScatterStackMarker({
   runSpiderOpen,
   stopSpiderAnim,
   setSpider,
+  colors,
 }: {
   sk: string;
   grp: MapPoint[];
@@ -555,13 +641,14 @@ function ScatterStackMarker({
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
   setSpider: (s: SpiderState) => void;
+  colors: MapColors;
 }) {
   const map = useMap();
   const [clat, clng] = centroid(grp);
   return (
     <Marker
       position={[clat, clng]}
-      {...markerIconOptsGroup(displayMode, grp)}
+      {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]))}
       eventHandlers={{
         click: (e) => {
           L.DomEvent.stopPropagation(e);
@@ -592,6 +679,87 @@ function ScatterStackMarker({
   );
 }
 
+function ScatterMarkersLayer({
+  stacks,
+  displayMode,
+  spider,
+  setSpider,
+  spiderRef,
+  runSpiderOpen,
+  stopSpiderAnim,
+  onSelectDevice,
+  colors,
+  keyPrefix,
+}: {
+  stacks: MapPoint[][];
+  displayMode: MapDisplayMode;
+  spider: SpiderState;
+  setSpider: (s: SpiderState) => void;
+  spiderRef: MutableRefObject<SpiderState>;
+  runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
+  stopSpiderAnim: () => void;
+  onSelectDevice?: (id: string) => void;
+  colors: MapColors;
+  keyPrefix: string;
+}) {
+  return (
+    <>
+      {stacks.map((grp, idx) => {
+        const sk = `${keyPrefix}-${idx}-${grp.map((g) => g.id).join(",")}`;
+        const isSpider = spider?.key === sk;
+
+        if (grp.length === 1) {
+          const p = grp[0];
+          return (
+            <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
+              <Popup>
+                {devicePopupBody(p, displayMode)}
+                {onSelectDevice && (
+                  <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(p.id)}>
+                    Ver detalhe
+                  </button>
+                )}
+              </Popup>
+            </Marker>
+          );
+        }
+
+        if (isSpider && spider) {
+          return spider.members.map((m, i) => {
+            const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
+            return (
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m, colors)}>
+                <Popup>
+                  {devicePopupBody(m, displayMode)}
+                  {onSelectDevice && (
+                    <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(m.id)}>
+                      Ver detalhe
+                    </button>
+                  )}
+                </Popup>
+              </Marker>
+            );
+          });
+        }
+
+        return (
+          <ScatterStackMarker
+            key={sk}
+            sk={sk}
+            grp={grp}
+            displayMode={displayMode}
+            spiderRef={spiderRef}
+            runSpiderOpen={runSpiderOpen}
+            stopSpiderAnim={stopSpiderAnim}
+            setSpider={setSpider}
+            colors={colors}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 export function EquipmentMap({
   points,
   displayMode,
@@ -600,20 +768,24 @@ export function EquipmentMap({
   flyKey,
   fitBoundsVersion,
   onBoundsChange,
+  mapColors,
+  connectionClusterForced = false,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
   onSelectDevice?: (id: string) => void;
-  /** Quando definido, centra o mapa neste ponto (ex.: filtro por equipamento). */
   flyTo: { lat: number; lng: number; zoom?: number } | null;
-  /** Incrementar para repetir o mesmo alvo (ex.: re-seleccionar equipamento). */
   flyKey: number;
-  /** Incrementar para voltar a ajustar o zoom aos pontos visíveis (refetch ou mudança de filtros). */
   fitBoundsVersion: number;
-  /** Vista actual do mapa (debounced) — útil para carregar conexões só na área visível. */
   onBoundsChange?: (b: MapBounds) => void;
+  mapColors?: MapColors;
+  /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
+  connectionClusterForced?: boolean;
 }) {
+  const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
+  const equipValid = useMemo(() => valid.filter((p) => !isConnectionPoint(p)), [valid]);
+  const connValid = useMemo(() => valid.filter(isConnectionPoint), [valid]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
 
   const [spider, setSpider] = useState<SpiderState>(null);
@@ -656,9 +828,13 @@ export function EquipmentMap({
     return () => stopSpiderAnim();
   }, [stopSpiderAnim]);
 
-  const stacksScatter = useMemo(
-    () => (displayMode === "cluster" ? [] : mergeProximityStacks(valid, STACK_MERGE_M)),
-    [valid, displayMode],
+  const stacksScatterEquip = useMemo(
+    () => (displayMode === "cluster" ? [] : mergeProximityStacks(equipValid, STACK_MERGE_M)),
+    [equipValid, displayMode],
+  );
+  const stacksScatterConn = useMemo(
+    () => (displayMode === "cluster" || connectionClusterForced ? [] : mergeProximityStacks(connValid, STACK_MERGE_M)),
+    [connValid, displayMode, connectionClusterForced],
   );
 
   const fitPointsRef = useRef<{ lat: number; lng: number }[]>([]);
@@ -692,61 +868,52 @@ export function EquipmentMap({
           spiderRef={spiderRef}
           runSpiderOpen={runSpiderOpen}
           stopSpiderAnim={stopSpiderAnim}
+          colors={colors}
         />
       )}
 
-      {(displayMode === "scatter" || displayMode === "status") &&
-        stacksScatter.map((grp, idx) => {
-          const sk = `s-${idx}-${grp.map((g) => g.id).join(",")}`;
-          const isSpider = spider?.key === sk;
-
-          if (grp.length === 1) {
-            const p = grp[0];
-            return (
-              <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p.status)}>
-                <Popup>
-                  {devicePopupBody(p, displayMode)}
-                  {onSelectDevice && (
-                    <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(p.id)}>
-                      Ver detalhe
-                    </button>
-                  )}
-                </Popup>
-              </Marker>
-            );
-          }
-
-          if (isSpider && spider) {
-            return spider.members.map((m, i) => {
-              const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
-              return (
-                <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m.status)}>
-                  <Popup>
-                    {devicePopupBody(m, displayMode)}
-                    {onSelectDevice && (
-                      <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(m.id)}>
-                        Ver detalhe
-                      </button>
-                    )}
-                  </Popup>
-                </Marker>
-              );
-            });
-          }
-
-          return (
-            <ScatterStackMarker
-              key={sk}
-              sk={sk}
-              grp={grp}
+      {(displayMode === "scatter" || displayMode === "status") && (
+        <>
+          <ScatterMarkersLayer
+            stacks={stacksScatterEquip}
+            displayMode={displayMode}
+            spider={spider}
+            setSpider={setSpider}
+            spiderRef={spiderRef}
+            runSpiderOpen={runSpiderOpen}
+            stopSpiderAnim={stopSpiderAnim}
+            onSelectDevice={onSelectDevice}
+            colors={colors}
+            keyPrefix="eq"
+          />
+          {connectionClusterForced && connValid.length > 0 ? (
+            <ClusterMarkersByView
+              points={connValid}
               displayMode={displayMode}
+              onSelectDevice={onSelectDevice}
+              spider={spider}
+              setSpider={setSpider}
               spiderRef={spiderRef}
               runSpiderOpen={runSpiderOpen}
               stopSpiderAnim={stopSpiderAnim}
-              setSpider={setSpider}
+              colors={colors}
             />
-          );
-        })}
+          ) : (
+            <ScatterMarkersLayer
+              stacks={stacksScatterConn}
+              displayMode={displayMode}
+              spider={spider}
+              setSpider={setSpider}
+              spiderRef={spiderRef}
+              runSpiderOpen={runSpiderOpen}
+              stopSpiderAnim={stopSpiderAnim}
+              onSelectDevice={onSelectDevice}
+              colors={colors}
+              keyPrefix="conn"
+            />
+          )}
+        </>
+      )}
     </MapContainer>
   );
 }

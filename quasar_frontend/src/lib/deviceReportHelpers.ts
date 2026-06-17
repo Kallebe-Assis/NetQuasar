@@ -235,7 +235,14 @@ export function oidFriendlyDescription(oid: string): string | null {
       "1.3.6.1.4.1.2021.11.11.0": "CPU — tempo inativo (UCD-SNMP)",
       "1.3.6.1.4.1.2021.4.6.0": "Memória RAM livre (UCD-SNMP)",
       "1.3.6.1.4.1.2021.4.5.0": "Memória RAM total (UCD-SNMP)",
+      "1.3.6.1.4.1.9.3.6.3.0": "Endereço MAC",
+      "1.3.6.1.4.1.9.2.1.3.0": "Modelo do equipamento",
+      "1.3.6.1.4.1.9.2.1.2.0": "Número de série",
+      "1.3.6.1.4.1.9.2.1.1.0": "Nome do equipamento",
     } as Record<string, string>)[o] ??
+    (/^1\.3\.6\.1\.4\.1\.9\.9\.92\.1\.5\.1\.1\.2\.\d+$/.test(o) ? "Modelo do módulo" : null) ??
+    (/^1\.3\.6\.1\.4\.1\.9\.9\.92\.1\.5\.1\.1\.3\.\d+$/.test(o) ? "Número de série do módulo" : null) ??
+    (/^1\.3\.6\.1\.2\.1\.2\.2\.1\.6\.\d+$/.test(o) ? "Endereço MAC da interface" : null) ??
     (/^1\.3\.6\.1\.2\.1\.25\.3\.3\.1\.2\.\d+$/.test(o) ? "Carga do processador (HOST-RESOURCES)" : null) ??
     (/^1\.3\.6\.1\.2\.1\.99\.1\.1\.1\.4\.\d+$/.test(o) ? "Temperatura (ENTITY-SENSOR)" : null) ??
     null
@@ -305,7 +312,8 @@ export function buildDeviceReportMainTable(args: {
     if (excluded.has(oid)) continue;
     const userLab = userLabelForOid(oid);
     const friendly = oidFriendlyDescription(oid);
-    const description = userLab ?? friendly ?? `Métrica SNMP adicional ${++extraIdx}`;
+    const heuristic = inferExtraOidLabel(oid, value);
+    const description = userLab ?? friendly ?? heuristic ?? `Informação adicional ${++extraIdx}`;
     rows.push({ description, value: value === "" ? "—" : value });
   }
   return rows;
@@ -563,14 +571,25 @@ export function buildFullDeviceReportCsv(args: {
   return lines.join("\n");
 }
 
+const CADASTRAL_HIDDEN_KEYS = new Set([
+  "id",
+  "pop_id",
+  "locality_id",
+  "mib_folder_path",
+  "telemetry_oid_strategy",
+  "telemetry_oid_overrides",
+  "snmp_health_status",
+  "snmp_health_reason",
+  "snmp_health_checked_at",
+]);
+
 const CADASTRAL_LABELS: Record<string, string> = {
-  id: "ID",
   description: "Descrição",
   category: "Categoria",
   ip: "IP",
   network_status: "Estado da rede",
-  pop_id: "POP (id)",
-  locality_id: "Localidade (id)",
+  pop_name: "POP",
+  locality_name: "Localidade",
   access_mode: "Modo de acesso",
   telemetry_mode: "Modo de telemetria",
   ping_enabled: "Monitorizar com ping",
@@ -586,19 +605,20 @@ const CADASTRAL_LABELS: Record<string, string> = {
   hardware_version: "Versão hardware",
   acquired_at: "Data de aquisição",
   snmp_community: "Community SNMP",
-  mib_folder_path: "Pasta MIBs (servidor)",
-  telemetry_oid_strategy: "Estratégia de OIDs (telemetria)",
-  telemetry_oid_overrides: "OIDs manuais (JSON)",
+  max_pons: "Portas PON (máx.)",
 };
 
 const CADASTRAL_ORDER = [
-  "id",
   "description",
   "category",
   "ip",
   "network_status",
-  "pop_id",
-  "locality_id",
+  "pop_name",
+  "locality_name",
+  "brand",
+  "model",
+  "mac",
+  "serial_number",
   "access_mode",
   "telemetry_mode",
   "ping_enabled",
@@ -606,17 +626,11 @@ const CADASTRAL_ORDER = [
   "operational_mode",
   "latitude",
   "longitude",
-  "brand",
-  "model",
-  "mac",
-  "serial_number",
   "software_version",
   "hardware_version",
   "acquired_at",
+  "max_pons",
   "snmp_community",
-  "mib_folder_path",
-  "telemetry_oid_strategy",
-  "telemetry_oid_overrides",
 ];
 
 export function formatCadastroCellValue(val: unknown): string {
@@ -634,12 +648,37 @@ export function formatCadastroCellValue(val: unknown): string {
   return String(val);
 }
 
+/** Heurística para OIDs sem rótulo configurado (MAC, modelo, etc.). */
+export function inferExtraOidLabel(oid: string, value: string): string | null {
+  const v = String(value ?? "").trim();
+  if (/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(v)) return "Endereço MAC";
+  if (/^([0-9A-Fa-f]{2}){6,}$/.test(v.replace(/[:\s.-]/g, "")) && v.length >= 12) return "Endereço MAC / serial";
+  if (/^[A-Z0-9][A-Z0-9._-]{2,}$/i.test(v) && v.length <= 48 && /model|version|sw/i.test(oid)) return "Modelo / versão";
+  return null;
+}
+
+/** Secção ZTE MIB só para OLT ZTE com dados reais. */
+export function deviceReportShowsZteSection(brand?: string | null, oltData?: Record<string, unknown> | null): boolean {
+  const b = String(brand ?? "").trim().toLowerCase();
+  if (!b.includes("zte")) return false;
+  if (!oltData) return false;
+  const tables = ["zte_onu_online_table", "zte_pon_status_table", "zte_transceiver_table"] as const;
+  return tables.some((k) => {
+    const arr = oltData[k];
+    return Array.isArray(arr) && arr.length > 0;
+  });
+}
+
+export function isOltCategory(category?: string | null): boolean {
+  return (category ?? "").trim().toLowerCase() === "olt";
+}
+
 /** Linhas da tabela de ficha completa do equipamento (resposta GET /devices/:id). */
 export function buildDeviceCadastroRows(device: Record<string, unknown>): { label: string; value: string }[] {
   const seen = new Set<string>();
   const rows: { label: string; value: string }[] = [];
   for (const key of CADASTRAL_ORDER) {
-    if (!(key in device)) continue;
+    if (!(key in device) || CADASTRAL_HIDDEN_KEYS.has(key)) continue;
     seen.add(key);
     rows.push({
       label: CADASTRAL_LABELS[key] ?? key,
@@ -647,7 +686,7 @@ export function buildDeviceCadastroRows(device: Record<string, unknown>): { labe
     });
   }
   const rest = Object.keys(device)
-    .filter((k) => !seen.has(k))
+    .filter((k) => !seen.has(k) && !CADASTRAL_HIDDEN_KEYS.has(k))
     .sort();
   for (const key of rest) {
     rows.push({

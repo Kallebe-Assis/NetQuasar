@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
 	"github.com/netquasar/netquasar/quasar_backend/internal/db"
 	"github.com/netquasar/netquasar/quasar_backend/internal/localdbstore"
@@ -586,14 +587,27 @@ func (s *Server) testTelegramByID(w http.ResponseWriter, r *http.Request, id, ti
 		})
 		return
 	}
-	text := fmt.Sprintf("NetQuasar\n%s\n%s", title, time.Now().Format(time.RFC3339))
+	var body struct {
+		Template string `json:"template"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	var text string
+	switch id {
+	case "monitoring":
+		text = alertnotify.MonitoringTestMessage(body.Template)
+	case "reports":
+		text = alertnotify.ReportsTestMessage(body.Template)
+	default:
+		text = fmt.Sprintf("NetQuasar\n%s\n%s", title, time.Now().Format(time.RFC3339))
+	}
 	if err := telegramclient.SendMessage(r.Context(), cfg, text); err != nil {
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}
 	s.appendAuditLog(r.Context(), "settings_telegram", id, "test_send", actorFromRequest(r), nil, map[string]any{
-		"title": title,
-		"sent":  true,
+		"title":    title,
+		"template": strings.TrimSpace(body.Template),
+		"sent":     true,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": true})
 }

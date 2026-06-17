@@ -30,7 +30,9 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 	}
 	// Abertos + instâncias fechadas há pouco (grace de 1 min na UI antes de sumirem desta lista).
 	q := `
-		SELECT u.id, u.device_id, u.severity, u.alert_type, u.message, u.ip, u.device_name, u.active_since, u.closed_at, u.meta::text, u.incident_id
+		SELECT u.id, u.device_id, u.severity, u.alert_type, u.message, u.ip, u.device_name,
+			u.active_since, u.closed_at, u.meta::text, u.incident_id,
+			COALESCE(NULLIF(trim(p.description), ''), '') AS pop_name
 		FROM (
 			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip,
 				COALESCE(NULLIF(trim(a.device_name), ''), NULLIF(trim(d.description), '')) AS device_name,
@@ -65,6 +67,8 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 			FROM alert_instances a
 			WHERE a.closed_at IS NOT NULL AND a.closed_at >= now() - interval '1 minute'
 		) u
+		LEFT JOIN devices d ON d.id = u.device_id
+		LEFT JOIN pops p ON p.id = d.pop_id
 		WHERE 1=1
 	`
 	args := []any{}
@@ -89,12 +93,12 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 	var list []map[string]any
 	for rows.Next() {
 		var id, devID uuid.UUID
-		var sev, typ, msg, ip, dname string
+		var sev, typ, msg, ip, dname, popName string
 		var since time.Time
 		var closed *time.Time
 		var meta []byte
 		var incidentID *uuid.UUID
-		if err := rows.Scan(&id, &devID, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta, &incidentID); err != nil {
+		if err := rows.Scan(&id, &devID, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta, &incidentID, &popName); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -104,6 +108,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		item := map[string]any{
 			"id": id, "device_id": devID, "severity": sev, "type": typ, "message": msg,
 			"ip": ip, "device_name": dname, "active_since": since, "meta": json.RawMessage(meta),
+			"pop_name": popName,
 		}
 		if incidentID != nil {
 			item["incident_id"] = *incidentID
@@ -181,9 +186,11 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 	q := `
 		SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip,
 			COALESCE(NULLIF(trim(a.device_name), ''), NULLIF(trim(d.description), '')) AS device_name,
-			a.active_since, a.closed_at, a.meta::text
+			a.active_since, a.closed_at, a.meta::text,
+			COALESCE(NULLIF(trim(p.description), ''), '') AS pop_name
 		FROM alert_instances a
 		LEFT JOIN devices d ON d.id = a.device_id
+		LEFT JOIN pops p ON p.id = d.pop_id
 		WHERE 1=1`
 	args := []any{}
 	n := 1
@@ -214,18 +221,20 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 		var id uuid.UUID
 		var did *uuid.UUID
 		var sev, typ, msg string
-		var ip, dname *string
+		var ip, dname, popName *string
 		var since time.Time
 		var closed *time.Time
 		var meta []byte
-		if err := rows.Scan(&id, &did, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta); err != nil {
+		if err := rows.Scan(&id, &did, &sev, &typ, &msg, &ip, &dname, &since, &closed, &meta, &popName); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
-		list = append(list, map[string]any{
+		item := map[string]any{
 			"id": id, "device_id": did, "severity": sev, "type": typ, "message": msg,
 			"ip": ip, "device_name": dname, "active_since": since, "closed_at": closed, "meta": json.RawMessage(meta),
-		})
+			"pop_name": ptrStr(popName),
+		}
+		list = append(list, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": list})
 }

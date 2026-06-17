@@ -371,6 +371,16 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/events", s.listEvents)
 		r.Get("/metrics", s.metricsSeries)
 
+		r.Route("/reports", func(r chi.Router) {
+			r.Get("/system", s.systemReportsCatalog)
+			r.Get("/system/{id}", s.systemReportData)
+			r.Get("/system/{id}/csv", s.systemReportCSV)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdminMiddleware)
+				r.Post("/system/{id}/telegram", s.systemReportTelegram)
+			})
+		})
+
 		r.Get("/map/equipment-points/{deviceId}", s.mapEquipmentPointDetail)
 		r.Get("/map/equipment-points", s.mapEquipmentPoints)
 		r.Get("/map/connection-points", s.mapConnectionPoints)

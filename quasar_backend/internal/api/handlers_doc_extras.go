@@ -648,7 +648,7 @@ func formatCommercialGrowthParen(cur, prev int64) string {
 	return "(" + growth + ", " + pctPart + ")"
 }
 
-// commercialTelegramCompose gera HTML (bloco <pre>) com todos os registos mensais do mês (tópicos vs mês anterior).
+// commercialTelegramCompose gera texto simples com todos os registos mensais do mês (comparativo vs mês anterior).
 // automatic altera apenas a linha de rodapé (relatório agendado vs envio manual).
 func (s *Server) commercialTelegramCompose(ctx context.Context, month string, automatic bool) (string, error) {
 	month = strings.TrimSpace(month)
@@ -750,7 +750,7 @@ func (s *Server) commercialTelegramCompose(ctx context.Context, month string, au
 	}
 
 	plain := clipCommercialPlain(sb.String(), telegramCommercialPlainMax)
-	return wrapCommercialTelegramPre(plain), nil
+	return plain, nil
 }
 
 var (
@@ -785,7 +785,7 @@ func (s *Server) commercialReportsSendTelegram(w http.ResponseWriter, r *http.Re
 		writeErr(w, http.StatusBadRequest, "VALIDATION", compErr.Error(), nil)
 		return
 	}
-	if err := telegramclient.SendMessageWithParseMode(r.Context(), cfg, text, "HTML"); err != nil {
+	if err := telegramclient.SendMessage(r.Context(), cfg, text); err != nil {
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}
@@ -822,16 +822,14 @@ func (s *Server) mapEquipmentPointDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	st := "unknown"
-	var ok sql.NullBool
+	var probeOK bool
+	var reachOK *bool
 	var checkedAt *time.Time
-	_ = s.DB().QueryRow(r.Context(), `SELECT ok, checked_at FROM device_probe_cache WHERE device_id=$1`, id).Scan(&ok, &checkedAt)
-	if ok.Valid {
-		if ok.Bool {
-			st = "online"
-		} else {
-			st = "offline"
-		}
-	}
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT COALESCE(ok, false), reach_ok, checked_at
+		FROM device_probe_cache WHERE device_id=$1
+	`, id).Scan(&probeOK, &reachOK, &checkedAt)
+	st = mapDeviceReachabilityStatus(pingEn, checkedAt, probeOK, reachOK)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "description": desc, "category": cat, "lat": lat, "lng": lon, "ip": ip, "pop_id": popID,
 		"operational_mode": op, "status": st, "network_status": netSt, "brand": brand, "model": model,

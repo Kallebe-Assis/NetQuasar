@@ -9,18 +9,15 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/rs/zerolog"
 )
 
 const (
-	globalThresholdRuleName = "Limiar global de alertas"
-	alertSchemaV1           = "netquasar.alert_thresholds.v1"
-	alertTypeSfpTx          = "mikrotik_sfp_tx"
-	alertTypeSfpRx          = "mikrotik_sfp_rx"
+	alertTypeSfpTx = "mikrotik_sfp_tx"
+	alertTypeSfpRx = "mikrotik_sfp_rx"
 )
 
 // SfpInterfaceRow dados por interface após colheita SNMP.
@@ -181,78 +178,45 @@ func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, 
 		ifLabel = fmt.Sprintf("if%d", ifIndex)
 	}
 	base := map[string]any{
-		"source":       "interface_snmp_refresh",
+		"source":       "interface_snapshot",
 		"if_index":     ifIndex,
 		"display_name": ifLabel,
 		"if_name":      ifLabel,
 		"key":          ifLabel,
 		"metric":       label,
 		"dbm":          v,
+		"value":        v,
+		"value_text":   fmt.Sprintf("%.3f dBm", v),
 	}
 	if sev == "ok" {
 		closeSfpAlert(ctx, pool, log, deviceID, alertType, ifIndex)
 		return
 	}
-	if alertignore.IsMuted(ctx, pool, deviceID, alertType, ifLabel) {
-		return
-	}
-	msg := fmt.Sprintf("%s (%s): interface %s — potência SFP %s %.3f dBm (severidade: %s).", descOr(desc, "?"), addrOr(ip, "?"), ifLabel, label, v, sev)
-	insertMeta, _ := json.Marshal(alertnotify.WithStatusTransition(base, "optical_within_limits", "threshold_"+sev, nil))
-	var newID uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5),''), NULLIF(trim($6),''), COALESCE($7::jsonb,'{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid AND ai.alert_type = $3::text AND ai.closed_at IS NULL
-			  AND (ai.meta->>'if_index')::int = $8
-		)
-		RETURNING id
-	`, deviceID, sev, alertType, msg, ip, desc, insertMeta, ifIndex).Scan(&newID)
-	if err == nil {
-		if log != nil {
-			log.Warn().Str("device", deviceID.String()).Str("alert_type", alertType).Int("if_index", ifIndex).Msg("alerta SFP: mudança de estado (limiar)")
-		}
-		alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, newID, strings.ToUpper(sev), "Potência óptica SFP", msg)
-		return
-	}
-	if err != pgx.ErrNoRows {
-		if log != nil {
-			log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances insert mikrotik_sfp")
-		}
-		return
-	}
-	updateMeta, _ := json.Marshal(base)
-	_, err = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity = $4::text,
-			message = $5,
-			meta = COALESCE(meta, '{}'::jsonb) || $6::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'if_index')::int = $7
-	`, deviceID, alertType, sev, msg, updateMeta, ifIndex)
+	msg := fmt.Sprintf("%s (%s): interface %s — potência SFP %s %.3f dBm (severidade: %s).",
+		descOr(desc, "?"), addrOr(ip, "?"), ifLabel, label, v, sev)
+	meta := alertnotify.WithStatusTransition(base, "optical_within_limits", "threshold_"+sev, nil)
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: sev, AlertType: alertType,
+		Message: msg, IP: ip, DeviceName: desc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchIfIndex, IfIndex: ifIndex},
+	}, &alertstore.NotifyCreate{
+		Log: log, Level: strings.ToUpper(sev), Headline: "Potência óptica SFP",
+	})
 	if err != nil && log != nil {
-		log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances update mikrotik_sfp valores")
+		log.Error().Err(err).Str("device", deviceID.String()).Str("alert_type", alertType).Msg("alertstore SFP")
+	} else if res.Created && log != nil {
+		log.Warn().Str("device", deviceID.String()).Str("alert_type", alertType).Int("if_index", ifIndex).Msg("alerta SFP: aberto")
 	}
 }
 
 func closeSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType string, ifIndex int) {
-	metaPatch, _ := json.Marshal(map[string]any{"resolved": "sfp_threshold_ok", "source": "interface_snmp_refresh"})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at = now(),
-			meta = COALESCE(meta, '{}'::jsonb) || $4::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'if_index')::int = $3
-		RETURNING id, message
-	`, deviceID, alertType, ifIndex, metaPatch).Scan(&aid, &msg)
-	if err != nil {
-		return
-	}
-	head := alertnotify.ResolutionHeadlineForAlertType(alertType)
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, head, msg)
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertType,
+		Match: alertstore.Match{Kind: alertstore.MatchIfIndex, IfIndex: ifIndex},
+		Resolved: map[string]any{
+			"resolved": "sfp_threshold_ok", "source": "interface_snapshot",
+		},
+	})
 }
 
 func descOr(s, fb string) string {

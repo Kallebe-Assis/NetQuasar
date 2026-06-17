@@ -2972,6 +2972,49 @@ h3 .info-hint {
   body.print-device-report .no-print {
     display: none !important;
   }
+
+  body.print-system-report .runtime-indicator,
+  body.print-system-report .sidebar,
+  body.print-system-report .page-heading,
+  body.print-system-report .card:not(.system-report-modal) {
+    display: none !important;
+  }
+  body.print-system-report .layout {
+    display: block !important;
+  }
+  body.print-system-report .main {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  body.print-system-report {
+    background: #fff !important;
+  }
+  body.print-system-report .modal-backdrop {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  body.print-system-report .system-report-modal {
+    box-shadow: none !important;
+    border: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    color: #111 !important;
+    background: #fff !important;
+  }
+  body.print-system-report .system-report-print {
+    color: #111 !important;
+    background: #fff !important;
+  }
+  body.print-system-report .system-report-print table {
+    font-size: 10px;
+  }
+  body.print-system-report .no-print {
+    display: none !important;
+  }
 }
 
 /* Dashboard loading */

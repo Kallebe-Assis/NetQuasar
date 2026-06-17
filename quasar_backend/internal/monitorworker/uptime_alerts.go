@@ -2,16 +2,14 @@ package monitorworker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 	"github.com/rs/zerolog"
@@ -64,50 +62,30 @@ func InsertUptimeRestartAlertIfNew(ctx context.Context, pool *pgxpool.Pool, log 
 	if thresholdMin <= 0 || pool == nil {
 		return
 	}
-	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeUptimeRestartLow, "") {
-		return
-	}
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
-	msg := fmt.Sprintf("Equipamento reiniciou (Uptime < %d minutos).", thresholdMin)
+	msg := fmt.Sprintf("Equipamento com uptime baixo (%.0f min, limite %d min) — possível reinício.", observedMin, thresholdMin)
 	meta := alertnotify.WithStatusTransition(map[string]any{
 		"source":                  "monitor_worker",
 		"threshold_minutes":       thresholdMin,
 		"observed_uptime_minutes": observedMin,
+		"uptime_minutes":          observedMin,
+		"value":                   observedMin,
+		"value_text":              fmt.Sprintf("%.0f min", observedMin),
 	}, "uptime_ok", "uptime_low", map[string]any{"uptime_minutes": observedMin})
-	metaRaw, jerr := json.Marshal(meta)
-	if jerr != nil {
-		metaRaw = []byte("{}")
-	}
-	var alertID uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, 'warning', $2::text, $3, NULLIF(trim($4), ''), NULLIF(trim($5), ''),
-			COALESCE($6::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid AND ai.alert_type = $2::text AND ai.closed_at IS NULL
-		)
-		RETURNING id
-	`, deviceID, alertTypeUptimeRestartLow, msg, addr, desc, metaRaw).Scan(&alertID)
+
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: "warning", AlertType: alertTypeUptimeRestartLow,
+		Message: msg, IP: addr, DeviceName: desc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchDeviceOnly},
+	}, &alertstore.NotifyCreate{Log: log, Level: "WARNING", Headline: "Possível reinício do equipamento"})
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			patch, _ := json.Marshal(map[string]any{
-				"observed_uptime_minutes": observedMin,
-				"uptime_minutes":          observedMin,
-			})
-			_, _ = pool.Exec(ctx, `
-				UPDATE alert_instances SET
-					meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb
-				WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-			`, deviceID, alertTypeUptimeRestartLow, patch)
-			return
-		}
-		log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances insert uptime_restart_low")
+		log.Error().Err(err).Str("device", deviceID.String()).Msg("alertstore uptime_restart_low")
 		return
 	}
-	log.Warn().Str("device", deviceID.String()).Float64("uptime_min", observedMin).Int("threshold", thresholdMin).Msg("alerta: uptime abaixo do limiar (possível reinício)")
-	alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, alertID, "WARNING", "Possível reinício do equipamento", msg)
+	if res.Created {
+		log.Warn().Str("device", deviceID.String()).Float64("uptime_min", observedMin).Int("threshold", thresholdMin).Msg("alerta: uptime abaixo do limiar")
+	}
 }
 
 // ResolveUptimeRestartAlertsForDevices fecha alertas de uptime baixo quando o uptime já não está abaixo do limiar.
@@ -152,4 +130,20 @@ func ResolveUptimeRestartAlertsForDevices(ctx context.Context, pool *pgxpool.Poo
 	if n > 0 {
 		log.Info().Int64("closed", n).Msg("alertas uptime baixo resolvidos")
 	}
+}
+
+// evaluateUptimeRestartAlert aplica o limiar de monitoring_intervals.uptime_restart_alert_minutes após cada coleta SNMP.
+func evaluateUptimeRestartAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, observedMin float64) {
+	if pool == nil || observedMin < 0 {
+		return
+	}
+	var threshold int
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(uptime_restart_alert_minutes, 0) FROM monitoring_intervals WHERE id=1`).Scan(&threshold); err != nil || threshold <= 0 {
+		return
+	}
+	if observedMin < float64(threshold) {
+		InsertUptimeRestartAlertIfNew(ctx, pool, log, deviceID, description, ip, threshold, observedMin)
+		return
+	}
+	ResolveUptimeRestartAlertsForDevices(ctx, pool, log, []uuid.UUID{deviceID})
 }

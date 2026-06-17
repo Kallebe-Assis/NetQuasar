@@ -1,10 +1,13 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { EquipmentMap, type MapBounds, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
+import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
+import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
+import { queryKeys } from "../lib/queryKeys";
+import { fetchUiAppearance, mapColorsFromAppearance } from "../lib/uiAppearance";
 
 class MapSectionErrorBoundary extends React.Component<Readonly<{ children: React.ReactNode }>, { err: Error | null }> {
   state = { err: null as Error | null };
@@ -107,11 +110,51 @@ export function MapPage() {
   const [mapDeviceSelect, setMapDeviceSelect] = useState("");
   const [mapToast, setMapToast] = useState<{ ok: boolean; text: string } | null>(null);
   const [showConnections, setShowConnections] = useState(false);
+  const [showEquipment, setShowEquipment] = useState(true);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [listPage, setListPage] = useState(0);
+  const [equipColorDraft, setEquipColorDraft] = useState(DEFAULT_MAP_COLORS.equipment);
+  const [connColorDraft, setConnColorDraft] = useState(DEFAULT_MAP_COLORS.connection);
   const onMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
+  const qc = useQueryClient();
+
+  const uiAppearance = useQuery({
+    queryKey: queryKeys.uiAppearance,
+    queryFn: fetchUiAppearance,
+  });
+
+  useEffect(() => {
+    const colors = mapColorsFromAppearance(uiAppearance.data);
+    setEquipColorDraft(colors.equipment);
+    setConnColorDraft(colors.connection);
+  }, [uiAppearance.data?.map_equipment_color, uiAppearance.data?.map_connection_color]);
+
+  const saveMapColors = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/settings/ui-appearance", {
+        method: "PATCH",
+        json: { map_equipment_color: equipColorDraft, map_connection_color: connColorDraft },
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.uiAppearance });
+      setMapToast({ ok: true, text: "Cores do mapa salvas." });
+    },
+    onError: (e) => setMapToast({ ok: false, text: e instanceof Error ? e.message : "Falha ao salvar cores." }),
+  });
+
+  const mapColors = useMemo(
+    () => ({ equipment: equipColorDraft, connection: connColorDraft }),
+    [equipColorDraft, connColorDraft],
+  );
 
   const pops = useQuery({ queryKey: ["pops"], queryFn: () => apiFetch<{ pops: { id: string; description: string }[] }>("/api/v1/pops") });
+
+  const monState = useQuery({
+    queryKey: queryKeys.monState,
+    queryFn: () => apiFetch<MonitoringStateSync>("/api/v1/monitoring/state"),
+    refetchInterval: (q) => monitoringPollMs(5000, q.state.data?.is_running),
+  });
+  useMonitoringLiveSync(monState.data, { map: true });
 
   const connPts = useQuery({
     queryKey: [
@@ -120,6 +163,7 @@ export function MapPage() {
       mapBounds?.maxLat,
       mapBounds?.minLng,
       mapBounds?.maxLng,
+      mapBounds?.zoom,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -128,9 +172,10 @@ export function MapPage() {
         params.set("max_lat", String(mapBounds.maxLat));
         params.set("min_lng", String(mapBounds.minLng));
         params.set("max_lng", String(mapBounds.maxLng));
+        if (mapBounds.zoom != null) params.set("zoom", String(mapBounds.zoom));
       }
       const qs = params.toString();
-      return apiFetch<{ points: ConnectionPoint[]; total?: number; truncated?: boolean }>(
+      return apiFetch<{ points: ConnectionPoint[]; total?: number; truncated?: boolean; limit?: number }>(
         `/api/v1/map/connection-points${qs ? `?${qs}` : ""}`,
       );
     },
@@ -155,7 +200,7 @@ export function MapPage() {
   const equipPoints = useMemo(() => (Array.isArray(pts.data?.points) ? pts.data.points : []), [pts.data?.points]);
 
   const displayedPoints = useMemo(() => {
-    const equip = equipPoints;
+    const equip = showEquipment ? equipPoints : [];
     const connRaw = showConnections && Array.isArray(connPts.data?.points) ? connPts.data.points : [];
     const conn: Point[] = connRaw.map((c) => ({
       id: `conn-${c.id}`,
@@ -168,10 +213,20 @@ export function MapPage() {
       login: c.login,
     }));
     return [...equip, ...conn];
-  }, [equipPoints, connPts.data?.points, showConnections]);
+  }, [equipPoints, connPts.data?.points, showConnections, showEquipment]);
 
   const connTotal = connPts.data?.total;
   const connTruncated = !!connPts.data?.truncated;
+  const connLimit = connPts.data?.limit;
+
+  const connectionClusterForced = useMemo(() => {
+    if (!showConnections || displayMode === "cluster") return false;
+    const zoom = mapBounds?.zoom ?? 6;
+    const connCount = connPts.data?.points?.length ?? 0;
+    if (zoom < 13) return true;
+    if (connCount > 500 || (connTotal ?? 0) > 800) return true;
+    return false;
+  }, [showConnections, displayMode, mapBounds?.zoom, connPts.data?.points?.length, connTotal]);
 
   const selPoint = useMemo(() => displayedPoints.find((p) => p.id === selId) ?? null, [displayedPoints, selId]);
   const isConnPoint = !!selId?.startsWith("conn-");
@@ -228,7 +283,7 @@ export function MapPage() {
   useEffect(() => {
     setFitBoundsVersion((v) => v + 1);
     setListPage(0);
-  }, [popId, category, showConnections]);
+  }, [popId, category, showConnections, showEquipment]);
 
   useEffect(() => {
     setListPage(0);
@@ -290,7 +345,9 @@ export function MapPage() {
           <span style={{ fontSize: 11, color: "var(--muted)" }}>
             Conexões na área: {connPts.data?.points?.length ?? 0}
             {connTotal > 0 ? ` / ${connTotal} com coordenadas` : ""}
-            {connTruncated ? " (aproxime o mapa para ver mais)" : ""}
+            {connLimit != null && connLimit > 0 ? ` (limite ${connLimit} neste zoom)` : ""}
+            {connTruncated ? " — aproxime o mapa para ver mais" : ""}
+            {connectionClusterForced && displayMode !== "cluster" ? " · logins agrupados por desempenho" : ""}
           </span>
         ) : null}
       </div>
@@ -339,6 +396,20 @@ export function MapPage() {
               ))}
             </select>
           </label>
+          <label className="toggle" title="Mostrar equipamentos no mapa">
+            <span className="toggle__track">
+              <input
+                id="map-show-equipment"
+                type="checkbox"
+                role="switch"
+                className="toggle__input"
+                checked={showEquipment}
+                onChange={(e) => setShowEquipment(e.target.checked)}
+              />
+              <span className="toggle__thumb" aria-hidden />
+            </span>
+            <span className="toggle__label">Equipamentos</span>
+          </label>
           <label className="toggle" title="Carrega logins só na área visível do mapa (melhor desempenho com milhares de pontos)">
             <span className="toggle__track">
               <input
@@ -352,6 +423,33 @@ export function MapPage() {
               <span className="toggle__thumb" aria-hidden />
             </span>
             <span className="toggle__label">Logins no mapa</span>
+          </label>
+          <label className="row" style={{ gap: 8, alignItems: "center", flex: "0 1 auto" }} title="Cores dos ícones (salvas na base de dados)">
+            <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Cor equip.</span>
+            <input
+              type="color"
+              value={equipColorDraft}
+              onChange={(e) => setEquipColorDraft(e.target.value)}
+              aria-label="Cor dos equipamentos"
+              style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }}
+            />
+            <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Cor login</span>
+            <input
+              type="color"
+              value={connColorDraft}
+              onChange={(e) => setConnColorDraft(e.target.value)}
+              aria-label="Cor das conexões"
+              style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }}
+            />
+            <button
+              type="button"
+              className="btn"
+              style={{ padding: "4px 10px", fontSize: 12 }}
+              disabled={saveMapColors.isPending}
+              onClick={() => saveMapColors.mutate()}
+            >
+              Salvar cores
+            </button>
           </label>
           <label className="row" style={{ gap: 8, alignItems: "center", flex: "2 1 240px", minWidth: 200 }}>
             <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Equipamento</span>
@@ -508,6 +606,8 @@ export function MapPage() {
                 <EquipmentMap
                   points={mapPoints}
                   displayMode={displayMode}
+                  mapColors={mapColors}
+                  connectionClusterForced={connectionClusterForced}
                   onSelectDevice={(id) => {
                     setSelId(id);
                     setMapDeviceSelect(id || "");
@@ -515,7 +615,7 @@ export function MapPage() {
                   flyTo={flyTo}
                   flyKey={flyKey}
                   fitBoundsVersion={fitBoundsVersion}
-                  onBoundsChange={showConnections ? onMapBoundsChange : undefined}
+                  onBoundsChange={onMapBoundsChange}
                 />
               </div>
             </MapSectionErrorBoundary>

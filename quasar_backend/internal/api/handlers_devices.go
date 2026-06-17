@@ -692,16 +692,21 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	var d deviceDTO
 	var ip *string
+	var popName, locName *string
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
-			ping_enabled, telemetry_enabled, operational_mode,
-			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
-		FROM devices WHERE id=$1
+		SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
+			d.ping_enabled, d.telemetry_enabled, d.operational_mode,
+			d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
+			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons,
+			p.description, l.name
+		FROM devices d
+		LEFT JOIN pops p ON p.id = d.pop_id
+		LEFT JOIN commercial_localities l ON l.id = d.locality_id
+		WHERE d.id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons)
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &popName, &locName)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
@@ -711,7 +716,16 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.IP = ip
-	writeJSON(w, http.StatusOK, d)
+	raw, _ := json.Marshal(d)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	if popName != nil && strings.TrimSpace(*popName) != "" {
+		out["pop_name"] = strings.TrimSpace(*popName)
+	}
+	if locName != nil && strings.TrimSpace(*locName) != "" {
+		out["locality_name"] = strings.TrimSpace(*locName)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {

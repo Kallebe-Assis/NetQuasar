@@ -155,6 +155,92 @@ func equipIPFromAlertRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.U
 	return equip, ip
 }
 
+type alertResolutionRow struct {
+	ActiveSince time.Time
+	ClosedAt    *time.Time
+	PopName     string
+	Meta        map[string]any
+	AlertType   string
+}
+
+func loadAlertResolutionRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) alertResolutionRow {
+	var out alertResolutionRow
+	var closed *time.Time
+	var metaRaw []byte
+	var pop *string
+	err := pool.QueryRow(ctx, `
+		SELECT a.active_since, a.closed_at, a.alert_type, COALESCE(a.meta::text, '{}'),
+			COALESCE(NULLIF(trim(p.description), ''), '')
+		FROM alert_instances a
+		LEFT JOIN devices d ON d.id = a.device_id
+		LEFT JOIN pops p ON p.id = d.pop_id
+		WHERE a.id = $1
+	`, alertID).Scan(&out.ActiveSince, &closed, &out.AlertType, &metaRaw, &pop)
+	if err != nil {
+		return out
+	}
+	out.ClosedAt = closed
+	if pop != nil {
+		out.PopName = strings.TrimSpace(*pop)
+	}
+	_ = json.Unmarshal(metaRaw, &out.Meta)
+	if out.Meta == nil {
+		out.Meta = map[string]any{}
+	}
+	return out
+}
+
+func resolvedValueFromMeta(alertType string, meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	if v, ok := meta["resolved_value"]; ok && v != nil {
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	if verify, ok := meta["verify"].(map[string]any); ok {
+		if v, ok := verify["dbm"]; ok && v != nil {
+			return fmt.Sprintf("%v dBm", v)
+		}
+		if v, ok := verify["latency_ms"]; ok && v != nil {
+			return fmt.Sprintf("%v ms", v)
+		}
+		if v, ok := verify["value"]; ok && v != nil {
+			return fmt.Sprint(v)
+		}
+	}
+	if v, ok := meta["value"]; ok && v != nil {
+		return fmt.Sprint(v)
+	}
+	if v, ok := meta["dbm"]; ok && v != nil {
+		return fmt.Sprintf("%v dBm", v)
+	}
+	_ = alertType
+	return ""
+}
+
+func formatDurationPT(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+	sec := int(d.Round(time.Second).Seconds())
+	days := sec / 86400
+	sec %= 86400
+	hours := sec / 3600
+	sec %= 3600
+	mins := sec / 60
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%d d", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%d h", hours))
+	}
+	if mins > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%d min", mins))
+	}
+	return strings.Join(parts, " ")
+}
+
 func telegramMonitoringBlocks(level, title, message string, equipFallback string, ipFallback string) string {
 	header := monitoringHeader(level, title, message)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
@@ -183,7 +269,7 @@ func buildResolutionText(title, detail string) string {
 	return telegramResolutionBlocks(title, detail, "", "")
 }
 
-func telegramResolutionBlocks(title, detail string, equipFallback string, ipFallback string) string {
+func telegramResolutionBlocks(title, detail string, equipFallback string, ipFallback string, extras ...string) string {
 	header := resolutionHeader(title, detail)
 	eq, ip, inc, val := shortEquipmentAndIncident(detail)
 	if strings.TrimSpace(equipFallback) != "" {
@@ -193,6 +279,12 @@ func telegramResolutionBlocks(title, detail string, equipFallback string, ipFall
 		ip = strings.TrimSpace(ipFallback)
 	}
 	parts := []string{header, "", "• " + eq, "• " + ip}
+	for _, line := range extras {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			parts = append(parts, "• "+line)
+		}
+	}
 	if tgt := incidentTarget(inc); tgt != "" {
 		parts = append(parts, "• "+tgt)
 	}
@@ -330,7 +422,24 @@ func SendResolutionTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 		return
 	}
 	eqName, eqIP := equipIPFromAlertRow(ctx, pool, alertID)
-	text := telegramResolutionBlocks(title, detail, eqName, eqIP)
+	row := loadAlertResolutionRow(ctx, pool, alertID)
+	extras := []string{}
+	if row.PopName != "" {
+		extras = append(extras, "POP: "+row.PopName)
+	}
+	if !row.ActiveSince.IsZero() {
+		extras = append(extras, "Início: "+row.ActiveSince.UTC().Format("02/01/2006 15:04"))
+	}
+	if row.ClosedAt != nil {
+		extras = append(extras, "Fim: "+row.ClosedAt.UTC().Format("02/01/2006 15:04"))
+		if d := row.ClosedAt.Sub(row.ActiveSince); d > 0 {
+			extras = append(extras, "Duração: "+formatDurationPT(d))
+		}
+	}
+	if rv := resolvedValueFromMeta(row.AlertType, row.Meta); rv != "" {
+		extras = append(extras, "Valor normalizado: "+rv)
+	}
+	text := telegramResolutionBlocks(title, detail, eqName, eqIP, extras...)
 	sendErr := telegramclient.SendMessage(ctx, cfg, text)
 	tg := map[string]any{"attempted_at": attempted}
 	if sendErr != nil {

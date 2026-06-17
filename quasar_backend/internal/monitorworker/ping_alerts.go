@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/rs/zerolog"
 )
 
@@ -86,9 +86,6 @@ func InsertPingUnreachableIfNewForMonitoredDevice(ctx context.Context, pool *pgx
 }
 
 func insertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
-	if alertignore.IsMuted(ctx, pool, deviceID, alertTypePingUnreachable, "") {
-		return
-	}
 	metaSource = strings.TrimSpace(metaSource)
 	if metaSource == "" {
 		metaSource = "monitor_worker"
@@ -96,37 +93,25 @@ func insertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *ze
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
 	msg := fmt.Sprintf("%s (%s): sem resposta ICMP/TCP dentro do tempo de espera configurado.", descOr(desc, "?"), addrOr(addr, "?"))
-
 	meta := alertnotify.WithStatusTransition(map[string]any{
 		"source":       metaSource,
 		"reachability": probe,
+		"last_seen_at": time.Now().UTC().Format(time.RFC3339),
 	}, "reachable", "unreachable", nil)
-	metaRaw, err := json.Marshal(meta)
-	if err != nil {
-		metaRaw = []byte("{}")
-	}
 
-	var alertID uuid.UUID
-	err = pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, 'critical', $2::text, $3, NULLIF(trim($4), ''), NULLIF(trim($5), ''),
-			COALESCE($6::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid AND ai.alert_type = $2::text AND ai.closed_at IS NULL
-		)
-		RETURNING id
-	`, deviceID, alertTypePingUnreachable, msg, addr, desc, metaRaw).Scan(&alertID)
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: "critical", AlertType: alertTypePingUnreachable,
+		Message: msg, IP: addr, DeviceName: desc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchDeviceOnly},
+	}, &alertstore.NotifyCreate{Log: log, Level: "CRITICAL", Headline: "Equipamento offline"})
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return
-		}
-		log.Error().Err(err).Str("device", deviceID.String()).Msg("alert_instances insert ping_unreachable")
+		log.Error().Err(err).Str("device", deviceID.String()).Msg("alertstore ping_unreachable")
 		return
 	}
-	log.Warn().Str("device", deviceID.String()).Str("host", addr).Msg("alerta criado: equipamento inalcançável (ICMP/TCP) — mudança de estado")
-	alertcorrelation.Reconcile(ctx, pool, log)
-	alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, alertID, "CRITICAL", "Equipamento offline", msg)
+	if res.Created {
+		log.Warn().Str("device", deviceID.String()).Str("host", addr).Msg("alerta criado: equipamento inalcançável (ICMP/TCP)")
+		alertcorrelation.Reconcile(ctx, pool, log)
+	}
 }
 
 func resolvePingUnreachableForDevices(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, recovered []uuid.UUID) {

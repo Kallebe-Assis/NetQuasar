@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
+	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/rs/zerolog"
@@ -462,69 +462,28 @@ func evalThresholdSeverity(v float64, t alertMetricThreshold) string {
 	return "ok"
 }
 
-// openOrUpdateAlertWithMeta cria uma instância nova ou, se já existir com a mesma meta.key, apenas
-// atualiza message / severity / meta (valor corrente na UI) — Telegram só quando created=true nos chamadores.
+// openOrUpdateAlertWithMeta delega para alertstore (compatibilidade API).
 func openOrUpdateAlertWithMeta(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, severity, alertType, message, ip, devName string, meta map[string]any) (created bool, alertID uuid.UUID, err error) {
-	if alertignore.IsMuted(ctx, pool, deviceID, alertType, alertignore.MetaKeyFromAlert(alertType, meta)) {
-		return false, uuid.Nil, nil
+	if meta == nil {
+		meta = map[string]any{}
 	}
-	metaRaw, jerr := json.Marshal(meta)
-	if jerr != nil {
-		metaRaw = []byte("{}")
-	}
-	err = pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5), ''), NULLIF(trim($6), ''), COALESCE($7::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid
-			  AND ai.alert_type = $3::text
-			  AND ai.closed_at IS NULL
-			  AND (ai.meta->>'key') = ($8::jsonb->>'key')
-		)
-		RETURNING id
-	`, deviceID, severity, alertType, message, ip, devName, metaRaw, metaRaw).Scan(&alertID)
-	if err == nil {
-		return true, alertID, nil
-	}
-	if err != pgx.ErrNoRows {
-		return false, uuid.Nil, err
-	}
-	_, err = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity = $3::text,
-			message = $4,
-			meta = COALESCE(meta, '{}'::jsonb) || $5::jsonb
-		WHERE device_id = $1::uuid
-		  AND alert_type = $2::text
-		  AND closed_at IS NULL
-		  AND (meta->>'key') = ($5::jsonb->>'key')
-	`, deviceID, alertType, severity, message, metaRaw)
-	return false, uuid.Nil, err
+	key, _ := meta["key"].(string)
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: severity, AlertType: alertType,
+		Message: message, IP: ip, DeviceName: devName, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+	}, nil)
+	return res.Created, res.ID, err
 }
 
 func closeAlertByMetaKey(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType, key string) {
-	metaRaw, _ := json.Marshal(map[string]any{"resolved": "normalized", "source": "interface_snmp_refresh", "key": key})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at = now(),
-			meta = COALESCE(meta, '{}'::jsonb) || $4::jsonb
-		WHERE device_id = $1::uuid
-		  AND alert_type = $2::text
-		  AND closed_at IS NULL
-		  AND (meta->>'key') = $3
-		RETURNING id, message
-	`, deviceID, alertType, key, metaRaw).Scan(&aid, &msg)
-	if err != nil {
-		if err != pgx.ErrNoRows && log != nil {
-			log.Error().Err(err).Str("alert_type", alertType).Msg("fechar alerta por meta key")
-		}
-		return
-	}
-	head := alertnotify.ResolutionHeadlineForAlertType(alertType)
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, head, msg)
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertType,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved: map[string]any{
+			"resolved": "normalized", "source": "interface_snmp_refresh", "key": key,
+		},
+	})
 }
 
 func parseTrailingIndex(oid string) int {
@@ -727,23 +686,7 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 }
 
 func walkJSONToSNMPVars(raw []byte) []probing.SNMPVar {
-	var arr []struct {
-		OID   string `json:"oid"`
-		Value string `json:"value"`
-		Type  string `json:"type"`
-	}
-	if json.Unmarshal(raw, &arr) != nil {
-		return nil
-	}
-	out := make([]probing.SNMPVar, 0, len(arr))
-	for _, v := range arr {
-		oid := strings.TrimSpace(v.OID)
-		if strings.HasPrefix(oid, "__netquasar.") {
-			continue
-		}
-		out = append(out, probing.SNMPVar{OID: v.OID, Value: v.Value, Type: v.Type})
-	}
-	return out
+	return snapshotwalk.VarsFromJSON(raw)
 }
 
 func snapshotWalkTruncated(raw []byte) bool {

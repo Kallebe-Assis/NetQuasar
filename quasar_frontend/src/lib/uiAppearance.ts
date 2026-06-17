@@ -3,9 +3,21 @@ import { isUiTheme, type UiTheme } from "./theme";
 
 export type UiAppearancePayload = {
   theme?: string;
+  map_equipment_color?: string;
+  map_connection_color?: string;
   updated_at?: string;
   source?: string;
 };
+
+export const DEFAULT_MAP_EQUIPMENT_COLOR = "#3388ff";
+export const DEFAULT_MAP_CONNECTION_COLOR = "#3b82f6";
+
+export function mapColorsFromAppearance(data: UiAppearancePayload | undefined) {
+  return {
+    equipment: (data?.map_equipment_color ?? DEFAULT_MAP_EQUIPMENT_COLOR).trim() || DEFAULT_MAP_EQUIPMENT_COLOR,
+    connection: (data?.map_connection_color ?? DEFAULT_MAP_CONNECTION_COLOR).trim() || DEFAULT_MAP_CONNECTION_COLOR,
+  };
+}
 
 export async function fetchUiAppearance(): Promise<UiAppearancePayload> {
   return apiFetch<UiAppearancePayload>("/api/v1/settings/ui-appearance");

@@ -2,16 +2,15 @@ package alertthresholds
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/rs/zerolog"
 )
 
@@ -57,43 +56,26 @@ func EvaluateOltOnuOpticalThreshold(
 		addrOrEmpty(strings.TrimSpace(deviceIP), "?"),
 		ponKey, label, value, sev, onuOpticalCycles)
 	meta := alertnotify.WithStatusTransition(map[string]any{
-		"source":            "monitor_worker_olt",
-		"key":               key,
-		"metric_id":         metricID,
-		"pon":               ponKey,
-		"value":             value,
-		"streak":            streak,
-		"required_streak":   onuOpticalCycles,
+		"source":             "monitor_worker_olt",
+		"key":                key,
+		"metric_id":          metricID,
+		"pon":                ponKey,
+		"value":              value,
+		"value_text":         fmt.Sprintf("%.2f dBm", value),
+		"streak":             streak,
+		"required_streak":    onuOpticalCycles,
 		"threshold_severity": sev,
 	}, "optical_normal", "threshold_"+sev, nil)
-	metaRaw, _ := json.Marshal(meta)
-	var newID uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5),''), NULLIF(trim($6),''), COALESCE($7::jsonb,'{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id = $1::uuid AND ai.alert_type = $3::text AND ai.closed_at IS NULL
-			  AND (ai.meta->>'key') = ($7::jsonb->>'key')
-		)
-		RETURNING id
-	`, deviceID, sev, alertType, msg, deviceIP, deviceDesc, metaRaw).Scan(&newID)
-	if err == nil {
-		alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, pool, log, newID, strings.ToUpper(sev), title, msg)
-		return
+	_, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: sev, AlertType: alertType,
+		Message: msg, IP: deviceIP, DeviceName: deviceDesc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+	}, &alertstore.NotifyCreate{
+		Log: log, Level: strings.ToUpper(sev), Headline: title,
+	})
+	if err != nil && log != nil {
+		log.Error().Err(err).Str("device", deviceID.String()).Msg("alertstore olt_onu_optical")
 	}
-	if err != pgx.ErrNoRows {
-		return
-	}
-	patch, _ := json.Marshal(map[string]any{"value": value, "streak": streak, "source": "monitor_worker_olt"})
-	_, _ = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity = $4::text,
-			message = $5,
-			meta = COALESCE(meta, '{}'::jsonb) || $6::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'key') = $3
-	`, deviceID, alertType, key, sev, msg, patch)
 }
 
 func updateOnuOpticalStreak(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, ponKey, metricID string, bad bool, value float64) int {
@@ -154,20 +136,12 @@ func parseNum(v any) (float64, bool) {
 }
 
 func closeOltOnuOpticalAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType, key string) {
-	metaPatch, _ := json.Marshal(map[string]any{"resolved": "optical_within_limits", "source": "monitor_worker_olt"})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at = now(),
-			meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb
-		WHERE device_id = $1::uuid AND alert_type = $2::text AND closed_at IS NULL
-		  AND (meta->>'key') = $4
-		RETURNING id, message
-	`, deviceID, alertType, metaPatch, key).Scan(&aid, &msg)
-	if err != nil {
-		return
-	}
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, alertnotify.ResolutionHeadlineForAlertType(alertType), msg)
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertType,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved: map[string]any{
+			"resolved": "optical_within_limits", "source": "monitor_worker_olt", "key": key,
+		},
+	})
 }
 

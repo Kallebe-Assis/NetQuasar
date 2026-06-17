@@ -6,6 +6,7 @@ import { AppRouter } from "./app/AppRouter";
 import { ThemeProvider } from "./app/ThemeProvider";
 import "./styles/themes.css";
 import "./styles/global.css";
+import "./styles/responsive.css";
 
 const qc = new QueryClient({
   defaultOptions: {

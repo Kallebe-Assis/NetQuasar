@@ -160,7 +160,10 @@ func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 			COALESCE(d.latitude, p.latitude) AS latitude,
 			COALESCE(d.longitude, p.longitude) AS longitude,
 			host(d.ip)::text, d.pop_id, d.operational_mode,
-			COALESCE(c.ok, false) AS up, c.checked_at,
+			d.ping_enabled,
+			COALESCE(c.ok, false) AS probe_ok,
+			c.reach_ok,
+			c.checked_at,
 			CASE
 				WHEN d.latitude IS NOT NULL AND d.longitude IS NOT NULL THEN 'device'
 				WHEN p.latitude IS NOT NULL AND p.longitude IS NOT NULL THEN 'pop'
@@ -226,20 +229,15 @@ func (s *Server) mapEquipmentPoints(w http.ResponseWriter, r *http.Request) {
 		var lat, lon float64
 		var ip *string
 		var popID *uuid.UUID
-		var up bool
+		var pingEnabled bool
+		var probeOK bool
+		var reachOK *bool
 		var checked *time.Time
-		if err := rows.Scan(&id, &desc, &cat, &lat, &lon, &ip, &popID, &op, &up, &checked, &coordSource); err != nil {
+		if err := rows.Scan(&id, &desc, &cat, &lat, &lon, &ip, &popID, &op, &pingEnabled, &probeOK, &reachOK, &checked, &coordSource); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
-		st := "unknown"
-		if checked != nil {
-			if up {
-				st = "online"
-			} else {
-				st = "offline"
-			}
-		}
+		st := mapDeviceReachabilityStatus(pingEnabled, checked, probeOK, reachOK)
 		pts = append(pts, map[string]any{
 			"id": id, "description": desc, "category": cat, "lat": lat, "lng": lon,
 			"ip": ip, "pop_id": popID, "operational_mode": op, "status": st, "last_check_at": checked,

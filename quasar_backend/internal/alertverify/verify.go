@@ -78,7 +78,11 @@ func VerifyAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, a
 	out.Resolved = resolved
 
 	if resolved {
-		metaClose, _ := json.Marshal(map[string]any{"resolved": "verify_normalized", "source": "alert_verify", "verify": collected})
+		closeMeta := map[string]any{"resolved": "verify_normalized", "source": "alert_verify", "verify": collected}
+		if rv := formatResolvedValueText(row.AlertType, collected); rv != "" {
+			closeMeta["resolved_value"] = rv
+		}
+		metaClose, _ := json.Marshal(closeMeta)
 		var closedID uuid.UUID
 		var msg string
 		err = pool.QueryRow(ctx, `
@@ -127,7 +131,7 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	case "telemetry_threshold":
 		return verifyTelemetry(ctx, pool, row)
 	case "uptime_restart_low":
-		return verifyUptime(ctx, pool, row)
+		return verifyUptimeRestartLow(ctx, pool, row)
 	case "olt_onu_drop", "olt_onu_rise":
 		return verifyOltOnuDelta(ctx, pool, row)
 	case "olt_onu_rx", "olt_onu_tx":
@@ -185,20 +189,28 @@ func verifyLatency(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool
 		collected["latency_ms"] = *lat
 	}
 	collected["reach_ok"] = reachOK
+	if lat == nil || !reachOK {
+		return false, "Sem leitura de latência no cache ou equipamento offline.", collected, nil
+	}
 	var devCat string
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
-	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "latency_ms", devCat)
-	if !ok {
-		return false, fmt.Sprintf("Latência actual: %v ms (sem limiar global).", collected["latency_ms"]), collected, map[string]any{"curr_latency_ms": lat}
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "latency_ms", devCat)
+	if ok {
+		sev := alertthresholds.EvalMetricSeverity(float64(*lat), th)
+		if sev == "ok" {
+			return true, fmt.Sprintf("%s: %d ms — dentro do limiar.", label, *lat), collected, map[string]any{"curr_latency_ms": *lat}
+		}
+		return false, fmt.Sprintf("%s: %d ms — ainda em %s.", label, *lat, sev), collected, map[string]any{"curr_latency_ms": *lat}
 	}
-	if lat == nil {
-		return false, "Sem leitura de latência no cache.", collected, nil
+	const calmMax int64 = 160
+	const warnMin int64 = 280
+	if *lat < calmMax {
+		return true, fmt.Sprintf("Latência %d ms — normalizada (heurística < %d ms).", *lat, calmMax), collected, map[string]any{"curr_latency_ms": *lat}
 	}
-	sev := severityGte(float64(*lat), th)
-	if sev == "ok" {
-		return true, fmt.Sprintf("Latência %.0f ms dentro do limiar.", float64(*lat)), collected, map[string]any{"curr_latency_ms": *lat}
+	if *lat >= warnMin {
+		return false, fmt.Sprintf("Latência %d ms — ainda acima do limiar heurístico (%d ms).", *lat, warnMin), collected, map[string]any{"curr_latency_ms": *lat}
 	}
-	return false, fmt.Sprintf("Latência %.0f ms — ainda acima do limiar (%s).", float64(*lat), sev), collected, map[string]any{"curr_latency_ms": *lat}
+	return false, fmt.Sprintf("Latência %d ms — entre limiares heurísticos.", *lat), collected, map[string]any{"curr_latency_ms": *lat}
 }
 
 func verifyTelemetry(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
@@ -230,8 +242,24 @@ func verifyTelemetry(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bo
 	return false, fmt.Sprintf("%s: %.2f — ainda em %s.", label, *val, sev), collected, map[string]any{"value": *val, "metric_id": metricID}
 }
 
-func verifyUptime(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+func verifyUptimeRestartLow(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
 	collected := map[string]any{}
+	mins := loadLatestUptimeMinutes(ctx, pool, row)
+	if mins != nil {
+		collected["uptime_minutes"] = *mins
+	}
+	var threshold int
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(uptime_restart_alert_minutes, 0) FROM monitoring_intervals WHERE id=1`).Scan(&threshold)
+	if threshold <= 0 || mins == nil {
+		return false, "Sem leitura de uptime ou limiar de reinício desligado.", collected, nil
+	}
+	if *mins >= float64(threshold) {
+		return true, fmt.Sprintf("Uptime %.0f min — acima do limiar de %d min.", *mins, threshold), collected, map[string]any{"uptime_minutes": *mins}
+	}
+	return false, fmt.Sprintf("Uptime %.0f min — ainda abaixo do limiar de %d min.", *mins, threshold), collected, map[string]any{"uptime_minutes": *mins}
+}
+
+func loadLatestUptimeMinutes(ctx context.Context, pool *pgxpool.Pool, row *alertRow) *float64 {
 	var mins *float64
 	_ = pool.QueryRow(ctx, `
 		SELECT value FROM telemetry_samples
@@ -239,19 +267,15 @@ func verifyUptime(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool,
 		ORDER BY sampled_at DESC LIMIT 1
 	`, row.DeviceID).Scan(&mins)
 	if mins != nil {
-		collected["uptime_minutes"] = *mins
+		return mins
 	}
-	var devCat string
-	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
-	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "uptime_minutes", devCat)
-	if !ok || mins == nil {
-		return false, "Sem leitura de uptime.", collected, nil
+	if v, ok := row.Meta["observed_uptime_minutes"].(float64); ok {
+		return &v
 	}
-	sev := severityGte(*mins, th)
-	if sev == "ok" {
-		return true, fmt.Sprintf("Uptime %.0f min — acima do limiar mínimo.", *mins), collected, map[string]any{"uptime_minutes": *mins}
+	if v, ok := row.Meta["uptime_minutes"].(float64); ok {
+		return &v
 	}
-	return false, fmt.Sprintf("Uptime %.0f min — ainda abaixo do esperado.", *mins), collected, map[string]any{"uptime_minutes": *mins}
+	return nil
 }
 
 func verifyOltOnuDelta(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
@@ -597,6 +621,38 @@ func RevalidatePingAlerts(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 		}
 	}
 	return n, rows.Err()
+}
+
+func formatResolvedValueText(alertType string, collected map[string]any) string {
+	if collected == nil {
+		return ""
+	}
+	if v, ok := collected["dbm"]; ok && v != nil {
+		return fmt.Sprintf("%v dBm", v)
+	}
+	if v, ok := collected["latency_ms"]; ok && v != nil {
+		return fmt.Sprintf("%v ms", v)
+	}
+	if v, ok := collected["uptime_minutes"]; ok && v != nil {
+		return fmt.Sprintf("%v min", v)
+	}
+	if v, ok := collected["value"]; ok && v != nil {
+		mid, _ := collected["metric_id"].(string)
+		mid = strings.ToLower(strings.TrimSpace(mid))
+		suffix := ""
+		if strings.Contains(mid, "cpu") || strings.Contains(mid, "mem") || strings.Contains(alertType, "cpu") || strings.Contains(alertType, "memory") {
+			suffix = "%"
+		} else if strings.Contains(mid, "temp") || strings.Contains(alertType, "temperature") {
+			suffix = " °C"
+		}
+		return fmt.Sprintf("%v%s", v, suffix)
+	}
+	if probe, ok := collected["probe"].(map[string]any); ok {
+		if okVal, _ := probe["ok"].(bool); okVal {
+			return "Online"
+		}
+	}
+	return ""
 }
 
 func ptrStr(p *string) string {

@@ -231,17 +231,20 @@ export function alertValueText(type: string | null | undefined, message: string 
   const upN = coerceFiniteNumber(m?.observed_uptime_minutes);
   if (upN !== null) return fmtByUnit(upN, "min");
 
+  const metricId = String(m?.metric_id ?? "").toLowerCase();
   const generic = coerceFiniteNumber(m?.value);
   if (generic !== null) {
+    if (metricId.includes("uptime") || metricId === "uptime_minutes") return fmtByUnit(generic, "min");
     if (t.includes("latency")) return fmtByUnit(generic, "ms");
     if (t.includes("sfp")) return fmtByUnit(generic, "dBm");
-    if (t.includes("telemetry") || t.includes("temperature")) return fmtByUnit(generic, "°C");
+    if (metricId.includes("cpu") || t.includes("cpu")) return fmtByUnit(generic, "%");
+    if (metricId.includes("mem") || t.includes("memory")) return fmtByUnit(generic, "%");
+    if (metricId.includes("temp") || t.includes("telemetry") || t.includes("temperature")) return fmtByUnit(generic, "°C");
     if (t.includes("uptime")) return fmtByUnit(generic, "min");
     if (t.includes("onu") || t.includes("pon")) return fmtByUnit(generic, "ONUs");
     if (t.includes("cpu") || t.includes("memory")) return fmtByUnit(generic, "%");
   }
 
-  const metricId = String(m?.metric_id ?? "").toLowerCase();
   if (metricId === "latency_ms") {
     const v = coerceFiniteNumber(m?.value);
     if (v !== null) return fmtByUnit(v, "ms");

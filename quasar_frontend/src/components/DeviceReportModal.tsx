@@ -4,29 +4,25 @@ import { DropdownMenu } from "./DropdownMenu";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastLoading, toastOk } from "../lib/operationToast";
-import { displayAlertType, displaySeverity } from "../lib/alertLabels";
 import {
-  aggregatePingSamples,
-  aggregateTelemetryFromSamples,
   buildDeviceCadastroRows,
   buildDeviceReportMainTable,
   buildFullDeviceReportCsv,
   cadastroPlainTextForClipboard,
   deviceShowsInterfaceMonitorSection,
-  formatDelta,
   formatNum,
   groupOltInterfaceRows,
   interfaceMonitorRowsFromApi,
   interfaceSnapshotTableRows,
   parseTelemetryKPIs,
   formatCollectedPt,
+  isOltCategory,
   reportWindowIso,
   shortFmtIso,
   type PingHistorySample,
   type ReportPeriod,
   type TelemetryHistorySample,
 } from "../lib/deviceReportHelpers";
-import { formatSnmpMetricCell } from "../lib/formatDisplay";
 
 function fmtIfaceOctCell(v: number | null | undefined, saturated?: boolean): string {
   if (saturated && v == null) return "— (32b)";
@@ -72,19 +68,6 @@ function adminStatusSpan(s: string | undefined | null) {
         ? "badge badge--err"
         : "badge badge--off";
   return <span className={cls}>{raw || "—"}</span>;
-}
-
-function fmtVsolReportCell(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  const t = String(v).trim();
-  return t || "—";
-}
-
-function fmtZteCell(v: unknown): string {
-  if (v == null) return "—";
-  const s = String(v).trim();
-  return s || "—";
 }
 
 export type DeviceReportTarget = {
@@ -195,7 +178,7 @@ type Props = {
 export function DeviceReportModal({ device, onClose }: Props) {
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("7d");
-  const [reportTab, setReportTab] = useState<"dados" | "interface" | "graficos" | "outros">("dados");
+  const [reportTab, setReportTab] = useState<"resumo" | "interfaces" | "graficos">("resumo");
   const [copyCadastroNote, setCopyCadastroNote] = useState<string | null>(null);
   const id = device?.id ?? "";
 
@@ -343,24 +326,6 @@ export function DeviceReportModal({ device, onClose }: Props) {
   }, [deviceCadastro.data]);
 
   const reportWin = useMemo(() => reportWindowIso(reportPeriod), [reportPeriod]);
-  const pingAggCurr = useMemo(
-    () => aggregatePingSamples(reportPingHistory.data?.samples ?? []),
-    [reportPingHistory.data?.samples],
-  );
-  const pingAggPrev = useMemo(
-    () => aggregatePingSamples(reportPingHistoryPrev.data?.samples ?? []),
-    [reportPingHistoryPrev.data?.samples],
-  );
-  const telAggCurr = useMemo(
-    () => aggregateTelemetryFromSamples(reportTelemetryHistory.data?.samples ?? []),
-    [reportTelemetryHistory.data?.samples],
-  );
-  const telAggPrev = useMemo(
-    () => aggregateTelemetryFromSamples(reportTelemetryHistoryPrev.data?.samples ?? []),
-    [reportTelemetryHistoryPrev.data?.samples],
-  );
-  const alertCountCurr = reportAlertsHistory.data?.events?.length ?? 0;
-  const alertCountPrev = reportAlertsHistoryPrev.data?.events?.length ?? 0;
 
   const telemetrySorted = useMemo(
     () =>
@@ -464,15 +429,12 @@ export function DeviceReportModal({ device, onClose }: Props) {
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal modal--wide device-report-print" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 6 }}>Relatório completo do equipamento</h3>
-        <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
-          <strong>{device.description}</strong> · <span className="mono">{device.ip ?? "sem IP"}</span> · {device.category}
-          {device.brand ? (
-            <>
-              {" "}
-              · marca <span className="mono">{device.brand}</span>
-            </>
-          ) : null}
+        <h3 style={{ marginBottom: 6 }}>Relatório do equipamento</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0, lineHeight: 1.5 }}>
+          <strong style={{ color: "var(--text)" }}>{device.description}</strong>
+          {device.ip ? <> · {device.ip}</> : null}
+          {device.category ? <> · {device.category}</> : null}
+          {device.brand ? <> · {device.brand}</> : null}
         </p>
         <div className="row no-print" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
           <button type="button" className="btn btn--primary" disabled={fullReport.isPending} onClick={() => fullReport.mutate(device.id)}>
@@ -556,42 +518,90 @@ export function DeviceReportModal({ device, onClose }: Props) {
           </div>
         )}
         <div className="row no-print" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>Período dos gráficos e tabelas:</span>
-          {(["24h", "7d", "30d"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={reportPeriod === p ? "btn btn--primary" : "btn"}
-              style={{ fontSize: 11, padding: "4px 10px" }}
-              onClick={() => setReportPeriod(p)}
-            >
-              {p === "24h" ? "Últimas 24 h" : p === "7d" ? "7 dias" : "30 dias"}
-            </button>
-          ))}
+          {reportTab === "graficos" && (
+            <>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>Período dos gráficos:</span>
+              {(["24h", "7d", "30d"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={reportPeriod === p ? "btn btn--primary" : "btn"}
+                  style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => setReportPeriod(p)}
+                >
+                  {p === "24h" ? "24 h" : p === "7d" ? "7 dias" : "30 dias"}
+                </button>
+              ))}
+            </>
+          )}
         </div>
-        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0, marginBottom: 8 }}>
-          Actual: {shortFmtIso(reportWin.fromIso)} — {shortFmtIso(reportWin.toIso)} · Anterior (comparativo):{" "}
-          {shortFmtIso(reportWin.prevFromIso)} — {shortFmtIso(reportWin.prevToIso)}
-        </p>
         <div className="tabs" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-          <button type="button" className={reportTab === "dados" ? "active" : ""} onClick={() => setReportTab("dados")}>
-            Dados
+          <button type="button" className={reportTab === "resumo" ? "active" : ""} onClick={() => setReportTab("resumo")}>
+            Resumo
           </button>
-          <button type="button" className={reportTab === "interface" ? "active" : ""} onClick={() => setReportTab("interface")}>
-            Interface
+          <button type="button" className={reportTab === "interfaces" ? "active" : ""} onClick={() => setReportTab("interfaces")}>
+            Interfaces
           </button>
           <button type="button" className={reportTab === "graficos" ? "active" : ""} onClick={() => setReportTab("graficos")}>
             Gráficos
           </button>
-          <button type="button" className={reportTab === "outros" ? "active" : ""} onClick={() => setReportTab("outros")}>
-            Outros
-          </button>
         </div>
-        {reportTab === "dados" && (
+        {reportTab === "resumo" && (
         <>
+        <div className="device-report-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 12 }}>
+          {mainReportRows.slice(0, 5).map((r) => (
+            <div key={r.description} className="card" style={{ padding: "10px 12px", margin: 0 }}>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>{r.description}</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{r.value}</div>
+            </div>
+          ))}
+        </div>
+        {isOltCategory(device.category) && reportOltDevice.data && (
+          <div className="card" style={{ marginBottom: 10 }}>
+            <h4 style={{ marginTop: 0 }}>ONUs por porta PON</h4>
+            {reportOltDevice.data?.olt_snapshot_at != null && String(reportOltDevice.data.olt_snapshot_at).length > 0 && (
+              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
+                Última coleta: {formatCollectedPt(String(reportOltDevice.data.olt_snapshot_at))}
+              </p>
+            )}
+            {reportOltDevice.isLoading && <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>}
+            {reportOltDevice.isError && <div className="msg msg--err">{(reportOltDevice.error as Error).message}</div>}
+            <div className="table-wrap">
+              <table style={{ fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th>PON</th>
+                    <th>Nome</th>
+                    <th className="mono">Total</th>
+                    <th className="mono">Online</th>
+                    <th className="mono">Offline</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.isArray(reportOltDevice.data.pons_table)
+                    ? (reportOltDevice.data.pons_table as Array<Record<string, unknown>>).map((p, i) => (
+                        <tr key={`${String(p.id ?? i)}`}>
+                          <td>{String(p.id ?? "—")}</td>
+                          <td>{String(p.name ?? "—")}</td>
+                          <td className="mono">{formatNum(Number.isFinite(Number(p.onu_total)) ? Number(p.onu_total) : null, 0)}</td>
+                          <td className="mono">{formatNum(Number.isFinite(Number(p.onu_online)) ? Number(p.onu_online) : null, 0)}</td>
+                          <td className="mono">{formatNum(Number.isFinite(Number(p.onu_offline)) ? Number(p.onu_offline) : null, 0)}</td>
+                          <td>{String(p.status ?? "—")}</td>
+                        </tr>
+                      ))
+                    : null}
+                </tbody>
+              </table>
+            </div>
+            {Array.isArray(reportOltDevice.data.pons_table) && (reportOltDevice.data.pons_table as unknown[]).length === 0 && (
+              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 0 }}>Sem dados de PON. Actualize o snapshot da OLT.</p>
+            )}
+          </div>
+        )}
         <div className="card" style={{ marginBottom: 10 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-            <h4 style={{ margin: 0 }}>Dados cadastrais (ficha completa)</h4>
+            <h4 style={{ margin: 0 }}>Ficha do equipamento</h4>
             <span className="no-print">
             <button
               type="button"
@@ -632,7 +642,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
                   {cadastroRows.map((r, idx) => (
                     <tr key={`${idx}-${r.label}`}>
                       <td>{r.label}</td>
-                      <td className="mono" style={{ fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      <td style={{ fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                         {r.value}
                       </td>
                     </tr>
@@ -643,81 +653,9 @@ export function DeviceReportModal({ device, onClose }: Props) {
           )}
         </div>
         <div className="card" style={{ marginBottom: 10 }}>
-          <h4 style={{ marginTop: 0 }}>Comparativo antes / depois (mesma duração)</h4>
+          <h4 style={{ marginTop: 0 }}>Leituras actuais</h4>
           <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-            “Depois” = período seleccionado acima; “Antes” = intervalo imediatamente anterior.
-          </p>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Métrica</th>
-                  <th>Antes</th>
-                  <th>Depois</th>
-                  <th>Variação</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Ping — latência média (ms)</td>
-                  <td className="mono">{formatNum(pingAggPrev.avgLatency, 1)}</td>
-                  <td className="mono">{formatNum(pingAggCurr.avgLatency, 1)}</td>
-                  <td className="mono">{formatDelta(pingAggPrev.avgLatency, pingAggCurr.avgLatency, 1)}</td>
-                </tr>
-                <tr>
-                  <td>Ping — latência máx. (ms)</td>
-                  <td className="mono">{formatNum(pingAggPrev.maxLatency, 1)}</td>
-                  <td className="mono">{formatNum(pingAggCurr.maxLatency, 1)}</td>
-                  <td className="mono">{formatDelta(pingAggPrev.maxLatency, pingAggCurr.maxLatency, 1)}</td>
-                </tr>
-                <tr>
-                  <td>Ping — taxa OK (%)</td>
-                  <td className="mono">{pingAggPrev.okRatio != null ? formatNum(pingAggPrev.okRatio * 100, 1) : "—"}</td>
-                  <td className="mono">{pingAggCurr.okRatio != null ? formatNum(pingAggCurr.okRatio * 100, 1) : "—"}</td>
-                  <td className="mono">
-                    {pingAggPrev.okRatio != null && pingAggCurr.okRatio != null
-                      ? formatDelta(pingAggPrev.okRatio * 100, pingAggCurr.okRatio * 100, 1, " p.p.")
-                      : "—"}
-                  </td>
-                </tr>
-                <tr>
-                  <td>Amostras de ping</td>
-                  <td className="mono">{pingAggPrev.n}</td>
-                  <td className="mono">{pingAggCurr.n}</td>
-                  <td className="mono">{formatDelta(pingAggPrev.n, pingAggCurr.n, 0, "")}</td>
-                </tr>
-                <tr>
-                  <td>CPU média (%)</td>
-                  <td className="mono">{formatNum(telAggPrev.cpu, 1)}</td>
-                  <td className="mono">{formatNum(telAggCurr.cpu, 1)}</td>
-                  <td className="mono">{formatDelta(telAggPrev.cpu, telAggCurr.cpu, 1)}</td>
-                </tr>
-                <tr>
-                  <td>Memória média (%)</td>
-                  <td className="mono">{formatNum(telAggPrev.memory, 1)}</td>
-                  <td className="mono">{formatNum(telAggCurr.memory, 1)}</td>
-                  <td className="mono">{formatDelta(telAggPrev.memory, telAggCurr.memory, 1)}</td>
-                </tr>
-                <tr>
-                  <td>Temperatura média (°C)</td>
-                  <td className="mono">{formatNum(telAggPrev.temp, 1)}</td>
-                  <td className="mono">{formatNum(telAggCurr.temp, 1)}</td>
-                  <td className="mono">{formatDelta(telAggPrev.temp, telAggCurr.temp, 1)}</td>
-                </tr>
-                <tr>
-                  <td>Alertas (instâncias no período)</td>
-                  <td className="mono">{alertCountPrev}</td>
-                  <td className="mono">{alertCountCurr}</td>
-                  <td className="mono">{formatDelta(alertCountPrev, alertCountCurr, 0, "")}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="card" style={{ marginBottom: 10 }}>
-          <h4 style={{ marginTop: 0 }}>Status e leituras colectadas</h4>
-          <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-            Valores da última colecta (ping e telemetria) e outras leituras SNMP da mesma amostra, com descrição legível — sem identificadores técnicos de OID.
+            Última coleta de ping e telemetria — valores em tempo real do equipamento.
           </p>
           <div className="table-wrap">
             <table>
@@ -741,7 +679,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
         </>
         )}
 
-        {reportTab === "interface" && showIfaceMonitor && (
+        {reportTab === "interfaces" && showIfaceMonitor && (
           <div className="card" style={{ marginBottom: 10 }}>
             <h4 style={{ marginTop: 0 }}>Interfaces (rede)</h4>
             {reportInterfacesLatest.isLoading && <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar última colecta de interfaces…</p>}
@@ -756,12 +694,9 @@ export function DeviceReportModal({ device, onClose }: Props) {
                   </p>
                 )}
                 <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                  Última colecta (IF-MIB / ifXTable):{" "}
-                  <span className="mono">{formatCollectedPt(String(reportInterfacesLatest.data?.collected_at ?? ""))}</span> · {ifaceTableRows.length}{" "}
-                  interface(s).
-                  {(device?.category ?? "").trim().toLowerCase() === "olt" && (
-                    <span> · Contagens de ONUs por PON vêm das interfaces <code className="mono">GPON…ONU…</code> (oper status).</span>
-                  )}
+                  Última coleta:{" "}
+                  <span>{formatCollectedPt(String(reportInterfacesLatest.data?.collected_at ?? ""))}</span> · {ifaceTableRows.length}{" "}
+                  interface(s)
                 </p>
                 {oltIfaceGroups ? (
                   <>
@@ -927,199 +862,6 @@ export function DeviceReportModal({ device, onClose }: Props) {
           </div>
         )}
 
-        {reportTab === "interface" && (device?.category ?? "").trim().toLowerCase() === "olt" && (
-          <div className="card" style={{ marginBottom: 10 }}>
-            <h4 style={{ marginTop: 0 }}>PONs — total / online / offline por porta</h4>
-            <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-              Dados do snapshot OLT (após «Actualizar interfaces» as contagens por PON são derivadas das interfaces <code className="mono">GPON…ONU…</code>).
-            </p>
-            {reportOltDevice.data?.olt_snapshot_at != null && String(reportOltDevice.data.olt_snapshot_at).length > 0 && (
-              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                Snapshot OLT: <span className="mono">{formatCollectedPt(String(reportOltDevice.data.olt_snapshot_at))}</span>
-                {reportOltDevice.data.interface_collected_at != null && String(reportOltDevice.data.interface_collected_at).length > 0 ? (
-                  <>
-                    {" "}
-                    · Interfaces: <span className="mono">{formatCollectedPt(String(reportOltDevice.data.interface_collected_at))}</span>
-                  </>
-                ) : null}
-              </p>
-            )}
-            {reportOltDevice.isLoading && <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar snapshot OLT…</p>}
-            {reportOltDevice.isError && <div className="msg msg--err">{(reportOltDevice.error as Error).message}</div>}
-            {reportOltDevice.data && (
-              <details className="collapsible-section" style={{ marginTop: 8 }}>
-                <summary>
-                  Tabela PONs{" "}
-                  <span style={{ fontWeight: 400, color: "var(--muted)" }}>
-                    ({Array.isArray(reportOltDevice.data.pons_table) ? (reportOltDevice.data.pons_table as unknown[]).length : 0})
-                  </span>
-                </summary>
-                <div className="collapsible-section__body">
-                  <div className="table-wrap">
-                    <table style={{ fontSize: 11 }}>
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Nome</th>
-                          <th className="mono">RX PON</th>
-                          <th className="mono">TX PON</th>
-                          <th className="mono">Voltagem</th>
-                          <th className="mono">Corrente</th>
-                          <th className="mono">Temp.</th>
-                          <th className="mono">Total</th>
-                          <th className="mono">Online</th>
-                          <th className="mono">Offline</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.isArray(reportOltDevice.data.pons_table)
-                          ? (reportOltDevice.data.pons_table as Array<Record<string, unknown>>).map((p, i) => {
-                              const fmtPonMetric = (v: unknown) =>
-                                v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : "—";
-                              return (
-                                <tr key={`${String(p.id ?? i)}`}>
-                                  <td className="mono">{String(p.id ?? "—")}</td>
-                                  <td>{String(p.name ?? "—")}</td>
-                                  <td className="mono">{fmtPonMetric(p.rx_dbm)}</td>
-                                  <td className="mono">{fmtPonMetric(p.tx_dbm)}</td>
-                                  <td className="mono">{fmtPonMetric(p.voltage)}</td>
-                                  <td className="mono">{fmtPonMetric(p.current)}</td>
-                                  <td className="mono">{fmtPonMetric(p.temperature)}</td>
-                                  <td className="mono">{formatNum(Number.isFinite(Number(p.onu_total)) ? Number(p.onu_total) : null, 0)}</td>
-                                  <td className="mono">{formatNum(Number.isFinite(Number(p.onu_online)) ? Number(p.onu_online) : null, 0)}</td>
-                                  <td className="mono">{formatNum(Number.isFinite(Number(p.onu_offline)) ? Number(p.onu_offline) : null, 0)}</td>
-                                  <td className="mono">{String(p.status ?? "—")}</td>
-                                </tr>
-                              );
-                            })
-                          : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </details>
-            )}
-            {reportOltDevice.data && Array.isArray(reportOltDevice.data.vsol_onu_table) && (reportOltDevice.data.vsol_onu_table as unknown[]).length > 0 && (
-              <details className="collapsible-section" style={{ marginTop: 10 }}>
-                <summary>
-                  ONUs (MIB OLT){" "}
-                  <span style={{ fontWeight: 400, color: "var(--muted)" }}>
-                    ({(reportOltDevice.data.vsol_onu_table as unknown[]).length})
-                  </span>
-                </summary>
-                <div className="collapsible-section__body">
-                  <div className="table-wrap" style={{ maxHeight: 320, overflow: "auto" }}>
-                    <table style={{ fontSize: 10 }}>
-                      <thead>
-                        <tr>
-                          <th>PON</th>
-                          <th>ONU</th>
-                          <th>Perfil</th>
-                          <th>Fase</th>
-                          <th className="mono">RX ONU</th>
-                          <th className="mono">TX ONU</th>
-                          <th>Modelo</th>
-                          <th>SN</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(reportOltDevice.data.vsol_onu_table as Array<Record<string, unknown>>).map((u, i) => (
-                          <tr key={`vsol-${i}`}>
-                            <td className="mono">{fmtVsolReportCell(u.pon)}</td>
-                            <td className="mono">{fmtVsolReportCell(u.onu)}</td>
-                            <td>{fmtVsolReportCell(u.profile_name)}</td>
-                            <td>{fmtVsolReportCell(u.phase_sta)}</td>
-                            <td className="mono">{formatSnmpMetricCell(u.rx_pwr)}</td>
-                            <td className="mono">{formatSnmpMetricCell(u.tx_pwr)}</td>
-                            <td>{fmtVsolReportCell(u.model)}</td>
-                            <td className="mono" style={{ wordBreak: "break-all", maxWidth: 120 }}>
-                              {fmtVsolReportCell(u.serial)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </details>
-            )}
-            {reportOltDevice.data &&
-              Array.isArray(reportOltDevice.data.pons_table) &&
-              (reportOltDevice.data.pons_table as unknown[]).length === 0 && (
-                <p style={{ fontSize: 12, color: "var(--muted)" }}>Sem linhas em «pons». Actualize interfaces ou snapshot OLT.</p>
-              )}
-            {reportOltDevice.data &&
-              (Array.isArray(reportOltDevice.data.zte_onu_online_table) ||
-                Array.isArray(reportOltDevice.data.zte_pon_status_table) ||
-                Array.isArray(reportOltDevice.data.zte_transceiver_table)) && (
-                <details className="collapsible-section" style={{ marginTop: 10 }}>
-                  <summary>
-                    ZTE MIB — tabelas coletadas
-                    <span style={{ fontWeight: 400, color: "var(--muted)" }}>
-                      {" "}
-                      (
-                      {(Array.isArray(reportOltDevice.data.zte_onu_online_table) ? (reportOltDevice.data.zte_onu_online_table as unknown[]).length : 0) +
-                        (Array.isArray(reportOltDevice.data.zte_pon_status_table) ? (reportOltDevice.data.zte_pon_status_table as unknown[]).length : 0) +
-                        (Array.isArray(reportOltDevice.data.zte_transceiver_table) ? (reportOltDevice.data.zte_transceiver_table as unknown[]).length : 0)}
-                      )
-                    </span>
-                  </summary>
-                  <div className="collapsible-section__body">
-                    {String((reportOltDevice.data.summary as Record<string, unknown> | undefined)?.zte_walk_note ?? "").trim() ? (
-                      <p className="msg msg--off" style={{ fontSize: 11 }}>
-                        Nota walk: {String((reportOltDevice.data.summary as Record<string, unknown>).zte_walk_note)}
-                      </p>
-                    ) : null}
-                    {(
-                      [
-                        ["ONU online (ZTE)", reportOltDevice.data.zte_onu_online_table],
-                        ["Status PON (ZTE)", reportOltDevice.data.zte_pon_status_table],
-                        ["Transceiver (ZTE)", reportOltDevice.data.zte_transceiver_table],
-                      ] as const
-                    ).map(([title, rows]) => {
-                      const arr = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-                      if (arr.length === 0) return null;
-                      return (
-                        <div key={title}>
-                          <h5 style={{ marginTop: 12, marginBottom: 6 }}>{title}</h5>
-                          <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto" }}>
-                            <table style={{ fontSize: 10 }}>
-                              <thead>
-                                <tr>
-                                  <th>Suffix</th>
-                                  <th>Porta</th>
-                                  <th>Valor</th>
-                                  <th>Status</th>
-                                  <th>Tipo</th>
-                                  <th>OID</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {arr.map((r, i) => (
-                                  <tr key={`${title}-${i}`}>
-                                    <td className="mono">{fmtZteCell(r.suffix)}</td>
-                                    <td>{fmtZteCell(r.if_name ?? (r.if_index != null ? `ifIndex ${String(r.if_index)}` : ""))}</td>
-                                    <td className="mono">{fmtZteCell(r.value)}</td>
-                                    <td>{fmtZteCell(r.value_label)}</td>
-                                    <td className="mono">{fmtZteCell(r.type)}</td>
-                                    <td className="mono" style={{ wordBreak: "break-all" }}>
-                                      {fmtZteCell(r.oid)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              )}
-          </div>
-        )}
-
         {reportTab === "graficos" && (
         <div className="report-chart-grid" style={{ marginTop: 10 }}>
           <div className="card report-chart-cell">
@@ -1153,56 +895,6 @@ export function DeviceReportModal({ device, onClose }: Props) {
             <p style={{ fontSize: 12, color: "var(--muted)" }}>{telemetrySorted.length} amostras · eixo Y: graus Celsius.</p>
           </div>
         </div>
-        )}
-
-        {reportTab === "outros" && (
-        <>
-        <div className="card" style={{ marginTop: 10 }}>
-          <h4 style={{ marginTop: 0 }}>Inventário SNMP e detalhes técnicos</h4>
-          {reportInventory.isLoading && <p>A carregar inventário…</p>}
-          {reportInventory.isError && <div className="msg msg--err">{(reportInventory.error as Error).message}</div>}
-          {reportInventory.data && (
-            <pre className="mono" style={{ maxHeight: 220, overflow: "auto", fontSize: 10 }}>
-              {JSON.stringify(reportInventory.data, null, 2)}
-            </pre>
-          )}
-        </div>
-
-        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-          <div className="card" style={{ flex: "1 1 420px", margin: 0 }}>
-            <h4 style={{ marginTop: 0 }}>Histórico de alertas</h4>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Quando</th>
-                    <th>Sev.</th>
-                    <th>Tipo</th>
-                    <th>Mensagem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(reportAlertsHistory.data?.events ?? []).slice(0, 15).map((ev, i) => (
-                    <tr key={`${String(ev.id ?? i)}`}>
-                      <td className="mono">{String(ev.active_since ?? ev.created_at ?? "—")}</td>
-                          <td>{displaySeverity(String(ev.severity ?? ""))}</td>
-                      <td>{displayAlertType(String(ev.type ?? ev.event_type ?? ""))}</td>
-                      <td>{String(ev.message ?? "—")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="card" style={{ flex: "1 1 420px", margin: 0 }}>
-            <h4 style={{ marginTop: 0 }}>Resumo de interfaces no período</h4>
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>
-              Total de snapshots salvos: {reportInterfacesHistory.data?.snapshots?.length ?? 0}
-              {!showIfaceMonitor && " · Detalhe por interface aparece no relatório para Mikrotik (categoria ou marca) e Rádio."}
-            </p>
-          </div>
-        </div>
-        </>
         )}
         <div className="row no-print" style={{ marginTop: 12 }}>
           <button type="button" className="btn" onClick={() => onClose()}>

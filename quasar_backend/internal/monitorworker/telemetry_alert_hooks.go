@@ -4,15 +4,12 @@ import (
 	"context"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmetrics"
-	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
-	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telemetryengine"
 	"github.com/rs/zerolog"
 )
@@ -238,74 +235,14 @@ func parseUptimeMinutesFromTelemetry(metrics map[string]any, vars []probing.SNMP
 	return nil
 }
 
-func likelyMikrotikDevice(category, brand, model, description string) bool {
-	hay := strings.ToLower(strings.TrimSpace(strings.Join([]string{category, brand, model, description}, " ")))
-	if hay == "" {
-		return false
+func parseUptimeMinutesFromSNMP(sn probing.SNMPGetResult) *float64 {
+	if m, ok := SnmpUptimeMinutes(sn); ok && m >= 0 {
+		return &m
 	}
-	if strings.Contains(hay, "mikrotik") || strings.Contains(hay, "routeros") {
-		return true
-	}
-	return strings.Contains(hay, "ccr") || strings.Contains(hay, "crs") || strings.Contains(hay, "rb")
+	return nil
 }
 
-func copyFloat64Ptr(p *float64) *float64 {
-	if p == nil {
-		return nil
-	}
-	v := *p
-	return &v
-}
-
-// evaluateMikrotikSfpAfterMonitoringTelemetry corre walks leves (IF-MIB + mtxr) e aplica limiares SFP globais.
-func evaluateMikrotikSfpAfterMonitoringTelemetry(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
-	deviceID uuid.UUID, deviceDesc, host, community, category, brand, model string,
-) {
-	if !likelyMikrotikDevice(category, brand, model, deviceDesc) {
-		return
-	}
-	h := strings.TrimSpace(host)
-	c := strings.TrimSpace(community)
-	if h == "" || c == "" {
-		return
-	}
-	walkMk, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
-		Version: "2c", Timeout: 18 * time.Second, Retries: 0, MaxRows: 8000,
-	})
-	walkMkIf, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
-		Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: 3000,
-	})
-	walkIF, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: h, Port: 161, Community: c, RootOID: "1.3.6.1.2.1.2.2.1",
-		Version: "2c", Timeout: 28 * time.Second, Retries: 0, MaxRows: 10000,
-	})
-	merged := append(append(append([]probing.SNMPVar{}, walkIF...), walkMk...), walkMkIf...)
-	if len(merged) == 0 {
-		return
-	}
-	ifRows := snmpifparse.BuildIfTable(merged)
-	optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, merged)
-	sfpEval := make([]alertthresholds.SfpInterfaceRow, 0, len(ifRows))
-	for _, r := range ifRows {
-		op := optMap[r.IfIndex]
-		disp := strings.TrimSpace(r.DisplayName)
-		if disp == "" {
-			disp = "if" + strconv.Itoa(r.IfIndex)
-		}
-		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
-			IfIndex:     r.IfIndex,
-			DisplayName: disp,
-			Sfp:         snmpmikrotik.IsSfpPort(r.DisplayName, r.Descr, op),
-			TxDBm:       copyFloat64Ptr(op.TxDBm),
-			RxDBm:       copyFloat64Ptr(op.RxDBm),
-		})
-	}
-	alertthresholds.EvaluateMikrotikSFPAfterSnapshot(ctx, pool, log, deviceID, strings.TrimSpace(deviceDesc), h, sfpEval)
-}
-
-// RunPostTelemetryAlertEval aplica limiares globais (ex.: temperatura) e SFP MikroTik após uma amostra de telemetria.
+// RunPostTelemetryAlertEval aplica limiares globais (CPU, memória, temperatura, uptime) após telemetria SNMP.
 func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	deviceID uuid.UUID, deviceDesc, host, community string,
 	category, brand, model string,
@@ -325,8 +262,16 @@ func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zer
 	if t := parseTempCFromTelemetry(col.Metrics, col.SNMP.Vars); t != nil {
 		alertthresholds.EvaluateGlobalGteMetric(ctx, pool, log, deviceID, deviceDesc, host, "temperature_c", *t)
 	}
-	if u := parseUptimeMinutesFromTelemetry(col.Metrics, col.SNMP.Vars); u != nil {
-		alertthresholds.EvaluateGlobalGteMetric(ctx, pool, log, deviceID, deviceDesc, host, "uptime_minutes", *u)
+	uptimeMin := parseUptimeMinutesFromTelemetry(col.Metrics, col.SNMP.Vars)
+	if uptimeMin == nil {
+		uptimeMin = parseUptimeMinutesFromSNMP(col.SNMP)
 	}
-	evaluateMikrotikSfpAfterMonitoringTelemetry(ctx, pool, log, deviceID, deviceDesc, host, community, category, brand, model)
+	if uptimeMin != nil {
+		_, _, hasGlobalUptime := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "uptime_minutes", category)
+		if hasGlobalUptime {
+			alertthresholds.EvaluateGlobalGteMetric(ctx, pool, log, deviceID, deviceDesc, host, "uptime_minutes", *uptimeMin)
+		} else {
+			evaluateUptimeRestartAlert(ctx, pool, log, deviceID, deviceDesc, host, *uptimeMin)
+		}
+	}
 }

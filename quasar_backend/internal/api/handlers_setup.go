@@ -14,8 +14,8 @@ func (s *Server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	configured := s.DB() != nil
 	out := map[string]any{"database_configured": configured, "ui_theme": uiThemeDark}
 	if configured {
-		if theme, _, err := loadUITheme(r.Context(), s.DB()); err == nil {
-			out["ui_theme"] = theme
+		if row, err := loadUIAppearance(r.Context(), s.DB()); err == nil {
+			out["ui_theme"] = row.Theme
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

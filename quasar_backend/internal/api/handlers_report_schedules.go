@@ -317,7 +317,7 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 		cfg, err := telegramclient.LoadConfig(ctx, pool, "reports")
 		if err != nil || !cfg.Ready() {
 			sendErr = fmt.Errorf("Telegram relatórios: %w", err)
-		} else if err := telegramclient.SendMessageWithParseMode(ctx, cfg, text, "HTML"); err != nil {
+		} else if err := telegramclient.SendMessage(ctx, cfg, text); err != nil {
 			sendErr = err
 		}
 	}
@@ -326,8 +326,7 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 		if err != nil || !smtpCfg.Ready() {
 			sendErr = fmt.Errorf("SMTP: %w", err)
 		} else {
-			plain := strings.ReplaceAll(text, "<b>", "")
-			plain = strings.ReplaceAll(plain, "</b>", "")
+			plain := text
 			subject := fmt.Sprintf("NetQuasar — Base comercial %s", period)
 			to := mailclient.ParseRecipients(ptrStr(emailTo))
 			if err := mailclient.Send(ctx, smtpCfg, to, subject, plain); err != nil {

@@ -257,7 +257,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 		s.finishONURun(ctx, runID, period, false, compErr.Error(), agg, started, actor, trigger)
 		return compErr
 	}
-	if err := telegramclient.SendMessageWithParseMode(ctx, cfg, text, "HTML"); err != nil {
+	if err := telegramclient.SendMessage(ctx, cfg, text); err != nil {
 		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
 		return err
 	}

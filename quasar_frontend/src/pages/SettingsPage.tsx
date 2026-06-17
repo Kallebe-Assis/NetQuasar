@@ -1881,9 +1881,29 @@ function TelegramTestOutcome({ data, error }: { data: unknown; error: Error | nu
   );
 }
 
+const TELEGRAM_MONITORING_TEST_TEMPLATES: { id: string; label: string }[] = [
+  { id: "default", label: "Padrão" },
+  { id: "ping_unreachable", label: "Equipamento offline" },
+  { id: "latency_high", label: "Latência alta" },
+  { id: "uptime_restart_low", label: "Uptime / reinício" },
+  { id: "sfp_rx", label: "SFP RX" },
+  { id: "sfp_tx", label: "SFP TX" },
+  { id: "pon_off", label: "PON OFF (queda ONUs)" },
+  { id: "interface_down", label: "Interface DOWN" },
+  { id: "telemetry_threshold", label: "Telemetria (limiar)" },
+  { id: "snmp_failure", label: "Falha SNMP" },
+];
+
+const TELEGRAM_REPORTS_TEST_TEMPLATES: { id: string; label: string }[] = [
+  { id: "default", label: "Padrão" },
+  { id: "alerts_digest", label: "Resumo de alertas" },
+  { id: "onu_monthly", label: "Relatório mensal ONU" },
+];
+
 function TelegramPanel({ id, title }: { id: string; title: string }) {
   const qc = useQueryClient();
   const path = id === "monitoring" ? "monitoring" : "reports";
+  const templates = id === "monitoring" ? TELEGRAM_MONITORING_TEST_TEMPLATES : TELEGRAM_REPORTS_TEST_TEMPLATES;
   const q = useQuery({
     queryKey: ["settings-tg", id],
     queryFn: () =>
@@ -1894,6 +1914,7 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   const [token, setToken] = useState("");
   const [chat, setChat] = useState("");
   const [topic, setTopic] = useState("");
+  const [testTemplate, setTestTemplate] = useState("default");
   const { push: pushToast } = useAppToast();
 
   useEffect(() => {
@@ -1916,7 +1937,11 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
   });
 
   const test = useMutation({
-    mutationFn: () => apiFetch(`/api/v1/settings/notifications/telegram/${path}/test`, { method: "POST", json: {} }),
+    mutationFn: () =>
+      apiFetch(`/api/v1/settings/notifications/telegram/${path}/test`, {
+        method: "POST",
+        json: { template: testTemplate },
+      }),
   });
 
   if (q.isLoading) return <p>A carregar…</p>;
@@ -1936,7 +1961,17 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
         <input className="input" placeholder="ID do chat" value={chat} onChange={(e) => setChat(e.target.value)} />
         <input className="input" placeholder="ID do tópico (opcional)" value={topic} onChange={(e) => setTopic(e.target.value)} />
       </div>
-      <div className="row" style={{ marginTop: 12, gap: 8 }}>
+      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label className="field" style={{ margin: 0, flex: "1 1 200px", minWidth: 180 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Tipo de mensagem de teste</span>
+          <select className="select" style={{ width: "100%" }} value={testTemplate} onChange={(e) => setTestTemplate(e.target.value)}>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
           Salvar
         </button>

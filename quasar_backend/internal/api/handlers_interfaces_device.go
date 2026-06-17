@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,8 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/interfacealerts"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
@@ -283,68 +281,18 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		}
 		// Snapshot OLT/PON só via refresh manual (perfil em Definições).
 	}
-	if isMikrotik && s.DB() != nil {
-		parsedVars := walkJSONToSNMPVars(b)
-		ifRows := snmpifparse.BuildIfTable(parsedVars)
-		optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, parsedVars)
-		sfpEval := make([]alertthresholds.SfpInterfaceRow, 0, len(ifRows))
-		for _, r := range ifRows {
-			op := optMap[r.IfIndex]
-			disp := strings.TrimSpace(r.DisplayName)
-			if disp == "" {
-				disp = fmt.Sprintf("if%d", r.IfIndex)
-			}
-			sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
-				IfIndex:     r.IfIndex,
-				DisplayName: disp,
-				Sfp:         snmpmikrotik.IsSfpPort(r.DisplayName, r.Descr, op),
-				TxDBm:       copyFloatPtr(op.TxDBm),
-				RxDBm:       copyFloatPtr(op.RxDBm),
-			})
-		}
-		alertthresholds.EvaluateMikrotikSFPAfterSnapshot(ctx, s.DB(), &s.Log, id, devDesc, host, sfpEval)
-	}
-	if s.DB() != nil && latestBeforeInsertRaw != nil {
-		prevRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(latestBeforeInsertRaw))
-		currRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(b))
-		prevBy := map[int]snmpifparse.IfRow{}
-		for _, r := range prevRows {
-			prevBy[r.IfIndex] = r
-		}
-		if th, ok := loadGlobalMetricThreshold(ctx, s.DB(), "iface_down_count"); ok {
-			for _, r := range currRows {
-				p, hasPrev := prevBy[r.IfIndex]
-				if !hasPrev {
-					continue
-				}
-				prevUp := snmpifparse.OperStatusLabel(p.OperStatus) == "up"
-				currUp := snmpifparse.OperStatusLabel(r.OperStatus) == "up"
-				key := fmt.Sprintf("ifdown:%d", r.IfIndex)
-				if prevUp && !currUp {
-					sev := evalThresholdSeverity(1, th)
-					if sev != "ok" {
-						name := strings.TrimSpace(r.DisplayName)
-						if name == "" {
-							name = fmt.Sprintf("if%d", r.IfIndex)
-						}
-						msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN.", strings.TrimSpace(devDesc), host, name)
-						meta := alertnotify.WithStatusTransition(map[string]any{
-							"source":       "interface_snmp_refresh",
-							"if_index":     r.IfIndex,
-							"display_name": name,
-							"key":          key,
-						}, "interface_up", "interface_down", nil)
-						created, aid, err := openOrUpdateAlertWithMeta(ctx, s.DB(), id, sev, "interface_down_transition", msg, host, devDesc, meta)
-						if err == nil && created && aid != uuid.Nil {
-							alertnotify.SendMonitoringTelegramAndPatchMeta(ctx, s.DB(), &s.Log, aid, strings.ToUpper(sev), "Interface DOWN (mudança de estado)", msg)
-						}
-					}
-				}
-				if currUp {
-					closeAlertByMetaKey(ctx, s.DB(), &s.Log, id, "interface_down_transition", key)
-				}
-			}
-		}
+	if s.DB() != nil {
+		interfacealerts.EvaluateAfterSnapshot(ctx, s.DB(), &s.Log, interfacealerts.Params{
+			DeviceID:   id,
+			Host:       host,
+			DeviceDesc: devDesc,
+			Category:   devCat,
+			Brand:      devBrand,
+			Model:      devModel,
+			Source:     "interface_snmp_refresh",
+			PrevJSON:   latestBeforeInsertRaw,
+			CurrJSON:   b,
+		})
 	}
 	ifaceCount := 0
 	if tab, ok := payload["interface_table"].([]map[string]any); ok {

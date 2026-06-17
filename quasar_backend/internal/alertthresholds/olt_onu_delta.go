@@ -2,15 +2,14 @@ package alertthresholds
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/rs/zerolog"
 )
@@ -180,48 +179,21 @@ func openOrUpdateOltOnuDeltaAlert(
 	if meta == nil {
 		meta = map[string]any{}
 	}
-	metaRaw, _ := json.Marshal(meta)
-	err = pool.QueryRow(ctx, `
-		INSERT INTO alert_instances (device_id, severity, alert_type, message, ip, device_name, meta)
-		SELECT $1::uuid, $2::text, $3::text, $4, NULLIF(trim($5), ''), NULLIF(trim($6), ''), COALESCE($7::jsonb, '{}'::jsonb)
-		WHERE NOT EXISTS (
-			SELECT 1 FROM alert_instances ai
-			WHERE ai.device_id=$1::uuid AND ai.alert_type=$3::text AND ai.closed_at IS NULL
-			  AND (ai.meta->>'key')=($7::jsonb->>'key')
-		)
-		RETURNING id
-	`, deviceID, severity, alertType, message, ip, devName, metaRaw).Scan(&alertID)
-	if err == nil {
-		return true, alertID, nil
-	}
-	if err != pgx.ErrNoRows {
-		return false, uuid.Nil, err
-	}
-	_, err = pool.Exec(ctx, `
-		UPDATE alert_instances SET
-			severity=$3::text,
-			message=$4,
-			meta=COALESCE(meta, '{}'::jsonb) || $5::jsonb
-		WHERE device_id=$1::uuid AND alert_type=$2::text AND closed_at IS NULL
-		  AND (meta->>'key')=($5::jsonb->>'key')
-	`, deviceID, alertType, severity, message, metaRaw)
-	return false, uuid.Nil, err
+	key, _ := meta["key"].(string)
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: severity, AlertType: alertType,
+		Message: message, IP: ip, DeviceName: devName, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+	}, nil)
+	return res.Created, res.ID, err
 }
 
 func closeOltOnuDeltaAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType, key string) {
-	metaPatch, _ := json.Marshal(map[string]any{"resolved": "normalized", "source": "olt_onu_delta", "key": key})
-	var aid uuid.UUID
-	var msg string
-	err := pool.QueryRow(ctx, `
-		UPDATE alert_instances SET
-			closed_at=now(),
-			meta=COALESCE(meta,'{}'::jsonb) || $4::jsonb
-		WHERE device_id=$1::uuid AND alert_type=$2::text AND closed_at IS NULL AND (meta->>'key')=$3
-		RETURNING id, message
-	`, deviceID, alertType, key, metaPatch).Scan(&aid, &msg)
-	if err != nil {
-		return
-	}
-	head := alertnotify.ResolutionHeadlineForAlertType(alertType)
-	alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, aid, head, msg)
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertType,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved: map[string]any{
+			"resolved": "normalized", "source": "olt_onu_delta", "key": key,
+		},
+	})
 }

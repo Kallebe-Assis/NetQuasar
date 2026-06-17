@@ -903,12 +903,40 @@ func parseMapBBoxQuery(r *http.Request) (minLat, maxLat, minLng, maxLng float64,
 	return
 }
 
+func mapConnectionLimit(zoom float64, hasBBox bool) int {
+	if !hasBBox {
+		return 0
+	}
+	switch {
+	case zoom < 9:
+		return 120
+	case zoom < 11:
+		return 350
+	case zoom < 13:
+		return 800
+	case zoom < 15:
+		return 1500
+	default:
+		return 2500
+	}
+}
+
+func parseMapZoomQuery(r *http.Request) float64 {
+	raw := strings.TrimSpace(r.URL.Query().Get("zoom"))
+	if raw == "" {
+		return 0
+	}
+	z, err := strconv.ParseFloat(raw, 64)
+	if err != nil || z < 0 || z > 22 {
+		return 0
+	}
+	return z
+}
+
 func (s *Server) mapConnectionPoints(w http.ResponseWriter, r *http.Request) {
 	minLat, maxLat, minLng, maxLng, hasBBox := parseMapBBoxQuery(r)
-	limit := 2500
-	if hasBBox {
-		limit = 4000
-	}
+	zoom := parseMapZoomQuery(r)
+	limit := mapConnectionLimit(zoom, hasBBox)
 
 	var total int
 	countQ := `SELECT COUNT(*) FROM client_connections WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
@@ -918,6 +946,24 @@ func (s *Server) mapConnectionPoints(w http.ResponseWriter, r *http.Request) {
 		countArgs = append(countArgs, minLat, maxLat, minLng, maxLng)
 	}
 	_ = s.DB().QueryRow(r.Context(), countQ, countArgs...).Scan(&total)
+
+	requiresBBox := !hasBBox && total > 800
+	if requiresBBox {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"points":        []any{},
+			"total":         total,
+			"truncated":     true,
+			"requires_bbox": true,
+			"limit":         0,
+		})
+		return
+	}
+
+	if !hasBBox {
+		limit = 2500
+	} else if limit <= 0 {
+		limit = 2500
+	}
 
 	q := `
 		SELECT id, client_name, login, connection_kind, latitude, longitude, address, neighborhood
@@ -963,10 +1009,11 @@ func (s *Server) mapConnectionPoints(w http.ResponseWriter, r *http.Request) {
 		pts = append(pts, pt)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"points":    pts,
-		"total":     total,
-		"truncated": total > len(pts),
-		"requires_bbox": !hasBBox && total > 800,
+		"points":        pts,
+		"total":         total,
+		"truncated":     total > len(pts),
+		"requires_bbox": false,
+		"limit":         limit,
 	})
 }
 

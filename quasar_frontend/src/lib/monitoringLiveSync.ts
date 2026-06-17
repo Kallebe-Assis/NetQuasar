@@ -31,6 +31,7 @@ export type MonitoringLiveSyncOptions = {
   monitoring?: boolean;
   alerts?: boolean;
   olt?: boolean;
+  map?: boolean;
 };
 
 /** Invalida listas quando o worker grava novas leituras (telemetria, ping, alertas, OLT). */
@@ -38,9 +39,12 @@ export function applyMonitoringLiveSync(
   qc: QueryClient,
   opts: MonitoringLiveSyncOptions = {},
 ): void {
-  const { monitoring = true, alerts = true, olt = false } = opts;
+  const { monitoring = true, alerts = true, olt = false, map = false } = opts;
   if (monitoring) {
     void qc.invalidateQueries({ queryKey: queryKeys.monitoringActiveEquipment });
+  }
+  if (map) {
+    void qc.invalidateQueries({ queryKey: ["map-points"] });
   }
   if (alerts) {
     void invalidateAlertListQueries(qc);

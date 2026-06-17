@@ -41,8 +41,8 @@ const OltPage = lazy(() => import("../pages/OltPage").then((m) => ({ default: m.
 const MikrotikPage = lazy(() =>
   import("../pages/MikrotikPage").then((m) => ({ default: m.MikrotikPage })),
 );
-const EventsPage = lazy(() =>
-  import("../pages/EventsPage").then((m) => ({ default: m.EventsPage })),
+const ReportsPage = lazy(() =>
+  import("../pages/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
 const IntegrationsHubPage = lazy(() =>
   import("../pages/IntegrationsHubPage").then((m) => ({ default: m.IntegrationsHubPage })),
@@ -80,7 +80,7 @@ export function AppRouter() {
         <Route path="conexoes" element={<Navigate to={APP_ROUTES.connections} replace />} />
         <Route path="integracoes" element={<Navigate to={APP_ROUTES.integrations} replace />} />
         <Route path="tempo-real" element={<Navigate to={APP_ROUTES.realtime} replace />} />
-        <Route path="eventos" element={<Navigate to={APP_ROUTES.events} replace />} />
+        <Route path="eventos" element={<Navigate to={APP_ROUTES.reports} replace />} />
         <Route path="overview" element={<Navigate to={APP_ROUTES.dashboard} replace />} />
         <Route path="bng" element={<Navigate to={APP_ROUTES.mikrotik} replace />} />
         <Route path="metrics" element={<Navigate to={APP_ROUTES.integrations} replace />} />
@@ -117,7 +117,8 @@ export function AppRouter() {
           />
           <Route path="olt" element={withSuspense(<OltPage />)} />
           <Route path="mikrotik" element={withSuspense(<MikrotikPage />)} />
-          <Route path="events" element={withSuspense(<EventsPage />)} />
+          <Route path="reports" element={withSuspense(<ReportsPage />)} />
+          <Route path="events" element={<Navigate to={APP_ROUTES.reports} replace />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

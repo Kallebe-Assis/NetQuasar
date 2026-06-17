@@ -12,7 +12,6 @@ import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import {
   activeRowSeverityPillClass,
   displayActiveRowSeverity,
-  displayAlertMessage,
   displaySeverity,
   formatAlertDateTimePt,
   severityPillClass,
@@ -27,6 +26,11 @@ import {
   alertValueText,
   formatRelativeCompactPt,
 } from "../lib/alertsPresentation";
+import {
+  formatAlertDuration,
+  formatAlertPopName,
+  formatAlertResolvedValue,
+} from "../lib/alertResolution";
 
 type ActiveAlert = {
   id: string;
@@ -41,6 +45,7 @@ type ActiveAlert = {
   closed_at?: string | null;
   incident_id?: string | null;
   meta?: unknown;
+  pop_name?: string | null;
 };
 
 type OpenIncident = {
@@ -99,6 +104,7 @@ type HistoryEvent = {
   active_since: string;
   closed_at?: string | null;
   meta?: unknown;
+  pop_name?: string | null;
 };
 
 /** Recarrega alertas periodicamente — mesma instância pode ter message/meta novos (ex.: latência 243→210). */
@@ -492,6 +498,7 @@ export function AlertsPage() {
                         <th>Problema</th>
                         <th>Valor</th>
                         <th>Equipamento</th>
+                        <th>POP</th>
                         <th>Estado</th>
                         <th style={{ width: 48 }} />
                       </tr>
@@ -532,9 +539,18 @@ export function AlertsPage() {
                                 {a.ip ? <div className="alerts-dev__ip">{a.ip}</div> : null}
                               </div>
                             </td>
+                            <td style={{ fontSize: 12 }}>{formatAlertPopName(a.pop_name, a.meta)}</td>
                             <td>
                               {resolved ? (
-                                <span className="alerts-status-pill alerts-status-pill--resolved">✓ Resolvido</span>
+                                <div>
+                                  <span className="alerts-status-pill alerts-status-pill--resolved">✓ Resolvido</span>
+                                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4, lineHeight: 1.45 }}>
+                                    <div>Início: {formatAlertDateTimePt(a.active_since)}</div>
+                                    <div>Fim: {formatAlertDateTimePt(a.closed_at!)}</div>
+                                    <div>Duração: {formatAlertDuration(a.active_since, a.closed_at)}</div>
+                                    <div>Normalizado: {formatAlertResolvedValue(a.type, a.meta, a.message)}</div>
+                                  </div>
+                                </div>
                               ) : (
                                 <span className="alerts-status-pill alerts-status-pill--open">● Ativo</span>
                               )}
@@ -633,11 +649,13 @@ export function AlertsPage() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Aberto</th>
-                        <th>Fechado</th>
+                        <th>Início</th>
+                        <th>Fim</th>
+                        <th>Duração</th>
+                        <th>POP</th>
                         <th>Severidade</th>
                         <th>Problema</th>
-                        <th>Mensagem</th>
+                        <th>Valor normalizado</th>
                         <th>Equipamento</th>
                         <th>Estado</th>
                       </tr>
@@ -647,11 +665,15 @@ export function AlertsPage() {
                         <tr key={e.id}>
                           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDateTimePt(e.active_since)}</td>
                           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{e.closed_at ? formatAlertDateTimePt(e.closed_at) : "—"}</td>
+                          <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDuration(e.active_since, e.closed_at)}</td>
+                          <td style={{ fontSize: 12 }}>{formatAlertPopName(e.pop_name, e.meta)}</td>
                           <td>
                             <span className={severityPillClass(e.severity)}>{displaySeverity(e.severity)}</span>
                           </td>
                           <td className="alerts-problem">{alertProblemTitle(e.type)}</td>
-                          <td className="alerts-msg">{displayAlertMessage(e.message, e.type)}</td>
+                          <td className="alerts-msg mono" style={{ fontSize: 12 }}>
+                            {e.closed_at ? formatAlertResolvedValue(e.type, e.meta, e.message) : "—"}
+                          </td>
                           <td>
                             <div className="alerts-dev">
                               {alertEquipmentPrimary(e.type, e.device_name ?? null, e.message, e.meta)}
