@@ -61,6 +61,38 @@ func RunWorkerOrderedSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	runWorkerSNMPStepsFromFlags(ctx, pool, log, mode, src, bootstrap, runTel, runIf, runOlt)
 }
 
+// RunWorkerInterfaceSteps executa apenas snapshots IF-MIB (sem telemetria).
+func RunWorkerInterfaceSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, bootstrap bool) {
+	if pool == nil || log == nil || mode != ModeFull {
+		return
+	}
+	cfg, err := loadClampMonitoringIntervals(ctx, pool)
+	if err != nil {
+		log.Error().Err(err).Msg("interface pipeline: intervalos")
+		return
+	}
+	var lastIf *time.Time
+	_ = pool.QueryRow(ctx, `SELECT last_interface_snapshot_cycle_at FROM monitoring_runtime WHERE id=1`).Scan(&lastIf)
+	src := "worker"
+	if bootstrap {
+		src = "bootstrap"
+	}
+	runIf := bootstrap || cycleDue(lastIf, cfg.IfaceSeconds)
+	if !runIf {
+		return
+	}
+	setActivity(ctx, pool, "3/5 — Interfaces SNMP (MikroTik / RouterOS)")
+	if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseMikrotik}); err != nil {
+		log.Warn().Err(err).Msg("pipeline: interfaces MikroTik")
+	}
+	setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT)")
+	if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseOLT}); err != nil {
+		log.Warn().Err(err).Msg("pipeline: interfaces OLT")
+	}
+	setActivity(ctx, pool, "")
+	log.Info().Bool("bootstrap", bootstrap).Bool("ran_interfaces", true).Msg("pipeline interfaces concluído")
+}
+
 // RunWorkerSNMPSteps executa telemetria e interfaces (modo full), sem ICMP/TCP.
 func RunWorkerSNMPSteps(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, bootstrap bool) {
 	if pool == nil || log == nil || mode != ModeFull {
@@ -99,23 +131,27 @@ func runWorkerSNMPStepsFromFlags(ctx context.Context, pool *pgxpool.Pool, log *z
 	}
 
 	if runIf {
-		setActivity(ctx, pool, "3/4 — Interfaces SNMP (MikroTik / RouterOS)")
+		setActivity(ctx, pool, "3/5 — Interfaces SNMP (MikroTik / RouterOS)")
 		if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseMikrotik}); err != nil {
 			log.Warn().Err(err).Msg("pipeline: interfaces MikroTik")
+		}
+		setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT)")
+		if err := RunInterfaceSnapshotSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap, InterfacePhase: InterfacePhaseOLT}); err != nil {
+			log.Warn().Err(err).Msg("pipeline: interfaces OLT")
 		}
 		setActivity(ctx, pool, "")
 	}
 
-	if runOlt {
-		setActivity(ctx, pool, "5/5 — PON/ONUs derivados IF-MIB (OLT compatíveis)")
+	if bootstrap && runOlt {
+		setActivity(ctx, pool, "5/5 — PON/ONUs (OLT)")
 		if err := RunOltIfDerivedSweep(ctx, pool, log, mode, SweepOpts{Source: src, Force: bootstrap}); err != nil {
-			log.Warn().Err(err).Msg("pipeline: OLT IF-derived")
+			log.Warn().Err(err).Msg("pipeline: OLT PON bootstrap")
 		}
 		setActivity(ctx, pool, "")
 	}
 
 	log.Info().Bool("bootstrap", bootstrap).
-		Bool("ran_telemetry", runTel).Bool("ran_interfaces", runIf).Bool("ran_olt_if", runOlt).
+		Bool("ran_telemetry", runTel).Bool("ran_interfaces", runIf).Bool("ran_olt_if", bootstrap && runOlt).
 		Msg("pipeline SNMP concluído")
 }
 
@@ -139,6 +175,5 @@ func PipelineHasWorkDue(ctx context.Context, pool *pgxpool.Pool, mode string) (b
 		return false, nil
 	}
 	return cycleDue(lastTel, cfg.TelemetrySeconds) ||
-		cycleDue(lastIf, cfg.IfaceSeconds) ||
-		cycleDue(lastOlt, cfg.OltDerivedSeconds), nil
+		cycleDue(lastIf, cfg.IfaceSeconds), nil
 }

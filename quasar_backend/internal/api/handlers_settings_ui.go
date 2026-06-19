@@ -157,7 +157,7 @@ func (s *Server) patchUIAppearance(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "settings_ui", "1", "patch", actorFromRequest(r), nil, audit)
+	s.appendAuditLog(r.Context(), "settings_ui", "1", "patch", s.actorFromRequest(r), nil, audit)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":                   true,
 		"theme":                cur.Theme,

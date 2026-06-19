@@ -60,7 +60,7 @@ func (s *Server) createPop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "pop", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "pop", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -127,7 +127,7 @@ func (s *Server) patchPop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after := map[string]any{"description": desc, "address": addr, "latitude": lat, "longitude": lon}
-	s.appendAuditLog(r.Context(), "pop", id.String(), "patch", actorFromRequest(r), before, after)
+	s.appendAuditLog(r.Context(), "pop", id.String(), "patch", s.actorFromRequest(r), before, after)
 	s.getPop(w, r)
 }
 
@@ -146,7 +146,7 @@ func (s *Server) deletePop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "POP não encontrado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "pop", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "pop", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

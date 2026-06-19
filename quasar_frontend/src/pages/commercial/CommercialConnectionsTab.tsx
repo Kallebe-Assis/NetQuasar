@@ -12,7 +12,9 @@ import { queryKeys } from "../../lib/queryKeys";
 import { CONN_IMPORT_BATCH_SIZE, parseConnectionsCsvFile } from "../../lib/connCsvImport";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { toastErr, toastLoading, toastOk } from "../../lib/operationToast";
-import type { IntegrationSummary } from "../../integrations/types";
+import type { ConnectionsFilterState } from "../../lib/connectionsFilters";
+import type { ConnectionsViewPrefs } from "../../lib/connectionsPreferences";
+import type { ConnectionsTabProps } from "../connections/shared";
 
 export type ClientConnection = {
   id: string;
@@ -256,15 +258,14 @@ function conflictSummary(loginC?: ConnConflict | null, ipC?: ConnConflict | null
   return parts.join(" · ");
 }
 
-type Props = { canMutate: boolean };
+type Props = ConnectionsTabProps;
 
-export function CommercialConnectionsTab({ canMutate }: Props) {
+export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const csvRef = useRef<HTMLInputElement>(null);
-  const [kindFilter, setKindFilter] = useState("");
-  const [q, setQ] = useState("");
-  const debouncedQ = useDebouncedValue(q.trim(), 320);
+  const debouncedQ = useDebouncedValue(filters.q.trim(), 320);
+  const kindQ = filters.logins.connection_kind;
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -286,19 +287,23 @@ export function CommercialConnectionsTab({ canMutate }: Props) {
     skipped: number;
   } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("display_number");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [pageSize, setPageSize] = useState<number>(50);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(prefs.sortDir);
+  const pageSize = prefs.pageSize;
   const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    setSortDir(prefs.sortDir);
+  }, [prefs.sortDir]);
   const [lookupOpen, setLookupOpen] = useState(false);
   const [lookupLogin, setLookupLogin] = useState("");
   const [lookupAll, setLookupAll] = useState(true);
   const [lookupIds, setLookupIds] = useState<string[]>([]);
 
   const list = useQuery({
-    queryKey: [...queryKeys.clientConnections, kindFilter, debouncedQ],
+    queryKey: [...queryKeys.clientConnections, kindQ, debouncedQ],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (kindFilter) params.set("connection_kind", kindFilter);
+      if (kindQ) params.set("connection_kind", kindQ);
       if (debouncedQ) params.set("q", debouncedQ);
       const qs = params.toString();
       return apiFetch<{ connections: ClientConnection[] }>(`/api/v1/commercial/connections${qs ? `?${qs}` : ""}`);
@@ -314,13 +319,22 @@ export function CommercialConnectionsTab({ canMutate }: Props) {
 
   const connections = list.data?.connections ?? [];
 
+  const connectionsFiltered = useMemo(() => {
+    let rows = connections;
+    const medium = filters.logins.medium_type?.trim();
+    const ctoText = filters.logins.cto?.trim().toLowerCase();
+    if (medium) rows = rows.filter((c) => c.medium_type === medium);
+    if (ctoText) rows = rows.filter((c) => (c.cto ?? "").toLowerCase().includes(ctoText));
+    return rows;
+  }, [connections, filters.logins.medium_type, filters.logins.cto]);
+
   useEffect(() => {
     setPage(0);
-  }, [debouncedQ, kindFilter, pageSize, sortKey, sortDir]);
+  }, [debouncedQ, kindQ, pageSize, sortKey, sortDir, filters.logins.medium_type, filters.logins.cto]);
 
   const sortedConnections = useMemo(
-    () => sortConnections(connections, sortKey, sortDir),
-    [connections, sortKey, sortDir],
+    () => sortConnections(connectionsFiltered, sortKey, sortDir),
+    [connectionsFiltered, sortKey, sortDir],
   );
 
   const totalPages = Math.max(1, Math.ceil(sortedConnections.length / pageSize));
@@ -612,36 +626,18 @@ export function CommercialConnectionsTab({ canMutate }: Props) {
 
   const integrationOptions = integrationsQ.data?.integrations ?? [];
 
+  const hiddenCols = new Set(prefs.hiddenColumns);
+  const showSecondary = prefs.showSecondaryInfo !== false;
+
   return (
     <>
-      <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>
-        Logins PPPoE e DHCP com dados comerciais e coordenadas para o mapa. Cada conexão tem um número (#) para pesquisa rápida.
-        O modelo CSV usa separador de colunas do Excel (ponto e vírgula).
-      </p>
-
-      <div className="row" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-        <PageCountPill label="Conexões" count={sortedConnections.length} />
-        <input
-          className="input"
-          style={{ flex: "1 1 160px", maxWidth: 240 }}
-          placeholder="Pesquisar (#, nome, login…)"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-busy={list.isFetching && q.trim() !== debouncedQ}
-        />
-        {list.isFetching && q.trim() !== debouncedQ ? (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>A pesquisar…</span>
-        ) : null}
-        <select className="select" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} style={{ width: 120 }}>
-          <option value="">Todos</option>
-          <option value="pppoe">PPPoE</option>
-          <option value="dhcp">DHCP</option>
-        </select>
+      <div className="conn-toolbar">
+        <PageCountPill label="Logins" count={sortedConnections.length} />
         <button
           type="button"
           className="btn"
           title="Buscar login nas integrações"
-          onClick={() => openLookup(q.trim())}
+          onClick={() => openLookup(filters.q.trim())}
         >
           <Search size={16} strokeWidth={2} style={{ marginRight: 6, verticalAlign: -3 }} />
           Integrações
@@ -710,30 +706,46 @@ export function CommercialConnectionsTab({ canMutate }: Props) {
               <th className="conn-table__num conn-table__sortable" onClick={() => toggleSort("display_number")}>
                 #{sortMark("display_number")}
               </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("client_name")}>
-                Cliente{sortMark("client_name")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("login")}>
-                Login{sortMark("login")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("connection_kind")}>
-                Tipo{sortMark("connection_kind")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("medium_type")}>
-                Meio{sortMark("medium_type")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("sales_plan")}>
-                Plano{sortMark("sales_plan")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("ip_address")}>
-                IP{sortMark("ip_address")}
-              </th>
-              <th className="mono conn-table__sortable" onClick={() => toggleSort("coords")}>
-                Coord.{sortMark("coords")}
-              </th>
-              <th className="conn-table__sortable" onClick={() => toggleSort("cto_port")}>
-                CTO / Porta{sortMark("cto_port")}
-              </th>
+              {!hiddenCols.has("client_name") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("client_name")}>
+                  Cliente{sortMark("client_name")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("login") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("login")}>
+                  Login{sortMark("login")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("connection_kind") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("connection_kind")}>
+                  Tipo{sortMark("connection_kind")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("medium_type") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("medium_type")}>
+                  Meio{sortMark("medium_type")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("sales_plan") && showSecondary ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("sales_plan")}>
+                  Plano{sortMark("sales_plan")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("ip_address") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("ip_address")}>
+                  IP{sortMark("ip_address")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("coords") ? (
+                <th className="mono conn-table__sortable" onClick={() => toggleSort("coords")}>
+                  Coord.{sortMark("coords")}
+                </th>
+              ) : null}
+              {!hiddenCols.has("cto_port") ? (
+                <th className="conn-table__sortable" onClick={() => toggleSort("cto_port")}>
+                  CTO / Porta{sortMark("cto_port")}
+                </th>
+              ) : null}
               <th style={{ width: 100 }} />
             </tr>
           </thead>
@@ -741,18 +753,24 @@ export function CommercialConnectionsTab({ canMutate }: Props) {
             {pageRows.map((c) => (
               <tr key={c.id}>
                 <td className="conn-table__num mono">{c.display_number}</td>
-                <td className="conn-table__client" title={c.client_name}>
-                  {c.client_name}
-                </td>
-                <td className="mono">{c.login}</td>
-                <td>{c.connection_kind === "dhcp" ? "DHCP" : "PPPoE"}</td>
-                <td>{c.medium_type ?? "—"}</td>
-                <td>{c.sales_plan ?? "—"}</td>
-                <td className="mono">{c.ip_address ?? "—"}</td>
-                <td className="mono">
-                  {c.latitude != null && c.longitude != null ? `${fmtCoord(c.latitude)}, ${fmtCoord(c.longitude)}` : "—"}
-                </td>
-                <td>{[c.cto, c.port].filter(Boolean).join(" / ") || "—"}</td>
+                {!hiddenCols.has("client_name") ? (
+                  <td className="conn-table__client" title={c.client_name}>
+                    {c.client_name}
+                  </td>
+                ) : null}
+                {!hiddenCols.has("login") ? <td className="mono">{c.login}</td> : null}
+                {!hiddenCols.has("connection_kind") ? (
+                  <td>{c.connection_kind === "dhcp" ? "DHCP" : "PPPoE"}</td>
+                ) : null}
+                {!hiddenCols.has("medium_type") ? <td>{c.medium_type ?? "—"}</td> : null}
+                {!hiddenCols.has("sales_plan") && showSecondary ? <td>{c.sales_plan ?? "—"}</td> : null}
+                {!hiddenCols.has("ip_address") ? <td className="mono">{c.ip_address ?? "—"}</td> : null}
+                {!hiddenCols.has("coords") ? (
+                  <td className="mono">
+                    {c.latitude != null && c.longitude != null ? `${fmtCoord(c.latitude)}, ${fmtCoord(c.longitude)}` : "—"}
+                  </td>
+                ) : null}
+                {!hiddenCols.has("cto_port") ? <td>{[c.cto, c.port].filter(Boolean).join(" / ") || "—"}</td> : null}
                 <td>
                   <div className="conn-row-actions">
                     <button

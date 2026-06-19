@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
+import { loadMapConnectionFilters, mapShowsLogins } from "../lib/connectionsMapFilters";
 import { apiFetch } from "../lib/api";
 import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { queryKeys } from "../lib/queryKeys";
@@ -109,7 +110,7 @@ export function MapPage() {
   const [flyKey, setFlyKey] = useState(0);
   const [mapDeviceSelect, setMapDeviceSelect] = useState("");
   const [mapToast, setMapToast] = useState<{ ok: boolean; text: string } | null>(null);
-  const [showConnections, setShowConnections] = useState(false);
+  const [showConnections, setShowConnections] = useState(() => mapShowsLogins(loadMapConnectionFilters()));
   const [showEquipment, setShowEquipment] = useState(true);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [listPage, setListPage] = useState(0);

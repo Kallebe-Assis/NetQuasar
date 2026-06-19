@@ -167,7 +167,7 @@ func (s *Server) createOltVendorModel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "brand": brand, "model": model})
 }
 
@@ -215,7 +215,7 @@ func (s *Server) patchOltVendorModel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "modelo não cadastrado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "patch", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -234,6 +234,6 @@ func (s *Server) deleteOltVendorModel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "modelo não cadastrado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "olt_vendor_model", brand+"/"+model, "delete", s.actorFromRequest(r), nil, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

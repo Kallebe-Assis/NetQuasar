@@ -509,7 +509,7 @@ func (s *Server) patchConnectionDefaults(w http.ResponseWriter, r *http.Request)
 	if len(body.SNMPOIDOverrides) > 0 {
 		auditAfter["snmp_oid_overrides"] = true
 	}
-	s.appendAuditLog(r.Context(), "settings_connection_defaults", "1", "patch", actorFromRequest(r), nil, auditAfter)
+	s.appendAuditLog(r.Context(), "settings_connection_defaults", "1", "patch", s.actorFromRequest(r), nil, auditAfter)
 	s.getConnectionDefaults(w, r)
 }
 
@@ -569,7 +569,7 @@ func (s *Server) patchTelegram(w http.ResponseWriter, r *http.Request, id string
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "settings_telegram", id, "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "settings_telegram", id, "patch", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -604,7 +604,7 @@ func (s *Server) testTelegramByID(w http.ResponseWriter, r *http.Request, id, ti
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "settings_telegram", id, "test_send", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "settings_telegram", id, "test_send", s.actorFromRequest(r), nil, map[string]any{
 		"title":    title,
 		"template": strings.TrimSpace(body.Template),
 		"sent":     true,
@@ -671,7 +671,7 @@ func (s *Server) patchOltVendor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "olt_vendor_profile", b, "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "olt_vendor_profile", b, "patch", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -788,7 +788,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "user", id.String(), "create", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "user", id.String(), "create", s.actorFromRequest(r), nil, map[string]any{
 		"email": email, "role": body.Role, "display_name": strings.TrimSpace(body.DisplayName),
 	})
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
@@ -902,7 +902,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.appendAuditLog(r.Context(), "user", id.String(), "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "user", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.getUser(w, r)
 }
 
@@ -949,6 +949,6 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "user", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "user", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }

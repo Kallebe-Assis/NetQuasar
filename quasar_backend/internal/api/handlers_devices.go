@@ -200,7 +200,7 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	if body.TelemetryEnabled {
 		s.scheduleSNMPDiscovery(id)
 	}
-	s.appendAuditLog(r.Context(), "device", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "device", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -294,10 +294,10 @@ func (s *Server) importDevicesCSV(w http.ResponseWriter, r *http.Request) {
 		if d.TelemetryEnabled {
 			s.scheduleSNMPDiscovery(id)
 		}
-		s.appendAuditLog(r.Context(), "device", id.String(), "create", actorFromRequest(r), nil, d)
+		s.appendAuditLog(r.Context(), "device", id.String(), "create", s.actorFromRequest(r), nil, d)
 	}
 	s.DB().Exec(r.Context(), `NOTIFY devices_changed, 'reload'`)
-	s.appendAuditLog(r.Context(), "device", "bulk", "import_csv", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "device", "bulk", "import_csv", s.actorFromRequest(r), nil, map[string]any{
 		"imported": imported,
 		"failed":   len(failed),
 	})
@@ -804,7 +804,7 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	if prevPing && !d.PingEnabled {
 		monitorworker.ClosePingUnreachableOnMonitoringDisabled(r.Context(), s.DB(), &s.Log, id)
 	}
-	s.appendAuditLog(r.Context(), "device", id.String(), "patch", actorFromRequest(r), nil, d)
+	s.appendAuditLog(r.Context(), "device", id.String(), "patch", s.actorFromRequest(r), nil, d)
 	s.getDevice(w, r)
 }
 
@@ -990,7 +990,7 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "device", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "device", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

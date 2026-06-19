@@ -70,7 +70,7 @@ func (s *Server) putDeviceConfigBackup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "device_config_backup", id.String(), "put", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "device_config_backup", id.String(), "put", s.actorFromRequest(r), nil, map[string]any{
 		"bytes": len(body.Content),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "device_id": id})

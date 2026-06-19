@@ -112,7 +112,7 @@ func (s *Server) systemReportTelegram(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "system_report", id, "telegram_send", actorFromRequest(r), nil, map[string]any{"report_id": id})
+	s.appendAuditLog(r.Context(), "system_report", id, "telegram_send", s.actorFromRequest(r), nil, map[string]any{"report_id": id})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report_id": id})
 }
 

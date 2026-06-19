@@ -146,12 +146,16 @@ func logOltPonSnmpWalk(log *zerolog.Logger, deviceID uuid.UUID, host, pass strin
 
 // CollectOltPonAndEvaluate executa coleta periódica de ONUs por PON (derive IF-MIB) e avalia alarmes.
 // Omitido para fabricantes onde o derive IF-MIB é incorrecto/incompleto (ex.: ZTE, Datacom — usar refresh OLT/API).
-func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community, devDesc, category, brand, model string, maxPons *int) {
+func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community, devDesc, category, brand, model string, maxPons *int) OltCollectOutcome {
+	out := OltCollectOutcome{Mode: "if_derived"}
 	if pool == nil || strings.TrimSpace(host) == "" || strings.TrimSpace(community) == "" {
-		return
+		out.Reason = "host ou community SNMP em falta"
+		return out
 	}
 	if !OltUsesIfDerivedPonSnapshots(category, brand, model) {
-		return
+		out.Skipped = true
+		out.Reason = "fabricante usa coleta por perfil (não IF-MIB derive)"
+		return out
 	}
 
 	tAll := time.Now()
@@ -173,18 +177,21 @@ func CollectOltPonAndEvaluate(ctx context.Context, pool *pgxpool.Pool, log *zero
 	logOltPonSnmpWalk(log, deviceID, host, "1_primary", b1)
 	if len(vars) == 0 {
 		if sumOnuOnlineInPonRows(prevMaps) < oltBulkZeroRetryMinSum {
-			return
+			out.Reason = "walk IF-MIB vazio"
+			return out
 		}
 		select {
 		case <-time.After(oltPonRetryPause):
 		case <-ctx.Done():
-			return
+			out.Reason = "contexto cancelado"
+			return out
 		}
 		b1b := walkOltIfMibTables(ctx, host, community, oltSnmpRetryTimeout, oltSnmpRetryRetries)
 		vars, truncated, walkErr = b1b.Vars, b1b.Truncated, b1b.Err
 		logOltPonSnmpWalk(log, deviceID, host, "1b_empty_retry", b1b)
 		if len(vars) == 0 {
-			return
+			out.Reason = "walk IF-MIB vazio após retry"
+			return out
 		}
 	}
 
@@ -209,7 +216,8 @@ deriveLoop:
 				Msg("OLT PON: derive IF-MIB → PON")
 		}
 		if len(pons) == 0 {
-			return
+			out.Reason = "derive IF-MIB não produziu segmentos PON"
+			return out
 		}
 		if !secondCollectDone && shouldSecondOltIfWalk(prevMaps, pons, truncated, walkErr) {
 			secondCollectDone = true
@@ -281,4 +289,7 @@ deriveLoop:
 			Float64("onu_online_sum_stored", sumOnuOnlineInPonRows(pons)).
 			Msg("OLT PON: ciclo concluído (snapshot gravado)")
 	}
+	out.OK = true
+	out.PonCount = len(pons)
+	return out
 }

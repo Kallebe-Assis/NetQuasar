@@ -23,26 +23,31 @@ func CollectOltVendorPeriodic(
 	deviceID uuid.UUID,
 	host, community, devDesc, brand, model string,
 	maxPons *int,
-) {
+) OltCollectOutcome {
+	out := OltCollectOutcome{Mode: "vendor_profile"}
 	if pool == nil || strings.TrimSpace(host) == "" || strings.TrimSpace(community) == "" {
-		return
+		out.Reason = "host ou community SNMP em falta"
+		return out
 	}
 	brand = strings.TrimSpace(brand)
 	model = strings.TrimSpace(model)
 	if brand == "" || model == "" {
-		return
+		out.Reason = "marca ou modelo OLT em falta"
+		return out
 	}
 	profile, err := oltcollect.LoadVendorProfile(ctx, pool, brand, model)
 	if err != nil {
+		out.Reason = "perfil do fabricante não encontrado"
 		if log != nil {
 			log.Debug().Err(err).Str("device", deviceID.String()).Str("brand", brand).Str("model", model).
 				Msg("OLT periódica: perfil não encontrado")
 		}
-		return
+		return out
 	}
 	steps := oltcollect.StepsForScope(oltcollect.EnabledSteps(profile.Steps), oltcollect.ScopeOnu)
 	if len(steps) == 0 {
-		return
+		out.Reason = "perfil sem passos de coleta ONU activos"
+		return out
 	}
 
 	var prevPonsRaw []byte
@@ -77,10 +82,11 @@ func CollectOltVendorPeriodic(
 			}
 			sum, p, _, err := oltcollect.CollectOnuMetrics(sctx, host, community, profile.OnuMetrics, budget, maxPonsVal)
 			if err != nil {
+				out.Reason = strings.TrimSpace(err.Error())
 				if log != nil {
 					log.Warn().Err(err).Str("device", deviceID.String()).Msg("OLT periódica: onu_metrics_collect")
 				}
-				return
+				return out
 			}
 			for k, v := range sum {
 				summary[k] = v
@@ -96,10 +102,11 @@ func CollectOltVendorPeriodic(
 			}
 			sum, ponsWalk, _, _, _, err := vsolparse.WalkOnuTable(sctx, host, community, oid, budget)
 			if err != nil {
+				out.Reason = strings.TrimSpace(err.Error())
 				if log != nil {
 					log.Warn().Err(err).Str("device", deviceID.String()).Msg("OLT periódica: onu_snmp_walk")
 				}
-				return
+				return out
 			}
 			for k, v := range sum {
 				summary[k] = v
@@ -114,7 +121,8 @@ func CollectOltVendorPeriodic(
 	}
 
 	if len(pons) == 0 {
-		return
+		out.Reason = "coleta por perfil não produziu segmentos PON"
+		return out
 	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 	oltifderive.ApplyPonOperStatusAll(pons)
@@ -140,4 +148,7 @@ func CollectOltVendorPeriodic(
 			Float64("onu_online_sum", sumOnuOnlineInPonRows(pons)).
 			Msg("OLT periódica: snapshot actualizado (perfil fabricante)")
 	}
+	out.OK = true
+	out.PonCount = len(pons)
+	return out
 }

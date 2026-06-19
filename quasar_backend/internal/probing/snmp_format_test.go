@@ -26,3 +26,25 @@ func TestOctetStringToUTF8_printableASCII(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestOctetStringToUTF8_sixCharInterfaceNameNotMAC(t *testing.T) {
+	// MikroTik ifName «combo1» = 6 octetos ASCII; não deve virar 63:6f:6d:62:6f:31
+	got := octetStringToUTF8([]byte("combo1"))
+	if got != "combo1" {
+		t.Fatalf("got %q want combo1", got)
+	}
+}
+
+func TestTryDecodeColonHexASCII_interfaceName(t *testing.T) {
+	got, ok := TryDecodeColonHexASCII("63:6f:6d:62:6f:31")
+	if !ok || got != "combo1" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
+func TestTryDecodeColonHexASCII_realMACUnchanged(t *testing.T) {
+	_, ok := TryDecodeColonHexASCII("64:d1:54:dc:97:22")
+	if ok {
+		t.Fatal("real MAC hex should not decode as ASCII label")
+	}
+}

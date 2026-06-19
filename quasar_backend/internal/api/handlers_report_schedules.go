@@ -97,7 +97,7 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 	if !due {
 		return
 	}
-	if err := s.executeAlertsDigest(ctx, runKey, "scheduler"); err != nil && log != nil {
+	if err := s.executeAlertsDigest(ctx, runKey, auditActorSistema); err != nil && log != nil {
 		log.Warn().Err(err).Str("run_key", runKey).Msg("resumo de alertas agendado falhou")
 	}
 }
@@ -136,7 +136,7 @@ func (s *Server) tryScheduledCommercialReport(ctx context.Context, log *zerolog.
 	if !due {
 		return
 	}
-	if err := s.executeCommercialReportOnly(ctx, period, "scheduler"); err != nil && log != nil {
+	if err := s.executeCommercialReportOnly(ctx, period, auditActorSistema); err != nil && log != nil {
 		log.Warn().Err(err).Str("period", period).Msg("relatório comercial agendado falhou")
 	}
 }
@@ -429,14 +429,14 @@ func (s *Server) patchAutomationAlertsDigest(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "automation_alerts_digest", "1", "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "automation_alerts_digest", "1", "patch", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) runAutomationAlertsDigest(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02")
 	go func() {
-		_ = s.executeAlertsDigest(context.Background(), runKey, actorFromRequest(r))
+		_ = s.executeAlertsDigest(context.Background(), runKey, s.actorFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "run_key": runKey})
 }
@@ -472,7 +472,7 @@ func (s *Server) patchAutomationCommercialReport(w http.ResponseWriter, r *http.
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "automation_commercial_report", "1", "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "automation_commercial_report", "1", "patch", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -481,7 +481,7 @@ func (s *Server) runAutomationCommercialReport(w http.ResponseWriter, r *http.Re
 	_ = s.DB().QueryRow(r.Context(), `SELECT timezone FROM automation_commercial_report WHERE id=1`).Scan(&tz)
 	period := onuReportPeriodNow(tz)
 	go func() {
-		_ = s.executeCommercialReportOnly(context.Background(), period, actorFromRequest(r))
+		_ = s.executeCommercialReportOnly(context.Background(), period, s.actorFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "period": period})
 }
@@ -536,7 +536,7 @@ func (s *Server) patchSMTPSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "settings_smtp", "1", "patch", actorFromRequest(r), nil, map[string]any{"enabled": body.Enabled})
+	s.appendAuditLog(r.Context(), "settings_smtp", "1", "patch", s.actorFromRequest(r), nil, map[string]any{"enabled": body.Enabled})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

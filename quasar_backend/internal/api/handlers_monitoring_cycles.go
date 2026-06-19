@@ -132,6 +132,18 @@ func (s *Server) monitoringCycleRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer monitorworker.UnlockLatencyCycle()
+	} else if slug == monitorworker.CycleSlugTelemetry {
+		if !monitorworker.TryLockTelemetryCycle() {
+			writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrTelemetryCycleBusy.Error(), map[string]any{"cycle": slug})
+			return
+		}
+		defer monitorworker.UnlockTelemetryCycle()
+	} else if slug == monitorworker.CycleSlugOltIfDerived {
+		if !monitorworker.TryLockOltPonCycle() {
+			writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrOltPonCycleBusy.Error(), map[string]any{"cycle": slug})
+			return
+		}
+		defer monitorworker.UnlockOltPonCycle()
 	} else {
 		if !monitorworker.TryLockMonitoringPipeline() {
 			writeErr(w, http.StatusConflict, "BUSY", monitorworker.ErrPipelineBusy.Error(), map[string]any{"cycle": slug})
@@ -146,6 +158,16 @@ func (s *Server) monitoringCycleRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "SWEEP", sweepErr.Error(), nil)
 		return
 	}
+
+	s.appendAuditLog(r.Context(), "monitoring_cycle", slug, "run", s.actorFromRequest(r), nil, map[string]any{
+		"cycle":                       slug,
+		"requested_slug":              raw,
+		"source":                      "api",
+		"monitoring_mode_requested":   mode,
+		"monitoring_mode_effective":   effectiveMode,
+		"device_id":                   body.DeviceID,
+		"force":                       body.Force,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cycle":                       slug,

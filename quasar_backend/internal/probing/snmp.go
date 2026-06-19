@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -159,12 +160,14 @@ func octetStringToUTF8(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
+	// Nomes de interface (ex.: «combo1», «ether1») podem ter exactamente 6 octetos ASCII —
+	// tratar como texto antes de ifPhysAddress (também 6 octetos binários).
+	if isPrintableASCII(b) {
+		return string(b)
+	}
 	// ifPhysAddress e similares: 6 octetos (por vezes com 0x00 à frente).
 	if mac, ok := bytesAsMAC(b); ok {
 		return mac
-	}
-	if isPrintableASCII(b) {
-		return string(b)
 	}
 	s := string(b)
 	if utf8.ValidString(s) && isMostlyPrintableUTF8(s) {
@@ -244,6 +247,50 @@ func formatOctetsHex(b []byte) string {
 		sb.WriteString(fmt.Sprintf("%02x", c))
 	}
 	return sb.String()
+}
+
+// NormalizeIFLabel corrige rótulos já gravados como hex ASCII (ex.: 63:6f:6d:62:6f:31 → combo1).
+func NormalizeIFLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if decoded, ok := TryDecodeColonHexASCII(s); ok {
+		return decoded
+	}
+	return s
+}
+
+// TryDecodeColonHexASCII converte «63:6f:6d:62:6f:31» em texto quando todos os octetos são ASCII imprimível.
+// Não altera MACs binários já formatados (ex.: contêm octetos > 0x7e).
+func TryDecodeColonHexASCII(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.Contains(s, ":") {
+		return "", false
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 64 {
+		return "", false
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		if len(p) != 2 {
+			return "", false
+		}
+		n, err := strconv.ParseUint(p, 16, 8)
+		if err != nil {
+			return "", false
+		}
+		if n < 32 || n > 126 {
+			return "", false
+		}
+		b.WriteByte(byte(n))
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "", false
+	}
+	return out, true
 }
 
 func truncateSNMPString(s string) string {

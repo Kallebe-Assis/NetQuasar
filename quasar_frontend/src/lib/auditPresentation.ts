@@ -22,7 +22,7 @@ const ENTITY_LABELS: Record<string, string> = {
   client_connection: "Conexão de cliente",
   network_tool: "Ferramenta de rede",
   integration: "Integração",
-  user: "Utilizador",
+  user: "Usuário",
   alert_rule: "Regra de alerta",
   maintenance_window: "Janela de manutenção",
   automation_onu_report: "Automação — relatório ONU",
@@ -78,8 +78,20 @@ export function formatAuditAction(action: string, entityType?: string): string {
 
 export function formatAuditActor(actor?: string | null): string {
   const a = String(actor ?? "").trim();
-  if (!a) return "Sistema";
-  if (a === "system" || a === "worker" || a === "automation") return "Automação";
+  if (!a || a === "anonymous") return "SISTEMA";
+  const lower = a.toLowerCase();
+  if (
+    lower === "sistema" ||
+    lower === "system" ||
+    lower === "worker" ||
+    lower === "automation" ||
+    lower === "scheduler" ||
+    lower === "system:monitor_worker" ||
+    lower.startsWith("system:")
+  ) {
+    return "SISTEMA";
+  }
+  if (lower === "chave api" || a.startsWith("key:")) return "Chave API";
   return a;
 }
 

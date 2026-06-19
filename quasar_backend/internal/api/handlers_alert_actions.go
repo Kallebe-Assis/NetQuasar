@@ -26,7 +26,7 @@ func (s *Server) alertIgnore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "alerta não encontrado ou já fechado", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "alert", id.String(), "ignore", actorFromRequest(r), nil, map[string]any{"ignore_id": ignoreID.String()})
+	s.appendAuditLog(r.Context(), "alert", id.String(), "ignore", s.actorFromRequest(r), nil, map[string]any{"ignore_id": ignoreID.String()})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ignore_id": ignoreID})
 }
 
@@ -105,6 +105,6 @@ func (s *Server) alertIgnoreReactivate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "alert_ignore", id.String(), "reactivate", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "alert_ignore", id.String(), "reactivate", s.actorFromRequest(r), nil, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -417,7 +417,7 @@ func (s *Server) createClientConnection(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, map[string]any{"skipped": true, "reason": "duplicate"})
 		return
 	}
-	s.appendAuditLog(r.Context(), "client_connection", id.String(), "create", actorFromRequest(r), nil, body.clientConnInput)
+	s.appendAuditLog(r.Context(), "client_connection", id.String(), "create", s.actorFromRequest(r), nil, body.clientConnInput)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -497,7 +497,7 @@ func (s *Server) patchClientConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "client_connection", id.String(), "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "client_connection", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.getClientConnection(w, r)
 }
 
@@ -594,7 +594,7 @@ func (s *Server) deleteClientConnection(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "client_connection", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "client_connection", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -616,7 +616,7 @@ func (s *Server) bulkClientConnections(w http.ResponseWriter, r *http.Request) {
 		bulkRows[i] = connImportRow{Line: i + 1, Input: c}
 	}
 	imported, skipped, failed := s.importClientConnectionRows(r.Context(), bulkRows, policy)
-	s.appendAuditLog(r.Context(), "client_connection", "bulk", "import", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "client_connection", "bulk", "import", s.actorFromRequest(r), nil, map[string]any{
 		"imported": imported,
 		"skipped":  skipped,
 		"failed":   len(failed),
@@ -770,7 +770,7 @@ func (s *Server) importClientConnectionsCSV(w http.ResponseWriter, r *http.Reque
 	for _, f := range importFailed {
 		failed = append(failed, f)
 	}
-	s.appendAuditLog(r.Context(), "client_connection", "bulk", "import_csv", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "client_connection", "bulk", "import_csv", s.actorFromRequest(r), nil, map[string]any{
 		"imported": imported,
 		"skipped":  skipped,
 		"failed":   len(failed),

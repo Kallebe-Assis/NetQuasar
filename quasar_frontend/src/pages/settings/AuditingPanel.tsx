@@ -95,7 +95,7 @@ export function AuditingPanel() {
     <div className="card">
       <h2>Auditoria</h2>
       <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-        Histórico completo de alterações e operações no sistema. Use os filtros para consultar equipamento, utilizador ou ação específica.
+        Histórico completo de alterações e operações no sistema. Use os filtros para consultar equipamento, usuário ou ação específica.
       </p>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <button type="button" className={sub === "ops" ? "active" : ""} onClick={() => setSub("ops")}>
@@ -109,7 +109,7 @@ export function AuditingPanel() {
         <>
           <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 200px" }}>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>Buscar (equipamento, utilizador, ação…)</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Buscar (equipamento, usuário, ação…)</span>
               <input
                 className="input"
                 value={searchQ}
@@ -141,12 +141,12 @@ export function AuditingPanel() {
               </select>
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120 }}>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>Utilizador</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Usuário</span>
               <input
                 className="input"
                 value={actorFilter}
                 onChange={(e) => setActorFilter(e.target.value)}
-                placeholder="key: ou sistema"
+                placeholder="nome ou SISTEMA"
               />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, width: 72 }}>

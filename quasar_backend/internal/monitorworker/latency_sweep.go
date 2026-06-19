@@ -193,6 +193,13 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	if log != nil {
 		log.Info().Str("cycle", "latency").Str("mode", mode).Int("ok", okN).Int("fail", failN).Msg("ciclo latência")
 	}
+	appendWorkerAudit(ctx, pool, "monitoring_cycle", CycleSlugLatency, "run", map[string]any{
+		"source": src,
+		"mode":   mode,
+		"ok":     okN,
+		"fail":   failN,
+		"total":  len(devices),
+	})
 	return err
 }
 

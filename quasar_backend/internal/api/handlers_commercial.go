@@ -54,7 +54,7 @@ func (s *Server) createLocality(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -107,7 +107,7 @@ func (s *Server) patchLocality(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.getLocality(w, r)
 }
 
@@ -122,7 +122,7 @@ func (s *Server) deleteLocality(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "commercial_locality", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -172,7 +172,7 @@ func (s *Server) createMonthlyRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -235,7 +235,7 @@ func (s *Server) patchMonthlyRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.getMonthlyRecord(w, r)
 }
 
@@ -254,7 +254,7 @@ func (s *Server) deleteMonthlyRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "commercial_monthly_record", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -289,7 +289,7 @@ func (s *Server) bulkMonthlyRecords(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "commercial_monthly_record", "bulk", "bulk_upsert", actorFromRequest(r), nil, map[string]any{"count": len(body.Records)})
+	s.appendAuditLog(r.Context(), "commercial_monthly_record", "bulk", "bulk_upsert", s.actorFromRequest(r), nil, map[string]any{"count": len(body.Records)})
 	writeJSON(w, http.StatusOK, map[string]any{"upserted": len(body.Records)})
 }
 

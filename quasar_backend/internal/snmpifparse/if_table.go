@@ -51,11 +51,12 @@ func parseInt64(s string) int64 {
 }
 
 func pickDisplayName(ifName, descr string) string {
-	ifName = strings.TrimSpace(ifName)
+	ifName = probing.NormalizeIFLabel(strings.TrimSpace(ifName))
+	descr = probing.NormalizeIFLabel(strings.TrimSpace(descr))
 	if ifName != "" {
 		return ifName
 	}
-	return strings.TrimSpace(descr)
+	return descr
 }
 
 // BuildIfTable agrega ifTable (1.3.6.1.2.1.2.2.1), ifName e ifHC* (1.3.6.1.2.1.31.1.1.1.*) por ifIndex.
@@ -143,8 +144,8 @@ func BuildIfTable(vars []probing.SNMPVar) []IfRow {
 		if _, ok := hcOutSeen[idx]; ok {
 			outOct = hcOut[idx]
 		}
-		nm := ifName[idx]
-		ds := c[2]
+		nm := probing.NormalizeIFLabel(ifName[idx])
+		ds := probing.NormalizeIFLabel(c[2])
 		row := IfRow{
 			IfIndex:     idx,
 			Descr:       ds,

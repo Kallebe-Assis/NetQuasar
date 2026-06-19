@@ -28,7 +28,7 @@ export function AuditLogTable({ rows, showDetailColumn = true, emptyMessage }: P
             <th>Resumo</th>
             <th>Entidade</th>
             <th>Ação</th>
-            <th>Utilizador</th>
+            <th>Usuário</th>
             {showDetailColumn ? <th>Detalhe</th> : null}
           </tr>
         </thead>

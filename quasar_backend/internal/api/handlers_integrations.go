@@ -131,7 +131,7 @@ func (s *Server) createIntegration(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "integration", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "integration", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "slug": slug})
 }
 
@@ -327,7 +327,7 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "integration", id.String(), "patch", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "integration", id.String(), "patch", s.actorFromRequest(r), nil, map[string]any{
 		"name":    strings.TrimSpace(name),
 		"enabled": en,
 		"slug":    slug,
@@ -376,7 +376,7 @@ func (s *Server) deleteIntegration(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "integração não encontrada", nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "integration", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "integration", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

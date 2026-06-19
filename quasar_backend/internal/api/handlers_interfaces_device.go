@@ -298,7 +298,7 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	if tab, ok := payload["interface_table"].([]map[string]any); ok {
 		ifaceCount = len(tab)
 	}
-	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_interfaces", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_interfaces", s.actorFromRequest(r), nil, map[string]any{
 		"ok": ok, "timeout_ms": ifRefreshTO.Milliseconds(), "snmp_rows": len(merged), "interface_count": ifaceCount,
 		"walk_truncated": walkRes.Truncated,
 	})

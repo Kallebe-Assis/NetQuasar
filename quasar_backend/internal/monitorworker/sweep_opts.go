@@ -2,6 +2,8 @@ package monitorworker
 
 import (
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -27,3 +29,15 @@ type SweepOpts struct {
 
 // ErrSweepBusy indica que já existe uma execução do mesmo tipo em curso (evita SNMP/ICMP sobrepostos).
 var ErrSweepBusy = errors.New("monitor: ciclo deste tipo já em execução")
+
+// sweepShouldCollectDevice true quando o worker/bootstrap/API force deve tentar coleta neste ciclo.
+func sweepShouldCollectDevice(opts SweepOpts, lastAt time.Time, interval time.Duration) bool {
+	if opts.Force {
+		return true
+	}
+	switch strings.TrimSpace(opts.Source) {
+	case "worker", "bootstrap":
+		return true
+	}
+	return lastAt.IsZero() || time.Since(lastAt) >= interval
+}

@@ -49,7 +49,7 @@ func (s *Server) maybeKickNightlyCollection(ctx context.Context) {
 		return
 	}
 	go func() {
-		sum, runErr := s.executeNightlyCollection(context.Background(), "scheduler")
+		sum, runErr := s.executeNightlyCollection(context.Background(), auditActorSistema)
 		if runErr != nil {
 			_, _ = s.DB().Exec(context.Background(), `
 				UPDATE nightly_collection_settings
@@ -67,21 +67,55 @@ func (s *Server) maybeKickNightlyCollection(ctx context.Context) {
 	}()
 }
 
-func actorFromRequest(r *http.Request) string {
-	key := strings.TrimSpace(r.Header.Get("X-API-Key"))
-	if key == "" {
-		return "anonymous"
+const auditActorSistema = "SISTEMA"
+
+func (s *Server) actorFromRequest(r *http.Request) string {
+	if r == nil {
+		return auditActorSistema
 	}
-	if len(key) > 8 {
-		return "key:" + key[:4] + "…" + key[len(key)-2:]
+	bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if bearer != "" && s.Cfg != nil {
+		uid, email, _, err := parseUserJWT(s.Cfg, bearer)
+		if err == nil && s.DB() != nil {
+			var displayName string
+			qerr := s.DB().QueryRow(r.Context(), `
+				SELECT COALESCE(NULLIF(trim(display_name), ''), trim(email))
+				FROM users WHERE id=$1`, uid).Scan(&displayName)
+			if qerr == nil && strings.TrimSpace(displayName) != "" {
+				return strings.TrimSpace(displayName)
+			}
+			if em := strings.TrimSpace(email); em != "" {
+				return em
+			}
+		}
 	}
-	return "key:" + key
+	if strings.TrimSpace(r.Header.Get("X-API-Key")) != "" {
+		return "Chave API"
+	}
+	return auditActorSistema
+}
+
+func normalizeAuditActor(actor string) string {
+	a := strings.TrimSpace(actor)
+	if a == "" {
+		return auditActorSistema
+	}
+	lower := strings.ToLower(a)
+	switch lower {
+	case "anonymous", "scheduler", "worker", "automation", "system:monitor_worker":
+		return auditActorSistema
+	}
+	if strings.HasPrefix(lower, "system:") {
+		return auditActorSistema
+	}
+	return a
 }
 
 func (s *Server) appendAuditLog(ctx context.Context, entityType, entityID, action, actor string, beforeData, afterData any) {
 	if s.DB() == nil {
 		return
 	}
+	actor = normalizeAuditActor(actor)
 	bb, _ := json.Marshal(beforeData)
 	ab, _ := json.Marshal(afterData)
 	_, _ = s.DB().Exec(ctx, `
@@ -94,7 +128,7 @@ func (s *Server) auditDeviceAction(ctx context.Context, r *http.Request, deviceI
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	s.appendAuditLog(ctx, "device", deviceID.String(), action, actorFromRequest(r), nil, detail)
+	s.appendAuditLog(ctx, "device", deviceID.String(), action, s.actorFromRequest(r), nil, detail)
 }
 
 func (s *Server) auditNetworkTool(ctx context.Context, r *http.Request, tool string, detail map[string]any) {
@@ -102,7 +136,7 @@ func (s *Server) auditNetworkTool(ctx context.Context, r *http.Request, tool str
 		detail = map[string]any{}
 	}
 	detail["tool"] = tool
-	s.appendAuditLog(ctx, "network_tool", tool, "executed", actorFromRequest(r), nil, detail)
+	s.appendAuditLog(ctx, "network_tool", tool, "executed", s.actorFromRequest(r), nil, detail)
 }
 
 func (s *Server) listOpsAudit(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +168,14 @@ func (s *Server) listOpsAudit(w http.ResponseWriter, r *http.Request) {
 					WHEN 'monitoring_runtime' THEN 'Sistema — Monitoramento'
 					WHEN 'monitoring_intervals' THEN 'Intervalos de monitoramento'
 					WHEN 'monitoring_settings' THEN 'Definições de monitoramento'
+					WHEN 'monitoring_cycle' THEN
+						CASE a.entity_id
+							WHEN 'latency' THEN 'Ciclo — latência (ping)'
+							WHEN 'telemetry' THEN 'Ciclo — telemetria SNMP'
+							WHEN 'interfaces' THEN 'Ciclo — interfaces SNMP'
+							WHEN 'olt-if-derived' THEN 'Ciclo — ONU/PON OLT'
+							ELSE 'Ciclo de monitoramento'
+						END
 					WHEN 'nightly_collection' THEN 'Automação — coleta noturna'
 					WHEN 'network_tool' THEN 'Ferramenta de rede'
 					WHEN 'settings_mikrotik_collection' THEN 'Coleta Mikrotik'
@@ -307,7 +349,7 @@ func (s *Server) createMaintenanceWindow(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "maintenance_window", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "maintenance_window", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -339,7 +381,7 @@ func (s *Server) patchMaintenanceWindow(w http.ResponseWriter, r *http.Request) 
 		b, _ := json.Marshal(v)
 		_, _ = s.DB().Exec(r.Context(), `UPDATE maintenance_windows SET checklist=$2::jsonb, updated_at=now() WHERE id=$1`, id, b)
 	}
-	s.appendAuditLog(r.Context(), "maintenance_window", id.String(), "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "maintenance_window", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.listMaintenanceWindows(w, r)
 }
 
@@ -432,7 +474,7 @@ func (s *Server) createPopContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "pop_contact", id.String(), "create", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "pop_contact", id.String(), "create", s.actorFromRequest(r), nil, body)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -447,7 +489,7 @@ func (s *Server) deletePopContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "pop_contact", id.String(), "delete", actorFromRequest(r), nil, nil)
+	s.appendAuditLog(r.Context(), "pop_contact", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -701,7 +743,7 @@ func (s *Server) patchNightlyCollectionSettings(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) runNightlyCollectionNow(w http.ResponseWriter, r *http.Request) {
-	sum, err := s.executeNightlyCollection(r.Context(), actorFromRequest(r))
+	sum, err := s.executeNightlyCollection(r.Context(), s.actorFromRequest(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "RUN", err.Error(), nil)
 		return

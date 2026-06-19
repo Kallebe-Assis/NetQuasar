@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,12 +122,13 @@ func monitoringHeader(level, title, message string) string {
 	return "🟡 ALERTA TELEMETRIA"
 }
 
-func resolutionHeader(title, detail string) string {
-	low := strings.ToLower(strings.TrimSpace(title + " " + detail))
-	if strings.Contains(low, "voltou a responder") || strings.Contains(low, "icmp/tcp") || strings.Contains(low, "online") {
+func resolutionHeader(alertType, title, detail string) string {
+	switch strings.TrimSpace(alertType) {
+	case "ping_unreachable":
 		return "🟢 EQUIPAMENTO ONLINE"
+	default:
+		return "🟢 ALERTA RESOLVIDO"
 	}
-	return "🟢 ALERTA RESOLVIDO"
 }
 
 func equipIPFromAlertRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (equip string, ip string) {
@@ -265,12 +267,102 @@ func buildMonitoringText(level, title, message string) string {
 	return telegramMonitoringBlocks(level, title, message, "", "")
 }
 
-func buildResolutionText(title, detail string) string {
-	return telegramResolutionBlocks(title, detail, "", "")
+func buildResolutionText(alertType, title, detail string) string {
+	return telegramResolutionBlocks(alertType, title, detail, "", "")
 }
 
-func telegramResolutionBlocks(title, detail string, equipFallback string, ipFallback string, extras ...string) string {
-	header := resolutionHeader(title, detail)
+type telegramMessageRef struct {
+	ChatID    string
+	MessageID int64
+}
+
+func jsonNumberToInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return i
+	case string:
+		i, _ := strconv.ParseInt(strings.TrimSpace(n), 10, 64)
+		return i
+	default:
+		return 0
+	}
+}
+
+func telegramRefFromMeta(meta map[string]any) (telegramMessageRef, bool) {
+	if meta == nil {
+		return telegramMessageRef{}, false
+	}
+	raw, ok := meta["telegram"].(map[string]any)
+	if !ok || raw == nil {
+		return telegramMessageRef{}, false
+	}
+	if skipped, _ := raw["skipped"].(bool); skipped {
+		return telegramMessageRef{}, false
+	}
+	if okVal, exists := raw["ok"]; exists {
+		if b, ok := okVal.(bool); ok && !b {
+			return telegramMessageRef{}, false
+		}
+	}
+	messageID := jsonNumberToInt64(raw["message_id"])
+	if messageID <= 0 {
+		return telegramMessageRef{}, false
+	}
+	chatID := strings.TrimSpace(fmt.Sprint(raw["chat_id"]))
+	if chatID == "" || chatID == "<nil>" {
+		return telegramMessageRef{}, false
+	}
+	return telegramMessageRef{ChatID: chatID, MessageID: messageID}, true
+}
+
+// telegramResolvedEditBlocks texto para editMessageText na mensagem original do alerta.
+func telegramResolvedEditBlocks(alertType, title, detail string, equipFallback string, activeSince time.Time, closedAt *time.Time) string {
+	header := resolutionHeader(alertType, title, detail)
+	eq, _, inc, _ := shortEquipmentAndIncident(detail)
+	if strings.TrimSpace(equipFallback) != "" {
+		eq = strings.TrimSpace(equipFallback)
+	}
+	incLine := strings.TrimSpace(inc)
+	if incLine == "" {
+		incLine = strings.TrimSpace(title)
+	}
+	parts := []string{header, "", eq, incLine, ""}
+	if !activeSince.IsZero() {
+		parts = append(parts, "Início: "+activeSince.UTC().Format("15:04"))
+	}
+	if closedAt != nil {
+		parts = append(parts, "Fim: "+closedAt.UTC().Format("15:04"))
+		if d := closedAt.Sub(activeSince); d > 0 {
+			parts = append(parts, "Duração: "+formatDurationPT(d))
+		}
+	}
+	parts = append(parts, "", "===============")
+	return strings.Join(parts, "\n")
+}
+
+func telegramResolutionReplyShort(alertType string, duration time.Duration) string {
+	if duration <= 0 {
+		if alertType == "ping_unreachable" {
+			return "✅ Equipamento online."
+		}
+		return "✅ Alerta resolvido."
+	}
+	dur := formatDurationPT(duration)
+	if alertType == "ping_unreachable" {
+		return "✅ Equipamento online após " + dur + "."
+	}
+	return "✅ Resolvido após " + dur + "."
+}
+
+func telegramResolutionBlocks(alertType, title, detail string, equipFallback string, ipFallback string, extras ...string) string {
+	header := resolutionHeader(alertType, title, detail)
 	eq, ip, inc, val := shortEquipmentAndIncident(detail)
 	if strings.TrimSpace(equipFallback) != "" {
 		eq = strings.TrimSpace(equipFallback)
@@ -348,8 +440,8 @@ func SendMonitoringTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 	}
 	eqName, eqIP := equipIPFromAlertRow(ctx, pool, alertID)
 	text := telegramMonitoringBlocks(level, title, message, eqName, eqIP)
-	sendErr := telegramclient.SendMessage(ctx, cfg, text)
-	tg := map[string]any{"attempted_at": attempted}
+	sent, sendErr := telegramclient.SendMessageWithResult(ctx, cfg, text, telegramclient.SendOpts{})
+	tg := map[string]any{"attempted_at": attempted, "text": text}
 	if sendErr != nil {
 		tg["ok"] = false
 		tg["error"] = sendErr.Error()
@@ -358,6 +450,15 @@ func SendMonitoringTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 		}
 	} else {
 		tg["ok"] = true
+		tg["created_at"] = attempted
+		if sent.ChatID != "" {
+			tg["chat_id"] = sent.ChatID
+		} else {
+			tg["chat_id"] = cfg.ChatID
+		}
+		if sent.MessageID > 0 {
+			tg["message_id"] = sent.MessageID
+		}
 	}
 	patch := map[string]any{"telegram": tg}
 	patchMeta(ctx, pool, alertID, patch)
@@ -439,18 +540,69 @@ func SendResolutionTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 	if rv := resolvedValueFromMeta(row.AlertType, row.Meta); rv != "" {
 		extras = append(extras, "Valor normalizado: "+rv)
 	}
-	text := telegramResolutionBlocks(title, detail, eqName, eqIP, extras...)
-	sendErr := telegramclient.SendMessage(ctx, cfg, text)
+
+	var duration time.Duration
+	if row.ClosedAt != nil && !row.ActiveSince.IsZero() {
+		duration = row.ClosedAt.Sub(row.ActiveSince)
+	}
+
 	tg := map[string]any{"attempted_at": attempted}
-	if sendErr != nil {
-		tg["ok"] = false
-		tg["error"] = sendErr.Error()
-		if log != nil {
-			log.Warn().Err(sendErr).Str("alert_id", alertID.String()).Msg("telegram resolução falhou")
+	origRef, hasOrig := telegramRefFromMeta(row.Meta)
+
+	if hasOrig {
+		editText := telegramResolvedEditBlocks(row.AlertType, title, detail, eqName, row.ActiveSince, row.ClosedAt)
+		if editErr := telegramclient.EditMessageText(ctx, cfg, origRef.ChatID, origRef.MessageID, editText); editErr != nil {
+			tg["edit_ok"] = false
+			tg["edit_error"] = editErr.Error()
+			if log != nil {
+				log.Warn().Err(editErr).Str("alert_id", alertID.String()).Int64("message_id", origRef.MessageID).
+					Msg("edição Telegram do alerta original falhou")
+			}
+		} else {
+			tg["edit_ok"] = true
+			tg["edited_message_id"] = origRef.MessageID
+		}
+
+		replyText := telegramResolutionReplyShort(row.AlertType, duration)
+		sent, sendErr := telegramclient.SendMessageWithResult(ctx, cfg, replyText, telegramclient.SendOpts{
+			ReplyToMessageID: origRef.MessageID,
+		})
+		if sendErr != nil {
+			tg["ok"] = false
+			tg["error"] = sendErr.Error()
+			tg["reply_to_message_id"] = origRef.MessageID
+			if log != nil {
+				log.Warn().Err(sendErr).Str("alert_id", alertID.String()).Msg("telegram resolução (reply) falhou")
+			}
+		} else {
+			tg["ok"] = true
+			tg["reply_to_message_id"] = origRef.MessageID
+			tg["text"] = replyText
+			if sent.MessageID > 0 {
+				tg["message_id"] = sent.MessageID
+			}
+			if sent.ChatID != "" {
+				tg["chat_id"] = sent.ChatID
+			} else {
+				tg["chat_id"] = origRef.ChatID
+			}
 		}
 	} else {
-		tg["ok"] = true
+		text := telegramResolutionBlocks(row.AlertType, title, detail, eqName, eqIP, extras...)
+		sendErr := telegramclient.SendMessage(ctx, cfg, text)
+		tg["fallback_full_message"] = true
+		tg["text"] = text
+		if sendErr != nil {
+			tg["ok"] = false
+			tg["error"] = sendErr.Error()
+			if log != nil {
+				log.Warn().Err(sendErr).Str("alert_id", alertID.String()).Msg("telegram resolução falhou")
+			}
+		} else {
+			tg["ok"] = true
+		}
 	}
+
 	resBlock["telegram"] = tg
 	patchResolutionBlock(ctx, pool, alertID, resBlock)
 }

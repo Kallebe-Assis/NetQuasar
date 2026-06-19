@@ -455,7 +455,7 @@ func (s *Server) patchAutomationONU(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "patch", actorFromRequest(r), nil, body)
+	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "patch", s.actorFromRequest(r), nil, body)
 	s.getAutomationONU(w, r)
 }
 
@@ -477,7 +477,7 @@ func (s *Server) runAutomationONU(w http.ResponseWriter, r *http.Request) {
 	var tz string
 	_ = pool.QueryRow(r.Context(), `SELECT timezone FROM automation_onu_report WHERE id=1`).Scan(&tz)
 	period := onuReportPeriodNow(tz)
-	actor := actorFromRequest(r)
+	actor := s.actorFromRequest(r)
 	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "run_manual", actor, nil, map[string]any{"period": period})
 	go func() {
 		bg := context.Background()

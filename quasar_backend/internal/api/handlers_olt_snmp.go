@@ -321,7 +321,7 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		recordOLTOnuSample(r.Context(), pool, id, sb, pb)
 	}
 	comp := oltparse.SnapshotComputed(sb, pb)
-	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_olt", actorFromRequest(r), nil, map[string]any{
+	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_olt", s.actorFromRequest(r), nil, map[string]any{
 		"timeout_ms": oltRefreshTotal.Milliseconds(), "computed": comp,
 	})
 	s.getOLTDevice(w, r)
