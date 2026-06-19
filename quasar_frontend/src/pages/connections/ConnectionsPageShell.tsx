@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { isAdminUser } from "../../lib/auth";
 import {
-  DEFAULT_CONNECTIONS_FILTERS,
   countActiveFilters,
   type ConnectionsFilterState,
   type ConnectionsTabId,

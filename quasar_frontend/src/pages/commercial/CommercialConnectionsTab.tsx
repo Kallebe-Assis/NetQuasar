@@ -12,9 +12,9 @@ import { queryKeys } from "../../lib/queryKeys";
 import { CONN_IMPORT_BATCH_SIZE, parseConnectionsCsvFile } from "../../lib/connCsvImport";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { toastErr, toastLoading, toastOk } from "../../lib/operationToast";
-import type { ConnectionsFilterState } from "../../lib/connectionsFilters";
-import type { ConnectionsViewPrefs } from "../../lib/connectionsPreferences";
+import type { IntegrationSummary } from "../../integrations/types";
 import type { ConnectionsTabProps } from "../connections/shared";
+import { ConnectionsPager } from "../connections/ConnectionsPager";
 
 export type ClientConnection = {
   id: string;
@@ -155,8 +155,6 @@ function formatImportFailMessage(row: ImportFailRow): string {
   }
   return `${loc}${login}: ${row.error}${extra}`;
 }
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200, 500, 1000] as const;
 
 type SortKey =
   | "display_number"
@@ -810,51 +808,15 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
             ))}
           </tbody>
         </table>
-        <div className="conn-table-pager">
-          <span>
-            {sortedConnections.length === 0
-              ? "Nenhuma conexão"
-              : `Mostrando ${rangeFrom}–${rangeTo} de ${sortedConnections.length}`}
-          </span>
-          <label className="row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
-            <span>Por página</span>
-            <select
-              className="select"
-              style={{ width: 72 }}
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-            >
-              {PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="row" style={{ gap: 6, marginLeft: "auto" }}>
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: 11, padding: "4px 10px" }}
-              disabled={safePage <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              Anterior
-            </button>
-            <span>
-              Página {safePage + 1} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: 11, padding: "4px 10px" }}
-              disabled={safePage >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            >
-              Seguinte
-            </button>
-          </div>
-        </div>
+        <ConnectionsPager
+          safePage={safePage}
+          totalPages={totalPages}
+          total={sortedConnections.length}
+          rangeFrom={rangeFrom}
+          rangeTo={rangeTo}
+          onPrev={() => setPage((p) => Math.max(0, p - 1))}
+          onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+        />
       </div>
 
       {formOpen && canMutate ? (

@@ -303,6 +303,7 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
 
       {deleteId ? (
         <ConfirmModal
+          open
           title="Remover projeto"
           message="Os elementos vinculados permanecem no sistema, mas deixam de estar associados a este projeto."
           confirmLabel="Remover"

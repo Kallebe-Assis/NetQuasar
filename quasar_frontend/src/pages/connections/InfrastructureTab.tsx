@@ -506,6 +506,7 @@ export function InfrastructureTab({ variant, tabId, canMutate, filters, prefs }:
 
       {deleteId ? (
         <ConfirmModal
+          open
           title={`Remover ${meta.singular}`}
           message="Esta acção não pode ser desfeita. O ID numérico não será reutilizado."
           confirmLabel="Remover"
