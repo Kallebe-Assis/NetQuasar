@@ -11,7 +11,6 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
-	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 	"github.com/rs/zerolog"
 )
 
@@ -23,6 +22,7 @@ func CollectOltVendorPeriodic(
 	deviceID uuid.UUID,
 	host, community, devDesc, brand, model string,
 	maxPons *int,
+	onuCollectMode string,
 ) OltCollectOutcome {
 	out := OltCollectOutcome{Mode: "vendor_profile"}
 	if pool == nil || strings.TrimSpace(host) == "" || strings.TrimSpace(community) == "" {
@@ -44,7 +44,11 @@ func CollectOltVendorPeriodic(
 		}
 		return out
 	}
-	steps := oltcollect.StepsForScope(oltcollect.EnabledSteps(profile.Steps), oltcollect.ScopeOnu)
+	if strings.TrimSpace(onuCollectMode) != "" {
+		profile.OnuMetrics = oltcollect.FilterOnuMetricsByMode(profile.OnuMetrics, onuCollectMode)
+	}
+	periodicSteps := periodicCollectionSteps(profile, brand)
+	steps := oltcollect.StepsForScope(periodicSteps, oltcollect.ScopeFull)
 	if len(steps) == 0 {
 		out.Reason = "perfil sem passos de coleta ONU activos"
 		return out
@@ -61,10 +65,10 @@ func CollectOltVendorPeriodic(
 
 	cfg, _ := loadClampMonitoringIntervals(ctx, pool)
 	budget := cfg.oltIfDerivedTimeout()
-	if budget <= 0 {
-		budget = 180 * time.Second
+	if budget < 120*time.Second {
+		budget = 120 * time.Second
 	}
-	sctx, cancel := context.WithTimeout(ctx, budget)
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 
 	summary := map[string]any{
@@ -72,56 +76,44 @@ func CollectOltVendorPeriodic(
 		"olt_collection_mode": "profile_periodic",
 		"updated_at":          time.Now().UTC().Format(time.RFC3339),
 	}
-	var pons []map[string]any
 
-	for _, step := range steps {
-		switch step.Method {
-		case oltcollect.MethodOnuMetricsCollect:
-			if !profile.OnuMetrics.HasAnyEnabled() {
-				continue
-			}
-			sum, p, _, err := oltcollect.CollectOnuMetrics(sctx, host, community, profile.OnuMetrics, budget, maxPonsVal)
-			if err != nil {
-				out.Reason = strings.TrimSpace(err.Error())
-				if log != nil {
-					log.Warn().Err(err).Str("device", deviceID.String()).Msg("OLT periódica: onu_metrics_collect")
-				}
-				return out
-			}
-			for k, v := range sum {
-				summary[k] = v
-			}
-			pons = p
-		case oltcollect.MethodOnuSNMPWalk:
-			oid := strings.TrimSpace(profile.ResolveWalkOID(step))
-			if oid == "" && strings.EqualFold(brand, "vsol") {
-				oid = vsolparse.DefaultVSOLOnuWalkOID
-			}
-			if oid == "" {
-				continue
-			}
-			sum, ponsWalk, _, _, _, err := vsolparse.WalkOnuTable(sctx, host, community, oid, budget)
-			if err != nil {
-				out.Reason = strings.TrimSpace(err.Error())
-				if log != nil {
-					log.Warn().Err(err).Str("device", deviceID.String()).Msg("OLT periódica: onu_snmp_walk")
-				}
-				return out
-			}
-			for k, v := range sum {
-				summary[k] = v
-			}
-			pons = ponsWalk
-		default:
-			continue
-		}
-		if len(pons) > 0 {
-			break
+	execSt := &oltWorkerExecState{
+		Pool: pool, DeviceID: deviceID,
+		Host: host, Community: community,
+		Brand: brand, Model: model, DevDesc: devDesc,
+		MaxPons: maxPonsVal, Profile: profile,
+		Summary: summary, TelnetTO: budget / 2,
+		StepsOverride: periodicSteps,
+	}
+	if err := runOltProfileStepsWorker(sctx, execSt, oltcollect.ScopeFull); err != nil {
+		out.Reason = strings.TrimSpace(err.Error())
+		if log != nil {
+			log.Warn().Err(err).Str("device", deviceID.String()).Msg("OLT periódica: perfil")
 		}
 	}
 
+	pons := execSt.Pons
+	if len(pons) == 0 {
+		if dl, ok := sctx.Deadline(); ok {
+			left := time.Until(dl) - 2*time.Second
+			if left > 25*time.Second {
+				if fbPons, fbSum := tryPeriodicOltCollectFallback(sctx, pool, deviceID, host, community, brand, profile, left, summary); len(fbPons) > 0 {
+					pons = fbPons
+					for k, v := range fbSum {
+						execSt.Summary[k] = v
+					}
+				}
+			}
+		}
+	}
 	if len(pons) == 0 {
 		out.Reason = "coleta por perfil não produziu segmentos PON"
+		if r := strings.TrimSpace(oltWorkerAnyString(execSt.Summary["olt_profile_error"])); r != "" {
+			out.Reason = r
+		}
+		if note := strings.TrimSpace(oltWorkerAnyString(execSt.Summary["onu_metrics_note"])); note != "" {
+			out.Reason = note
+		}
 		return out
 	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
@@ -129,6 +121,7 @@ func CollectOltVendorPeriodic(
 	alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
 
+	summary = execSt.Summary
 	summary["if_mib_derived_at"] = time.Now().UTC().Format(time.RFC3339)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)

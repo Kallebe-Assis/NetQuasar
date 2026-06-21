@@ -15,7 +15,8 @@ func TestShouldOpenPingUnreachableAlert(t *testing.T) {
 		{"second fail below threshold", false, 2, false},
 		{"third fail opens alert", false, 3, true},
 		{"continued fail keeps eligible", false, 5, true},
-		{"threshold one first fail", false, 1, true},
+		{"threshold one still needs three fails", false, 1, false},
+		{"threshold one opens on third fail", false, 3, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -18,7 +18,8 @@ export const APP_ROUTES = {
   tools: "/tools",
   olt: "/olt",
   mikrotik: "/mikrotik",
-  events: "/reports",
+  bng: "/bng",
+  events: "/events",
   reports: "/reports",
   settings: "/settings",
 } as const;
@@ -26,7 +27,7 @@ export const APP_ROUTES = {
 /** URLs antigas / alternativas → rota actual. */
 export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
   "/database-setup": APP_ROUTES.configSetup,
-  "/bng": APP_ROUTES.mikrotik,
+  "/bng": APP_ROUTES.bng,
   "/metrics": APP_ROUTES.integrations,
   "/monitoramento": APP_ROUTES.monitoring,
   "/equipamentos": APP_ROUTES.devices,
@@ -38,7 +39,7 @@ export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
   "/conexoes": APP_ROUTES.connections,
   "/integracoes": APP_ROUTES.integrations,
   "/tempo-real": APP_ROUTES.realtime,
-  "/eventos": APP_ROUTES.reports,
-  "/events": APP_ROUTES.reports,
+  "/eventos": APP_ROUTES.events,
+  "/events": APP_ROUTES.events,
   "/overview": APP_ROUTES.dashboard,
 };

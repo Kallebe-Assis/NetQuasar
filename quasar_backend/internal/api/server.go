@@ -26,6 +26,9 @@ type Server struct {
 	ensureMonitorOnce   sync.Once
 	automationONUOnce      sync.Once
 	automationReportsOnce  sync.Once
+	// sysCfgImportMu protege o mapa de jobs de importação de configuração (aba Base de dados).
+	sysCfgImportMu    sync.Mutex
+	sysCfgImportJobs  map[string]*sysConfigImportJob
 }
 
 // DB retorna o pool PostgreSQL ativo ou nil (testes sem holder).
@@ -56,7 +59,16 @@ func (s *Server) ensureBackgroundSchedulers() {
 }
 
 func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[pgxpool.Pool], workerCtx context.Context) http.Handler {
-	s := &Server{Log: log, Cfg: cfg, DBHolder: dbHolder, WorkerCtx: workerCtx}
+	s := &Server{
+		Log:              log,
+		Cfg:              cfg,
+		DBHolder:         dbHolder,
+		WorkerCtx:        workerCtx,
+		sysCfgImportJobs: make(map[string]*sysConfigImportJob),
+	}
+	if workerCtx != nil {
+		registerOltManualRefresher(s)
+	}
 	s.rt = newRealtimeBroker(log, cfg.RedisURL)
 	if workerCtx != nil {
 		s.rt.Start(workerCtx)
@@ -88,6 +100,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/state", s.monitoringState)
 			r.Get("/cycles/kinds", s.monitoringCycleKinds)
 			r.Get("/active-equipment", s.monitoringActiveEquipment)
+			r.Get("/olt-collect-readiness", s.monitoringOltCollectReadiness)
 			r.Get("/nightly-collection", s.getNightlyCollectionSettings)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
@@ -115,6 +128,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Patch("/database", s.patchDatabaseMeta)
 				r.Post("/database/test", s.testDatabaseConnection)
 				r.Get("/database/logs", s.settingsDatabaseLogs)
+				r.Get("/system-config/export", s.exportSystemConfiguration)
+				r.Post("/system-config/import", s.startSystemConfigurationImport)
+				r.Get("/system-config/import/{jobId}", s.getSystemConfigurationImportJob)
 				r.Get("/users", s.listUsers)
 				r.Post("/users", s.createUser)
 				r.Get("/users/{id}", s.getUser)
@@ -230,15 +246,19 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Patch("/network/projects/{id}", s.patchNetworkProject)
 				r.Delete("/network/projects/{id}", s.deleteNetworkProject)
 				r.Post("/network/ctos", s.createNetworkCto)
+				r.Post("/network/ctos/bulk", s.bulkNetworkCtos)
 				r.Patch("/network/ctos/{id}", s.patchNetworkCto)
 				r.Delete("/network/ctos/{id}", s.deleteNetworkCto)
 				r.Post("/network/splice-boxes", s.createNetworkSpliceBox)
+				r.Post("/network/splice-boxes/bulk", s.bulkNetworkSpliceBoxes)
 				r.Patch("/network/splice-boxes/{id}", s.patchNetworkSpliceBox)
 				r.Delete("/network/splice-boxes/{id}", s.deleteNetworkSpliceBox)
 				r.Post("/network/cables", s.createNetworkCable)
+				r.Post("/network/cables/bulk", s.bulkNetworkCables)
 				r.Patch("/network/cables/{id}", s.patchNetworkCable)
 				r.Delete("/network/cables/{id}", s.deleteNetworkCable)
 				r.Post("/network/poles", s.createNetworkPole)
+				r.Post("/network/poles/bulk", s.bulkNetworkPoles)
 				r.Patch("/network/poles/{id}", s.patchNetworkPole)
 				r.Delete("/network/poles/{id}", s.deleteNetworkPole)
 				r.Post("/reports/send-telegram", s.commercialReportsSendTelegram)
@@ -335,10 +355,10 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/ping", func(r chi.Router) {
 			r.Get("/devices/{id}/latest", s.pingLatest)
 			r.Get("/history", s.pingHistory)
-			r.Get("/devices/{id}/run", s.pingRunStub)
+			r.Get("/devices/{id}/run", s.pingRunDevice)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
-				r.Post("/devices/{id}/run", s.pingRunStub)
+				r.Post("/devices/{id}/run", s.pingRunDevice)
 			})
 		})
 
@@ -366,10 +386,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}", s.getOLTDevice)
 			r.Get("/devices/{id}/snmp-debug", s.getOLTSnmpDebug)
 			r.Get("/reports/history", s.getOLTReportsHistory)
+			r.Post("/onu-search", s.searchOLTOnus)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdminMiddleware)
 				r.Post("/devices/{id}/refresh", s.refreshOLTDevice)
 				r.Post("/devices/{id}/snmp-debug", s.postOLTSnmpDebug)
+				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
 			})
 		})
 
@@ -408,8 +430,11 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/map/equipment-points/{deviceId}", s.mapEquipmentPointDetail)
 		r.Get("/map/equipment-points", s.mapEquipmentPoints)
 		r.Get("/map/connection-points", s.mapConnectionPoints)
+		r.Get("/map/infrastructure-points", s.mapInfrastructurePoints)
+		r.Get("/map/search", s.mapSearch)
+		r.Get("/map/locality-center", s.mapLocalityCenter)
 
-		r.Get("/overview/summary", s.overviewSummaryStub)
+		r.Get("/overview/summary", s.overviewSummary)
 		r.Get("/overview/top-latency", s.overviewTopLatency)
 		r.Get("/dashboard/analytics", s.dashboardAnalytics)
 		r.Get("/dashboard/data-gaps", s.dashboardDataGaps)

@@ -16,6 +16,7 @@ import { formatCollectedPt, groupOltInterfaceRows, type InterfaceMonitorTableRow
 import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoices } from "../lib/yearMonthPt";
 import { DropdownMenu } from "../components/DropdownMenu";
 import { OltReportsTab } from "./olt/OltReportsTab";
+import { OltPesquisaTab } from "./olt/OltPesquisaTab";
 import { OltMetricsCollectLogModal, type MetricsWalkRow } from "../components/OltMetricsCollectLogModal";
 import { OltSnmpDebugPanel } from "../components/OltSnmpDebugPanel";
 import { OltVsolOnuTable, type VsOnuRow } from "../components/OltVsolOnuTable";
@@ -292,7 +293,23 @@ function OltIfaceSection({ rows }: { rows: IfRow[] }) {
   );
 }
 
-type OltPageTab = "equipamentos" | "relatorios";
+type OltPageTab = "equipamentos" | "relatorios" | "pesquisa";
+
+function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: OltPageTab) => void }) {
+  return (
+    <div className="tabs" style={{ marginBottom: active === "equipamentos" ? 12 : 16 }}>
+      <button type="button" className={active === "equipamentos" ? "active" : ""} onClick={() => onChange("equipamentos")}>
+        Equipamentos
+      </button>
+      <button type="button" className={active === "pesquisa" ? "active" : ""} onClick={() => onChange("pesquisa")}>
+        Pesquisa
+      </button>
+      <button type="button" className={active === "relatorios" ? "active" : ""} onClick={() => onChange("relatorios")}>
+        Relatórios
+      </button>
+    </div>
+  );
+}
 
 export function OltPage() {
   const [pageTab, setPageTab] = useState<OltPageTab>("equipamentos");
@@ -639,20 +656,25 @@ export function OltPage() {
   const ztePonRows = (detail.data?.zte_pon_status_table ?? []) as ZteMibRow[];
   const zteTrxRows = (detail.data?.zte_transceiver_table ?? []) as ZteMibRow[];
 
+  if (pageTab === "pesquisa") {
+    return (
+      <>
+        <div className="page-heading" style={{ marginBottom: 8 }}>
+          <h1>OLT</h1>
+        </div>
+        <OltPageTabs active={pageTab} onChange={setPageTab} />
+        <OltPesquisaTab canMutate={canMutate} olts={list.data?.olts ?? []} />
+      </>
+    );
+  }
+
   if (pageTab === "relatorios") {
     return (
       <>
         <div className="page-heading" style={{ marginBottom: 8 }}>
           <h1>OLT</h1>
         </div>
-        <div className="tabs" style={{ marginBottom: 16 }}>
-          <button type="button" className="" onClick={() => setPageTab("equipamentos")}>
-            Equipamentos
-          </button>
-          <button type="button" className="active" onClick={() => setPageTab("relatorios")}>
-            Relatórios
-          </button>
-        </div>
+        <OltPageTabs active={pageTab} onChange={setPageTab} />
         <OltReportsTab />
       </>
     );
@@ -660,14 +682,7 @@ export function OltPage() {
 
   return (
     <>
-      <div className="tabs" style={{ marginBottom: 12 }}>
-        <button type="button" className="active" onClick={() => setPageTab("equipamentos")}>
-          Equipamentos
-        </button>
-        <button type="button" onClick={() => setPageTab("relatorios")}>
-          Relatórios
-        </button>
-      </div>
+      <OltPageTabs active={pageTab} onChange={setPageTab} />
       <div className="row" style={{ flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <div className="page-heading" style={{ marginBottom: 0, flex: "1 1 280px" }}>
           <h1>

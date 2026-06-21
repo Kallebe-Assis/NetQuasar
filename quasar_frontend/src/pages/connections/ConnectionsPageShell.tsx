@@ -52,7 +52,28 @@ export function ConnectionsPageShell() {
   useConnectionsLookups(true);
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters, tab), [filters, tab]);
-  const tabProps = { canMutate, filters, prefs };
+
+  function setSearch(q: string) {
+    const next = { ...filters, q };
+    setFilters(next);
+    saveMapConnectionFilters(next);
+  }
+
+  const tabProps = {
+    canMutate,
+    filters,
+    prefs,
+    onSearchChange: setSearch,
+    onOpenFilters: () => {
+      setDraftFilters(filters);
+      setFiltersOpen(true);
+    },
+    onOpenSettings: () => {
+      setDraftPrefs(prefs);
+      setSettingsOpen(true);
+    },
+    activeFilterCount,
+  };
 
   function switchTab(next: ConnectionsTabId) {
     setTab(next);
@@ -89,29 +110,6 @@ export function ConnectionsPageShell() {
           </button>
         ))}
       </nav>
-
-      <div className="conn-toolbar" style={{ marginBottom: 12 }}>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setDraftFilters(filters);
-            setFiltersOpen(true);
-          }}
-        >
-          Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setDraftPrefs(prefs);
-            setSettingsOpen(true);
-          }}
-        >
-          Configurações
-        </button>
-      </div>
 
       {tab === "logins" ? <CommercialConnectionsTab {...tabProps} /> : null}
       {tab === "cto" ? <InfrastructureTab variant="cto" tabId="cto" {...tabProps} /> : null}

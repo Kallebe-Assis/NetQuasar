@@ -464,11 +464,14 @@ type networkCtoInput struct {
 	Latitude         *float64 `json:"latitude"`
 	Longitude        *float64 `json:"longitude"`
 	Splitter         *string  `json:"splitter"`
+	Transmitter      *string  `json:"transmitter"`
 	FiberColor       *string  `json:"fiber_color"`
 	Notes            *string  `json:"notes"`
 	NeedsMaintenance *bool    `json:"needs_maintenance"`
 	ProjectID        *string  `json:"project_id"`
+	ProjectNumber    *int     `json:"project_number"`
 	LocalityID       *string  `json:"locality_id"`
+	LocalityName     *string  `json:"locality_name"`
 }
 
 func (in *networkCtoInput) validate() error {
@@ -489,12 +492,12 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	var id uuid.UUID
 	var displayNumber int
 	var description string
-	var splitter, fiberColor, notes *string
+	var splitter, transmitter, fiberColor, notes *string
 	var projectID, localityID *uuid.UUID
 	var needsMaintenance bool
 	var lat, lon *float64
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &splitter, &fiberColor, &notes,
+	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &splitter, &transmitter, &fiberColor, &notes,
 		&needsMaintenance, &projectID, &localityID, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -504,6 +507,7 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 		"needs_maintenance": needsMaintenance, "created_at": created, "updated_at": updated,
 	}
 	setOptionalStr(m, "splitter", splitter)
+	setOptionalStr(m, "transmitter", transmitter)
 	setOptionalStr(m, "fiber_color", fiberColor)
 	setOptionalStr(m, "notes", notes)
 	if lat != nil {
@@ -527,7 +531,7 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	return m, nil
 }
 
-const networkCtoSelect = `id, display_number, description, latitude, longitude, splitter, fiber_color, notes,
+const networkCtoSelect = `id, display_number, description, latitude, longitude, splitter, transmitter, fiber_color, notes,
 	needs_maintenance, project_id, locality_id, created_at, updated_at`
 
 func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
@@ -543,7 +547,7 @@ func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
 	sqlQ := `SELECT ` + networkCtoSelect + ` FROM network_ctos WHERE 1=1`
 	n := 1
 	if q != "" {
-		sqlQ += ` AND (description ILIKE $` + strconv.Itoa(n) + ` OR display_number::text = $` + strconv.Itoa(n+1) + ` OR COALESCE(splitter,'') ILIKE $` + strconv.Itoa(n) + `)`
+		sqlQ += ` AND (description ILIKE $` + strconv.Itoa(n) + ` OR display_number::text = $` + strconv.Itoa(n+1) + ` OR COALESCE(splitter,'') ILIKE $` + strconv.Itoa(n) + ` OR COALESCE(transmitter,'') ILIKE $` + strconv.Itoa(n) + `)`
 		args = append(args, "%"+q+"%", q)
 		n += 2
 	}
@@ -638,9 +642,9 @@ func (s *Server) createNetworkCto(w http.ResponseWriter, r *http.Request) {
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_ctos (description, latitude, longitude, splitter, fiber_color, notes, needs_maintenance, project_id, locality_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, display_number`,
-		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), trimPtr(body.FiberColor),
+		INSERT INTO network_ctos (description, latitude, longitude, splitter, transmitter, fiber_color, notes, needs_maintenance, project_id, locality_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, display_number`,
+		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), trimPtr(body.Transmitter), trimPtr(body.FiberColor),
 		trimPtr(body.Notes), needsMaint, projectID, localityID,
 	).Scan(&id, &displayNumber)
 	if err != nil {
@@ -690,7 +694,7 @@ func networkCtoPatch(body map[string]json.RawMessage) ([]string, []any, int, err
 		key string
 		col string
 	}{
-		{"splitter", "splitter"}, {"notes", "notes"},
+		{"splitter", "splitter"}, {"transmitter", "transmitter"}, {"notes", "notes"},
 	} {
 		if raw, ok := body[fld.key]; ok {
 			var v *string
@@ -816,6 +820,7 @@ type networkSpliceBoxInput struct {
 	NeedsMaintenance *bool    `json:"needs_maintenance"`
 	Notes            *string  `json:"notes"`
 	ProjectID        *string  `json:"project_id"`
+	ProjectNumber    *int     `json:"project_number"`
 }
 
 func (in *networkSpliceBoxInput) validate() error {
@@ -1040,13 +1045,14 @@ func (s *Server) deleteNetworkSpliceBox(w http.ResponseWriter, r *http.Request) 
 // --- Cables (estrutura inicial) ---
 
 type networkCableInput struct {
-	Description string   `json:"description"`
-	CableType   *string  `json:"cable_type"`
-	FiberCount  *int     `json:"fiber_count"`
-	Status      string   `json:"status"`
-	ProjectID   *string  `json:"project_id"`
-	Latitude    *float64 `json:"latitude"`
-	Longitude   *float64 `json:"longitude"`
+	Description   string   `json:"description"`
+	CableType     *string  `json:"cable_type"`
+	FiberCount    *int     `json:"fiber_count"`
+	Status        string   `json:"status"`
+	ProjectID     *string  `json:"project_id"`
+	ProjectNumber *int     `json:"project_number"`
+	Latitude      *float64 `json:"latitude"`
+	Longitude     *float64 `json:"longitude"`
 }
 
 func (in *networkCableInput) validate() error {
@@ -1254,12 +1260,14 @@ func (s *Server) deleteNetworkCable(w http.ResponseWriter, r *http.Request) {
 // --- Poles ---
 
 type networkPoleInput struct {
-	Description string   `json:"description"`
-	PoleType    *string  `json:"pole_type"`
-	ProjectID   *string  `json:"project_id"`
-	LocalityID  *string  `json:"locality_id"`
-	Latitude    *float64 `json:"latitude"`
-	Longitude   *float64 `json:"longitude"`
+	Description   string   `json:"description"`
+	PoleType      *string  `json:"pole_type"`
+	ProjectID     *string  `json:"project_id"`
+	ProjectNumber *int     `json:"project_number"`
+	LocalityID    *string  `json:"locality_id"`
+	LocalityName  *string  `json:"locality_name"`
+	Latitude      *float64 `json:"latitude"`
+	Longitude     *float64 `json:"longitude"`
 }
 
 func (in *networkPoleInput) validate() error {

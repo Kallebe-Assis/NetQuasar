@@ -5,7 +5,7 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { AdminOnly } from "./AdminOnly";
 import { IntegrationSlugRedirect } from "./IntegrationSlugRedirect";
 import { ProtectedLayout } from "./ProtectedLayout";
-import { APP_ROUTES } from "./routes";
+import { APP_ROUTES, LEGACY_ROUTE_REDIRECTS } from "./routes";
 import { ShellLayout } from "./ShellLayout";
 import { ClientSetupPage } from "../pages/ClientSetupPage";
 import { ConfigSetupPage } from "../pages/ConfigSetupPage";
@@ -44,6 +44,12 @@ const MikrotikPage = lazy(() =>
 const ReportsPage = lazy(() =>
   import("../pages/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
+const EventsPage = lazy(() =>
+  import("../pages/EventsPage").then((m) => ({ default: m.EventsPage })),
+);
+const BngPage = lazy(() =>
+  import("../pages/BngPage").then((m) => ({ default: m.BngPage })),
+);
 const IntegrationsHubPage = lazy(() =>
   import("../pages/IntegrationsHubPage").then((m) => ({ default: m.IntegrationsHubPage })),
 );
@@ -61,6 +67,18 @@ function withSuspense(el: React.ReactNode) {
   return <Suspense fallback={<DelayedGlobeFallback />}>{el}</Suspense>;
 }
 
+function legacyRoutePath(from: string) {
+  return from.startsWith("/") ? from.slice(1) : from;
+}
+
+function legacyRedirects() {
+  return Object.entries(LEGACY_ROUTE_REDIRECTS)
+    .filter(([from, to]) => from !== "/database-setup" && legacyRoutePath(from) !== legacyRoutePath(to))
+    .map(([from, to]) => (
+      <Route key={from} path={legacyRoutePath(from)} element={<Navigate to={to} replace />} />
+    ));
+}
+
 export function AppRouter() {
   return (
     <Routes>
@@ -70,20 +88,7 @@ export function AppRouter() {
       <Route path={APP_ROUTES.login} element={<LoginPage />} />
 
       <Route element={<ProtectedLayout />}>
-        <Route path="monitoramento" element={<Navigate to={APP_ROUTES.monitoring} replace />} />
-        <Route path="equipamentos" element={<Navigate to={APP_ROUTES.devices} replace />} />
-        <Route path="configuracoes" element={<Navigate to={APP_ROUTES.settings} replace />} />
-        <Route path="ferramentas" element={<Navigate to={APP_ROUTES.tools} replace />} />
-        <Route path="alertas" element={<Navigate to={APP_ROUTES.alerts} replace />} />
-        <Route path="mapa" element={<Navigate to={APP_ROUTES.map} replace />} />
-        <Route path="comercial" element={<Navigate to={APP_ROUTES.commercial} replace />} />
-        <Route path="conexoes" element={<Navigate to={APP_ROUTES.connections} replace />} />
-        <Route path="integracoes" element={<Navigate to={APP_ROUTES.integrations} replace />} />
-        <Route path="tempo-real" element={<Navigate to={APP_ROUTES.realtime} replace />} />
-        <Route path="eventos" element={<Navigate to={APP_ROUTES.reports} replace />} />
-        <Route path="overview" element={<Navigate to={APP_ROUTES.dashboard} replace />} />
-        <Route path="bng" element={<Navigate to={APP_ROUTES.mikrotik} replace />} />
-        <Route path="metrics" element={<Navigate to={APP_ROUTES.integrations} replace />} />
+        {legacyRedirects()}
         <Route path="/" element={<ShellLayout />}>
           <Route index element={<Navigate to={APP_ROUTES.dashboard} replace />} />
           <Route path="dashboard" element={withSuspense(<DashboardPage />)} />
@@ -117,8 +122,9 @@ export function AppRouter() {
           />
           <Route path="olt" element={withSuspense(<OltPage />)} />
           <Route path="mikrotik" element={withSuspense(<MikrotikPage />)} />
+          <Route path="bng" element={withSuspense(<BngPage />)} />
           <Route path="reports" element={withSuspense(<ReportsPage />)} />
-          <Route path="events" element={<Navigate to={APP_ROUTES.reports} replace />} />
+          <Route path="events" element={withSuspense(<EventsPage />)} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

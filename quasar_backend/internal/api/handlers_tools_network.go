@@ -37,6 +37,7 @@ func (s *Server) toolsTracert(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		resp["error"] = err.Error()
 	}
+	s.auditNetworkTool(r.Context(), r, "tracert", map[string]any{"host": body.Host, "ok": err == nil, "hops": len(hops)})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -63,5 +64,6 @@ func (s *Server) toolsNmap(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		resp["error"] = err.Error()
 	}
+	s.auditNetworkTool(r.Context(), r, "nmap", map[string]any{"host": body.Host, "scan_mode": body.ScanMode, "ok": err == nil})
 	writeJSON(w, http.StatusOK, resp)
 }

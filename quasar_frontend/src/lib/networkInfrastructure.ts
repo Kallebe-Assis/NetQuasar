@@ -57,6 +57,7 @@ export type NetworkCto = {
   latitude?: number | null;
   longitude?: number | null;
   splitter?: string | null;
+  transmitter?: string | null;
   fiber_color?: string | null;
   notes?: string | null;
   needs_maintenance: boolean;
@@ -123,4 +124,20 @@ export function projectStatusLabel(status: string): string {
 
 export function cableStatusLabel(status: string): string {
   return CABLE_STATUSES.find((s) => s.value === status)?.label ?? status;
+}
+
+/** Ex.: 01:08, 1:8 → 1x8 */
+export function formatSplitterDisplay(raw?: string | null): string {
+  if (!raw?.trim()) return "—";
+  const normalized = normalizeSplitterInput(raw);
+  return normalized ?? raw.trim();
+}
+
+/** Normaliza entrada/saída de splitter para o formato 1x8. */
+export function normalizeSplitterInput(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const m = t.match(/^(\d+)\s*[:xX×]\s*(\d+)$/);
+  if (m) return `${parseInt(m[1], 10)}x${parseInt(m[2], 10)}`;
+  return t;
 }

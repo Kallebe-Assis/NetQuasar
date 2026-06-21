@@ -264,7 +264,9 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: ["commercial-loc"] });
       qc.invalidateQueries({ queryKey: ["commercial-rec"] });
       setEditingLocId(null);
+      notify("Localidade eliminada.");
     },
+    onError: (e) => toastErr(pushToast, e, "Falha ao eliminar localidade."),
   });
 
   const [lid, setLid] = useState("");

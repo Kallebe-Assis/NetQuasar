@@ -1,14 +1,16 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Trash2 } from "lucide-react";
+import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { LocationMapModal, type LocationMapPreview } from "../../components/LocationMapModal";
 import { PageCountPill } from "../../components/PageCountPill";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { apiFetch } from "../../lib/api";
 import { errorMessageFromUnknown } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { queryKeys } from "../../lib/queryKeys";
 import { toastErr, toastOk } from "../../lib/operationToast";
-import { filtersToQueryParams } from "../../lib/connectionsFilters";
+import { filterProjectRows, NETWORK_INFRA_GC_MS, NETWORK_INFRA_STALE_MS } from "../../lib/networkInfraCache";
 import {
   PROJECT_STATUSES,
   fmtCoord,
@@ -18,6 +20,7 @@ import {
 } from "../../lib/networkInfrastructure";
 import { CoordFields, LocalitySelect } from "./ConnectionsFormFields";
 import { ConnectionsPager } from "./ConnectionsPager";
+import { ConnectionsTabToolbar } from "./ConnectionsTabToolbar";
 import type { ConnectionsTabProps } from "./shared";
 import { useConnectionsLookups } from "./useConnectionsLookups";
 import { usePagedRows } from "./usePagedRows";
@@ -31,7 +34,15 @@ const EMPTY = {
   longitude: "",
 };
 
-export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) {
+export function ProjectsTab({
+  canMutate,
+  filters,
+  prefs,
+  onSearchChange,
+  onOpenFilters,
+  onOpenSettings,
+  activeFilterCount,
+}: ConnectionsTabProps) {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [formOpen, setFormOpen] = useState(false);
@@ -39,17 +50,35 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
+  const [mapPreview, setMapPreview] = useState<LocationMapPreview | null>(null);
 
-  const queryParams = useMemo(() => filtersToQueryParams(filters, "projects").toString(), [filters]);
+  const debouncedQ = useDebouncedValue(filters.q, 320);
+  const filterKey = useMemo(
+    () =>
+      JSON.stringify({
+        q: debouncedQ,
+        locality_id: filters.locality_id,
+        status: filters.projects.status,
+        sortDir: prefs.sortDir,
+      }),
+    [debouncedQ, filters.locality_id, filters.projects.status, prefs.sortDir],
+  );
 
   const listQ = useQuery({
-    queryKey: [...queryKeys.networkProjects, queryParams],
-    queryFn: async () => {
-      const qs = queryParams ? `?${queryParams}` : "";
-      return apiFetch<{ projects: NetworkProject[] }>(`/api/v1/commercial/network/projects${qs}`);
-    },
+    queryKey: queryKeys.networkProjects,
+    queryFn: async () => apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
+    staleTime: NETWORK_INFRA_STALE_MS,
+    gcTime: NETWORK_INFRA_GC_MS,
+    refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
   });
+
+  const sorted = useMemo(() => {
+    const rows = filterProjectRows(listQ.data?.projects ?? [], filters, debouncedQ);
+    return [...rows].sort((a, b) =>
+      prefs.sortDir === "asc" ? a.display_number - b.display_number : b.display_number - a.display_number,
+    );
+  }, [listQ.data?.projects, filters, debouncedQ, prefs.sortDir]);
 
   const detailQ = useQuery({
     queryKey: ["network-project", detailId],
@@ -59,18 +88,24 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
 
   const { localities } = useConnectionsLookups(formOpen);
 
-  const sorted = useMemo(() => {
-    const rows = listQ.data?.projects ?? [];
-    return [...rows].sort((a, b) =>
-      prefs.sortDir === "asc" ? a.display_number - b.display_number : b.display_number - a.display_number,
-    );
-  }, [listQ.data?.projects, prefs.sortDir]);
-
   const { safePage, totalPages, pageRows, setPage, rangeFrom, rangeTo } = usePagedRows(
     sorted,
     prefs.pageSize,
-    `${queryParams}:${prefs.sortDir}`,
+    filterKey,
   );
+
+  async function reloadFromDb() {
+    try {
+      const r = await listQ.refetch();
+      if (r.error) {
+        toastErr(pushToast, r.error);
+      } else {
+        toastOk(pushToast, "Projetos recarregados da base de dados.");
+      }
+    } catch (e) {
+      toastErr(pushToast, e);
+    }
+  }
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -129,7 +164,17 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
 
   return (
     <>
-      <div className="conn-toolbar">
+      <ConnectionsTabToolbar
+        search={filters.q}
+        onSearchChange={onSearchChange}
+        searchPlaceholder="Descrição, ID do projeto…"
+        onOpenFilters={onOpenFilters}
+        onOpenSettings={onOpenSettings}
+        activeFilterCount={activeFilterCount}
+        onReload={() => void reloadFromDb()}
+        reloading={listQ.isFetching}
+        reloadTitle="Recarregar projetos da base de dados"
+      >
         <PageCountPill label="Projetos" count={sorted.length} />
         {canMutate ? (
           <button
@@ -144,10 +189,10 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
             Novo projeto
           </button>
         ) : null}
-      </div>
+      </ConnectionsTabToolbar>
 
       <div className="table-wrap">
-        <table className="conn-table" style={{ fontSize: 12 }}>
+        <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
             <tr>
               <th>ID</th>
@@ -160,7 +205,9 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((p) => (
+            {pageRows.map((p) => {
+              const hasCoords = p.latitude != null && p.longitude != null;
+              return (
               <tr key={p.id}>
                 <td className="mono">Projeto {p.display_number}</td>
                 <td>{p.description}</td>
@@ -177,10 +224,29 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
                   )}
                 </td>
                 <td className="mono">
-                  {p.latitude != null && p.longitude != null ? `${fmtCoord(p.latitude)}, ${fmtCoord(p.longitude)}` : "—"}
+                  {hasCoords ? `${fmtCoord(p.latitude!)}, ${fmtCoord(p.longitude!)}` : "—"}
                 </td>
                 <td>
                   <div className="conn-row-actions">
+                    {hasCoords ? (
+                      <button
+                        type="button"
+                        className="btn btn--icon"
+                        title="Ver no mapa"
+                        onClick={() =>
+                          setMapPreview({
+                            title: p.description,
+                            subtitle: `Projeto ${p.display_number}`,
+                            lat: p.latitude!,
+                            lng: p.longitude!,
+                            kind: "project",
+                            color: p.color,
+                          })
+                        }
+                      >
+                        <MapPin size={15} />
+                      </button>
+                    ) : null}
                     <button type="button" className="btn btn--icon" title="Ver elementos" onClick={() => setDetailId(p.id)}>
                       <Eye size={15} />
                     </button>
@@ -213,7 +279,8 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>
@@ -230,38 +297,59 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
 
       {formOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !saveMut.isPending && setFormOpen(false)}>
-          <div className="modal conn-form-modal" onMouseDown={(e) => e.stopPropagation()}>
-            <h3>{editId ? "Editar projeto" : "Novo projeto"}</h3>
-            <label className="field">
-              Descrição *
-              <input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            </label>
-            <LocalitySelect
-              value={form.locality_id}
-              localities={localities}
-              onChange={(id) => setForm({ ...form, locality_id: id })}
-            />
-            <label className="field">
-              Cor
-              <input className="input" type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} />
-            </label>
-            <label className="field">
-              Status
-              <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {PROJECT_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <CoordFields
-              latitude={form.latitude}
-              longitude={form.longitude}
-              onChange={(lat, lon) => setForm({ ...form, latitude: lat, longitude: lon })}
-            />
-            <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-              <button type="button" className="btn" onClick={() => setFormOpen(false)}>
+          <div
+            className="modal conn-form-modal conn-form-modal--infra"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-form-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="conn-form-modal__head">
+              <h2 id="project-form-title">{editId ? "Editar projeto" : "Novo projeto"}</h2>
+              <p>Agrupa CTOs, emendas, cabos e postes numa área de implantação.</p>
+            </div>
+            <div className="conn-form-modal__body">
+              <section className="conn-form-modal__section">
+                <h3 className="conn-form-modal__section-title">Identificação</h3>
+                <div className="conn-form-modal__grid">
+                  <div className="conn-form-modal__field field--full">
+                    <span className="conn-form-modal__field-label">Descrição *</span>
+                    <input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                  </div>
+                  <LocalitySelect
+                    value={form.locality_id}
+                    localities={localities}
+                    onChange={(id) => setForm({ ...form, locality_id: id })}
+                  />
+                  <div className="conn-form-modal__field">
+                    <span className="conn-form-modal__field-label">Cor</span>
+                    <input className="input" type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} />
+                  </div>
+                  <div className="conn-form-modal__field">
+                    <span className="conn-form-modal__field-label">Status</span>
+                    <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                      {PROJECT_STATUSES.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </section>
+              <section className="conn-form-modal__section">
+                <h3 className="conn-form-modal__section-title">Localização</h3>
+                <div className="conn-form-modal__grid">
+                  <CoordFields
+                    latitude={form.latitude}
+                    longitude={form.longitude}
+                    onChange={(lat, lon) => setForm({ ...form, latitude: lat, longitude: lon })}
+                  />
+                </div>
+              </section>
+            </div>
+            <div className="conn-form-modal__foot">
+              <button type="button" className="btn" onClick={() => setFormOpen(false)} disabled={saveMut.isPending}>
                 Cancelar
               </button>
               <button type="button" className="btn btn--primary" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
@@ -313,6 +401,8 @@ export function ProjectsTab({ canMutate, filters, prefs }: ConnectionsTabProps) 
           busy={deleteMut.isPending}
         />
       ) : null}
+
+      <LocationMapModal preview={mapPreview} onClose={() => setMapPreview(null)} />
     </>
   );
 }

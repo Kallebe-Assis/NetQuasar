@@ -58,7 +58,7 @@ type Tab =
   | "nmap";
 
 export function ToolsPage() {
-  const [tab, setTab] = useState<Tab>("host_ping");
+  const [tab, setTab] = useState<Tab>("http_matrix");
   const { toast, leaving, show, dismiss } = useToolsPageToast();
 
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");
@@ -485,8 +485,8 @@ export function ToolsPage() {
       <div className="tabs" style={{ flexWrap: "wrap", marginBottom: "0.35rem" }}>
         {(
           [
-            ["host_ping", "Domínios"],
             ["http_matrix", "HTTP/HTTPS"],
+            ["host_ping", "Domínios"],
             ["icmp", "ICMP"],
             ["tracert", "Tracert"],
             ["nmap", "Nmap"],

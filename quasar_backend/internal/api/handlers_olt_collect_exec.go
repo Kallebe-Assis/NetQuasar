@@ -37,8 +37,7 @@ type oltCollectExecState struct {
 }
 
 func (s *Server) executeOltProfile(ctx context.Context, st *oltCollectExecState) error {
-	steps := oltcollect.EnabledSteps(st.Profile.Steps)
-	steps = oltcollect.StepsForScope(steps, st.Scope)
+	steps := oltcollect.StepsForScope(oltcollect.EffectiveCollectionSteps(st.Profile), st.Scope)
 	if len(steps) == 0 {
 		st.Summary["olt_profile_error"] = "perfil sem passos de coleta — configure em Definições → OLT vendors"
 		return fmt.Errorf("perfil sem passos de coleta")

@@ -52,6 +52,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	`, email).Scan(&id, &hash, &role, &displayName)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			s.appendAuditLog(r.Context(), "auth", email, "login_failed", email, nil, map[string]any{"reason": "user_not_found"})
 			writeErr(w, http.StatusUnauthorized, "AUTH_FAILED", "credenciais inválidas", nil)
 			return
 		}
@@ -59,6 +60,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword(hash, []byte(pw)); err != nil {
+		s.appendAuditLog(r.Context(), "auth", id.String(), "login_failed", email, nil, map[string]any{"reason": "bad_password"})
 		writeErr(w, http.StatusUnauthorized, "AUTH_FAILED", "credenciais inválidas", nil)
 		return
 	}
@@ -67,6 +69,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "TOKEN", err.Error(), nil)
 		return
 	}
+	s.appendAuditLog(r.Context(), "auth", id.String(), "login_success", displayName, nil, map[string]any{"email": email, "role": role})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":         token,
 		"email":         email,

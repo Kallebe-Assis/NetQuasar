@@ -6,4 +6,8 @@ export type ConnectionsTabProps = {
   canMutate: boolean;
   filters: ConnectionsFilterState;
   prefs: ConnectionsViewPrefs;
+  onSearchChange: (q: string) => void;
+  onOpenFilters: () => void;
+  onOpenSettings: () => void;
+  activeFilterCount: number;
 };

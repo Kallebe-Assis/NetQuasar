@@ -46,11 +46,6 @@ export function ConnectionsFilterDrawer({ open, tab, filters, onChange, onClose,
       </p>
 
       <label className="field" style={{ display: "block", marginBottom: 12 }}>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>Pesquisa geral</span>
-        <input className="input" value={filters.q} onChange={(e) => set("q", e.target.value)} placeholder="Texto, ID…" />
-      </label>
-
-      <label className="field" style={{ display: "block", marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: "var(--muted)" }}>Projeto</span>
         <select className="input" value={filters.project_id} onChange={(e) => set("project_id", e.target.value)}>
           <option value="">Todos</option>
@@ -168,6 +163,7 @@ export function ConnectionsFilterDrawer({ open, tab, filters, onChange, onClose,
               className="input"
               value={filters.ctos.splitter}
               onChange={(e) => set("ctos", { ...filters.ctos, splitter: e.target.value })}
+              placeholder="ex. 1x8"
             />
           </label>
         </>

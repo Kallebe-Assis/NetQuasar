@@ -134,6 +134,20 @@ func EnabledSteps(steps []Step) []Step {
 	return out
 }
 
+// EffectiveCollectionSteps devolve passos activos do perfil ou, se vazio, deriva de onu_metrics.
+func EffectiveCollectionSteps(p Profile) []Step {
+	steps := EnabledSteps(p.Steps)
+	if len(steps) > 0 {
+		return steps
+	}
+	return DefaultStepsFromMetrics(p.OnuMetrics)
+}
+
+// EffectivePeriodicSteps usa os mesmos passos que o refresh manual (paridade automático/manual).
+func EffectivePeriodicSteps(p Profile) []Step {
+	return EffectiveCollectionSteps(p)
+}
+
 // MethodLabels para UI.
 var MethodLabels = map[string]string{
 	MethodIfMibRefresh:     "SNMP — actualizar snapshot IF-MIB",

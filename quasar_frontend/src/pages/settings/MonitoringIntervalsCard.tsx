@@ -13,17 +13,24 @@ type MonitoringIntervalsPayload = {
   telemetry_seconds: number;
   interface_snapshot_seconds: number;
   olt_if_derived_pon_seconds: number;
+  pipeline_cycle_seconds?: number;
   telemetry_minutes: number;
   ping_timeout_ms: number;
   telemetry_timeout_ms?: number;
   interface_snapshot_timeout_ms?: number;
   olt_if_derived_pon_timeout_ms?: number;
+  mikrotik_timeout_ms?: number;
   icmp_payload_bytes?: number;
   offline_ping_fail_threshold?: number;
   uptime_restart_alert_minutes?: number;
+  ping_parallel?: boolean;
+  pipeline_steps?: unknown[];
 };
 
 function effectiveMonitoringCycleSeconds(d: MonitoringIntervalsPayload): number {
+  if (d.pipeline_cycle_seconds && d.pipeline_cycle_seconds >= 30) {
+    return d.pipeline_cycle_seconds;
+  }
   return Math.min(
     d.ping_seconds,
     d.telemetry_seconds ?? d.telemetry_minutes * 60,
@@ -47,9 +54,12 @@ export function MonitoringPingIntervalsCard() {
   const [telTimeout, setTelTimeout] = useState("");
   const [ifaceTimeout, setIfaceTimeout] = useState("");
   const [oltTimeout, setOltTimeout] = useState("");
+  const [mikrotikTimeout, setMikrotikTimeout] = useState("");
+  const [pipelineCycle, setPipelineCycle] = useState("");
   const [icmpSz, setIcmpSz] = useState("");
   const [offTh, setOffTh] = useState("");
   const [uptimeRestart, setUptimeRestart] = useState("");
+  const [pingParallel, setPingParallel] = useState(true);
   useEffect(() => {
     if (!q.data) return;
     setPs((v) => (v === "" ? String(q.data.ping_seconds) : v));
@@ -60,9 +70,12 @@ export function MonitoringPingIntervalsCard() {
     setTelTimeout((v) => (v === "" ? String(q.data.telemetry_timeout_ms ?? 120000) : v));
     setIfaceTimeout((v) => (v === "" ? String(q.data.interface_snapshot_timeout_ms ?? 120000) : v));
     setOltTimeout((v) => (v === "" ? String(q.data.olt_if_derived_pon_timeout_ms ?? 180000) : v));
+    setMikrotikTimeout((v) => (v === "" ? String(q.data.mikrotik_timeout_ms ?? 120000) : v));
+    setPipelineCycle((v) => (v === "" ? String(q.data.pipeline_cycle_seconds ?? 120) : v));
     setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
     setOffTh((v) => (v === "" ? String(q.data.offline_ping_fail_threshold ?? 3) : v));
     setUptimeRestart((v) => (v === "" ? String(q.data.uptime_restart_alert_minutes ?? 0) : v));
+    setPingParallel(q.data.ping_parallel !== false);
   }, [q.data]);
   const save = useMutation({
     mutationFn: (body: Partial<MonitoringIntervalsPayload>) =>
@@ -96,8 +109,9 @@ export function MonitoringPingIntervalsCard() {
         Intervalos globais e sondagem ICMP
         <InfoHint label="Funcionamento do worker de monitorização">
           <p>
-            O worker acorda pelo <strong>menor</strong> intervalo entre latência/ping, telemetria, snapshots de interfaces e PON derivada IF-MIB. O ciclo
-            efectivo actual é de até ~<strong>{minCycle} s</strong> (o mínimo entre os quatro intervalos de coleta).
+            O <strong>ping (ICMP/TCP)</strong> corre em <strong>paralelo</strong> ao pipeline SNMP/OLT (intervalo «Intervalo entre pings»),
+            para que a latência e alertas offline não parem durante colectas longas (ex.: dezenas de OLT).
+            Telemetria, interfaces e ONU seguem em sequência no pipeline (~<strong>{minCycle} s</strong> entre ciclos).
           </p>
           <p>
             Valores gravados neste momento: ping (ICMP/TCP) <strong>{d.ping_seconds} s</strong>; tempo máximo da sonda{" "}
@@ -113,17 +127,38 @@ export function MonitoringPingIntervalsCard() {
         <h3 id="mon-intervals-collect-heading">Intervalos de coleta</h3>
         <div className="settings-fields-grid">
           <SettingsField
+            label="Ciclo completo pipeline (s)"
+            hintLabel="Intervalo entre execuções sequenciais"
+            hint={
+              <p>
+                Tempo mínimo entre <strong>ciclos completos</strong> do pipeline (todos os passos configurados em ordem).
+                Configure a ordem dos passos na secção abaixo nesta mesma aba.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Intervalo pipeline em segundos" value={pipelineCycle} onChange={(e) => setPipelineCycle(e.target.value)} />
+          </SettingsField>
+          <SettingsField
             label="Intervalo entre pings (s)"
             hintLabel="Intervalo de latência e ping ICMP/TCP"
             hint={
               <p>
-                Tempo mínimo entre ciclos de <strong>latência/ping</strong> para todos os equipamentos ativos no monitoramento. Valores típicos: 30–60 s.
-                Este intervalo entra no cálculo do ciclo efectivo do worker (o menor entre ping, telemetria, interfaces e PON).
+                Intervalo do ping em paralelo (não bloqueia telemetria nem coleta OLT). Valores típicos: 30–60 s.
+                Com «Ping em paralelo» activo, o passo ping na ordem de monitoramento é ignorado na sequência.
               </p>
             }
           >
             <input className="input mono" aria-label="Intervalo entre pings em segundos" value={ps} onChange={(e) => setPs(e.target.value)} />
           </SettingsField>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, gridColumn: "1 / -1" }}>
+            <input
+              type="checkbox"
+              checked={pingParallel}
+              onChange={(e) => setPingParallel(e.target.checked)}
+              aria-label="Ping em paralelo ao pipeline"
+            />
+            Ping em paralelo (recomendado — mantém monitoramento de latência durante colectas SNMP/OLT longas)
+          </label>
           <SettingsField
             label="Telemetria SNMP (s)"
             hintLabel="Intervalo de telemetria SNMP"
@@ -204,15 +239,26 @@ export function MonitoringPingIntervalsCard() {
             <input className="input mono" aria-label="Timeout interfaces em ms" value={ifaceTimeout} onChange={(e) => setIfaceTimeout(e.target.value)} />
           </SettingsField>
           <SettingsField
-            label="OLT PON IF (ms)"
-            hintLabel="Timeout PON derivada IF-MIB"
+            label="OLT PON / ONUs (ms)"
+            hintLabel="Timeout coleta ONUs OLT"
             hint={
               <p>
-                Tempo máximo da colecta ONUs/PON por derive IF-MIB nas OLT compatíveis. Intervalo válido: <strong>5000–600000</strong> ms.
+                Tempo máximo da colecta ONUs/PON SNMP nas OLT. Intervalo válido: <strong>5000–600000</strong> ms.
               </p>
             }
           >
-            <input className="input mono" aria-label="Timeout OLT PON IF em ms" value={oltTimeout} onChange={(e) => setOltTimeout(e.target.value)} />
+            <input className="input mono" aria-label="Timeout OLT PON em ms" value={oltTimeout} onChange={(e) => setOltTimeout(e.target.value)} />
+          </SettingsField>
+          <SettingsField
+            label="MikroTik (ms)"
+            hintLabel="Timeout coleta MikroTik"
+            hint={
+              <p>
+                Tempo máximo por equipamento MikroTik no pipeline. Intervalo válido: <strong>5000–600000</strong> ms.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Timeout MikroTik em ms" value={mikrotikTimeout} onChange={(e) => setMikrotikTimeout(e.target.value)} />
           </SettingsField>
         </div>
       </section>
@@ -295,6 +341,7 @@ export function MonitoringPingIntervalsCard() {
           onClick={() =>
             save.mutate({
               ping_seconds: ps ? Number(ps) : undefined,
+              pipeline_cycle_seconds: pipelineCycle ? Number(pipelineCycle) : undefined,
               telemetry_seconds: telS ? Number(telS) : undefined,
               interface_snapshot_seconds: ifaceS ? Number(ifaceS) : undefined,
               olt_if_derived_pon_seconds: oltDerivedS ? Number(oltDerivedS) : undefined,
@@ -302,9 +349,11 @@ export function MonitoringPingIntervalsCard() {
               telemetry_timeout_ms: telTimeout ? Number(telTimeout) : undefined,
               interface_snapshot_timeout_ms: ifaceTimeout ? Number(ifaceTimeout) : undefined,
               olt_if_derived_pon_timeout_ms: oltTimeout ? Number(oltTimeout) : undefined,
+              mikrotik_timeout_ms: mikrotikTimeout ? Number(mikrotikTimeout) : undefined,
               icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
               offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,
               uptime_restart_alert_minutes: uptimeRestart !== "" ? Number(uptimeRestart) : undefined,
+              ping_parallel: pingParallel,
             })
           }
         >

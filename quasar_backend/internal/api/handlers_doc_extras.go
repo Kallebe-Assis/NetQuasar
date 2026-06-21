@@ -52,6 +52,7 @@ func (s *Server) toolsSNMPBulkGet(w http.ResponseWriter, r *http.Request) {
 	res := probing.SNMPGet(ctx, probing.SNMPGetParams{
 		Host: body.Host, Community: body.Community, OIDs: body.OIDs, Version: "2c", Timeout: to, Retries: 0,
 	})
+	s.auditNetworkTool(r.Context(), r, "snmp_bulk_get", map[string]any{"host": body.Host, "oids": len(body.OIDs), "ok": res.OK})
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -155,6 +156,9 @@ func (s *Server) toolsSNMPWalkRun(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(out)
 		_, _ = pool.Exec(ctx, `UPDATE snmp_walk_jobs SET status='done', result=$2::jsonb, error_message=NULL, finished_at=now() WHERE id=$1`, jobID, b)
 	}(body)
+	s.auditNetworkTool(r.Context(), r, "snmp_walk", map[string]any{
+		"host": body.Host, "root_oid": body.RootOID, "job_id": jid.String(),
+	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"job_id":   jid,
 		"status":   "queued",

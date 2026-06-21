@@ -29,10 +29,16 @@ func (c intervalConfig) telemetryTimeout() time.Duration {
 	return time.Duration(clampCollectionTimeoutMs(c.TelemetryTimeoutMs, defaultTelemetryTimeoutMs)) * time.Millisecond
 }
 
-func (c intervalConfig) interfaceTimeout(oltPhase bool) time.Duration {
+func (c intervalConfig) mikrotikTimeout() time.Duration {
+	return time.Duration(clampCollectionTimeoutMs(c.MikrotikTimeoutMs, defaultInterfaceTimeoutMs)) * time.Millisecond
+}
+
+func (c intervalConfig) interfaceTimeout(oltPhase bool, mikrotikPhase bool) time.Duration {
+	if mikrotikPhase {
+		return c.mikrotikTimeout()
+	}
 	ms := clampCollectionTimeoutMs(c.InterfaceTimeoutMs, defaultInterfaceTimeoutMs)
 	if oltPhase && ms > 75_000 {
-		// Mantém limite prático por OLT na fase dedicada, sem ignorar totalmente a configuração.
 		ms = 75_000
 	}
 	return time.Duration(ms) * time.Millisecond

@@ -408,26 +408,6 @@ func (s *Server) testAlertRule(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Teste sandbox de regra não está disponível em produção.", nil)
 }
 
-func (s *Server) bngSessions(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Integração BNG não configurada.", nil)
-}
-
-func (s *Server) bngSessionsSearch(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Integração BNG não configurada.", nil)
-}
-
-func (s *Server) bngAuthLogs(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Integração BNG não configurada.", nil)
-}
-
-func (s *Server) bngTrafficUsers(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Integração BNG não configurada.", nil)
-}
-
-func (s *Server) bngStatsSummary(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Integração BNG não configurada.", nil)
-}
-
 func (s *Server) realtimePing(w http.ResponseWriter, r *http.Request) {
 	ids := r.URL.Query().Get("device_ids")
 	if ids == "" {
@@ -555,7 +535,10 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		list = append(list, raw[i].row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": list})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events": list,
+		"note":   "Tabela events é somente leitura nesta versão — sem writers automáticos; dados históricos/legado ou inserções manuais.",
+	})
 }
 
 func (s *Server) metricsSeries(w http.ResponseWriter, r *http.Request) {

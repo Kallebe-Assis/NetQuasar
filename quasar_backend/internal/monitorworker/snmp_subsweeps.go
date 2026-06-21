@@ -29,7 +29,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 		src = "worker"
 	}
 
-	devices, err := loadPingableDevices(ctx, pool, opts.DeviceID)
+	devices, err := resolveSweepDevices(ctx, pool, opts, false)
 	if err != nil {
 		return err
 	}
@@ -54,9 +54,6 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 				Skipped: true,
 				Reason:  "telemetria desativada no equipamento",
 			})
-			patchProbeSNMPHealth(ctx, pool, row.id, ModeSimplePing, false, "failed",
-				"telemetria desativada no equipamento",
-				probeDetailFromTelemetry(src, map[string]any{"ok": false, "skipped": true, "reason": "telemetry_disabled"}, nil))
 			continue
 		}
 		comm := resolveSNMPCommunity(row, defCommunity)
@@ -154,7 +151,7 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			Msg("ciclo telemetria incompleto (equipamentos não processados)")
 	}
 
-	appendWorkerAudit(ctx, pool, "monitoring_cycle", CycleSlugTelemetry, "run", map[string]any{
+	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugTelemetry, "run", map[string]any{
 		"source":    src,
 		"eligible":  eligible,
 		"processed": processed,
@@ -182,7 +179,7 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 	if err != nil {
 		return err
 	}
-	devices, err := loadPingableDevices(ctx, pool, opts.DeviceID)
+	devices, err := resolveSweepDevices(ctx, pool, opts, false)
 	if err != nil {
 		return err
 	}
@@ -243,7 +240,7 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 		func() {
 			defer unlock()
 			ifaceAttempted++
-			perDeviceTimeout := cfg.interfaceTimeout(ph == InterfacePhaseOLT)
+			perDeviceTimeout := cfg.interfaceTimeout(ph == InterfacePhaseOLT, ph == InterfacePhaseMikrotik)
 			sctx, scancel := context.WithTimeout(ctx, perDeviceTimeout)
 			defer scancel()
 			t0 := time.Now()
@@ -281,7 +278,7 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 		UPDATE monitoring_runtime SET last_interface_snapshot_cycle_at = now(), last_cycle_at = now(), updated_at = now()
 		WHERE id = 1
 	`)
-	appendWorkerAudit(ctx, pool, "monitoring_cycle", CycleSlugInterfaces, "run", map[string]any{
+	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugInterfaces, "run", map[string]any{
 		"source":    src,
 		"phase":     ph,
 		"attempted": ifaceAttempted,
@@ -292,141 +289,8 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 	return err
 }
 
-// RunOltIfDerivedSweep coleta ONUs/PON em todas as OLTs elegíveis (IF-MIB derive ou perfil do fabricante).
+// RunOltIfDerivedSweep coleta ONUs/PON em todas as OLTs (delega para RunOltCollectAll).
 func RunOltIfDerivedSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, opts SweepOpts) error {
-	if mode != ModeFull {
-		return nil
-	}
-	cfg, err := loadClampMonitoringIntervals(ctx, pool)
-	if err != nil {
-		return err
-	}
-	src := opts.Source
-	if src == "" {
-		src = "worker"
-	}
-	devices, err := loadPingableDevices(ctx, pool, opts.DeviceID)
-	if err != nil {
-		return err
-	}
-	if len(devices) == 0 {
-		_, err = pool.Exec(ctx, `UPDATE monitoring_runtime SET last_olt_if_derived_cycle_at = now(), updated_at = now(), last_cycle_at = now() WHERE id=1`)
-		return err
-	}
-
-	lastOltByDevice, err := loadOltSnapshotByDevice(ctx, pool)
-	if err != nil {
-		return err
-	}
-
-	var defCommunity *string
-	_ = pool.QueryRow(ctx, `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&defCommunity)
-
-	oltDur := time.Duration(cfg.OltDerivedSeconds) * time.Second
-	oltEligible := 0
-	oltAttempted := 0
-	oltOK := 0
-	oltFailed := 0
-	oltSkipped := 0
-	var deviceOutcomes []map[string]any
-
-	for _, row := range devices {
-		if !strings.EqualFold(strings.TrimSpace(row.category), "olt") {
-			continue
-		}
-		if !row.telemetryEnabled {
-			oltSkipped++
-			continue
-		}
-		comm := resolveSNMPCommunity(row, defCommunity)
-		if comm == "" {
-			oltSkipped++
-			continue
-		}
-		oltEligible++
-
-		lastOt := lastOltByDevice[row.id]
-		if !sweepShouldCollectDevice(opts, lastOt, oltDur) {
-			continue
-		}
-
-		usesIfDerived := OltUsesIfDerivedPonSnapshots(row.category, row.brand, row.model)
-		unlock := snmpdevicelock.Acquire(row.id)
-		func() {
-			defer unlock()
-			oltAttempted++
-			sctx, scancel := context.WithTimeout(ctx, cfg.oltIfDerivedTimeout())
-			defer scancel()
-
-			var out OltCollectOutcome
-			if usesIfDerived {
-				invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
-				if invEmptyBefore {
-					_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
-				}
-				out = CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
-			} else {
-				out = CollectOltVendorPeriodic(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.brand, row.model, row.maxPons)
-			}
-			if out.OK {
-				oltOK++
-				lastOltByDevice[row.id] = time.Now()
-				NudgeMonitoringRuntimeRefresh(sctx, pool)
-			} else {
-				if out.Skipped {
-					oltSkipped++
-				} else {
-					oltFailed++
-					recordOltCollectAttempt(sctx, pool, row.id, src, out)
-				}
-				if log != nil {
-					log.Warn().
-						Str("device_id", row.id.String()).
-						Str("host", strings.TrimSpace(row.ip)).
-						Bool("skipped", out.Skipped).
-						Str("reason", out.Reason).
-						Msg("coleta ONU/PON OLT falhou")
-				}
-			}
-			if len(deviceOutcomes) < 50 {
-				deviceOutcomes = append(deviceOutcomes, map[string]any{
-					"device_id":   row.id.String(),
-					"host":        strings.TrimSpace(row.ip),
-					"description": row.description,
-					"ok":          out.OK,
-					"skipped":     out.Skipped,
-					"reason":      out.Reason,
-					"pon_count":   out.PonCount,
-					"mode":        out.Mode,
-				})
-			}
-		}()
-	}
-
-	if log != nil && oltEligible > 0 {
-		log.Info().
-			Int("eligible", oltEligible).
-			Int("attempted", oltAttempted).
-			Int("ok", oltOK).
-			Int("failed", oltFailed).
-			Int("skipped", oltSkipped).
-			Str("source", src).
-			Msg("ciclo ONU/PON OLT concluído")
-	}
-
-	appendWorkerAudit(ctx, pool, "monitoring_cycle", CycleSlugOltIfDerived, "run", map[string]any{
-		"source":    src,
-		"eligible":  oltEligible,
-		"attempted": oltAttempted,
-		"ok":        oltOK,
-		"failed":    oltFailed,
-		"skipped":   oltSkipped,
-		"devices":   deviceOutcomes,
-	})
-
-	_, err = pool.Exec(ctx, `
-		UPDATE monitoring_runtime SET last_olt_if_derived_cycle_at = now(), last_cycle_at = now(), updated_at = now()
-		WHERE id = 1
-	`)
+	_, err := RunOltCollectAll(ctx, pool, log, mode, opts)
 	return err
 }

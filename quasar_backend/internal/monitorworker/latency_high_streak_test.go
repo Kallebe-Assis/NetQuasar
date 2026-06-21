@@ -24,7 +24,7 @@ func TestLatencyHighStreakAfter(t *testing.T) {
 }
 
 func TestLatencyHighConsecutiveRequired(t *testing.T) {
-	if latencyHighConsecutiveRequired != 3 {
-		t.Fatalf("expected 3 consecutive readings, got %d", latencyHighConsecutiveRequired)
+	if consecutivePingsRequired(0) != 3 {
+		t.Fatalf("expected min 3 consecutive readings, got %d", consecutivePingsRequired(0))
 	}
 }

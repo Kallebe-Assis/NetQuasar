@@ -160,6 +160,7 @@ export function MikrotikPage() {
   const telemetry = useQuery({
     queryKey: ["mikrotik-tel", sel],
     enabled: !!sel,
+    refetchInterval: sel ? 30_000 : false,
     queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown> }>(`/api/v1/telemetry/devices/${sel}/latest`),
   });
 

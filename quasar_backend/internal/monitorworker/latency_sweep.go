@@ -33,7 +33,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 		tcpPart = time.Second
 	}
 
-	devices, err := loadPingableDevices(ctx, pool, opts.DeviceID)
+	devices, err := resolveSweepDevices(ctx, pool, opts, false)
 	if err != nil {
 		return err
 	}
@@ -47,9 +47,12 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	defer setActivity(ctx, pool, "")
 
 	okN, failN := 0, 0
-	var recoveredPing []uuid.UUID
+	recoveredPing := make(map[uuid.UUID]int64)
 
 	for _, row := range devices {
+		if ctx.Err() != nil {
+			break
+		}
 		id := row.id
 		host := strings.TrimSpace(row.ip)
 		description := row.description
@@ -78,7 +81,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			} else {
 				streakAfter = streak + 1
 			}
-			reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.OfflineThreshold)
+			reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.alertConsecutiveRequired())
 			method, _ := probe["method"].(string)
 			var lat int64
 			switch v := probe["latency_ms"].(type) {
@@ -95,13 +98,13 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				"latency_source": src,
 			}
 
-			if shouldOpenPingUnreachableAlert(probeReachOK, streakAfter, cfg.OfflineThreshold) {
+			if shouldOpenPingUnreachableAlert(probeReachOK, streakAfter, cfg.alertConsecutiveRequired()) {
 				InsertPingUnreachableIfNewForMonitoredDevice(ctx, pool, log, id, description, host, probe, src)
 			}
 			if probeReachOK {
-				recoveredPing = append(recoveredPing, id)
+				recoveredPing[id] = lat
 			}
-			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, latHighStreak)
+			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, latHighStreak, cfg.alertConsecutiveRequired())
 
 			overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
 			if overallOK {
@@ -179,7 +182,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	}
 
 	resolvePingUnreachableForDevices(ctx, pool, log, recoveredPing)
-	repairMissingPingUnreachableAlerts(ctx, pool, log, cfg.OfflineThreshold)
+	repairMissingPingUnreachableAlerts(ctx, pool, log, cfg.alertConsecutiveRequired())
 
 	_, err = pool.Exec(ctx, `
 		UPDATE monitoring_runtime SET
@@ -193,7 +196,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	if log != nil {
 		log.Info().Str("cycle", "latency").Str("mode", mode).Int("ok", okN).Int("fail", failN).Msg("ciclo latência")
 	}
-	appendWorkerAudit(ctx, pool, "monitoring_cycle", CycleSlugLatency, "run", map[string]any{
+	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugLatency, "run", map[string]any{
 		"source": src,
 		"mode":   mode,
 		"ok":     okN,
@@ -228,7 +231,7 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 			outerErr = cfgErr
 			return
 		}
-		reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.OfflineThreshold)
+		reachOK := cacheReachOK(probeReachOK, streakAfter, cfg.alertConsecutiveRequired())
 		method, _ := probe["method"].(string)
 		var lat int64
 		switch v := probe["latency_ms"].(type) {
@@ -251,7 +254,7 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 		_ = pool.QueryRow(ctx, `SELECT COALESCE(latency_high_streak, 0) FROM device_probe_cache WHERE device_id=$1`, deviceID).Scan(&latHighStreak)
 		latHighStreakAfter := latHighStreak
 		if host != "" {
-			latHighStreakAfter = EvaluateLatencyHighAlerts(ctx, pool, log, deviceID, cat, description, host, reachOK, lat, latHighStreak)
+			latHighStreakAfter = EvaluateLatencyHighAlerts(ctx, pool, log, deviceID, cat, description, host, probeReachOK, lat, latHighStreak, cfg.alertConsecutiveRequired())
 		}
 
 		overallOK := compositeProbeOK(mode, reachOK, snmpPrev)

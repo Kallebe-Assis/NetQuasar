@@ -7,10 +7,7 @@ func pingOfflineConfirmed(probeReachOK bool, streakAfter, threshold int) bool {
 	if probeReachOK {
 		return false
 	}
-	if threshold < 1 {
-		threshold = 1
-	}
-	return streakAfter >= threshold
+	return streakAfter >= consecutivePingsRequired(threshold)
 }
 
 // cacheReachOK é o valor persistido em device_probe_cache.reach_ok.

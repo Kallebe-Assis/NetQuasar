@@ -8,10 +8,11 @@ import { InfoHint } from "../components/InfoHint";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { AppearancePanel } from "./settings/AppearancePanel";
-import { MonitoringPingIntervalsCard } from "./settings/MonitoringIntervalsCard";
+import { MonitoringSettingsPanel } from "./settings/MonitoringPipelinePanel";
 import { AuditingPanel } from "./settings/AuditingPanel";
 import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { MikrotikCollectionPanel } from "./settings/MikrotikCollectionPanel";
+import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -19,6 +20,7 @@ type SettingsTab =
   | "logs"
   | "users"
   | "alerts"
+  | "monitoring"
   | "appearance"
   | "connection"
   | "telegram"
@@ -41,6 +43,7 @@ export function SettingsPage() {
             ["logs", "Auditoria"],
             ["users", "Usuários"],
             ["alerts", "Alertas"],
+            ["monitoring", "Monitoramento"],
             ["appearance", "Aparência"],
             ["connection", "Rede e SNMP"],
             ["telegram", "Telegram"],
@@ -57,12 +60,8 @@ export function SettingsPage() {
       {tab === "database" && <DatabasePanel />}
       {tab === "logs" && <AuditingPanel />}
       {tab === "users" && <UsersPanel />}
-      {tab === "alerts" && (
-        <>
-          <MonitoringPingIntervalsCard />
-          <AlertThresholdsPanel />
-        </>
-      )}
+      {tab === "alerts" && <AlertThresholdsPanel />}
+      {tab === "monitoring" && <MonitoringSettingsPanel />}
       {tab === "appearance" && <AppearancePanel />}
       {tab === "connection" && <ConnectionPanel />}
       {tab === "telegram" && (
@@ -497,6 +496,8 @@ function DatabasePanel() {
           {dbToast.text}
         </div>
       )}
+
+      <SystemConfigBackupPanel />
     </div>
   );
 }
@@ -545,7 +546,9 @@ function UsersPanel() {
       setEmail("");
       setPhone("");
       setPassword("");
+      toastOk(pushToast, "Utilizador criado com sucesso.");
     },
+    onError: (err) => toastErr(pushToast, err, "Falha ao criar utilizador."),
   });
 
   const patch = useMutation({
@@ -567,7 +570,11 @@ function UsersPanel() {
 
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/settings/users/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-users"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings-users"] });
+      toastOk(pushToast, "Utilizador removido.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao remover utilizador."),
   });
 
   if (list.isLoading) return <p>A carregar…</p>;
@@ -1998,6 +2005,12 @@ type OltCollectionStep = {
   params?: Record<string, unknown>;
 };
 
+type OltOnuReportCommands = {
+  pre_commands?: string[];
+  command?: string;
+  commands?: string[];
+};
+
 type OltOnuMetricDef = {
   enabled?: boolean;
   oid?: string;
@@ -2275,15 +2288,61 @@ const OLT_COLLECT_METHODS: { value: string; label: string }[] = [
   { value: "stabilize_pons", label: "Estabilizar PONs vs. coleta anterior" },
 ];
 
+function defaultOnuReportForBrand(brandName: string): { pre_commands: string[]; commands: string[] } {
+  const b = brandName.trim().toUpperCase();
+  if (b.includes("ZTE")) {
+    return {
+      pre_commands: ["terminal length 0", "terminal page-break disable", "scroll 512"],
+      commands: [
+        "show gpon onu detail-info {gpon_onu}",
+        "show pon onu information {gpon_onu}",
+        "show pon power onu-rx {gpon_onu}",
+        "show pon power onu-tx {gpon_onu}",
+      ],
+    };
+  }
+  if (b.includes("VSOL")) {
+    return {
+      pre_commands: ["enable", "conf terminal"],
+      commands: ["show onu info {pon} {onu}", "show onu state {pon} {onu}"],
+    };
+  }
+  return { pre_commands: [], commands: [] };
+}
+
+function onuReportCommandsFromApi(rc?: OltOnuReportCommands | null): { pre_commands: string[]; commands: string[] } {
+  const cmds =
+    Array.isArray(rc?.commands) && rc.commands.length > 0
+      ? rc.commands
+      : rc?.command?.trim()
+        ? [rc.command.trim()]
+        : [];
+  return {
+    pre_commands: Array.isArray(rc?.pre_commands) ? rc.pre_commands : [],
+    commands: cmds,
+  };
+}
+
 function OltVendorsPanel() {
   const qc = useQueryClient();
   const brands = useQuery({ queryKey: ["olt-brands"], queryFn: () => apiFetch<{ brands: string[] }>("/api/v1/settings/olt-vendors") });
+  const connDefaults = useQuery({
+    queryKey: ["settings-conn-def"],
+    queryFn: () =>
+      apiFetch<{
+        telnet_user: string | null;
+        telnet_password_configured: boolean;
+      }>("/api/v1/settings/connection/defaults"),
+    staleTime: 60_000,
+  });
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<OltMetricsForm>(() => defaultMetricsForm());
   const [steps, setSteps] = useState<OltCollectionStep[]>([]);
+  const [onuReportPreText, setOnuReportPreText] = useState("");
+  const [onuReportCommandsText, setOnuReportCommandsText] = useState("");
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyBrand, setCopyBrand] = useState("");
   const [copyModel, setCopyModel] = useState("");
@@ -2328,6 +2387,7 @@ function OltVendorsPanel() {
         model: string;
         onu_metrics?: OltMetricsForm;
         collection_steps?: OltCollectionStep[];
+        onu_report_commands?: OltOnuReportCommands;
       }>(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`),
   });
 
@@ -2350,6 +2410,10 @@ function OltVendorsPanel() {
     if (!vendor.data) return;
     setMetrics(metricsFromApi(vendor.data.onu_metrics));
     setSteps(Array.isArray(vendor.data.collection_steps) ? vendor.data.collection_steps : []);
+    const rc = vendor.data.onu_report_commands;
+    const parsed = onuReportCommandsFromApi(rc);
+    setOnuReportPreText(parsed.pre_commands.join("\n"));
+    setOnuReportCommandsText(parsed.commands.join("\n"));
   }, [vendor.data]);
 
   const metricsReady = hasEnabledMetrics(metrics);
@@ -2360,11 +2424,23 @@ function OltVendorsPanel() {
       const autoSteps: OltCollectionStep[] = metricsReady
         ? [{ id: "onu_metrics", method: "onu_metrics_collect", enabled: true }]
         : steps;
+      const preCommands = onuReportPreText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const commands = onuReportCommandsText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
       return apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`, {
         method: "PATCH",
         json: {
           onu_metrics: payload,
           collection_steps: autoSteps,
+          onu_report_commands: {
+            pre_commands: preCommands,
+            commands,
+          },
         },
       });
     },
@@ -2452,13 +2528,17 @@ function OltVendorsPanel() {
       const src = await apiFetch<{
         onu_metrics?: OltMetricsForm;
         collection_steps?: OltCollectionStep[];
+        onu_report_commands?: OltOnuReportCommands;
       }>(
         `/api/v1/settings/olt-vendors/${encodeURIComponent(srcBrand)}/models/${encodeURIComponent(srcModel)}`,
       );
       setMetrics(metricsFromApi(src.onu_metrics));
       setSteps(Array.isArray(src.collection_steps) ? src.collection_steps : []);
+      const parsed = onuReportCommandsFromApi(src.onu_report_commands);
+      setOnuReportPreText(parsed.pre_commands.join("\n"));
+      setOnuReportCommandsText(parsed.commands.join("\n"));
       setCopyModalOpen(false);
-      toastOk(pushToast, `Métricas copiadas de ${srcBrand} / ${srcModel}. Clique em Salvar para gravar neste modelo.`);
+      toastOk(pushToast, `Perfil copiado de ${srcBrand} / ${srcModel} (SNMP e telnet). Clique em Guardar para gravar.`);
     } catch (e) {
       toastErr(pushToast, e, "Falha ao copiar perfil.");
     } finally {
@@ -2472,7 +2552,8 @@ function OltVendorsPanel() {
         <div>
           <h2 style={{ margin: 0 }}>Perfis OLT por marca e modelo</h2>
           <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, marginBottom: 0 }}>
-            Configure OIDs SNMP por modelo. O sistema faz snmpwalk e interpreta os dados conforme o modo escolhido.
+            Configure OIDs SNMP e comandos telnet de relatório por ONU (aba Pesquisa). A sessão telnet usa as credenciais
+            definidas em <strong>Rede e SNMP</strong>.
           </p>
         </div>
         <div className="row" style={{ gap: 6, flexShrink: 0 }}>
@@ -2973,6 +3054,72 @@ function OltVendorsPanel() {
             })}
           </div>
 
+          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Relatório telnet por ONU (aba Pesquisa)</h3>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+            Login usa <strong>Rede e SNMP</strong> (utilizador + palavra-passe telnet). Nos pré-comandos pode usar{" "}
+            <code>{"{enable}"}</code> ou <code>{"{enable_password}"}</code> para a senha de enable, e{" "}
+            <code>{"{password}"}</code> para repetir a senha de login. O sistema também envia enable automaticamente e
+            detecta pedidos de <em>Password:</em> após o comando <code>enable</code>. Placeholders ONU:{" "}
+            <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{serial}"}</code>, <code>{"{gpon_onu}"}</code>.
+          </p>
+          <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span
+              className={
+                connDefaults.data?.telnet_password_configured && connDefaults.data?.telnet_user
+                  ? "badge badge--ok"
+                  : "badge badge--off"
+              }
+            >
+              Telnet:{" "}
+              {connDefaults.data?.telnet_password_configured && connDefaults.data?.telnet_user
+                ? `configurado (${connDefaults.data.telnet_user})`
+                : "credenciais em falta — configure em Rede e SNMP"}
+            </span>
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: 12, padding: "4px 10px" }}
+              onClick={() => {
+                const d = defaultOnuReportForBrand(brand);
+                setOnuReportPreText(d.pre_commands.join("\n"));
+                setOnuReportCommandsText(d.commands.join("\n"));
+                toastOk(pushToast, "Comandos padrão da marca carregados no formulário. Clique em Guardar para persistir.");
+              }}
+            >
+              Restaurar padrão da marca
+            </button>
+          </div>
+          <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+            <div className="field">
+              <label>Pré-comandos (um por linha)</label>
+              <textarea
+                className="input mono"
+                rows={3}
+                value={onuReportPreText}
+                onChange={(e) => setOnuReportPreText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "terminal length 0\nterminal page-break disable\nscroll 512"
+                    : "enable\n{enable}\nconf terminal"
+                }
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Comandos (um por linha)</label>
+              <textarea
+                className="input mono"
+                rows={6}
+                value={onuReportCommandsText}
+                onChange={(e) => setOnuReportCommandsText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "show gpon onu detail-info {gpon_onu}\nshow pon onu information {gpon_onu}\nshow pon power onu-rx {gpon_onu}\nshow pon power onu-tx {gpon_onu}"
+                    : "show onu info {pon} {onu}\nshow onu state {pon} {onu}"
+                }
+              />
+            </div>
+          </div>
+
           <details style={{ marginTop: 14 }} open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
             <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Opções avançadas (passos extras de coleta)</summary>
             <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
@@ -3015,7 +3162,7 @@ function OltVendorsPanel() {
           </details>
 
           <button type="button" className="btn btn--primary" style={{ marginTop: 14 }} disabled={patch.isPending} onClick={() => patch.mutate()}>
-            {patch.isPending ? "A guardar…" : "Guardar perfil de monitoramento"}
+            {patch.isPending ? "A guardar…" : "Guardar perfil (SNMP e telnet)"}
           </button>
         </>
       )}
@@ -3100,7 +3247,7 @@ function OltVendorsPanel() {
               Copiar informações do perfil
             </h3>
             <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-              Copia OIDs e opções SNMP do perfil de origem para <strong>{brand || "—"} / {model || "—"}</strong>. Os passos avançados também são copiados. Clique em Salvar para persistir.
+              Copia OIDs SNMP, comandos telnet e passos avançados do perfil de origem para <strong>{brand || "—"} / {model || "—"}</strong>. Clique em Guardar para persistir.
             </p>
             <div className="field">
               <label>Marca de origem</label>

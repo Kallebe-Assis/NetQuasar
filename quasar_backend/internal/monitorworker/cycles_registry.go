@@ -39,7 +39,7 @@ func ListCycleKinds() []CycleKindMeta {
 		{Slug: CycleSlugLatency, RequiresFull: false, IntervalField: "ping_seconds", Description: "ICMP/TCP (latência, reach_ok, ping_history)"},
 		{Slug: CycleSlugTelemetry, RequiresFull: true, IntervalField: "telemetry_seconds", Description: "Telemetria SNMP (CPU, memória, temperatura, uptime)"},
 		{Slug: CycleSlugInterfaces, RequiresFull: true, IntervalField: "interface_snapshot_seconds", Description: "Snapshots IF-MIB (+ Mikrotik quando aplicável)"},
-		{Slug: CycleSlugOltIfDerived, RequiresFull: true, IntervalField: "olt_if_derived_pon_seconds", Description: "PON/ONUs derivados de IF-MIB (OLT compatíveis; ZTE/datacom omitidos)"},
+		{Slug: CycleSlugOltIfDerived, RequiresFull: true, IntervalField: "olt_if_derived_pon_seconds", Description: "Coleta ONU/PON SNMP por OLT (round-robin; VSOL/ZTE/Datacom por perfil)"},
 	}
 }
 

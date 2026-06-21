@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { InfoHint } from "../../components/InfoHint";
 import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 import { AutomationHistoryModal } from "./AutomationHistoryModal";
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
@@ -36,6 +38,7 @@ type SmtpCfg = {
 
 function DigestScheduleCard() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const cfg = useQuery({
     queryKey: queryKeys.automationAlertsDigest,
     queryFn: () => apiFetch<ScheduleCfg>("/api/v1/settings/automation/alerts-digest"),
@@ -49,13 +52,6 @@ function DigestScheduleCard() {
   const [tg, setTg] = useState(true);
   const [em, setEm] = useState(false);
   const [emailTo, setEmailTo] = useState("");
-  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 10_000);
-    return () => window.clearTimeout(t);
-  }, [toast]);
 
   useEffect(() => {
     if (!cfg.data) return;
@@ -86,9 +82,9 @@ function DigestScheduleCard() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.automationAlertsDigest });
-      setToast({ ok: true, text: "Resumo de alertas salvo." });
+      toastOk(pushToast, "Resumo de alertas salvo.");
     },
-    onError: (err) => setToast({ ok: false, text: (err as Error).message }),
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar resumo de alertas."),
   });
 
   const run = useMutation({
@@ -172,13 +168,13 @@ function DigestScheduleCard() {
           Executar agora
         </button>
       </div>
-      {toast && <div className={`msg ${toast.ok ? "msg--ok" : "msg--err"}`} style={{ marginTop: 8 }}>{toast.text}</div>}
     </div>
   );
 }
 
 function CommercialScheduleCard() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const cfg = useQuery({
     queryKey: queryKeys.automationCommercial,
     queryFn: () => apiFetch<ScheduleCfg>("/api/v1/settings/automation/commercial-report"),
@@ -217,7 +213,11 @@ function CommercialScheduleCard() {
           email_to: emailTo.trim() || null,
         },
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.automationCommercial }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.automationCommercial });
+      toastOk(pushToast, "Relatório comercial agendado salvo.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar agendamento comercial."),
   });
 
   const run = useMutation({
@@ -289,6 +289,7 @@ function CommercialScheduleCard() {
 
 function SmtpPanel() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const cfg = useQuery({
     queryKey: queryKeys.smtpSettings,
     queryFn: () => apiFetch<SmtpCfg>("/api/v1/settings/notifications/smtp"),
@@ -329,7 +330,9 @@ function SmtpPanel() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.smtpSettings });
       setPass("");
+      toastOk(pushToast, "SMTP salvo com sucesso.");
     },
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar SMTP."),
   });
 
   const test = useMutation({

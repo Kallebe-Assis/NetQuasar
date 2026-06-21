@@ -1,9 +1,9 @@
 // Package monitorworker executa ciclos de sondagem enquanto monitoring_runtime.is_running = true,
 // independentemente de conexões HTTP do front (troca de tela não interrompe). Parar só via POST /monitoring/stop.
 //
-// O worker dispara ciclos independentes: ping (paralelo), telemetria SNMP (paralelo), pipeline de interfaces
-// (MikroTik + OLT), e ONU/PON. Ao iniciar modo full, o HTTP arranca um bootstrap sequencial com todos os passos forçados.
-// Escritas em device_probe_cache por equipamento são serializadas com WithDeviceProbeRowLock; SNMP por snmpdevicelock.
+// O worker executa ping em paralelo (ping_seconds) quando ping_parallel=true (padrão).
+// Os restantes passos do pipeline correm em sequência (Configurações → Monitoramento).
+// são serializadas com WithDeviceProbeRowLock; SNMP por snmpdevicelock.
 package monitorworker
 
 import (
@@ -65,78 +65,52 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		return err
 	}
 	if !running || mode == ModeOff || mode == "" {
+		EndActiveRun()
 		return nil
 	}
 	if mode != ModeSimplePing && mode != ModeFull {
+		EndActiveRun()
 		return nil
 	}
+	EnsureActiveRun(ctx)
 
 	cfg, err := loadClampMonitoringIntervals(ctx, pool)
 	if err != nil {
 		return err
 	}
-	var lastLat, lastTel, lastIf, lastOlt *time.Time
-	if err := pool.QueryRow(ctx, `
-		SELECT last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at,
-			last_olt_if_derived_cycle_at
-		FROM monitoring_runtime WHERE id=1
-	`).Scan(&lastLat, &lastTel, &lastIf, &lastOlt); err != nil {
+
+	runCtx := ActiveRunContext(ctx)
+
+	// Ping paralelo (intervalo ping_seconds) — não espera telemetria/OLT.
+	if cfg.PingParallel || mode == ModeSimplePing {
+		TryStartParallelPingCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+	}
+	if mode == ModeSimplePing {
+		return nil
+	}
+
+	var lastPipeline *time.Time
+	if err := pool.QueryRow(ctx, `SELECT last_pipeline_cycle_at FROM monitoring_runtime WHERE id=1`).Scan(&lastPipeline); err != nil {
 		return err
 	}
 
-	latencyDue := cycleDue(lastLat, cfg.PingSeconds)
-	if latencyDue && TryLockLatencyCycle() {
-		go func(mode string, log *zerolog.Logger) {
-			defer UnlockLatencyCycle()
-			l := log.With().Str("component", "monitor_worker").Str("cycle", "latency").Logger()
-			if err := RunLatencySweep(ctx, pool, &l, mode, SweepOpts{Source: "worker"}); err != nil {
-				l.Warn().Err(err).Msg("ciclo latência")
-			}
-		}(mode, log)
+	pipelineDue := cycleDue(lastPipeline, cfg.PipelineCycleSeconds)
+	if !pipelineDue {
+		return nil
 	}
-
-	if mode == ModeFull {
-		oltDue := cycleDue(lastOlt, cfg.OltDerivedSeconds)
-		if oltDue && TryLockOltPonCycle() {
-			go func(log *zerolog.Logger) {
-				defer UnlockOltPonCycle()
-				l := log.With().Str("cycle", "olt_pon").Logger()
-				if err := RunOltIfDerivedSweep(ctx, pool, &l, mode, SweepOpts{Source: "worker"}); err != nil {
-					l.Warn().Err(err).Msg("ciclo ONU/PON")
-				}
-			}(log)
-		} else if oltDue && log != nil {
-			log.Warn().Msg("ciclo ONU/PON adiado: execução anterior ainda em curso")
+	if !TryLockMonitoringPipeline() {
+		if log != nil {
+			log.Debug().Msg("pipeline adiado: execução anterior ainda em curso")
 		}
-
-		telDue := cycleDue(lastTel, cfg.TelemetrySeconds)
-		if telDue {
-			if TryLockTelemetryCycle() {
-				go func(log *zerolog.Logger) {
-					defer UnlockTelemetryCycle()
-					l := log.With().Str("component", "monitor_worker").Str("cycle", "telemetry").Logger()
-					if err := RunTelemetrySweep(ctx, pool, &l, mode, SweepOpts{Source: "worker"}); err != nil {
-						l.Warn().Err(err).Msg("ciclo telemetria")
-					}
-				}(log)
-			} else if log != nil {
-				log.Warn().Msg("ciclo telemetria adiado: execução anterior ainda em curso")
-			}
-		}
-
-		ifDue := cycleDue(lastIf, cfg.IfaceSeconds)
-		if ifDue {
-			if TryLockMonitoringPipeline() {
-				go func(log *zerolog.Logger) {
-					defer UnlockMonitoringPipeline()
-					l := log.With().Str("component", "monitor_worker").Str("cycle", "interfaces").Logger()
-					RunWorkerInterfaceSteps(ctx, pool, &l, mode, false)
-				}(log)
-			} else if log != nil {
-				log.Warn().Msg("ciclo interfaces adiado: pipeline SNMP ainda em execução")
-			}
-		}
+		return nil
 	}
+	go func(mode string, log *zerolog.Logger, skipPing bool, pipelineCtx context.Context) {
+		defer UnlockMonitoringPipeline()
+		l := log.With().Str("component", "monitor_worker").Str("cycle", "pipeline").Logger()
+		if err := RunConfiguredPipeline(pipelineCtx, pool, &l, mode, SweepOpts{Source: "worker", SkipPingInPipeline: skipPing}); err != nil {
+			l.Warn().Err(err).Msg("pipeline de monitoramento")
+		}
+	}(mode, log, cfg.PingParallel, runCtx)
 
 	return nil
 }

@@ -114,30 +114,30 @@ func insertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *ze
 	}
 }
 
-func resolvePingUnreachableForDevices(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, recovered []uuid.UUID) {
+func resolvePingUnreachableForDevices(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, recovered map[uuid.UUID]int64) {
 	if len(recovered) == 0 {
 		return
 	}
-	rows, err := pool.Query(ctx, `
-		UPDATE alert_instances SET
-			closed_at = now(),
-			meta = COALESCE(meta, '{}'::jsonb) || '{"resolved":"icmp_or_tcp_ok","source":"monitor_worker"}'::jsonb
-		WHERE alert_type = $1
-		  AND closed_at IS NULL
-		  AND device_id = ANY($2::uuid[])
-		RETURNING id, alert_type, message, device_name, ip
-	`, alertTypePingUnreachable, recovered)
-	if err != nil {
-		log.Error().Err(err).Msg("fechar alertas ping_unreachable")
-		return
-	}
-	defer rows.Close()
 	var n int64
-	for rows.Next() {
+	for deviceID, lat := range recovered {
+		closeMeta := map[string]any{"resolved": "icmp_or_tcp_ok", "source": "monitor_worker"}
+		if lat > 0 {
+			closeMeta["curr_latency_ms"] = lat
+			closeMeta["resolved_value"] = fmt.Sprintf("%d ms", lat)
+		}
+		metaRaw, _ := json.Marshal(closeMeta)
 		var id uuid.UUID
 		var atype, msg, dname, ip string
-		if err := rows.Scan(&id, &atype, &msg, &dname, &ip); err != nil {
-			log.Error().Err(err).Msg("scan ping_unreachable resolvido")
+		err := pool.QueryRow(ctx, `
+			UPDATE alert_instances SET
+				closed_at = now(),
+				meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb
+			WHERE alert_type = $1
+			  AND closed_at IS NULL
+			  AND device_id = $3::uuid
+			RETURNING id, alert_type, message, device_name, ip
+		`, alertTypePingUnreachable, metaRaw, deviceID).Scan(&id, &atype, &msg, &dname, &ip)
+		if err != nil {
 			continue
 		}
 		n++
@@ -147,10 +147,6 @@ func resolvePingUnreachableForDevices(ctx context.Context, pool *pgxpool.Pool, l
 		}
 		head := alertnotify.ResolutionHeadlineForAlertType(atype)
 		alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, id, head, detail)
-	}
-	if err := rows.Err(); err != nil {
-		log.Error().Err(err).Msg("iter ping_unreachable resolvido")
-		return
 	}
 	if n > 0 {
 		log.Info().Int64("closed", n).Msg("alertas ping recuperados — equipamento volta a responder")

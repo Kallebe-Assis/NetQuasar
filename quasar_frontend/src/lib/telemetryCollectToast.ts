@@ -32,6 +32,7 @@ export async function collectDeviceTelemetry(
     toast.dismiss(loadingId);
     toast.push({ tone: "ok", text: `Telemetria de ${label} concluída.` });
     void qc?.invalidateQueries({ queryKey: queryKeys.alertsPingUnreachable });
+    void qc?.invalidateQueries({ queryKey: ["mikrotik-tel", deviceId] });
     if (qc) {
       void qc.invalidateQueries({ queryKey: queryKeys.monitoringActiveEquipment });
       invalidateDashboardAfterCollect(qc);

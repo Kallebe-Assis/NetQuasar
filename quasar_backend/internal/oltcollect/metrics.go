@@ -206,6 +206,37 @@ func (c OnuMetricsConfig) HasAnyEnabled() bool {
 	return len(c.EnabledMetrics()) > 0
 }
 
+// FilterOnuMetricsByMode reduz métricas para coleta periódica simplificada.
+func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" || mode == "full" {
+		return c
+	}
+	out := make(OnuMetricsConfig, len(c))
+	for k, v := range c {
+		cp := v
+		cp.Enabled = false
+		out[k] = cp
+	}
+	enable := func(keys ...string) {
+		for _, k := range keys {
+			if def, ok := c[k]; ok {
+				def.Enabled = true
+				out[k] = def
+			}
+		}
+	}
+	switch mode {
+	case "status_only":
+		enable(MetricStatus, MetricPonStatus)
+	case "status_rx":
+		enable(MetricStatus, MetricPonStatus, MetricRxPower, MetricPonRxPower)
+	default:
+		return c
+	}
+	return out
+}
+
 func DefaultStepsFromMetrics(c OnuMetricsConfig) []Step {
 	if !c.HasAnyEnabled() {
 		return nil

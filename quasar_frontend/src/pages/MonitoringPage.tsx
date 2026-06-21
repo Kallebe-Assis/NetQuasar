@@ -965,7 +965,7 @@ export function MonitoringPage() {
           <h2>Alvos HTTPS + offset VPS</h2>
           <p style={{ fontSize: 12, color: "var(--muted)" }}>
             Ajuste o atraso medido no VPS e a lista de URLs usadas para testar a internet. Os valores são salvos no servidor.
-            Intervalos globais do worker, pacote ICMP e limiar para alertas passaram para <strong>Configurações · Alertas</strong>.
+            Intervalos globais do worker, pacote ICMP, ordem do pipeline e timeouts passaram para <strong>Configurações · Monitoramento</strong>.
           </p>
           <div className="field">
             <label>Compensação de latência do VPS (ms)</label>

@@ -35,7 +35,9 @@ Documentação complementar: [Backend](quasar_backend/README-BACKEND.md) · [Fro
          PostgreSQL                      Redis (tempo real)
 ```
 
-O **worker de monitoramento** (`monitorworker.Run`) corre em goroutine dedicada, lê o estado em `monitoring_runtime` (ligado/desligado, modo) e dispara ciclos conforme os intervalos em `monitoring_intervals`. Cada alteração relevante actualiza timestamps em `monitoring_runtime` para o frontend invalidar caches (polling + `useMonitoringLiveSync`).
+O **worker de monitoramento** (`monitorworker.Run`) corre em goroutine dedicada, lê o estado em `monitoring_runtime` (ligado/desligado, modo) e dispara ciclos conforme `monitoring_intervals` e a ordem de passos em **Configurações → Monitoramento → Pipeline**. Cada alteração relevante actualiza timestamps em `monitoring_runtime` para o frontend invalidar caches (polling + `useMonitoringLiveSync`).
+
+**Modo `full`:** o ping pode correr **em paralelo** (`ping_parallel=true`, intervalo `ping_seconds`) enquanto telemetria, interfaces e OLT correm **em sequência** num pipeline único (intervalo `pipeline_cycle_seconds`). Com `ping_parallel=false`, o ping entra no pipeline em vez de correr à parte. **Modo `simple_ping`:** apenas latência/ICMP-TCP, sempre activo independentemente de `ping_parallel`.
 
 ---
 
@@ -55,10 +57,13 @@ Ligação/desligação: **Monitoramento** na UI ou `POST /api/v1/monitoring/star
 
 | Ciclo | Intervalo (config) | O que faz |
 |-------|-------------------|-----------|
-| **Latência / ping** | `ping_seconds` | Para cada equipamento monitorizado: ICMP e fallback TCP; grava `device_probe_cache` (`reach_ok`, `latency_ms`); abre/fecha alerta `ping_unreachable`; histórico em `ping_history` |
-| **Telemetria SNMP** | `telemetry_seconds` | Walk/get conforme perfil do equipamento; amostras em `telemetry_samples` (CPU, memória, temperatura, uptime); avalia limiares globais → alertas `telemetry_threshold` e `uptime_restart_low` |
-| **Interfaces (IF-MIB)** | `interface_snapshot_seconds` | Walk IF-MIB (+ IF-MIB-X); grava `interface_snapshots`; MikroTik: potências SFP e alertas ópticos; detecta transição UP→DOWN → `interface_down_transition` |
-| **OLT PON / ONUs** | `olt_if_derived_pon_seconds` | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, actualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs e potência óptica |
+| **Latência / ping** | `ping_seconds` (paralelo) ou dentro do pipeline | Para cada equipamento monitorizado: ICMP e fallback TCP; grava `device_probe_cache` (`reach_ok`, `latency_ms`); abre/fecha alerta `ping_unreachable`; histórico em `ping_history`. Requer **3 leituras consecutivas** antes de abrir alerta de latência alta ou offline. |
+| **Telemetria SNMP** | Passo no pipeline (`pipeline_cycle_seconds`) | Walk/get conforme perfil do equipamento; amostras em `telemetry_samples` (CPU, memória, temperatura, uptime); avalia limiares globais → alertas `telemetry_threshold` e `uptime_restart_low` |
+| **Interfaces (IF-MIB)** | Passo no pipeline | Walk IF-MIB (+ IF-MIB-X); grava `interface_snapshots`; MikroTik: potências SFP e alertas ópticos; detecta transição UP→DOWN → `interface_down_transition` |
+| **OLT PON / ONUs** | Passo no pipeline | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, actualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs e potência óptica |
+| **Pipeline completo** | `pipeline_cycle_seconds` | Executa os passos activos em sequência (ping incluído se `ping_parallel=false`); actualiza `last_pipeline_cycle_at` |
+
+Os campos `telemetry_seconds`, `interface_snapshot_seconds` e `olt_if_derived_pon_seconds` continuam disponíveis para ciclos **manuais** (`POST /monitoring/cycles/...`) e referência na UI; no worker automático em modo full, o gatilho principal é `pipeline_cycle_seconds`.
 
 Cada ciclo tem **timeout** próprio (`telemetry_timeout_ms`, `interface_snapshot_timeout_ms`, `olt_if_derived_pon_timeout_ms`) configurável em **Configurações → Monitoramento**.
 
@@ -211,9 +216,17 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ### Mapa (`/mapa` → `/map`)
 
-**Função:** visualização geográfica.
+**Função:** visualização geográfica full-width (~72vh).
 
-**Como funciona:** `GET /map/equipment-points` (equipamentos com lat/lng); `GET /map/connection-points` (logins, filtrado por bbox). Modos: agrupado, disperso, online/offline (pins coloridos). Equipamentos usam pin Leaflet padrão; logins usam marcador circular azul distinto. Lista paginada e painel de detalhe lateral.
+**Como funciona:**
+- `GET /map/equipment-points` — equipamentos com lat/lng; pins coloridos online/offline.
+- `GET /map/connection-points` — logins PPPoE/DHCP (carga por bounding box).
+- `GET /map/search` — pesquisa unificada (equipamento, login, POP, CTO).
+- `GET /map/locality-center` — centrar mapa numa localidade comercial.
+- **Filtros** em modal (equipamentos ON por defeito; logins/infra OFF).
+- **Detalhe** em modal lateral (sem painel fixo).
+- CTOs no mapa: etiqueta só com **descrição** (sem ID).
+- Marcadores: equipamentos com pin Leaflet; logins com círculo azul.
 
 ---
 
@@ -246,17 +259,25 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ### MikroTik (`/mikrotik`)
 
-**Função:** interfaces, tráfego e sessões PPPoE.
+**Função:** interfaces, tráfego e telemetria SNMP.
 
-**Como funciona:** lista equipamentos MikroTik; detalhe com tabela de interfaces (status, tráfego, SFP dBm), gráficos de taxa, coleta manual. Sessões PPPoE via API BNG (`/bng/sessions`). Perfil de coleta SNMP configurável em **Configurações → MikroTik**. Alertas SFP gerados automaticamente no ciclo de interfaces.
+**Como funciona:** lista equipamentos MikroTik; detalhe com tabela de interfaces (status, tráfego, SFP dBm), gráficos de taxa, coleta manual. Perfil de coleta SNMP configurável em **Configurações → MikroTik**. Alertas SFP gerados automaticamente no ciclo de interfaces.
+
+---
+
+### BNG / PPPoE (`/bng`)
+
+**Função:** visão consolidada de sessões PPPoE activas nos concentradores.
+
+**Como funciona:** agrega sessões a partir de `telemetry_samples` (campo `pppoe_active_sessions`) e `interface_snapshots` (interfaces IF-MIB com «pppoe») em equipamentos BNG/concentrador/MikroTik. Endpoints: `GET /bng/sessions`, `/bng/sessions/search?q=`, `/bng/stats/summary`. Actualização automática na UI (~30 s). Logs RADIUS externos não estão integrados — use **Conexões** + auditoria em `/bng/auth/logs`.
 
 ---
 
 ### Eventos (`/events`)
 
-**Função:** linha do tempo operacional.
+**Função:** linha do tempo operacional (eventos agregados).
 
-**Como funciona:** `GET /events` — eventos agregados (alterações, coletas, alertas) para consulta histórica rápida.
+**Como funciona:** `GET /api/v1/events?limit=` (1–200) — consulta histórica. A tabela `events` é **somente leitura** nesta versão (sem writers automáticos no backend Go); dados legados ou inserções manuais.
 
 ---
 
@@ -431,10 +452,12 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `/tools` | Ferramentas |
 | `/olt` | OLT |
 | `/mikrotik` | MikroTik |
-| `/events` | Eventos |
+| `/bng` | BNG / sessões PPPoE |
+| `/events` | Eventos (linha do tempo, read-only) |
+| `/reports` | Relatórios analíticos |
 | `/settings` | Configurações |
 
-Redireccionamentos legados: `/alertas` → `/alerts`, `/comercial` → `/commercial`, `/bng` → `/mikrotik`, etc. (ver `routes.ts`).
+Redireccionamentos legados: definidos em `LEGACY_ROUTE_REDIRECTS` (`routes.ts`) e aplicados automaticamente no `AppRouter` (ex.: `/alertas` → `/alerts`, `/comercial` → `/commercial`).
 
 ---
 

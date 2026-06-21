@@ -1165,8 +1165,16 @@ export function DevicesPage() {
                   />
                 </td>
                 <td>{d.operational_mode}</td>
-                <td title={d.snmp_health_reason ?? ""}>
-                  {d.snmp_health_status === "ok" ? "🟢 OK" : d.snmp_health_status === "partial" ? "🟡 Parcial" : d.snmp_health_status === "failed" ? "🔴 Falha" : "—"}
+                <td title={d.telemetry_enabled ? (d.snmp_health_reason ?? "") : undefined}>
+                  {!d.telemetry_enabled
+                    ? "—"
+                    : d.snmp_health_status === "ok"
+                      ? "🟢 OK"
+                      : d.snmp_health_status === "partial"
+                        ? "🟡 Parcial"
+                        : d.snmp_health_status === "failed"
+                          ? "🔴 Falha"
+                          : "—"}
                 </td>
                 <td>
                   {canMutate ? (

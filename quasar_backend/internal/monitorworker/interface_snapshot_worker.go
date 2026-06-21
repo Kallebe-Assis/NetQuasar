@@ -27,7 +27,7 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	c := strings.TrimSpace(community)
 	total := 120 * time.Second
 	if cfg, err := loadClampMonitoringIntervals(ctx, pool); err == nil {
-		total = cfg.interfaceTimeout(false)
+		total = cfg.interfaceTimeout(false, false)
 	}
 
 	var prevRaw []byte

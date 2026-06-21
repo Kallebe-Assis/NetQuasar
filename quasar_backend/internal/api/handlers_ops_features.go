@@ -118,10 +118,16 @@ func (s *Server) appendAuditLog(ctx context.Context, entityType, entityID, actio
 	actor = normalizeAuditActor(actor)
 	bb, _ := json.Marshal(beforeData)
 	ab, _ := json.Marshal(afterData)
-	_, _ = s.DB().Exec(ctx, `
+	if _, err := s.DB().Exec(ctx, `
 		INSERT INTO ops_audit_log (entity_type, entity_id, action, actor, before_data, after_data)
 		VALUES ($1, $2, $3, NULLIF($4,''), $5::jsonb, $6::jsonb)
-	`, entityType, entityID, action, strings.TrimSpace(actor), bb, ab)
+	`, entityType, entityID, action, strings.TrimSpace(actor), bb, ab); err != nil {
+		s.Log.Warn().Err(err).
+			Str("entity_type", entityType).
+			Str("entity_id", entityID).
+			Str("action", action).
+			Msg("falha ao gravar ops_audit_log")
+	}
 }
 
 func (s *Server) auditDeviceAction(ctx context.Context, r *http.Request, deviceID uuid.UUID, action string, detail map[string]any) {

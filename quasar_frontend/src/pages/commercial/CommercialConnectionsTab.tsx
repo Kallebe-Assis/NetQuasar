@@ -1,9 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plug, Search, Trash2 } from "lucide-react";
+import { Pencil, Plug, Search, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { NearestCtoMatchModal } from "../../components/NearestCtoMatchModal";
 import { PageCountPill } from "../../components/PageCountPill";
 import { apiFetch, ApiError, downloadBlob } from "../../lib/api";
 import { errorMessageFromUnknown } from "../../lib/apiErrors";
@@ -15,6 +16,7 @@ import { toastErr, toastLoading, toastOk } from "../../lib/operationToast";
 import type { IntegrationSummary } from "../../integrations/types";
 import type { ConnectionsTabProps } from "../connections/shared";
 import { ConnectionsPager } from "../connections/ConnectionsPager";
+import { ConnectionsTabToolbar } from "../connections/ConnectionsTabToolbar";
 
 export type ClientConnection = {
   id: string;
@@ -258,7 +260,7 @@ function conflictSummary(loginC?: ConnConflict | null, ipC?: ConnConflict | null
 
 type Props = ConnectionsTabProps;
 
-export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
+export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchChange, onOpenFilters, onOpenSettings, activeFilterCount }: Props) {
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const csvRef = useRef<HTMLInputElement>(null);
@@ -296,6 +298,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
   const [lookupLogin, setLookupLogin] = useState("");
   const [lookupAll, setLookupAll] = useState(true);
   const [lookupIds, setLookupIds] = useState<string[]>([]);
+  const [nearestCtoOpen, setNearestCtoOpen] = useState(false);
 
   const list = useQuery({
     queryKey: [...queryKeys.clientConnections, kindQ, debouncedQ],
@@ -629,8 +632,24 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
 
   return (
     <>
-      <div className="conn-toolbar">
+      <ConnectionsTabToolbar
+        search={filters.q}
+        onSearchChange={onSearchChange}
+        searchPlaceholder="Cliente, login, IP…"
+        onOpenFilters={onOpenFilters}
+        onOpenSettings={onOpenSettings}
+        activeFilterCount={activeFilterCount}
+      >
         <PageCountPill label="Logins" count={sortedConnections.length} />
+        <button
+          type="button"
+          className="btn"
+          title="Comparar coordenadas dos logins com a CTO mais próxima"
+          onClick={() => setNearestCtoOpen(true)}
+        >
+          <Waypoints size={16} strokeWidth={2} style={{ marginRight: 6, verticalAlign: -3 }} />
+          Correlacionar CTO
+        </button>
         <button
           type="button"
           className="btn"
@@ -695,7 +714,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
             Exportar CSV
           </button>
         )}
-      </div>
+      </ConnectionsTabToolbar>
 
       <div className="table-wrap">
         <table className="conn-table" style={{ fontSize: 12 }}>
@@ -1213,6 +1232,8 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs }: Props) {
         onCancel={() => setDeleteId(null)}
         onConfirm={() => deleteId && deleteMut.mutate(deleteId)}
       />
+
+      <NearestCtoMatchModal open={nearestCtoOpen} onClose={() => setNearestCtoOpen(false)} canMutate={canMutate} />
     </>
   );
 }

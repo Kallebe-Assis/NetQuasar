@@ -12,7 +12,16 @@ func TestResolutionHeaderLatencyNotOnline(t *testing.T) {
 
 func TestResolutionHeaderPingOnline(t *testing.T) {
 	got := resolutionHeader("ping_unreachable", "Equipamento voltou a responder (ICMP/TCP)", "detalhe")
-	if got != "🟢 EQUIPAMENTO ONLINE" {
+	if got != "🟢 ALERTA RESOLVIDO" {
 		t.Fatalf("ping_unreachable header = %q", got)
+	}
+}
+
+func TestResolutionStatusLine(t *testing.T) {
+	if got := ResolutionStatusLine("latency_high", ""); got != "Latência normalizada" {
+		t.Fatalf("got %q", got)
+	}
+	if got := ResolutionStatusLine("ping_unreachable", ""); !contains(got, "online") {
+		t.Fatalf("got %q", got)
 	}
 }

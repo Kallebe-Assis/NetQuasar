@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { InfoHint } from "../../components/InfoHint";
 import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 
 type OnuAutomationCfg = {
@@ -18,6 +20,7 @@ const TZ_DEFAULT = "America/Sao_Paulo";
 
 export function OnuMonthlyReportPanel() {
   const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
   const cfg = useQuery({
     queryKey: queryKeys.automationOnu,
     queryFn: () => apiFetch<OnuAutomationCfg>("/api/v1/settings/automation/onu-monthly-report"),
@@ -28,7 +31,6 @@ export function OnuMonthlyReportPanel() {
   const [dom, setDom] = useState("1");
   const [timeVal, setTimeVal] = useState("08:00");
   const [tz, setTz] = useState(TZ_DEFAULT);
-  const [saveToast, setSaveToast] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (!cfg.data) return;
@@ -38,12 +40,6 @@ export function OnuMonthlyReportPanel() {
     setTimeVal(th.length >= 5 ? th.slice(0, 5) : "08:00");
     setTz(cfg.data.timezone?.trim() || TZ_DEFAULT);
   }, [cfg.data]);
-
-  useEffect(() => {
-    if (!saveToast) return;
-    const t = window.setTimeout(() => setSaveToast(null), 10_000);
-    return () => window.clearTimeout(t);
-  }, [saveToast]);
 
   const patch = useMutation({
     mutationFn: () =>
@@ -58,9 +54,9 @@ export function OnuMonthlyReportPanel() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.automationOnu });
-      setSaveToast({ ok: true, text: "Agendamento salvo." });
+      toastOk(pushToast, "Agendamento ONU salvo.");
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Falha ao salvar." }),
+    onError: (err) => toastErr(pushToast, err, "Falha ao salvar agendamento ONU."),
   });
 
   const run = useMutation({
@@ -68,9 +64,9 @@ export function OnuMonthlyReportPanel() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.automationOnu });
       void qc.invalidateQueries({ queryKey: queryKeys.automationHistory });
-      setSaveToast({ ok: true, text: "Execução iniciada — consulte o Histórico." });
+      toastOk(pushToast, "Execução iniciada — consulte o Histórico.");
     },
-    onError: (err) => setSaveToast({ ok: false, text: (err as Error).message || "Não foi possível iniciar." }),
+    onError: (err) => toastErr(pushToast, err, "Não foi possível iniciar execução ONU."),
   });
 
   if (cfg.isLoading) return <p>A carregar…</p>;
@@ -135,15 +131,6 @@ export function OnuMonthlyReportPanel() {
           Executar agora
         </button>
       </div>
-
-      {saveToast && (
-        <div className={`page-toast ${saveToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 10 }}>
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setSaveToast(null)}>
-            ×
-          </button>
-          {saveToast.text}
-        </div>
-      )}
     </div>
   );
 }

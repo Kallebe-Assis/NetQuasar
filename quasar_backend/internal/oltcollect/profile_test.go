@@ -25,3 +25,36 @@ func TestEnabledSteps(t *testing.T) {
 		t.Fatalf("expected 1 enabled, got %d", len(steps))
 	}
 }
+
+func TestEffectiveCollectionSteps(t *testing.T) {
+	t.Run("uses enabled steps", func(t *testing.T) {
+		steps := EffectiveCollectionSteps(Profile{
+			Steps: []Step{{Method: MethodSNMPWalk}},
+		})
+		if len(steps) != 1 || steps[0].Method != MethodSNMPWalk {
+			t.Fatalf("steps: %+v", steps)
+		}
+	})
+	t.Run("falls back to metrics", func(t *testing.T) {
+		steps := EffectiveCollectionSteps(Profile{
+			OnuMetrics: OnuMetricsConfig{
+				MetricSerial: {Enabled: true, OID: "1.3.6.1.2.1"},
+			},
+		})
+		if len(steps) != 1 || steps[0].Method != MethodOnuMetricsCollect {
+			t.Fatalf("steps: %+v", steps)
+		}
+	})
+}
+
+func TestEffectivePeriodicSteps_prefersMetrics(t *testing.T) {
+	steps := EffectivePeriodicSteps(Profile{
+		Steps: []Step{{Method: MethodOnuSNMPWalk}},
+		OnuMetrics: OnuMetricsConfig{
+			MetricSerial: {Enabled: true, OID: "1.3.6.1.2.1"},
+		},
+	})
+	if len(steps) != 1 || steps[0].Method != MethodOnuSNMPWalk {
+		t.Fatalf("periodic should match manual profile steps, got %+v", steps)
+	}
+}

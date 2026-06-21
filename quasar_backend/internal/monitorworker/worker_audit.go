@@ -6,12 +6,13 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog"
 )
 
 const workerAuditActor = "SISTEMA"
 
 // appendWorkerAudit regista ciclos automáticos (ping, SNMP, ONU/PON) em ops_audit_log.
-func appendWorkerAudit(ctx context.Context, pool *pgxpool.Pool, entityType, entityID, action string, detail map[string]any) {
+func appendWorkerAudit(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, entityType, entityID, action string, detail map[string]any) {
 	if pool == nil {
 		return
 	}
@@ -27,8 +28,10 @@ func appendWorkerAudit(ctx context.Context, pool *pgxpool.Pool, entityType, enti
 	if err != nil {
 		return
 	}
-	_, _ = pool.Exec(ctx, `
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO ops_audit_log (entity_type, entity_id, action, actor, before_data, after_data)
 		VALUES ($1, $2, $3, $4, NULL, $5::jsonb)
-	`, entityType, entityID, action, workerAuditActor, ab)
+	`, entityType, entityID, action, workerAuditActor, ab); err != nil && log != nil {
+		log.Warn().Err(err).Str("entity_type", entityType).Str("action", action).Msg("falha ao gravar ops_audit_log (worker)")
+	}
 }

@@ -24,9 +24,7 @@ func (s *Server) runFullMonitoringBootstrap() {
 		ctx = s.WorkerCtx
 	}
 	l := s.Log.With().Str("component", "monitor_bootstrap").Logger()
-	monitorworker.LockMonitoringPipeline()
-	defer monitorworker.UnlockMonitoringPipeline()
-	monitorworker.RunWorkerOrderedSteps(ctx, pool, &l, monitorworker.ModeFull, true)
+	monitorworker.RunBootstrapPipeline(ctx, pool, &l)
 }
 
 func (s *Server) loadInternetCheckConfig(ctx context.Context) ([]string, time.Duration, error) {
@@ -150,6 +148,9 @@ func (s *Server) monitoringStart(w http.ResponseWriter, r *http.Request) {
 	s.appendAuditLog(ctx, "monitoring_runtime", "1", "start", s.actorFromRequest(r), nil, map[string]any{
 		"monitoring_mode": mode, "was_running": wasRunning, "refresh_snmp_inventory": refreshSnmpInv,
 	})
+	if !wasRunning {
+		monitorworker.BeginActiveRun(s.WorkerCtx)
+	}
 	if !wasRunning && mode == monitorworker.ModeFull {
 		go s.runFullMonitoringBootstrap()
 	}
@@ -170,6 +171,7 @@ func (s *Server) monitoringStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setMonitoringActivity(r.Context(), "")
+	monitorworker.EndActiveRun()
 	s.appendAuditLog(r.Context(), "monitoring_runtime", "1", "stop", s.actorFromRequest(r), nil, map[string]any{
 		"monitoring_mode": monitorworker.ModeOff,
 	})
@@ -184,7 +186,7 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 	s.maybeKickNightlyCollection(r.Context())
 	var running bool
 	var started, stopped, lastCheck, lastCycle *time.Time
-	var lastLatency, lastTelemetry, lastIface, lastOlt *time.Time
+	var lastLatency, lastTelemetry, lastIface, lastOlt, lastPipeline *time.Time
 	var activity *string
 	var activityStarted *time.Time
 	var activityUpdated *time.Time
@@ -200,12 +202,13 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 		SELECT is_running, last_started_at, last_stopped_at, last_internet_check_at, last_internet_check_ok, last_internet_check_detail,
 			COALESCE(monitoring_mode, 'off'), last_cycle_at,
 			last_latency_cycle_at, last_telemetry_cycle_at, last_interface_snapshot_cycle_at, last_olt_if_derived_cycle_at,
+			last_pipeline_cycle_at,
 			COALESCE(last_cycle_ok_count, 0), COALESCE(last_cycle_fail_count, 0),
 			current_activity, activity_started_at, activity_updated_at, last_activity, last_activity_finished_at,
 			updated_at, last_alerts_change_at
 		FROM monitoring_runtime WHERE id = 1
 	`).Scan(&running, &started, &stopped, &lastCheck, &lastOK, &detail, &mode, &lastCycle,
-		&lastLatency, &lastTelemetry, &lastIface, &lastOlt,
+		&lastLatency, &lastTelemetry, &lastIface, &lastOlt, &lastPipeline,
 		&okC, &failC, &activity, &activityStarted, &activityUpdated, &lastActivity, &lastActivityFinished, &runtimeUpdated, &lastAlertsChange)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -225,6 +228,7 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 		"last_telemetry_cycle_at":           lastTelemetry,
 		"last_interface_snapshot_cycle_at":  lastIface,
 		"last_olt_if_derived_cycle_at":       lastOlt,
+		"last_pipeline_cycle_at":             lastPipeline,
 		"last_cycle_ok_count":        okC,
 		"last_cycle_fail_count":      failC,
 		"current_activity":           activity,
@@ -237,6 +241,38 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 		"persistencia":               "O monitoramento é estado no servidor (Postgres + worker); não depende da tela aberta no cliente.",
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) monitoringOltCollectReadiness(w http.ResponseWriter, r *http.Request) {
+	rows, err := monitorworker.AuditOltCollectReadiness(r.Context(), s.DB())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	ready, notReady := 0, 0
+	list := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row.Ready {
+			ready++
+		} else {
+			notReady++
+		}
+		list = append(list, map[string]any{
+			"device_id":   row.DeviceID.String(),
+			"description": row.Description,
+			"host":        row.Host,
+			"brand":       row.Brand,
+			"model":       row.Model,
+			"ready":       row.Ready,
+			"reason":      row.Reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":     len(rows),
+		"ready":     ready,
+		"not_ready": notReady,
+		"items":     list,
+	})
 }
 
 func (s *Server) monitoringReloadDevices(w http.ResponseWriter, r *http.Request) {
@@ -255,70 +291,94 @@ func (s *Server) monitoringReloadDevices(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var ps, tm, pto int
-	var telSecRaw, ifaceSec, oltDerivedSec int
+	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout int
 	var telTimeout, ifaceTimeout, oltTimeout int
 	var icmpPB, offTh, uptimeRestart int
+	var pingParallel bool
+	var pipelineRaw []byte
 	if err := s.DB().QueryRow(r.Context(), `
 		SELECT ping_seconds, telemetry_minutes, ping_timeout_ms,
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
-			COALESCE(uptime_restart_alert_minutes, 0)
+			COALESCE(uptime_restart_alert_minutes, 0),
+			pipeline_cycle_seconds, mikrotik_timeout_ms,
+			COALESCE(ping_parallel, true),
+			coalesce(pipeline_steps::text, '[]')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
-		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart); err != nil {
+		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart,
+		&pipelineSec, &mikrotikTimeout, &pingParallel, &pipelineRaw); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	telSec := monitorworker.ResolveTelemetrySeconds(telSecRaw, tm)
-	writeJSON(w, http.StatusOK, map[string]int{
+	steps := monitorworker.ParsePipelineSteps(pipelineRaw)
+	if len(steps) == 0 {
+		steps = monitorworker.DefaultPipelineSteps()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
 		"ping_seconds":                    ps,
 		"telemetry_seconds":               telSec,
 		"interface_snapshot_seconds":      ifaceSec,
 		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"pipeline_cycle_seconds":          pipelineSec,
 		"telemetry_minutes":               tm,
 		"ping_timeout_ms":                 pto,
 		"telemetry_timeout_ms":            telTimeout,
 		"interface_snapshot_timeout_ms":   ifaceTimeout,
 		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"mikrotik_timeout_ms":             mikrotikTimeout,
 		"icmp_payload_bytes":              icmpPB,
 		"offline_ping_fail_threshold":     offTh,
 		"uptime_restart_alert_minutes":    uptimeRestart,
+		"ping_parallel":                   pingParallel,
+		"pipeline_steps":                  steps,
 	})
 }
 
 func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		PingSeconds                   *int `json:"ping_seconds"`
-		TelemetryMinutes              *int `json:"telemetry_minutes"`
-		TelemetrySeconds              *int `json:"telemetry_seconds"`
-		InterfaceSnapshotSeconds      *int `json:"interface_snapshot_seconds"`
-		OltIfDerivedPonSeconds        *int `json:"olt_if_derived_pon_seconds"`
-		PingTimeoutMs                 *int `json:"ping_timeout_ms"`
-		TelemetryTimeoutMs            *int `json:"telemetry_timeout_ms"`
-		InterfaceSnapshotTimeoutMs  *int `json:"interface_snapshot_timeout_ms"`
-		OltIfDerivedPonTimeoutMs    *int `json:"olt_if_derived_pon_timeout_ms"`
-		IcmpPayloadBytes              *int `json:"icmp_payload_bytes"`
-		OfflinePingFailThreshold      *int `json:"offline_ping_fail_threshold"`
-		UptimeRestartAlertMinutes     *int `json:"uptime_restart_alert_minutes"`
+		PingSeconds                   *int                           `json:"ping_seconds"`
+		TelemetryMinutes              *int                           `json:"telemetry_minutes"`
+		TelemetrySeconds              *int                           `json:"telemetry_seconds"`
+		InterfaceSnapshotSeconds      *int                           `json:"interface_snapshot_seconds"`
+		OltIfDerivedPonSeconds        *int                           `json:"olt_if_derived_pon_seconds"`
+		PipelineCycleSeconds          *int                           `json:"pipeline_cycle_seconds"`
+		PingTimeoutMs                 *int                           `json:"ping_timeout_ms"`
+		TelemetryTimeoutMs            *int                           `json:"telemetry_timeout_ms"`
+		InterfaceSnapshotTimeoutMs    *int                           `json:"interface_snapshot_timeout_ms"`
+		OltIfDerivedPonTimeoutMs      *int                           `json:"olt_if_derived_pon_timeout_ms"`
+		MikrotikTimeoutMs             *int                           `json:"mikrotik_timeout_ms"`
+		IcmpPayloadBytes              *int                           `json:"icmp_payload_bytes"`
+		OfflinePingFailThreshold      *int                           `json:"offline_ping_fail_threshold"`
+		UptimeRestartAlertMinutes     *int                           `json:"uptime_restart_alert_minutes"`
+		PipelineSteps                 *[]monitorworker.PipelineStep `json:"pipeline_steps"`
+		PingParallel                  *bool                         `json:"ping_parallel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
 	var ps, tm, pto int
-	var telSecRaw, ifaceSec, oltDerivedSec int
+	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout int
 	var telTimeout, ifaceTimeout, oltTimeout int
 	var icmpPB, offTh, uptimeRestart int
+	var pingParallel bool
+	var pipelineRaw []byte
 	if err := s.DB().QueryRow(r.Context(), `
 		SELECT ping_seconds, telemetry_minutes, ping_timeout_ms,
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
-			COALESCE(uptime_restart_alert_minutes, 0)
+			COALESCE(uptime_restart_alert_minutes, 0),
+			pipeline_cycle_seconds, mikrotik_timeout_ms,
+			COALESCE(ping_parallel, true),
+			coalesce(pipeline_steps::text, '[]')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
-		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart); err != nil {
+		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart,
+		&pipelineSec, &mikrotikTimeout, &pingParallel, &pipelineRaw); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
@@ -340,6 +400,12 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	if body.OltIfDerivedPonSeconds != nil {
 		oltDerivedSec = *body.OltIfDerivedPonSeconds
 	}
+	if body.PipelineCycleSeconds != nil {
+		pipelineSec = *body.PipelineCycleSeconds
+	}
+	if body.PingParallel != nil {
+		pingParallel = *body.PingParallel
+	}
 	if body.PingTimeoutMs != nil {
 		pto = *body.PingTimeoutMs
 	}
@@ -352,6 +418,9 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	if body.OltIfDerivedPonTimeoutMs != nil {
 		oltTimeout = *body.OltIfDerivedPonTimeoutMs
 	}
+	if body.MikrotikTimeoutMs != nil {
+		mikrotikTimeout = *body.MikrotikTimeoutMs
+	}
 	if body.IcmpPayloadBytes != nil {
 		icmpPB = *body.IcmpPayloadBytes
 	}
@@ -361,10 +430,11 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	if body.UptimeRestartAlertMinutes != nil {
 		uptimeRestart = *body.UptimeRestartAlertMinutes
 	}
-	if ps < 30 || tm < 2 || telSec < 60 || ifaceSec < 60 || oltDerivedSec < 60 {
-		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "ping_seconds >= 30; telemetria/interfaces/PON (IF) >= 60 s; telemetry_minutes >= 2 (derivado)", map[string]any{
+	if ps < 30 || tm < 2 || telSec < 60 || ifaceSec < 60 || oltDerivedSec < 60 || pipelineSec < 30 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "ping_seconds >= 30; pipeline_cycle >= 30; telemetria/interfaces/PON >= 60 s; telemetry_minutes >= 2", map[string]any{
 			"ping_seconds": ps, "telemetry_minutes": tm, "telemetry_seconds": telSec,
 			"interface_snapshot_seconds": ifaceSec, "olt_if_derived_pon_seconds": oltDerivedSec,
+			"pipeline_cycle_seconds": pipelineSec,
 		})
 		return
 	}
@@ -375,7 +445,7 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	for _, pair := range []struct {
 		name string
 		val  int
-	}{{"telemetry_timeout_ms", telTimeout}, {"interface_snapshot_timeout_ms", ifaceTimeout}, {"olt_if_derived_pon_timeout_ms", oltTimeout}} {
+	}{{"telemetry_timeout_ms", telTimeout}, {"interface_snapshot_timeout_ms", ifaceTimeout}, {"olt_if_derived_pon_timeout_ms", oltTimeout}, {"mikrotik_timeout_ms", mikrotikTimeout}} {
 		if pair.val < 5000 || pair.val > 600000 {
 			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", pair.name+" entre 5000 e 600000 (5 s – 10 min)", map[string]any{pair.name: pair.val})
 			return
@@ -393,33 +463,52 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "uptime_restart_alert_minutes entre 0 (desligado) e 10080 (7 dias)", map[string]any{"uptime_restart_alert_minutes": uptimeRestart})
 		return
 	}
+	var stepsJSON []byte
+	if body.PipelineSteps != nil {
+		norm := monitorworker.NormalizePipelineSteps(*body.PipelineSteps)
+		if len(norm) == 0 {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "pipeline_steps não pode estar vazio", nil)
+			return
+		}
+		stepsJSON, _ = json.Marshal(norm)
+	} else {
+		stepsJSON = pipelineRaw
+	}
 	_, err := s.DB().Exec(r.Context(), `
 		UPDATE monitoring_intervals SET
 			ping_seconds=$1, telemetry_minutes=$2, telemetry_seconds=$3,
 			interface_snapshot_seconds=$4, olt_if_derived_pon_seconds=$5,
-			ping_timeout_ms=$6,
-			telemetry_timeout_ms=$7, interface_snapshot_timeout_ms=$8, olt_if_derived_pon_timeout_ms=$9,
-			icmp_payload_bytes=$10, offline_ping_fail_threshold=$11,
-			uptime_restart_alert_minutes=$12,
+			pipeline_cycle_seconds=$6,
+			ping_timeout_ms=$7,
+			telemetry_timeout_ms=$8, interface_snapshot_timeout_ms=$9, olt_if_derived_pon_timeout_ms=$10,
+			mikrotik_timeout_ms=$11,
+			icmp_payload_bytes=$12, offline_ping_fail_threshold=$13,
+			uptime_restart_alert_minutes=$14,
+			pipeline_steps=$15::jsonb,
+			ping_parallel=$16,
 			updated_at=now() WHERE id=1`,
-		ps, tm, telSec, ifaceSec, oltDerivedSec, pto, telTimeout, ifaceTimeout, oltTimeout, icmpPB, offTh, uptimeRestart)
+		ps, tm, telSec, ifaceSec, oltDerivedSec, pipelineSec, pto, telTimeout, ifaceTimeout, oltTimeout, mikrotikTimeout, icmpPB, offTh, uptimeRestart, stepsJSON, pingParallel)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	payload := map[string]int{
+	payload := map[string]any{
 		"ping_seconds":                    ps,
 		"telemetry_seconds":               telSec,
 		"interface_snapshot_seconds":      ifaceSec,
 		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"pipeline_cycle_seconds":          pipelineSec,
 		"telemetry_minutes":               tm,
 		"ping_timeout_ms":                 pto,
 		"telemetry_timeout_ms":            telTimeout,
 		"interface_snapshot_timeout_ms":   ifaceTimeout,
 		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"mikrotik_timeout_ms":             mikrotikTimeout,
 		"icmp_payload_bytes":              icmpPB,
 		"offline_ping_fail_threshold":     offTh,
 		"uptime_restart_alert_minutes":    uptimeRestart,
+		"ping_parallel":                   pingParallel,
+		"pipeline_steps":                  json.RawMessage(stepsJSON),
 	}
 	s.appendAuditLog(r.Context(), "monitoring_intervals", "1", "patch", s.actorFromRequest(r), nil, payload)
 	writeJSON(w, http.StatusOK, payload)

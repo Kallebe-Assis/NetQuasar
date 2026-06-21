@@ -20,9 +20,6 @@ const alertTypeLatencyHigh = "latency_high"
 const latencyHealthyMaxMS = int64(120)
 const latencyDegradedMinMS = int64(280)
 
-// latencyHighConsecutiveRequired — alerta só após N leituras consecutivas acima do limiar.
-const latencyHighConsecutiveRequired = 3
-
 var latencyHighMatch = alertstore.Match{Kind: alertstore.MatchDeviceOnly}
 
 func latencyReadingIsHigh(ctx context.Context, pool *pgxpool.Pool, deviceCategory string, reachOK bool, lat int64) bool {
@@ -55,7 +52,8 @@ func latencyHighStreakAfter(prev int, isHigh bool) int {
 }
 
 // EvaluateLatencyHighAlerts actualiza streak e gere alerta latency_high (abrir/atualizar/fechar).
-func EvaluateLatencyHighAlerts(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceCategory, description, ip string, reachOK bool, currLat int64, prevHighStreak int) int {
+func EvaluateLatencyHighAlerts(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceCategory, description, ip string, reachOK bool, currLat int64, prevHighStreak, requiredConsecutive int) int {
+	requiredConsecutive = consecutivePingsRequired(requiredConsecutive)
 	isHigh := latencyReadingIsHigh(ctx, pool, deviceCategory, reachOK, currLat)
 	streakAfter := latencyHighStreakAfter(prevHighStreak, isHigh)
 
@@ -63,8 +61,8 @@ func EvaluateLatencyHighAlerts(ctx context.Context, pool *pgxpool.Pool, log *zer
 		refreshOpenLatencyHigh(ctx, pool, deviceID, description, ip, currLat)
 	}
 
-	if streakAfter >= latencyHighConsecutiveRequired && isHigh {
-		openOrUpdateLatencyHigh(ctx, pool, log, deviceID, deviceCategory, description, ip, currLat)
+	if streakAfter >= requiredConsecutive && isHigh {
+		openOrUpdateLatencyHigh(ctx, pool, log, deviceID, deviceCategory, description, ip, currLat, requiredConsecutive)
 	} else if streakAfter == 0 && reachOK {
 		closeLatencyHighIfCalm(ctx, pool, log, deviceID, deviceCategory, currLat)
 	}
@@ -77,7 +75,8 @@ type latencyAlertContent struct {
 	Meta     map[string]any
 }
 
-func buildLatencyHighContent(ctx context.Context, pool *pgxpool.Pool, deviceCategory, description, ip string, currLat int64) (latencyAlertContent, bool) {
+func buildLatencyHighContent(ctx context.Context, pool *pgxpool.Pool, deviceCategory, description, ip string, currLat int64, requiredConsecutive int) (latencyAlertContent, bool) {
+	requiredConsecutive = consecutivePingsRequired(requiredConsecutive)
 	desc := strings.TrimSpace(description)
 	addr := strings.TrimSpace(ip)
 	baseMeta := map[string]any{
@@ -87,8 +86,8 @@ func buildLatencyHighContent(ctx context.Context, pool *pgxpool.Pool, deviceCate
 		"value_text":                strconv.FormatInt(currLat, 10),
 		"curr_latency_ms":           currLat,
 		"probe_latency_ms":          currLat,
-		"latency_high_streak":       latencyHighConsecutiveRequired,
-		"consecutive_high_required": latencyHighConsecutiveRequired,
+		"latency_high_streak":       requiredConsecutive,
+		"consecutive_high_required": requiredConsecutive,
 	}
 
 	th, label, hasGlobal := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "latency_ms", deviceCategory)
@@ -98,7 +97,7 @@ func buildLatencyHighContent(ctx context.Context, pool *pgxpool.Pool, deviceCate
 			return latencyAlertContent{}, false
 		}
 		msg := fmt.Sprintf("%s (%s): %s em %d ms — %s (%d leituras consecutivas).",
-			descOr(desc, "?"), addrOr(addr, "?"), label, currLat, sev, latencyHighConsecutiveRequired)
+			descOr(desc, "?"), addrOr(addr, "?"), label, currLat, sev, requiredConsecutive)
 		meta := alertnotify.WithStatusTransition(baseMeta, "latency_normal", "threshold_"+sev, nil)
 		return latencyAlertContent{Severity: sev, Message: msg, Meta: meta}, true
 	}
@@ -107,13 +106,13 @@ func buildLatencyHighContent(ctx context.Context, pool *pgxpool.Pool, deviceCate
 		return latencyAlertContent{}, false
 	}
 	msg := fmt.Sprintf("%s (%s): latência ICMP/TCP em %d ms (≥ %d ms em %d leituras consecutivas).",
-		descOr(desc, "?"), addrOr(addr, "?"), currLat, latencyDegradedMinMS, latencyHighConsecutiveRequired)
+		descOr(desc, "?"), addrOr(addr, "?"), currLat, latencyDegradedMinMS, requiredConsecutive)
 	meta := alertnotify.WithStatusTransition(baseMeta, "latency_normal", "latency_degraded", nil)
 	return latencyAlertContent{Severity: "warning", Message: msg, Meta: meta}, true
 }
 
-func openOrUpdateLatencyHigh(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceCategory, description, ip string, currLat int64) {
-	content, ok := buildLatencyHighContent(ctx, pool, deviceCategory, description, ip, currLat)
+func openOrUpdateLatencyHigh(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceCategory, description, ip string, currLat int64, requiredConsecutive int) {
+	content, ok := buildLatencyHighContent(ctx, pool, deviceCategory, description, ip, currLat, requiredConsecutive)
 	if !ok {
 		return
 	}
@@ -156,9 +155,14 @@ func closeLatencyHighIfCalm(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 	if !latencyIsCalm(ctx, pool, deviceCategory, currLat) {
 		return
 	}
+	resolved := map[string]any{"resolved": "latency_normalized", "source": "monitor_worker"}
+	if currLat > 0 {
+		resolved["curr_latency_ms"] = currLat
+		resolved["resolved_value"] = fmt.Sprintf("%d ms", currLat)
+	}
 	closed, _, err := alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
 		DeviceID: deviceID, AlertType: alertTypeLatencyHigh, Match: latencyHighMatch,
-		Resolved: map[string]any{"resolved": "latency_normalized", "source": "monitor_worker"},
+		Resolved: resolved,
 	})
 	if err != nil && log != nil {
 		log.Error().Err(err).Str("device", deviceID.String()).Msg("fechar latency_high")

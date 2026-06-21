@@ -39,12 +39,12 @@ export type MikrotikMetricCard =
 
 const SECTION_ORDER = ["system", "health", "interfaces", "optical", "ppp", "wireless", "users", "dhcp", "ip"];
 
-function formatScalarValue(key: string, value: unknown, unit?: string, divisor?: number): string {
+function formatScalarValue(key: string, value: unknown, unit?: string, fallbackDivisor?: number, alreadyScaled?: boolean): string {
   if (value == null) return EM_DASH;
   if (key === "sys_uptime") return formatUptimeTicks(value);
   let n = Number(value);
-  if (Number.isFinite(n) && divisor && divisor > 1) {
-    n = n / divisor;
+  if (Number.isFinite(n) && !alreadyScaled && fallbackDivisor && fallbackDivisor > 1) {
+    n = n / fallbackDivisor;
   }
   if (unit === "°C" || unit === "°c") {
     return Number.isFinite(n) ? `${n.toFixed(1)} °C` : String(value);
@@ -113,8 +113,9 @@ function fieldFromRaw(
     }
   }
 
-  const div = raw.value_divisor || catalog?.default_divisor;
-  const scalar = formatScalarValue(key, raw.value, catalog?.unit, div);
+  const scaledAtCollect = (raw.value_divisor ?? 0) > 1;
+  const fallbackDiv = scaledAtCollect ? undefined : catalog?.default_divisor;
+  const scalar = formatScalarValue(key, raw.value, catalog?.unit, fallbackDiv, scaledAtCollect);
   return { kind: "scalar", key, label, section, value: scalar, ok, error };
 }
 

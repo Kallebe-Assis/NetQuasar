@@ -1,9 +1,7 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,8 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
-	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
@@ -203,126 +199,28 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	unlockSNMP := snmpdevicelock.Acquire(id)
 	defer unlockSNMP()
-	summary := map[string]any{
-		"source":     "olt_refresh",
-		"status":     "updated",
-		"updated_at": time.Now().UTC().Format(time.RFC3339),
-	}
-	pons := []any{}
-
-	var ip *string
-	var comm *string
-	var brand, model, devDesc string
-	var maxPons *int
-	_ = s.DB().QueryRow(r.Context(), `
-		SELECT host(d.ip)::text, d.snmp_community,
-			coalesce(trim(d.brand), ''), coalesce(trim(d.model), ''),
-			coalesce(trim(d.description), ''), d.max_pons
-		FROM devices d WHERE d.id=$1
-	`, id).Scan(&ip, &comm, &brand, &model, &devDesc, &maxPons)
-	host := ""
-	if ip != nil {
-		host = strings.TrimSpace(*ip)
-	}
-	c := ""
-	if comm != nil {
-		c = strings.TrimSpace(*comm)
-	}
-	if c == "" {
-		_ = s.DB().QueryRow(r.Context(), `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&comm)
-		if comm != nil {
-			c = strings.TrimSpace(*comm)
-		}
-	}
-	if host == "" || c == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "IP e community SNMP obrigatórios para refresh OLT", nil)
-		return
-	}
-	if strings.TrimSpace(model) == "" {
-		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "modelo OLT obrigatório — seleccione em Equipamentos e configure o perfil em Definições", nil)
-		return
-	}
-
-	profile, profErr := loadOltCollectionProfile(r.Context(), s.DB(), brand, model)
-	if profErr != nil {
-		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION",
-			fmt.Sprintf("perfil OLT não encontrado para %s / %s — cadastre em Definições → OLT vendors", brand, model), nil)
-		return
-	}
-
-	collTO := s.loadCollectionTimeouts(r.Context())
-	oltRefreshTotal := collTO.OltRefreshTotal()
-	if oltcollect.IsSimpleOnuCollect(profile.Steps) || strings.TrimSpace(strings.ToLower(r.URL.Query().Get("scope"))) == oltcollect.ScopeOnu {
-		oltRefreshTotal = 100 * time.Second
-	}
-	telnetTO := collTO.TelnetPhaseTimeout(oltRefreshTotal)
-	oltCtx, oltCancel := context.WithTimeout(r.Context(), oltRefreshTotal)
-	defer oltCancel()
 
 	fullTelemetry := strings.TrimSpace(r.URL.Query().Get("telemetry")) == "1"
 	scope := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("scope")))
-	if scope == "" {
-		scope = oltcollect.ScopeFull
-	}
-	if scope == "fast" {
-		scope = oltcollect.ScopeOnu
-	}
-	refreshT0 := time.Now()
-	maxPonsVal := 0
-	if maxPons != nil && *maxPons > 0 {
-		maxPonsVal = *maxPons
-	}
-	execSt := &oltCollectExecState{
-		DeviceID: id, Host: host, Community: c,
-		Brand: brand, Model: model, DevDesc: devDesc,
-		MaxPons: maxPonsVal,
-		Profile: profile, Summary: summary, Pons: pons,
-		FullTelemetry: fullTelemetry, TelnetTO: telnetTO,
-		Scope: scope,
-	}
-	if err := s.executeOltProfile(oltCtx, execSt); err != nil {
-		summary["olt_profile_exec_error"] = err.Error()
-	}
-	if oltCtx.Err() != nil {
-		summary["olt_refresh_timeout"] = true
-		summary["olt_refresh_timeout_reason"] = oltCtx.Err().Error()
-		if _, ok := summary["olt_refresh_cancelled"]; !ok {
-			summary["olt_refresh_cancelled"] = oltCtx.Err().Error()
-		}
-	}
-	pons = execSt.Pons
-	pons = applyMaxPonsLimitAnyRows(pons, maxPons)
-	for k, v := range execSt.Summary {
-		summary[k] = v
-	}
-	summary["olt_refresh_elapsed_ms"] = time.Since(refreshT0).Milliseconds()
-
-	curMaps := oltifderive.PonsAnySliceToMaps(pons)
-	oltifderive.ApplyPonOperStatusAll(curMaps)
-	pons = oltifderive.PonsMapsToAny(curMaps)
-	if pool := s.DB(); pool != nil {
-		var prevSnapPons []byte
-		_ = pool.QueryRow(r.Context(), `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons)
-		prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
-		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(r.Context(), pool, &s.Log, id, devDesc, host, prevMaps, curMaps, "olt_refresh")
-	}
-
-	sb, _ := json.Marshal(summary)
-	pb, _ := json.Marshal(pons)
-	_, err = s.DB().Exec(r.Context(), `
-		INSERT INTO olt_snapshots (device_id, summary, pons) VALUES ($1, $2::jsonb, $3::jsonb)
-		ON CONFLICT (device_id) DO UPDATE SET summary = excluded.summary, pons = excluded.pons, updated_at = now()
-	`, id, sb, pb)
+	res, err := s.refreshOLTDeviceCore(r.Context(), id, OltRefreshCoreOpts{
+		Source:        "olt_refresh",
+		Scope:         scope,
+		FullTelemetry: fullTelemetry,
+	})
 	if err != nil {
+		if strings.Contains(err.Error(), "community SNMP") || strings.Contains(err.Error(), "modelo OLT") {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
+			return
+		}
+		if strings.Contains(err.Error(), "perfil OLT não encontrado") {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	if pool := s.DB(); pool != nil {
-		recordOLTOnuSample(r.Context(), pool, id, sb, pb)
-	}
-	comp := oltparse.SnapshotComputed(sb, pb)
 	s.appendAuditLog(r.Context(), "device", id.String(), "refresh_olt", s.actorFromRequest(r), nil, map[string]any{
-		"timeout_ms": oltRefreshTotal.Milliseconds(), "computed": comp,
+		"timeout_ms": res.TimeoutMs, "pon_count": res.PonCount, "ok": res.OK,
 	})
 	s.getOLTDevice(w, r)
 }

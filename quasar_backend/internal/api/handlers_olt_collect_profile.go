@@ -27,3 +27,8 @@ func onuMetricsJSON(m oltcollect.OnuMetricsConfig) json.RawMessage {
 	b, _ := json.Marshal(m)
 	return b
 }
+
+func onuReportCommandsJSON(c oltcollect.OnuReportConfig) json.RawMessage {
+	b, _ := json.Marshal(c)
+	return b
+}

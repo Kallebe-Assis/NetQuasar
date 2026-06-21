@@ -2,6 +2,9 @@ import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import { infrastructurePinIcon, isInfraMapKind, type InfraMapKind } from "../lib/mapInfrastructureIcons";
+
+export type MapPointKind = "equipment" | "connection" | InfraMapKind;
 
 export type MapPoint = {
   id: string;
@@ -11,6 +14,12 @@ export type MapPoint = {
   ip?: string | null;
   category: string;
   status: string;
+  /** Tipo de ícone no mapa (CTO, poste, equipamento, etc.). */
+  mapKind?: MapPointKind;
+  /** Cor opcional (ex.: cor do projeto). */
+  markerColor?: string | null;
+  /** Etiqueta curta no pin (ex.: descrição da CTO). */
+  mapLabel?: string | null;
 };
 
 /** Agrupado (grelha por tipo), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
@@ -106,12 +115,18 @@ function pointsFingerprint(points: MapPoint[]): string {
 }
 
 function pointClusterKind(p: MapPoint): string {
-  if (p.status === "connection") return "connection";
+  if (p.status === "connection" || p.mapKind === "connection") return "connection";
+  if (p.mapKind && isInfraMapKind(p.mapKind)) return p.mapKind;
   return p.category || "equipamento";
 }
 
 function clusterKindLabel(kind: string, count: number): string {
   if (kind === "connection") return count === 1 ? "Conexão" : "Conexões";
+  if (kind === "cto") return count === 1 ? "CTO" : "CTOs";
+  if (kind === "splice_box") return count === 1 ? "Caixa de emenda" : "Caixas de emenda";
+  if (kind === "cable") return count === 1 ? "Cabo" : "Cabos";
+  if (kind === "pole") return count === 1 ? "Poste" : "Postes";
+  if (kind === "project") return count === 1 ? "Projeto" : "Projetos";
   return count === 1 ? kind : `${kind} (${count})`;
 }
 
@@ -317,6 +332,27 @@ function clusterBadgeIcon(count: number, color: string, kind: string, isConnecti
   return icon;
 }
 
+function clusterBadgeInfraIcon(count: number, kind: InfraMapKind, color?: string | null): L.DivIcon {
+  const key = `infra-badge:${count}:${kind}:${color ?? ""}`;
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const badge =
+    count > 1
+      ? `<span style="position:absolute;top:-6px;right:-8px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#0f172a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)">${count > 999 ? "999+" : count}</span>`
+      : "";
+  const innerPin = infrastructurePinIcon(kind, color).options.html ?? "";
+  const html = `<div style="position:relative;display:inline-block;line-height:0">${innerPin}${badge}</div>`;
+  const icon = L.divIcon({
+    className: "map-cluster-badge-wrap",
+    html,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -13],
+  });
+  iconCache.set(key, icon);
+  return icon;
+}
+
 /** Pin em forma de gota (SVG), verde / vermelho / cinza — modo «estado». */
 function statusPinIcon(status: string): L.DivIcon {
   const st = status === "online" ? "online" : status === "offline" ? "offline" : "unknown";
@@ -337,11 +373,18 @@ function statusPinIcon(status: string): L.DivIcon {
  * (origem do erro «Cannot read properties of undefined (reading 'createIcon')» com react-leaflet).
  */
 function isConnectionPoint(p: MapPoint): boolean {
-  return p.status === "connection";
+  return p.status === "connection" || p.mapKind === "connection";
+}
+
+function isInfrastructurePoint(p: MapPoint): boolean {
+  return !!p.mapKind && isInfraMapKind(p.mapKind);
 }
 
 function markerIconOpts(displayMode: MapDisplayMode, p: MapPoint, colors: MapColors): { icon: L.Icon | L.DivIcon } {
-  if (p.status === "connection") return { icon: connectionPinIcon(colors.connection) };
+  if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
+    return { icon: infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null) };
+  }
+  if (isConnectionPoint(p)) return { icon: connectionPinIcon(colors.connection) };
   if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
   return { icon: statusPinIcon(p.status) };
 }
@@ -353,9 +396,20 @@ function markerIconOptsGroup(
   clusterKind?: string,
 ): { icon: L.Icon | L.DivIcon } {
   const isConn = members.length > 0 && members.every(isConnectionPoint);
+  const infraKind = members.length > 0 && members.every((m) => m.mapKind === members[0].mapKind && isInfrastructurePoint(m))
+    ? members[0].mapKind
+    : null;
   if (members.length > 1 && clusterKind) {
+    if (infraKind && isInfraMapKind(infraKind)) {
+      const color = members[0].markerColor;
+      return { icon: clusterBadgeInfraIcon(members.length, infraKind, color) };
+    }
     const color = isConn ? colors.connection : colors.equipment;
     return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn) };
+  }
+  if (infraKind && isInfraMapKind(infraKind)) {
+    const label = infraKind === "cto" && members.length === 1 ? members[0].mapLabel : null;
+    return { icon: infrastructurePinIcon(infraKind, members[0].markerColor, label) };
   }
   if (isConn) return { icon: connectionPinIcon(colors.connection) };
   if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
@@ -737,6 +791,7 @@ export function EquipmentMap({
   onBoundsChange,
   mapColors,
   connectionClusterForced = false,
+  mapHeight = 480,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -748,6 +803,7 @@ export function EquipmentMap({
   mapColors?: MapColors;
   /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
   connectionClusterForced?: boolean;
+  mapHeight?: number | string;
 }) {
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
@@ -815,7 +871,7 @@ export function EquipmentMap({
     <MapContainer
       center={center}
       zoom={6}
-      style={{ height: 480, width: "100%", minHeight: 420, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}
+      style={{ height: mapHeight, width: "100%", minHeight: 420, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}
       scrollWheelZoom
     >
       <MapInvalidateSize />

@@ -59,6 +59,44 @@ func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUI
 	return out, nil
 }
 
+// loadOltDevicesForCollect lista OLTs com IP para coleta SNMP periódica de ONUs/PON.
+// Mesmos critérios da listagem OLT na API (sem exigir ping, network_status nem operational_mode).
+func loadOltDevicesForCollect(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUID) ([]pingableDeviceRow, error) {
+	base := `
+		SELECT d.id, host(d.ip)::text, d.snmp_community, d.description, d.telemetry_enabled,
+			coalesce(d.category, ''), coalesce(d.brand, ''), coalesce(d.model, ''), d.max_pons
+		FROM devices d
+		WHERE lower(trim(coalesce(d.category, ''))) = 'olt'
+		  AND d.ip IS NOT NULL AND trim(host(d.ip)::text) <> ''
+	`
+	args := []any{}
+	if only != nil {
+		base += ` AND d.id = $1`
+		args = append(args, *only)
+	}
+	base += ` ORDER BY d.description LIMIT 500`
+	rows, err := pool.Query(ctx, base, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []pingableDeviceRow
+	for rows.Next() {
+		var r pingableDeviceRow
+		if err := rows.Scan(&r.id, &r.ip, &r.devComm, &r.description, &r.telemetryEnabled, &r.category, &r.brand, &r.model, &r.maxPons); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if only != nil && len(out) == 0 {
+		return nil, fmt.Errorf("OLT não encontrada ou inelegível para coleta periódica")
+	}
+	return out, nil
+}
+
 func resolveSNMPCommunity(row pingableDeviceRow, defCommunity *string) string {
 	if row.devComm != nil && strings.TrimSpace(*row.devComm) != "" {
 		return strings.TrimSpace(*row.devComm)

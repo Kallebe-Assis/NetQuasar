@@ -2,7 +2,6 @@ package alertnotify
 
 import (
 	"testing"
-	"time"
 )
 
 func TestTelegramRefFromMeta(t *testing.T) {
@@ -29,23 +28,37 @@ func TestTelegramRefFromMetaMissing(t *testing.T) {
 	}
 }
 
-func TestTelegramResolutionReplyShort(t *testing.T) {
-	got := telegramResolutionReplyShort("latency_high", 28*time.Minute)
-	if got != "✅ Resolvido após 28 min." {
-		t.Fatalf("got %q", got)
+func TestTelegramRefFromMetaPrefersProblemRef(t *testing.T) {
+	meta := map[string]any{
+		"telegram": map[string]any{
+			"ok": true, "chat_id": "-1001", "message_id": float64(999),
+		},
+		"telegram_problem_ref": map[string]any{
+			"ok": true, "chat_id": "-1001", "message_id": float64(42),
+		},
 	}
-	got = telegramResolutionReplyShort("ping_unreachable", 28*time.Minute)
-	if got != "✅ Equipamento online após 28 min." {
-		t.Fatalf("got %q", got)
+	ref, ok := telegramRefFromMeta(meta)
+	if !ok || ref.MessageID != 42 {
+		t.Fatalf("ref=%+v ok=%v", ref, ok)
 	}
 }
 
-func TestTelegramResolvedEditBlocks(t *testing.T) {
-	start := time.Date(2026, 6, 18, 14, 3, 0, 0, time.UTC)
-	end := time.Date(2026, 6, 18, 14, 31, 0, 0, time.UTC)
-	text := telegramResolvedEditBlocks("ping_unreachable", "Offline", "OLT POP Sul (10.0.0.1): ping indisponível", "OLT POP Sul", start, &end)
-	if !containsAll(text, "🟢 EQUIPAMENTO ONLINE", "OLT POP Sul", "Início: 14:03", "Fim: 14:31", "Duração: 28 min") {
-		t.Fatalf("edit text:\n%s", text)
+func TestTelegramResolutionReplyToProblemOnly(t *testing.T) {
+	text := telegramResolutionBlocks("latency_high", "Latência normalizada",
+		"OLT (10.0.0.1): latência ICMP/TCP em 45 ms.", "OLT", "10.0.0.1", "45 ms", "Duração: 10 min")
+	if !containsAll(text, "🟢 ALERTA RESOLVIDO", "Latência normalizada", "Latência = 45 ms", "OLT", "10.0.0.1", "Duração: 10 min") {
+		t.Fatalf("resolution text:\n%s", text)
+	}
+}
+
+func TestResolvedValueFromMetaLatency(t *testing.T) {
+	meta := map[string]any{"resolved_value": "45 ms"}
+	if got := resolvedValueFromMeta("latency_high", meta); got != "45 ms" {
+		t.Fatalf("got %q", got)
+	}
+	meta = map[string]any{"curr_latency_ms": int64(32)}
+	if got := resolvedValueFromMeta("latency_high", meta); got != "32 ms" {
+		t.Fatalf("got %q", got)
 	}
 }
 

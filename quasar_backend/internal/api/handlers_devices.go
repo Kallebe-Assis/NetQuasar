@@ -801,6 +801,15 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	if d.TelemetryEnabled && !prevTelemetry {
 		s.scheduleSNMPDiscovery(id)
 	}
+	if prevTelemetry && !d.TelemetryEnabled {
+		_, _ = s.DB().Exec(r.Context(), `
+			UPDATE device_probe_cache SET
+				snmp_health_status = 'unknown',
+				snmp_health_reason = NULL,
+				snmp_health_checked_at = NULL
+			WHERE device_id = $1::uuid
+		`, id)
+	}
 	if prevPing && !d.PingEnabled {
 		monitorworker.ClosePingUnreachableOnMonitoringDisabled(r.Context(), s.DB(), &s.Log, id)
 	}
