@@ -37,7 +37,11 @@ type oltCollectExecState struct {
 }
 
 func (s *Server) executeOltProfile(ctx context.Context, st *oltCollectExecState) error {
-	steps := oltcollect.StepsForScope(oltcollect.EffectiveCollectionSteps(st.Profile), st.Scope)
+	rawSteps := oltcollect.AppendPonTelnetCollectStep(
+		oltcollect.AppendOnuTelnetReportStep(oltcollect.EffectiveCollectionSteps(st.Profile), st.Profile),
+		st.Profile,
+	)
+	steps := oltcollect.StepsForScope(rawSteps, st.Scope)
 	if len(steps) == 0 {
 		st.Summary["olt_profile_error"] = "perfil sem passos de coleta — configure em Definições → OLT vendors"
 		return fmt.Errorf("perfil sem passos de coleta")
@@ -95,6 +99,10 @@ func (s *Server) runOltCollectStep(ctx context.Context, st *oltCollectExecState,
 		return s.oltStepSNMPGet(ctx, st, step)
 	case oltcollect.MethodTelnet:
 		return s.oltStepTelnet(ctx, st, step)
+	case oltcollect.MethodOnuTelnetReport:
+		return s.oltStepOnuTelnetReport(ctx, st)
+	case oltcollect.MethodPonTelnetCollect:
+		return s.oltStepPonTelnetCollect(ctx, st)
 	case oltcollect.MethodDatacomBuildPons:
 		return s.oltStepDatacomBuildPons(ctx, st)
 	case oltcollect.MethodIfMibMergePons:
@@ -409,6 +417,57 @@ func (s *Server) oltStepTelnet(ctx context.Context, st *oltCollectExecState, ste
 	default:
 		st.Summary[key+"_output"] = trimForSummary(tel.Output, 8000)
 	}
+	return nil
+}
+
+func (s *Server) oltStepOnuTelnetReport(ctx context.Context, st *oltCollectExecState) error {
+	cfg := st.Profile.OnuReport
+	if !cfg.MonitorEnabled() {
+		st.Summary["onu_telnet_skipped"] = "desactivado no perfil"
+		return nil
+	}
+	rows := oltcollect.OnuRowsFromSummary(st.Summary)
+	if len(rows) == 0 {
+		st.Summary["onu_telnet_skipped"] = "sem ONUs SNMP para enriquecer"
+		return nil
+	}
+	creds, err := oltcollect.LoadTelnetCredentials(ctx, s.DB())
+	if err != nil {
+		st.Summary["onu_telnet_error"] = err.Error()
+		return nil
+	}
+	telTO := st.TelnetTO
+	if telTO <= 0 {
+		telTO = 45 * time.Second
+	}
+	result := oltcollect.EnrichOnuRowsViaTelnet(ctx, st.Host, creds, cfg, rows, telTO)
+	oltcollect.ApplyOnuTelnetResultToSummary(st.Summary, result)
+	return nil
+}
+
+func (s *Server) oltStepPonTelnetCollect(ctx context.Context, st *oltCollectExecState) error {
+	cfg := st.Profile.PonTelnet
+	if !cfg.MonitorEnabled() {
+		st.Summary["pon_telnet_skipped"] = "desactivado no perfil"
+		return nil
+	}
+	pons := oltifderive.PonsAnySliceToMaps(st.Pons)
+	if len(pons) == 0 {
+		st.Summary["pon_telnet_skipped"] = "sem PONs para enriquecer"
+		return nil
+	}
+	creds, err := oltcollect.LoadTelnetCredentials(ctx, s.DB())
+	if err != nil {
+		st.Summary["pon_telnet_error"] = err.Error()
+		return nil
+	}
+	telTO := st.TelnetTO
+	if telTO <= 0 {
+		telTO = 35 * time.Second
+	}
+	result := oltcollect.EnrichPonRowsViaTelnet(ctx, st.Host, creds, cfg, pons, telTO)
+	oltcollect.ApplyPonTelnetResultToSummary(st.Summary, result)
+	st.Pons = oltifderive.PonsMapsToAny(result.Rows)
 	return nil
 }
 

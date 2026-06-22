@@ -18,6 +18,8 @@ const (
 	MethodDatacomBuildPons = "datacom_build_pons"
 	MethodIfMibMergePons  = "if_mib_merge_pons"
 	MethodStabilizePons   = "stabilize_pons"
+	MethodOnuTelnetReport = "onu_telnet_report"
+	MethodPonTelnetCollect = "pon_telnet_collect"
 )
 
 // ParserTelnet identifica como interpretar saída telnet.
@@ -57,6 +59,44 @@ type Profile struct {
 	SNMPBaseOID    string
 	Steps          []Step
 	OnuMetrics     OnuMetricsConfig
+	OnuReport      OnuReportConfig
+	PonTelnet      PonTelnetConfig
+}
+
+// AppendOnuTelnetReportStep acrescenta passo de enriquecimento telnet quando activo no perfil.
+func AppendOnuTelnetReportStep(steps []Step, profile Profile) []Step {
+	if !profile.OnuReport.MonitorEnabled() {
+		return steps
+	}
+	for _, s := range steps {
+		if s.Method == MethodOnuTelnetReport {
+			return steps
+		}
+	}
+	en := true
+	return append(steps, Step{
+		ID:      "onu_telnet_report",
+		Method:  MethodOnuTelnetReport,
+		Enabled: &en,
+	})
+}
+
+// AppendPonTelnetCollectStep acrescenta passo de métricas ópticas PON via telnet quando activo no perfil.
+func AppendPonTelnetCollectStep(steps []Step, profile Profile) []Step {
+	if !profile.PonTelnet.MonitorEnabled() {
+		return steps
+	}
+	for _, s := range steps {
+		if s.Method == MethodPonTelnetCollect {
+			return steps
+		}
+	}
+	en := true
+	return append(steps, Step{
+		ID:      "pon_telnet_collect",
+		Method:  MethodPonTelnetCollect,
+		Enabled: &en,
+	})
 }
 
 // ResolveWalkOID OID do passo: step.oid, oid_field no perfil, snmp_base_oid, ou vazio.
@@ -161,4 +201,6 @@ var MethodLabels = map[string]string{
 	MethodDatacomBuildPons: "Datacom — agregar PONs a partir do walk ONU",
 	MethodIfMibMergePons:   "IF-MIB — derivar e fundir PONs no snapshot",
 	MethodStabilizePons:    "Estabilizar PONs vs. snapshot anterior",
+	MethodOnuTelnetReport:  "Telnet — enriquecer ONUs (perfil)",
+	MethodPonTelnetCollect: "Telnet — métricas PON/SFP (perfil)",
 }

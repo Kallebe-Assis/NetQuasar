@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -38,6 +39,67 @@ type oltOnuReportRequest struct {
 	Serial  string `json:"serial"`
 	IfIndex int    `json:"if_index"`
 	IfName  string `json:"if_name"`
+}
+
+type oltOnuSerialSearchRequest struct {
+	Serial string `json:"serial"`
+}
+
+type oltTelnetSession struct {
+	DeviceID          uuid.UUID
+	Desc, Brand, Model string
+	Host              string
+	Cfg               oltcollect.OnuReportConfig
+	User, Password, Enable string
+}
+
+func (s *Server) loadOLTTelnetSession(ctx context.Context, id uuid.UUID) (oltTelnetSession, error) {
+	var sess oltTelnetSession
+	sess.DeviceID = id
+	var ip *string
+	err := s.DB().QueryRow(ctx, `
+		SELECT description, brand, model, host(ip)::text
+		FROM devices WHERE id=$1 AND lower(trim(category))='olt'
+	`, id).Scan(&sess.Desc, &sess.Brand, &sess.Model, &ip)
+	if err == pgx.ErrNoRows {
+		return sess, err
+	}
+	if err != nil {
+		return sess, err
+	}
+	if ip != nil {
+		sess.Host = strings.TrimSpace(*ip)
+	}
+	if sess.Host == "" {
+		return sess, errValidation("OLT sem IP configurado")
+	}
+
+	var reportRaw []byte
+	err = s.DB().QueryRow(ctx, `
+		SELECT coalesce(onu_report_commands::text, '{}')
+		FROM olt_vendor_models
+		WHERE upper(trim(brand)) = upper(trim($1)) AND upper(trim(model)) = upper(trim($2))
+	`, sess.Brand, sess.Model).Scan(&reportRaw)
+	if err != nil && err != pgx.ErrNoRows {
+		return sess, err
+	}
+	sess.Cfg = oltcollect.ParseOnuReportConfig(reportRaw)
+
+	var telUser, telPass, telEnable *string
+	_ = s.DB().QueryRow(ctx, `SELECT telnet_user, telnet_password, telnet_enable FROM settings_connection_defaults WHERE id=1`).Scan(&telUser, &telPass, &telEnable)
+	if telUser != nil {
+		sess.User = strings.TrimSpace(*telUser)
+	}
+	if telPass != nil {
+		sess.Password = strings.TrimSpace(*telPass)
+	}
+	if telEnable != nil {
+		sess.Enable = strings.TrimSpace(*telEnable)
+	}
+	if sess.User == "" || sess.Password == "" {
+		return sess, errValidation("credenciais telnet não configuradas em Definições → Rede e SNMP")
+	}
+	return sess, nil
 }
 
 func (s *Server) searchOLTOnus(w http.ResponseWriter, r *http.Request) {
@@ -158,69 +220,32 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	var desc, brand, model string
-	var ip *string
-	err = s.DB().QueryRow(ctx, `
-		SELECT description, brand, model, host(ip)::text
-		FROM devices WHERE id=$1 AND lower(trim(category))='olt'
-	`, id).Scan(&desc, &brand, &model, &ip)
+	sess, err := s.loadOLTTelnetSession(ctx, id)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
 	if err != nil {
+		if strings.Contains(err.Error(), "credenciais telnet") || strings.Contains(err.Error(), "sem IP") {
+			writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", err.Error(), nil)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	host := ""
-	if ip != nil {
-		host = strings.TrimSpace(*ip)
-	}
-	if host == "" {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "OLT sem IP configurado", nil)
-		return
-	}
-
-	var reportRaw []byte
-	err = s.DB().QueryRow(ctx, `
-		SELECT coalesce(onu_report_commands::text, '{}')
-		FROM olt_vendor_models
-		WHERE upper(trim(brand)) = upper(trim($1)) AND upper(trim(model)) = upper(trim($2))
-	`, brand, model).Scan(&reportRaw)
-	if err != nil && err != pgx.ErrNoRows {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	cfg := oltcollect.ParseOnuReportConfig(reportRaw)
+	cfg := sess.Cfg
 	if !cfg.HasCommands() {
 		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED",
-			"Configure os comandos telnet de relatório ONU em Definições → Perfis OLT para "+brand+" / "+model, nil)
+			"Configure os comandos telnet de relatório ONU em Definições → Perfis OLT para "+sess.Brand+" / "+sess.Model, nil)
 		return
 	}
-
-	var telUser, telPass, telEnable *string
-	_ = s.DB().QueryRow(ctx, `SELECT telnet_user, telnet_password, telnet_enable FROM settings_connection_defaults WHERE id=1`).Scan(&telUser, &telPass, &telEnable)
-	tu, tp, te := "", "", ""
-	if telUser != nil {
-		tu = strings.TrimSpace(*telUser)
-	}
-	if telPass != nil {
-		tp = strings.TrimSpace(*telPass)
-	}
-	if telEnable != nil {
-		te = strings.TrimSpace(*telEnable)
-	}
-	if tu == "" || tp == "" {
-		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", "credenciais telnet não configuradas em Definições → Rede e SNMP", nil)
-		return
-	}
-	if te == "" && cfg.NeedsEnablePassword() {
+	if cfg.NeedsEnablePassword() && sess.Enable == "" {
 		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED",
 			"configure a palavra-passe enable (telnet enable) em Definições → Rede e SNMP para os pré-comandos deste perfil", nil)
 		return
 	}
 
-	secrets := oltcollect.TelnetSecrets{Password: tp, Enable: te}
+	secrets := oltcollect.TelnetSecrets{Password: sess.Password, Enable: sess.Enable}
 
 	target := oltcollect.OnuReportTarget{
 		Pon:     body.Pon,
@@ -232,31 +257,8 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 	target.GponOnu = oltcollect.ResolveGponOnu(target)
 
 	if target.GponOnu == "" && cfg.NeedsGponOnu() && strings.TrimSpace(body.Serial) != "" {
-		lookupCmd := "show gpon onu by sn " + strings.TrimSpace(body.Serial)
-		tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
-			Host: host, Port: "23", Timeout: 45 * time.Second,
-			User: tu, Password: tp, Enable: te,
-			Command: lookupCmd, PreCommands: cfg.PreCommands, MaxReadBytes: 280000,
-		})
-		if tel.OK {
-			if g := oltcollect.ParseGponOnuFromOutput(tel.Output); g != "" {
-				target.GponOnu = g
-			}
-		}
-	}
-
-	if target.GponOnu == "" && cfg.NeedsGponOnu() && strings.TrimSpace(body.Serial) != "" {
-		lookupCmd := "show gpon onu by sn " + strings.TrimSpace(body.Serial)
-		pre := cfg.RenderPreCommands(target, secrets)
-		tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
-			Host: host, Port: "23", Timeout: 45 * time.Second,
-			User: tu, Password: tp, Enable: te,
-			Command: lookupCmd, PreCommands: pre, MaxReadBytes: 280000,
-		})
-		if tel.OK {
-			if g := oltcollect.ParseGponOnuFromOutput(tel.Output); g != "" {
-				target.GponOnu = g
-			}
+		if g := s.lookupGponOnuBySerial(ctx, sess, target, secrets); g != "" {
+			target.GponOnu = g
 		}
 	}
 
@@ -268,8 +270,8 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 	}
 
 	script := probing.TelnetRunScript(ctx, probing.TelnetRunScriptParams{
-		Host: host, Port: "23", Timeout: 90 * time.Second,
-		User: tu, Password: tp, Enable: te,
+		Host: sess.Host, Port: "23", Timeout: 90 * time.Second,
+		User: sess.User, Password: sess.Password, Enable: sess.Enable,
 		PreCommands: preRendered, RawPreCommands: cfg.PreCommands,
 		Commands: cmds, MaxReadBytes: 280000,
 	})
@@ -294,7 +296,7 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":              false,
 			"olt_id":          id,
-			"olt_description": desc,
+			"olt_description": sess.Desc,
 			"commands":        outputs,
 			"output":          script.Output,
 			"error":           script.Error,
@@ -305,10 +307,117 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
 		"olt_id":          id,
-		"olt_description": desc,
+		"olt_description": sess.Desc,
 		"commands":        outputs,
 		"output":          script.Output,
 	})
+}
+
+func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {
+	extendWriteDeadline(w, 2*time.Minute)
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
+		return
+	}
+	var body oltOnuSerialSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	serial := strings.TrimSpace(body.Serial)
+	if serial == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "informe o número de série", nil)
+		return
+	}
+
+	ctx := r.Context()
+	sess, err := s.loadOLTTelnetSession(ctx, id)
+	if err == pgx.ErrNoRows {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
+		return
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "credenciais telnet") || strings.Contains(err.Error(), "sem IP") {
+			writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED", err.Error(), nil)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !sess.Cfg.HasCommands() && strings.TrimSpace(sess.Cfg.SerialSearchCommand) == "" {
+		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED",
+			"Configure os comandos telnet do perfil OLT em Definições → Perfis OLT para "+sess.Brand+" / "+sess.Model, nil)
+		return
+	}
+	if sess.Cfg.NeedsEnablePassword() && sess.Enable == "" {
+		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED",
+			"configure a palavra-passe enable (telnet enable) em Definições → Rede e SNMP para os pré-comandos deste perfil", nil)
+		return
+	}
+
+	secrets := oltcollect.TelnetSecrets{Password: sess.Password, Enable: sess.Enable}
+	target := oltcollect.OnuReportTarget{Serial: serial}
+	lookupCmd := sess.Cfg.RenderSerialSearchCommand(target, secrets)
+	preRendered := sess.Cfg.RenderPreCommands(target, secrets)
+
+	tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
+		Host: sess.Host, Port: "23", Timeout: 45 * time.Second,
+		User: sess.User, Password: sess.Password, Enable: sess.Enable,
+		Command: lookupCmd, PreCommands: preRendered, MaxReadBytes: 280000,
+	})
+
+	gponOnu := ""
+	pon, onu := 0, 0
+	if tel.OK {
+		gponOnu = oltcollect.ParseGponOnuFromOutput(tel.Output)
+		if gponOnu != "" {
+			pon, onu = oltcollect.ParsePonOnuFromGponOnu(gponOnu)
+		}
+	}
+	parsed := oltcollect.ExtractTelnetKVFieldsPublic(tel.Output)
+
+	out := map[string]any{
+		"ok":              tel.OK,
+		"olt_id":          id,
+		"olt_description": sess.Desc,
+		"serial":          serial,
+		"command":         lookupCmd,
+		"output":          tel.Output,
+		"gpon_onu":        nilIfBlankStr(gponOnu),
+		"parsed":          parsed,
+	}
+	if pon > 0 {
+		out["pon"] = pon
+	}
+	if onu > 0 {
+		out["onu"] = onu
+	}
+	if !tel.OK && tel.Error != "" {
+		out["error"] = tel.Error
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) lookupGponOnuBySerial(ctx context.Context, sess oltTelnetSession, target oltcollect.OnuReportTarget, secrets oltcollect.TelnetSecrets) string {
+	lookupCmd := sess.Cfg.RenderSerialSearchCommand(target, secrets)
+	pre := sess.Cfg.RenderPreCommands(target, secrets)
+	tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
+		Host: sess.Host, Port: "23", Timeout: 45 * time.Second,
+		User: sess.User, Password: sess.Password, Enable: sess.Enable,
+		Command: lookupCmd, PreCommands: pre, MaxReadBytes: 280000,
+	})
+	if tel.OK {
+		return oltcollect.ParseGponOnuFromOutput(tel.Output)
+	}
+	return ""
+}
+
+func nilIfBlankStr(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
 }
 
 func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ, modelQ string) bool {

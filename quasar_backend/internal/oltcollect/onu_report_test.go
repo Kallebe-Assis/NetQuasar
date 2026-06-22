@@ -16,6 +16,21 @@ func TestResolveGponOnuFromIfName(t *testing.T) {
 	}
 }
 
+func TestRenderSerialSearchCommand(t *testing.T) {
+	cfg := OnuReportConfig{SerialSearchCommand: "show gpon onu by sn {serial}"}
+	cmd := cfg.RenderSerialSearchCommand(OnuReportTarget{Serial: "ABC123"}, TelnetSecrets{})
+	if cmd != "show gpon onu by sn ABC123" {
+		t.Fatalf("got %q", cmd)
+	}
+}
+
+func TestParsePonOnuFromGponOnu(t *testing.T) {
+	pon, onu := ParsePonOnuFromGponOnu("gpon_onu-1/1/9:80")
+	if pon != 9 || onu != 80 {
+		t.Fatalf("pon=%d onu=%d", pon, onu)
+	}
+}
+
 func TestParseGponOnuFromOutput(t *testing.T) {
 	out := `SearchResult
 -----------------
@@ -59,5 +74,15 @@ func TestRenderPreCommandsSecrets(t *testing.T) {
 	pre := cfg.RenderPreCommands(OnuReportTarget{}, TelnetSecrets{Enable: "secret-en"})
 	if len(pre) != 3 || pre[1] != "secret-en" {
 		t.Fatalf("pre=%v", pre)
+	}
+}
+
+func TestOnuReportConfig_MonitorEnabled(t *testing.T) {
+	cfg := ParseOnuReportConfig([]byte(`{"enabled":true,"commands":["show onu {pon} {onu}"]}`))
+	if !cfg.MonitorEnabled() {
+		t.Fatal("expected monitor enabled")
+	}
+	if cfg.EffectiveMaxOnus() != 25 {
+		t.Fatalf("max=%d", cfg.EffectiveMaxOnus())
 	}
 }

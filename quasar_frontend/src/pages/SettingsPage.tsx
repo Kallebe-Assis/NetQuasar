@@ -2006,8 +2006,19 @@ type OltCollectionStep = {
 };
 
 type OltOnuReportCommands = {
+  enabled?: boolean;
+  monitor_online_only?: boolean;
+  max_onus_per_cycle?: number;
   pre_commands?: string[];
   command?: string;
+  commands?: string[];
+  serial_search_command?: string;
+};
+
+type OltPonTelnetCommands = {
+  enabled?: boolean;
+  max_pons_per_cycle?: number;
+  pre_commands?: string[];
   commands?: string[];
 };
 
@@ -2310,6 +2321,34 @@ function defaultOnuReportForBrand(brandName: string): { pre_commands: string[]; 
   return { pre_commands: [], commands: [] };
 }
 
+function defaultPonTelnetForBrand(brandName: string): { pre_commands: string[]; commands: string[] } {
+  const b = brandName.trim().toUpperCase();
+  if (b.includes("ZTE")) {
+    return {
+      pre_commands: ["terminal length 0", "terminal page-break disable", "scroll 512"],
+      commands: [
+        "show pon power olt-tx gpon-olt_1/1/{pon}",
+        "show pon power olt-rx gpon-olt_1/1/{pon}",
+        "show optical-module-info gpon-olt_1/1/{pon}",
+      ],
+    };
+  }
+  if (b.includes("VSOL")) {
+    return {
+      pre_commands: ["enable", "{enable}", "conf terminal"],
+      commands: ["show pon optical-transceiver-diagnosis slot 0 pon {pon}"],
+    };
+  }
+  return { pre_commands: [], commands: [] };
+}
+
+function ponTelnetCommandsFromApi(pc?: OltPonTelnetCommands | null): { pre_commands: string[]; commands: string[] } {
+  return {
+    pre_commands: Array.isArray(pc?.pre_commands) ? pc.pre_commands : [],
+    commands: Array.isArray(pc?.commands) ? pc.commands : [],
+  };
+}
+
 function onuReportCommandsFromApi(rc?: OltOnuReportCommands | null): { pre_commands: string[]; commands: string[] } {
   const cmds =
     Array.isArray(rc?.commands) && rc.commands.length > 0
@@ -2343,6 +2382,14 @@ function OltVendorsPanel() {
   const [steps, setSteps] = useState<OltCollectionStep[]>([]);
   const [onuReportPreText, setOnuReportPreText] = useState("");
   const [onuReportCommandsText, setOnuReportCommandsText] = useState("");
+  const [onuReportSerialSearchText, setOnuReportSerialSearchText] = useState("");
+  const [ponTelnetPreText, setPonTelnetPreText] = useState("");
+  const [ponTelnetCommandsText, setPonTelnetCommandsText] = useState("");
+  const [ponTelnetEnabled, setPonTelnetEnabled] = useState(false);
+  const [ponTelnetMaxPerCycle, setPonTelnetMaxPerCycle] = useState("16");
+  const [onuReportEnabled, setOnuReportEnabled] = useState(false);
+  const [onuReportOnlineOnly, setOnuReportOnlineOnly] = useState(true);
+  const [onuReportMaxPerCycle, setOnuReportMaxPerCycle] = useState("25");
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyBrand, setCopyBrand] = useState("");
   const [copyModel, setCopyModel] = useState("");
@@ -2388,6 +2435,7 @@ function OltVendorsPanel() {
         onu_metrics?: OltMetricsForm;
         collection_steps?: OltCollectionStep[];
         onu_report_commands?: OltOnuReportCommands;
+        pon_telnet_commands?: OltPonTelnetCommands;
       }>(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`),
   });
 
@@ -2414,6 +2462,16 @@ function OltVendorsPanel() {
     const parsed = onuReportCommandsFromApi(rc);
     setOnuReportPreText(parsed.pre_commands.join("\n"));
     setOnuReportCommandsText(parsed.commands.join("\n"));
+    setOnuReportSerialSearchText(rc?.serial_search_command?.trim() ?? "");
+    setOnuReportEnabled(rc?.enabled === true);
+    setOnuReportOnlineOnly(rc?.monitor_online_only !== false);
+    setOnuReportMaxPerCycle(rc?.max_onus_per_cycle != null && rc.max_onus_per_cycle > 0 ? String(rc.max_onus_per_cycle) : "25");
+    const pc = vendor.data.pon_telnet_commands;
+    const ponParsed = ponTelnetCommandsFromApi(pc);
+    setPonTelnetPreText(ponParsed.pre_commands.join("\n"));
+    setPonTelnetCommandsText(ponParsed.commands.join("\n"));
+    setPonTelnetEnabled(pc?.enabled === true);
+    setPonTelnetMaxPerCycle(pc?.max_pons_per_cycle != null && pc.max_pons_per_cycle > 0 ? String(pc.max_pons_per_cycle) : "16");
   }, [vendor.data]);
 
   const metricsReady = hasEnabledMetrics(metrics);
@@ -2432,14 +2490,35 @@ function OltVendorsPanel() {
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
+      const serialSearch = onuReportSerialSearchText.trim();
+      const ponPreCommands = ponTelnetPreText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const ponCommands = ponTelnetCommandsText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const maxPons = Number.parseInt(ponTelnetMaxPerCycle, 10);
+      const maxOnus = Number.parseInt(onuReportMaxPerCycle, 10);
       return apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`, {
         method: "PATCH",
         json: {
           onu_metrics: payload,
           collection_steps: autoSteps,
           onu_report_commands: {
+            enabled: onuReportEnabled,
+            monitor_online_only: onuReportOnlineOnly,
+            max_onus_per_cycle: Number.isFinite(maxOnus) && maxOnus > 0 ? maxOnus : 25,
             pre_commands: preCommands,
             commands,
+            serial_search_command: serialSearch || undefined,
+          },
+          pon_telnet_commands: {
+            enabled: ponTelnetEnabled,
+            max_pons_per_cycle: Number.isFinite(maxPons) && maxPons > 0 ? maxPons : 16,
+            pre_commands: ponPreCommands,
+            commands: ponCommands,
           },
         },
       });
@@ -2529,6 +2608,7 @@ function OltVendorsPanel() {
         onu_metrics?: OltMetricsForm;
         collection_steps?: OltCollectionStep[];
         onu_report_commands?: OltOnuReportCommands;
+        pon_telnet_commands?: OltPonTelnetCommands;
       }>(
         `/api/v1/settings/olt-vendors/${encodeURIComponent(srcBrand)}/models/${encodeURIComponent(srcModel)}`,
       );
@@ -2537,6 +2617,23 @@ function OltVendorsPanel() {
       const parsed = onuReportCommandsFromApi(src.onu_report_commands);
       setOnuReportPreText(parsed.pre_commands.join("\n"));
       setOnuReportCommandsText(parsed.commands.join("\n"));
+      setOnuReportSerialSearchText(src.onu_report_commands?.serial_search_command?.trim() ?? "");
+      setOnuReportEnabled(src.onu_report_commands?.enabled === true);
+      setOnuReportOnlineOnly(src.onu_report_commands?.monitor_online_only !== false);
+      setOnuReportMaxPerCycle(
+        src.onu_report_commands?.max_onus_per_cycle != null && src.onu_report_commands.max_onus_per_cycle > 0
+          ? String(src.onu_report_commands.max_onus_per_cycle)
+          : "25",
+      );
+      const ponParsed = ponTelnetCommandsFromApi(src.pon_telnet_commands);
+      setPonTelnetPreText(ponParsed.pre_commands.join("\n"));
+      setPonTelnetCommandsText(ponParsed.commands.join("\n"));
+      setPonTelnetEnabled(src.pon_telnet_commands?.enabled === true);
+      setPonTelnetMaxPerCycle(
+        src.pon_telnet_commands?.max_pons_per_cycle != null && src.pon_telnet_commands.max_pons_per_cycle > 0
+          ? String(src.pon_telnet_commands.max_pons_per_cycle)
+          : "16",
+      );
       setCopyModalOpen(false);
       toastOk(pushToast, `Perfil copiado de ${srcBrand} / ${srcModel} (SNMP e telnet). Clique em Guardar para gravar.`);
     } catch (e) {
@@ -3054,7 +3151,42 @@ function OltVendorsPanel() {
             })}
           </div>
 
-          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Relatório telnet por ONU (aba Pesquisa)</h3>
+          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por ONU (Pesquisa e monitoramento)</h3>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+            Os mesmos comandos usados na aba <strong>Pesquisa</strong> («Relatório telnet»). Com monitoramento activo, o worker executa estes comandos
+            por ONU após a coleta SNMP e actualiza a tabela de ONUs na página OLT.
+          </p>
+          <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
+            <input
+              type="checkbox"
+              checked={onuReportEnabled}
+              onChange={(e) => setOnuReportEnabled(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span style={{ fontSize: 13, lineHeight: 1.45 }}>
+              <strong>Coletar via telnet no monitoramento</strong> — enriquece ONUs com dados CLI (modelo, RX/TX, estado, etc.).
+            </span>
+          </label>
+          {onuReportEnabled ? (
+            <div className="row" style={{ gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "flex-end" }}>
+              <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 13 }}>
+                <input type="checkbox" checked={onuReportOnlineOnly} onChange={(e) => setOnuReportOnlineOnly(e.target.checked)} />
+                Só ONUs online
+              </label>
+              <div className="field" style={{ margin: 0, maxWidth: 140 }}>
+                <label htmlFor="onu-telnet-max">Máx. ONUs/ciclo</label>
+                <input
+                  id="onu-telnet-max"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={onuReportMaxPerCycle}
+                  onChange={(e) => setOnuReportMaxPerCycle(e.target.value)}
+                />
+              </div>
+            </div>
+          ) : null}
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
             Login usa <strong>Rede e SNMP</strong> (utilizador + palavra-passe telnet). Nos pré-comandos pode usar{" "}
             <code>{"{enable}"}</code> ou <code>{"{enable_password}"}</code> para a senha de enable, e{" "}
@@ -3091,6 +3223,22 @@ function OltVendorsPanel() {
           </div>
           <div className="card" style={{ padding: 10, marginBottom: 12 }}>
             <div className="field">
+              <label>Pesquisa por série (telnet)</label>
+              <input
+                className="input mono"
+                value={onuReportSerialSearchText}
+                onChange={(e) => setOnuReportSerialSearchText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "show gpon onu by sn {serial}"
+                    : "show onu sn {serial}"
+                }
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                Comando executado na aba <strong>Pesquisa</strong> quando uma OLT está seleccionada. Use <code>{"{serial}"}</code>.
+              </p>
+            </div>
+            <div className="field">
               <label>Pré-comandos (um por linha)</label>
               <textarea
                 className="input mono"
@@ -3115,6 +3263,86 @@ function OltVendorsPanel() {
                   brand.toUpperCase().includes("ZTE")
                     ? "show gpon onu detail-info {gpon_onu}\nshow pon onu information {gpon_onu}\nshow pon power onu-rx {gpon_onu}\nshow pon power onu-tx {gpon_onu}"
                     : "show onu info {pon} {onu}\nshow onu state {pon} {onu}"
+                }
+              />
+            </div>
+          </div>
+
+          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por PON / SFP (GBIC)</h3>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+            Comandos CLI por porta PON para voltagem, temperatura, TX/RX e corrente de bias do módulo óptico. Os valores
+            actualizam a tabela de PONs na página OLT após cada coleta.
+          </p>
+          <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
+            <input
+              type="checkbox"
+              checked={ponTelnetEnabled}
+              onChange={(e) => setPonTelnetEnabled(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span style={{ fontSize: 13, lineHeight: 1.45 }}>
+              <strong>Coletar métricas PON via telnet no monitoramento</strong> — voltagem, TX, temperatura, bias, etc.
+            </span>
+          </label>
+          {ponTelnetEnabled ? (
+            <div className="field" style={{ margin: "0 0 10px", maxWidth: 140 }}>
+              <label htmlFor="pon-telnet-max">Máx. PONs/ciclo</label>
+              <input
+                id="pon-telnet-max"
+                className="input"
+                type="number"
+                min={1}
+                max={64}
+                value={ponTelnetMaxPerCycle}
+                onChange={(e) => setPonTelnetMaxPerCycle(e.target.value)}
+              />
+            </div>
+          ) : null}
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+            Placeholder principal: <code>{"{pon}"}</code> (número da porta). Use os mesmos placeholders de credenciais dos
+            pré-comandos que na secção ONU.
+          </p>
+          <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: 12, padding: "4px 10px" }}
+              onClick={() => {
+                const d = defaultPonTelnetForBrand(brand);
+                setPonTelnetPreText(d.pre_commands.join("\n"));
+                setPonTelnetCommandsText(d.commands.join("\n"));
+                toastOk(pushToast, "Comandos PON padrão da marca carregados. Clique em Guardar para persistir.");
+              }}
+            >
+              Restaurar padrão PON da marca
+            </button>
+          </div>
+          <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+            <div className="field">
+              <label>Pré-comandos PON (um por linha)</label>
+              <textarea
+                className="input mono"
+                rows={3}
+                value={ponTelnetPreText}
+                onChange={(e) => setPonTelnetPreText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "terminal length 0\nterminal page-break disable\nscroll 512"
+                    : "enable\n{enable}\nconf terminal"
+                }
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Comandos PON (um por linha)</label>
+              <textarea
+                className="input mono"
+                rows={5}
+                value={ponTelnetCommandsText}
+                onChange={(e) => setPonTelnetCommandsText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "show pon power olt-tx gpon-olt_1/1/{pon}\nshow pon power olt-rx gpon-olt_1/1/{pon}\nshow optical-module-info gpon-olt_1/1/{pon}"
+                    : "show pon optical-transceiver-diagnosis slot 0 pon {pon}"
                 }
               />
             </div>

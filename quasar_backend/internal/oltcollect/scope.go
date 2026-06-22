@@ -26,6 +26,8 @@ func StepsForScope(steps []Step, scope string) []Step {
 		case MethodOnuMetricsCollect:
 			out = append(out, s)
 			return out
+		case MethodOnuTelnetReport, MethodPonTelnetCollect:
+			out = append(out, s)
 		case MethodIfMibSnapshot:
 			hasSnapshot = true
 			out = append(out, s)

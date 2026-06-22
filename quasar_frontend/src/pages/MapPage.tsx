@@ -443,9 +443,11 @@ export function MapPage() {
         setDetailFallback(null);
       }
       setSelId(row.map_id);
-      setDetailModalOpen(true);
       userPickedTab.current = true;
       setView("mapa");
+      if (row.kind === "login") setShowConnections(true);
+      else if (row.kind === "equipment") setShowEquipment(true);
+      else setShowInfrastructure(true);
       setFlyTo({ lat: row.lat, lng: row.lng, zoom: 17 });
       setFlyKey((k) => k + 1);
     },
@@ -810,6 +812,7 @@ export function MapPage() {
                   mapHeight="min(72vh, 720px)"
                   mapColors={mapColors}
                   connectionClusterForced={connectionClusterForced}
+                  highlightedId={selId}
                   onSelectDevice={(id) => {
                     if (id) openPointDetail(id);
                   }}

@@ -27,6 +27,8 @@ export type VsOnuRow = {
   serial?: string;
   model?: string;
   vlan?: string;
+  telnet_report_at?: string;
+  data_source_telnet?: boolean;
 };
 
 function cell(v: unknown): string {
@@ -245,7 +247,16 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
                 {visible.has("tx") && <td className="mono">{metricCell(u.tx_pwr)}</td>}
                 {visible.has("voltage") && <td className="mono">{metricCell(u.voltage)}</td>}
                 {visible.has("temp") && <td className="mono">{metricCell(u.temp)}</td>}
-                {visible.has("model") && <td>{cell(u.model)}</td>}
+                {visible.has("model") && (
+                  <td>
+                    {cell(u.model)}
+                    {u.data_source_telnet ? (
+                      <span className="badge badge--ok" style={{ marginLeft: 6, fontSize: 9 }} title={u.telnet_report_at ? `Telnet ${u.telnet_report_at}` : "Dados telnet"}>
+                        CLI
+                      </span>
+                    ) : null}
+                  </td>
+                )}
                 {visible.has("serial") && (
                   <td className="mono" style={{ maxWidth: 140, wordBreak: "break-all" }}>
                     {cell(u.serial)}

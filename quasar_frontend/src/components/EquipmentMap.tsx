@@ -380,13 +380,46 @@ function isInfrastructurePoint(p: MapPoint): boolean {
   return !!p.mapKind && isInfraMapKind(p.mapKind);
 }
 
-function markerIconOpts(displayMode: MapDisplayMode, p: MapPoint, colors: MapColors): { icon: L.Icon | L.DivIcon } {
+function highlightAccent(p: MapPoint, colors: MapColors): string {
+  if (p.markerColor?.trim()) return p.markerColor.trim();
   if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
-    return { icon: infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null) };
+    return p.mapKind === "cto" ? "#7c3aed" : "#2563eb";
   }
-  if (isConnectionPoint(p)) return { icon: connectionPinIcon(colors.connection) };
-  if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
-  return { icon: statusPinIcon(p.status) };
+  if (isConnectionPoint(p)) return colors.connection;
+  return colors.equipment;
+}
+
+function withMapPinHighlight(icon: L.DivIcon, highlighted: boolean, accent: string): L.DivIcon {
+  if (!highlighted) return icon;
+  const inner = icon.options.html ?? "";
+  const html = `<div class="map-pin-highlight-inner" style="--map-highlight:${accent}">${inner}</div>`;
+  return L.divIcon({
+    className: `${icon.options.className ?? ""} map-pin-highlight-wrap`.trim(),
+    html,
+    iconSize: icon.options.iconSize,
+    iconAnchor: icon.options.iconAnchor,
+    popupAnchor: icon.options.popupAnchor,
+  });
+}
+
+function markerIconOpts(
+  displayMode: MapDisplayMode,
+  p: MapPoint,
+  colors: MapColors,
+  highlightedId?: string | null,
+): { icon: L.Icon | L.DivIcon } {
+  const highlighted = !!highlightedId && p.id === highlightedId;
+  let icon: L.DivIcon;
+  if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
+    icon = infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null);
+  } else if (isConnectionPoint(p)) {
+    icon = connectionPinIcon(colors.connection);
+  } else if (displayMode !== "status") {
+    icon = equipmentPinIcon(colors.equipment);
+  } else {
+    icon = statusPinIcon(p.status);
+  }
+  return { icon: withMapPinHighlight(icon, highlighted, highlightAccent(p, colors)) };
 }
 
 function markerIconOptsGroup(
@@ -394,6 +427,7 @@ function markerIconOptsGroup(
   members: MapPoint[],
   colors: MapColors,
   clusterKind?: string,
+  highlightedId?: string | null,
 ): { icon: L.Icon | L.DivIcon } {
   const isConn = members.length > 0 && members.every(isConnectionPoint);
   const infraKind = members.length > 0 && members.every((m) => m.mapKind === members[0].mapKind && isInfrastructurePoint(m))
@@ -407,13 +441,36 @@ function markerIconOptsGroup(
     const color = isConn ? colors.connection : colors.equipment;
     return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn) };
   }
+  const single = members[0];
+  const highlighted = !!highlightedId && members.length === 1 && single.id === highlightedId;
   if (infraKind && isInfraMapKind(infraKind)) {
     const label = infraKind === "cto" && members.length === 1 ? members[0].mapLabel : null;
-    return { icon: infrastructurePinIcon(infraKind, members[0].markerColor, label) };
+    const icon = infrastructurePinIcon(infraKind, members[0].markerColor, label);
+    return { icon: withMapPinHighlight(icon, highlighted, highlightAccent(single, colors)) };
   }
-  if (isConn) return { icon: connectionPinIcon(colors.connection) };
-  if (displayMode !== "status") return { icon: equipmentPinIcon(colors.equipment) };
-  return { icon: statusPinIcon(dominantStatus(members)) };
+  if (isConn) {
+    const icon = connectionPinIcon(colors.connection);
+    return { icon: withMapPinHighlight(icon, highlighted, colors.connection) };
+  }
+  if (displayMode !== "status") {
+    const icon = equipmentPinIcon(colors.equipment);
+    return { icon: withMapPinHighlight(icon, highlighted, colors.equipment) };
+  }
+  const icon = statusPinIcon(dominantStatus(members));
+  return { icon: withMapPinHighlight(icon, highlighted, colors.equipment) };
+}
+
+function mapMarkerProps(
+  p: MapPoint,
+  displayMode: MapDisplayMode,
+  colors: MapColors,
+  highlightedId?: string | null,
+) {
+  const highlighted = !!highlightedId && p.id === highlightedId;
+  return {
+    ...markerIconOpts(displayMode, p, colors, highlightedId),
+    zIndexOffset: highlighted ? 1200 : 0,
+  };
 }
 
 type SpiderState = { key: string; members: MapPoint[]; center: [number, number]; phase: number } | null;
@@ -432,6 +489,7 @@ function ClusterCellMarkers({
   onSelectDevice,
   displayMode,
   colors,
+  highlightedId,
 }: {
   c: ClusterCell;
   expanded: Set<string>;
@@ -444,13 +502,14 @@ function ClusterCellMarkers({
   onSelectDevice?: (id: string) => void;
   displayMode: MapDisplayMode;
   colors: MapColors;
+  highlightedId?: string | null;
 }) {
   const map = useMap();
 
   if (c.members.length === 1) {
     const p = c.members[0];
     return (
-      <Marker position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
+      <Marker position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
         <Popup>
           {devicePopupBody(p, displayMode)}
           {onSelectDevice && (
@@ -467,7 +526,8 @@ function ClusterCellMarkers({
     return (
       <Marker
         position={[c.lat, c.lng]}
-        {...markerIconOptsGroup(displayMode, c.members, colors, c.kind)}
+        {...markerIconOptsGroup(displayMode, c.members, colors, c.kind, highlightedId)}
+        zIndexOffset={c.members.some((m) => m.id === highlightedId) ? 1200 : 0}
         eventHandlers={{
           click: (e) => {
             L.DomEvent.stopPropagation(e);
@@ -508,7 +568,7 @@ function ClusterCellMarkers({
         if (grp.length === 1) {
           const p = grp[0];
           return (
-            <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
+            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
                 {onSelectDevice && (
@@ -524,7 +584,7 @@ function ClusterCellMarkers({
           return spider.members.map((m, i) => {
             const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
             return (
-              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m, colors)}>
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
                   {onSelectDevice && (
@@ -542,7 +602,8 @@ function ClusterCellMarkers({
           <Marker
             key={sk}
             position={[clat, clng]}
-            {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]))}
+            {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]), highlightedId)}
+            zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
@@ -583,6 +644,7 @@ function ClusterMarkersByView({
   runSpiderOpen,
   stopSpiderAnim,
   colors,
+  highlightedId,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -593,6 +655,7 @@ function ClusterMarkersByView({
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
   colors: MapColors;
+  highlightedId?: string | null;
 }) {
   const map = useMap();
   const [zoom, setZoom] = useState(() => map.getZoom());
@@ -639,6 +702,7 @@ function ClusterMarkersByView({
           onSelectDevice={onSelectDevice}
           displayMode={displayMode}
           colors={colors}
+          highlightedId={highlightedId}
         />
       ))}
     </>
@@ -654,6 +718,7 @@ function ScatterStackMarker({
   stopSpiderAnim,
   setSpider,
   colors,
+  highlightedId,
 }: {
   sk: string;
   grp: MapPoint[];
@@ -663,13 +728,15 @@ function ScatterStackMarker({
   stopSpiderAnim: () => void;
   setSpider: (s: SpiderState) => void;
   colors: MapColors;
+  highlightedId?: string | null;
 }) {
   const map = useMap();
   const [clat, clng] = centroid(grp);
   return (
     <Marker
       position={[clat, clng]}
-      {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]))}
+      {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]), highlightedId)}
+      zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
       eventHandlers={{
         click: (e) => {
           L.DomEvent.stopPropagation(e);
@@ -711,6 +778,7 @@ function ScatterMarkersLayer({
   onSelectDevice,
   colors,
   keyPrefix,
+  highlightedId,
 }: {
   stacks: MapPoint[][];
   displayMode: MapDisplayMode;
@@ -722,6 +790,7 @@ function ScatterMarkersLayer({
   onSelectDevice?: (id: string) => void;
   colors: MapColors;
   keyPrefix: string;
+  highlightedId?: string | null;
 }) {
   return (
     <>
@@ -732,7 +801,7 @@ function ScatterMarkersLayer({
         if (grp.length === 1) {
           const p = grp[0];
           return (
-            <Marker key={p.id} position={[p.lat, p.lng]} {...markerIconOpts(displayMode, p, colors)}>
+            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
                 {onSelectDevice && (
@@ -749,7 +818,7 @@ function ScatterMarkersLayer({
           return spider.members.map((m, i) => {
             const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
             return (
-              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...markerIconOpts(displayMode, m, colors)}>
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
                   {onSelectDevice && (
@@ -774,6 +843,7 @@ function ScatterMarkersLayer({
             stopSpiderAnim={stopSpiderAnim}
             setSpider={setSpider}
             colors={colors}
+            highlightedId={highlightedId}
           />
         );
       })}
@@ -792,6 +862,7 @@ export function EquipmentMap({
   mapColors,
   connectionClusterForced = false,
   mapHeight = 480,
+  highlightedId = null,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -804,6 +875,8 @@ export function EquipmentMap({
   /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
   connectionClusterForced?: boolean;
   mapHeight?: number | string;
+  /** Pin seleccionado (ex.: resultado da pesquisa) com destaque visual. */
+  highlightedId?: string | null;
 }) {
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
@@ -892,6 +965,7 @@ export function EquipmentMap({
           runSpiderOpen={runSpiderOpen}
           stopSpiderAnim={stopSpiderAnim}
           colors={colors}
+          highlightedId={highlightedId}
         />
       )}
 
@@ -908,6 +982,7 @@ export function EquipmentMap({
             onSelectDevice={onSelectDevice}
             colors={colors}
             keyPrefix="eq"
+            highlightedId={highlightedId}
           />
           {connectionClusterForced && connValid.length > 0 ? (
             <ClusterMarkersByView
@@ -920,6 +995,7 @@ export function EquipmentMap({
               runSpiderOpen={runSpiderOpen}
               stopSpiderAnim={stopSpiderAnim}
               colors={colors}
+              highlightedId={highlightedId}
             />
           ) : (
             <ScatterMarkersLayer
@@ -933,6 +1009,7 @@ export function EquipmentMap({
               onSelectDevice={onSelectDevice}
               colors={colors}
               keyPrefix="conn"
+              highlightedId={highlightedId}
             />
           )}
         </>

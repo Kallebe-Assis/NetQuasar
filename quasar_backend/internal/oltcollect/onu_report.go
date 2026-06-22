@@ -8,15 +8,38 @@ import (
 	"strings"
 )
 
-var gponOnuInterfaceRE = regexp.MustCompile(`gpon_onu-\d+/\d+/\d+:\d+`)
+var (
+	gponOnuInterfaceRE = regexp.MustCompile(`gpon_onu-\d+/\d+/\d+:\d+`)
+	gponOnuPonOnuRE    = regexp.MustCompile(`(\d+):(\d+)\s*$`)
+)
 
 // OnuReportConfig comandos telnet para relatório individual de uma ONU.
 // Placeholders ONU: {pon}, {onu}, {serial}, {if_index}, {gpon_onu}, {onu_if}
 // Placeholders credenciais (pré-comandos): {enable}, {enable_password}, {password}, {telnet_password}
 type OnuReportConfig struct {
-	PreCommands []string `json:"pre_commands"`
-	Command     string   `json:"command"`
-	Commands    []string `json:"commands"`
+	Enabled           bool     `json:"enabled"`
+	MonitorOnlineOnly bool     `json:"monitor_online_only"`
+	MaxOnusPerCycle   int      `json:"max_onus_per_cycle"`
+	PreCommands          []string `json:"pre_commands"`
+	Command              string   `json:"command"`
+	Commands             []string `json:"commands"`
+	SerialSearchCommand  string   `json:"serial_search_command"`
+}
+
+// MonitorEnabled indica se o monitoramento deve enriquecer ONUs via telnet.
+func (c OnuReportConfig) MonitorEnabled() bool {
+	return c.Enabled && c.HasCommands()
+}
+
+// EffectiveMaxOnus limite por ciclo (0 = 25).
+func (c OnuReportConfig) EffectiveMaxOnus() int {
+	if c.MaxOnusPerCycle <= 0 {
+		return 25
+	}
+	if c.MaxOnusPerCycle > 200 {
+		return 200
+	}
+	return c.MaxOnusPerCycle
 }
 
 func ParseOnuReportConfig(raw []byte) OnuReportConfig {
@@ -39,6 +62,7 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 		cfg.Commands = out
 	}
 	cfg.Command = strings.TrimSpace(cfg.Command)
+	cfg.SerialSearchCommand = strings.TrimSpace(cfg.SerialSearchCommand)
 	return cfg
 }
 
@@ -122,6 +146,28 @@ func ParseGponOnuFromOutput(output string) string {
 		return m
 	}
 	return ""
+}
+
+// ParsePonOnuFromGponOnu extrai PON e ONU de interfaces como gpon_onu-1/1/9:80.
+func ParsePonOnuFromGponOnu(gpon string) (pon, onu int) {
+	m := gponOnuPonOnuRE.FindStringSubmatch(strings.TrimSpace(gpon))
+	if len(m) < 3 {
+		return 0, 0
+	}
+	pon, _ = strconv.Atoi(m[1])
+	onu, _ = strconv.Atoi(m[2])
+	return pon, onu
+}
+
+func (c OnuReportConfig) DefaultSerialSearchCommand() string {
+	if tpl := strings.TrimSpace(c.SerialSearchCommand); tpl != "" {
+		return tpl
+	}
+	return "show gpon onu by sn {serial}"
+}
+
+func (c OnuReportConfig) RenderSerialSearchCommand(t OnuReportTarget, sec TelnetSecrets) string {
+	return SubstituteTelnetTemplate(c.DefaultSerialSearchCommand(), t, sec)
 }
 
 func ResolveGponOnu(t OnuReportTarget) string {

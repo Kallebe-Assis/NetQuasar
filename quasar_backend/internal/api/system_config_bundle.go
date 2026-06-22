@@ -423,16 +423,18 @@ func applyOltModelsImport(ctx context.Context, s *Server, sections map[string]an
 		cj, _ := json.Marshal(m["collection_steps"])
 		om, _ := json.Marshal(m["onu_metrics"])
 		or, _ := json.Marshal(m["onu_report_commands"])
+		pt, _ := json.Marshal(m["pon_telnet_commands"])
 		if _, err := s.DB().Exec(ctx, `
-			INSERT INTO olt_vendor_models (brand, model, onu_online_oid, pon_status_oid, transceiver_oid, snmp_base_oid, collection_steps, onu_metrics, onu_report_commands)
-			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb)
+			INSERT INTO olt_vendor_models (brand, model, onu_online_oid, pon_status_oid, transceiver_oid, snmp_base_oid, collection_steps, onu_metrics, onu_report_commands, pon_telnet_commands)
+			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)
 			ON CONFLICT (brand, model) DO UPDATE SET
 				onu_online_oid = EXCLUDED.onu_online_oid, pon_status_oid = EXCLUDED.pon_status_oid,
 				transceiver_oid = EXCLUDED.transceiver_oid, snmp_base_oid = EXCLUDED.snmp_base_oid,
 				collection_steps = EXCLUDED.collection_steps, onu_metrics = EXCLUDED.onu_metrics,
-				onu_report_commands = EXCLUDED.onu_report_commands`,
+				onu_report_commands = EXCLUDED.onu_report_commands,
+				pon_telnet_commands = EXCLUDED.pon_telnet_commands`,
 			strField(m, "brand"), strField(m, "model"), strField(m, "onu_online_oid"), strField(m, "pon_status_oid"),
-			strField(m, "transceiver_oid"), strField(m, "snmp_base_oid"), cj, om, or); err != nil {
+			strField(m, "transceiver_oid"), strField(m, "snmp_base_oid"), cj, om, or, pt); err != nil {
 			return err
 		}
 	}

@@ -13,15 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const bngDeviceSQLFilter = `
-	(
-		lower(coalesce(d.category,'')) LIKE '%bng%'
-		OR lower(coalesce(d.category,'')) LIKE '%concentrador%'
-		OR lower(coalesce(d.brand,'')) LIKE '%mikrotik%'
-		OR lower(coalesce(d.brand,'')) LIKE '%huawei%'
-		OR lower(coalesce(d.description,'')) LIKE '%bng%'
-	)
-`
+const bngDeviceSQLFilter = `COALESCE(d.bng_enabled, false) = true`
 
 type bngSessionOut struct {
 	DeviceID          uuid.UUID

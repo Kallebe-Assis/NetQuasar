@@ -317,7 +317,7 @@ export function OltPage() {
   const qc = useQueryClient();
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const [sel, setSel] = useState<string | null>(null);
-  const [snmpDebugOpen, setSnmpDebugOpen] = useState(true);
+  const [snmpDebugOpen, setSnmpDebugOpen] = useState(false);
   const [refreshScope, setRefreshScope] = useState<"onu" | "full" | "telemetry">("onu");
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkPhase, setBulkPhase] = useState<"select" | "running" | "results">("select");
@@ -585,6 +585,47 @@ export function OltPage() {
     });
     return out;
   }, [rows, sortDir, sortKey]);
+
+  const onuTableNote = useMemo(() => {
+    const summaryObj = detail.data?.summary as Record<string, unknown> | undefined;
+    const parts: string[] = [];
+    const collected = summaryObj?.onu_telnet_collected;
+    if (typeof collected === "number" && collected > 0) {
+      parts.push(`Telnet: ${collected} ONU(s) enriquecidas com dados CLI`);
+      if (summaryObj?.onu_telnet_at) {
+        parts.push(`(${String(summaryObj.onu_telnet_at)})`);
+      }
+    } else if (summaryObj?.onu_telnet_skipped) {
+      parts.push(`Telnet: ${String(summaryObj.onu_telnet_skipped)}`);
+    } else if (summaryObj?.onu_telnet_error) {
+      parts.push(`Telnet: ${String(summaryObj.onu_telnet_error)}`);
+    }
+    const base =
+      summaryObj?.onu_metrics_note
+        ? String(summaryObj.onu_metrics_note)
+        : summaryObj?.vsol_get_note
+          ? String(summaryObj.vsol_get_note)
+          : summaryObj?.vsol_walk_note
+            ? String(summaryObj.vsol_walk_note)
+            : summaryObj?.onu_metrics_missing
+              ? "Nenhuma MIB SNMP configurada para monitoramento deste modelo. Configure em Definições → Perfis OLT."
+              : "";
+    if (base) parts.unshift(base);
+    return parts.length > 0 ? parts.join(" · ") : undefined;
+  }, [detail.data?.summary]);
+
+  const ponTableNote = useMemo(() => {
+    const summaryObj = detail.data?.summary as Record<string, unknown> | undefined;
+    const collected = summaryObj?.pon_telnet_collected;
+    if (typeof collected === "number" && collected > 0) {
+      const at = summaryObj?.pon_telnet_at ? ` (${String(summaryObj.pon_telnet_at)})` : "";
+      return `Telnet PON: ${collected} porta(s) com métricas SFP${at}`;
+    }
+    if (summaryObj?.pon_telnet_skipped) return `Telnet PON: ${String(summaryObj.pon_telnet_skipped)}`;
+    if (summaryObj?.pon_telnet_error) return `Telnet PON: ${String(summaryObj.pon_telnet_error)}`;
+    return undefined;
+  }, [detail.data?.summary]);
+
   const sortArrow = (k: OltSortKey) => (sortKey !== k ? "↕" : sortDir === "asc" ? "↑" : "↓");
   const toggleSort = (k: OltSortKey) => {
     setSortKey((cur) => {
@@ -1115,6 +1156,9 @@ export function OltPage() {
                 </div>
 
                 <h2 style={{ marginTop: 18 }}>Portas PON</h2>
+                {ponTableNote ? (
+                  <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>{ponTableNote}</p>
+                ) : null}
                 <div className="table-wrap" style={{ maxHeight: 280, overflow: "auto" }}>
                   <table className="table table--compact" style={{ width: "100%", fontSize: 12 }}>
                     <thead>
@@ -1169,17 +1213,7 @@ export function OltPage() {
                     rxStatusMode={onuStatusByRx}
                     offlineRxDbm={offlineRxDbm}
                     onuRefs={typeof summaryObj?.vsol_onu_refs_count === "number" ? summaryObj.vsol_onu_refs_count : undefined}
-                    note={
-                      summaryObj?.onu_metrics_note
-                        ? String(summaryObj.onu_metrics_note)
-                        : summaryObj?.vsol_get_note
-                          ? String(summaryObj.vsol_get_note)
-                          : summaryObj?.vsol_walk_note
-                            ? String(summaryObj.vsol_walk_note)
-                            : summaryObj?.onu_metrics_missing
-                              ? "Nenhuma MIB SNMP configurada para monitoramento deste modelo. Configure em Definições → Perfis OLT."
-                              : undefined
-                    }
+                    note={onuTableNote}
                   />
                 </>
               )}

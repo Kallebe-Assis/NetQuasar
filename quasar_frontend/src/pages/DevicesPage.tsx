@@ -25,6 +25,7 @@ type Device = {
   telemetry_mode?: string | null;
   ping_enabled: boolean;
   telemetry_enabled: boolean;
+  bng_enabled?: boolean;
   operational_mode: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -320,6 +321,7 @@ function emptyForm(): Partial<Device> {
     network_status: "Normal",
     ping_enabled: true,
     telemetry_enabled: false,
+    bng_enabled: false,
     operational_mode: "Ativo",
     locality_id: null,
     access_mode: null,
@@ -725,6 +727,7 @@ export function DevicesPage() {
         telemetry_mode: telOn ? normalizeTelemetryMode(form.telemetry_mode ?? "SNMP") : null,
         ping_enabled: pingOn,
         telemetry_enabled: telOn,
+        bng_enabled: !!form.bng_enabled,
         operational_mode: form.operational_mode || "Ativo",
         latitude: form.latitude ?? null,
         longitude: form.longitude ?? null,
@@ -1447,6 +1450,12 @@ export function DevicesPage() {
                       telemetry_mode: telOn ? normalizeTelemetryMode(f.telemetry_mode ?? "SNMP") : f.telemetry_mode,
                     }))
                   }
+                />
+                <PanelSwitch
+                  id="device-bng"
+                  label="BNG"
+                  checked={!!form.bng_enabled}
+                  onChange={(bngOn) => setForm((f) => ({ ...f, bng_enabled: bngOn }))}
                 />
               </div>
               {formIsBridge && (

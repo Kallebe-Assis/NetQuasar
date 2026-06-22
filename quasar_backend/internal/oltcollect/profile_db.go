@@ -10,15 +10,17 @@ import (
 // LoadVendorProfile carrega o perfil de coleta OLT (brand/model) a partir da BD.
 func LoadVendorProfile(ctx context.Context, pool *pgxpool.Pool, brand, model string) (Profile, error) {
 	var p Profile
-	var stepsRaw, metricsRaw []byte
+	var stepsRaw, metricsRaw, reportRaw, ponTelnetRaw []byte
 	var onu, pon, trx, base *string
 	err := pool.QueryRow(ctx, `
 		SELECT brand, model, onu_online_oid, pon_status_oid, transceiver_oid, snmp_base_oid,
 			coalesce(collection_steps::text, '[]'),
-			coalesce(onu_metrics::text, '{}')
+			coalesce(onu_metrics::text, '{}'),
+			coalesce(onu_report_commands::text, '{}'),
+			coalesce(pon_telnet_commands::text, '{}')
 		FROM olt_vendor_models
 		WHERE upper(trim(brand)) = upper(trim($1)) AND upper(trim(model)) = upper(trim($2))
-	`, brand, model).Scan(&p.Brand, &p.Model, &onu, &pon, &trx, &base, &stepsRaw, &metricsRaw)
+	`, brand, model).Scan(&p.Brand, &p.Model, &onu, &pon, &trx, &base, &stepsRaw, &metricsRaw, &reportRaw, &ponTelnetRaw)
 	if err == pgx.ErrNoRows {
 		return p, err
 	}
@@ -39,5 +41,7 @@ func LoadVendorProfile(ctx context.Context, pool *pgxpool.Pool, brand, model str
 	}
 	p.Steps = ParseSteps(stepsRaw)
 	p.OnuMetrics = ParseOnuMetrics(metricsRaw)
+	p.OnuReport = ParseOnuReportConfig(reportRaw)
+	p.PonTelnet = ParsePonTelnetConfig(ponTelnetRaw)
 	return p, nil
 }

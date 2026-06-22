@@ -32,3 +32,8 @@ func onuReportCommandsJSON(c oltcollect.OnuReportConfig) json.RawMessage {
 	b, _ := json.Marshal(c)
 	return b
 }
+
+func ponTelnetCommandsJSON(c oltcollect.PonTelnetConfig) json.RawMessage {
+	b, _ := json.Marshal(c)
+	return b
+}

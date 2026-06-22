@@ -392,6 +392,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/refresh", s.refreshOLTDevice)
 				r.Post("/devices/{id}/snmp-debug", s.postOLTSnmpDebug)
 				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
+				r.Post("/devices/{id}/onu-serial-search", s.searchOLTOnuBySerial)
 			})
 		})
 

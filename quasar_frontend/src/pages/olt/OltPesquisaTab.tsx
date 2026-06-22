@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
-import { FileText, Filter } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, FileText, Filter, RefreshCw, Server } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { ApiError, apiFetch } from "../../lib/api";
@@ -29,10 +30,24 @@ export type OltOnuSearchResult = {
   if_index?: number;
   if_name?: string;
   snapshot_at?: string;
+  telnet_only?: boolean;
+};
+
+type TelnetSerialResult = {
+  ok: boolean;
+  olt_id: string;
+  olt_description?: string;
+  serial?: string;
+  command?: string;
+  output?: string;
+  gpon_onu?: string | null;
+  pon?: number;
+  onu?: number;
+  parsed?: Record<string, string>;
+  error?: string;
 };
 
 type SearchFilters = {
-  serial: string;
   model: string;
   online: "" | "true" | "false";
   rx_dbm_min: string;
@@ -43,11 +58,9 @@ type SearchFilters = {
   temp_max: string;
   voltage_min: string;
   voltage_max: string;
-  olt_id: string;
 };
 
 const EMPTY_FILTERS: SearchFilters = {
-  serial: "",
   model: "",
   online: "",
   rx_dbm_min: "",
@@ -58,7 +71,6 @@ const EMPTY_FILTERS: SearchFilters = {
   temp_max: "",
   voltage_min: "",
   voltage_max: "",
-  olt_id: "",
 };
 
 function parseOptFloat(s: string): number | undefined {
@@ -81,6 +93,7 @@ type Props = {
 export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 320);
+  const [selectedOltId, setSelectedOltId] = useState("");
   const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [draftFilters, setDraftFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -89,6 +102,13 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [reportSteps, setReportSteps] = useState<OltTelnetReportStep[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [errorModal, setErrorModal] = useState<ParsedApiError | null>(null);
+  const [telnetResult, setTelnetResult] = useState<TelnetSerialResult | null>(null);
+  const [telnetLoading, setTelnetLoading] = useState(false);
+
+  const selectedOltLabel = useMemo(() => {
+    if (!selectedOltId) return "Todas as OLTs";
+    return olts.find((o) => o.id === selectedOltId)?.description ?? "OLT";
+  }, [selectedOltId, olts]);
 
   function openErrorModal(e: unknown, title: string) {
     setErrorModal(parseApiErrorForModal(e, title));
@@ -96,10 +116,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (filters.serial.trim()) n++;
     if (filters.model.trim()) n++;
     if (filters.online) n++;
-    if (filters.olt_id) n++;
     if (filters.rx_dbm_min.trim() || filters.rx_dbm_max.trim()) n++;
     if (filters.tx_dbm_min.trim() || filters.tx_dbm_max.trim()) n++;
     if (filters.temp_min.trim() || filters.temp_max.trim()) n++;
@@ -115,9 +133,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
   const payload = useMemo(() => {
     const body: Record<string, unknown> = { q: debouncedQ.trim() };
-    if (filters.serial.trim()) body.serial = filters.serial.trim();
     if (filters.model.trim()) body.model = filters.model.trim();
-    if (filters.olt_id) body.olt_id = filters.olt_id;
+    if (selectedOltId) body.olt_id = selectedOltId;
     if (filters.online === "true") body.online = true;
     if (filters.online === "false") body.online = false;
     const rxMin = parseOptFloat(filters.rx_dbm_min);
@@ -137,14 +154,72 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (voltMin != null) body.voltage_min = voltMin;
     if (voltMax != null) body.voltage_max = voltMax;
     return body;
-  }, [debouncedQ, filters]);
+  }, [debouncedQ, filters, selectedOltId]);
 
   const payloadKey = JSON.stringify(payload);
   useEffect(() => {
     searchMut.mutate(payload);
   }, [payloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const results = searchMut.data?.results ?? [];
+  const runTelnetSerialSearch = useCallback(async (oltId: string, serial: string) => {
+    setTelnetLoading(true);
+    try {
+      const res = await apiFetch<TelnetSerialResult>(`/api/v1/olt/devices/${oltId}/onu-serial-search`, {
+        method: "POST",
+        json: { serial },
+      });
+      setTelnetResult(res);
+      if (!res.ok && res.error) {
+        openErrorModal(new ApiError(res.error, 200, "TELNET_FAILED", res), "Erro na consulta telnet");
+      }
+    } catch (e) {
+      setTelnetResult(null);
+      openErrorModal(e, "Erro na consulta telnet");
+    } finally {
+      setTelnetLoading(false);
+    }
+  }, []);
+
+  const telnetKey = `${selectedOltId}|${debouncedQ.trim()}`;
+  useEffect(() => {
+    const serial = debouncedQ.trim();
+    if (!canMutate || !selectedOltId || serial.length < 3) {
+      setTelnetResult(null);
+      setTelnetLoading(false);
+      return;
+    }
+    void runTelnetSerialSearch(selectedOltId, serial);
+  }, [canMutate, telnetKey, runTelnetSerialSearch, selectedOltId, debouncedQ]);
+
+  const snapshotResults = searchMut.data?.results ?? [];
+
+  const displayResults = useMemo(() => {
+    const list = [...snapshotResults];
+    if (telnetResult?.ok && telnetResult.pon && telnetResult.onu) {
+      const exists = list.some(
+        (r) => r.olt_id === telnetResult.olt_id && r.pon === telnetResult.pon && r.onu === telnetResult.onu,
+      );
+      if (!exists) {
+        const parsed = telnetResult.parsed ?? {};
+        list.unshift({
+          olt_id: telnetResult.olt_id,
+          olt_description: telnetResult.olt_description,
+          pon: telnetResult.pon,
+          onu: telnetResult.onu,
+          serial: telnetResult.serial ?? parsed.SN ?? debouncedQ.trim(),
+          model: parsed.Modelo ?? parsed["Modelo reportado"],
+          online: /online|working|up/i.test(parsed.Estado ?? parsed["Status ONU"] ?? ""),
+          rx_pwr: parsed.RX,
+          tx_pwr: parsed.TX,
+          temp: parsed.Temperatura,
+          voltage: parsed.Voltagem,
+          if_name: telnetResult.gpon_onu ?? undefined,
+          telnet_only: true,
+        });
+      }
+    }
+    return list;
+  }, [snapshotResults, telnetResult, debouncedQ]);
 
   async function runReport(row: OltOnuSearchResult) {
     if (!canMutate) return;
@@ -195,9 +270,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
   return (
     <>
-      <div className="conn-toolbar" style={{ marginBottom: 12 }}>
-        <PageCountPill label="ONUs encontradas" count={results.length} />
-        <div className="conn-toolbar__spacer" aria-hidden />
+      <div className="conn-toolbar olt-pesquisa-toolbar" style={{ marginBottom: 12 }}>
         <label className="conn-toolbar__search">
           <input
             className="input"
@@ -208,6 +281,47 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             autoComplete="off"
           />
         </label>
+
+        <DropdownMenu
+          align="start"
+          minWidth={260}
+          trigger={({ toggle }) => (
+            <button type="button" className="btn olt-pesquisa-toolbar__olt-btn" onClick={toggle} title="Seleccionar OLT">
+              <Server size={15} aria-hidden />
+              <span className="olt-pesquisa-toolbar__olt-label">{selectedOltLabel}</span>
+              <ChevronDown size={14} aria-hidden />
+            </button>
+          )}
+        >
+          {({ close }) => (
+            <div>
+              <button
+                type="button"
+                className="action-menu__item"
+                onClick={() => {
+                  setSelectedOltId("");
+                  close();
+                }}
+              >
+                Todas as OLTs
+              </button>
+              {olts.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="action-menu__item"
+                  onClick={() => {
+                    setSelectedOltId(o.id);
+                    close();
+                  }}
+                >
+                  {o.description ?? o.id}
+                </button>
+              ))}
+            </div>
+          )}
+        </DropdownMenu>
+
         <button
           type="button"
           className="btn btn--icon"
@@ -221,7 +335,96 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         >
           <Filter size={16} />
         </button>
+
+        <div className="conn-toolbar__spacer" aria-hidden />
+        <PageCountPill label="ONUs encontradas" count={displayResults.length} />
       </div>
+
+      {canMutate && selectedOltId && debouncedQ.trim().length >= 3 ? (
+        <div className="card" style={{ padding: "10px 12px", marginBottom: 12, fontSize: 12 }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <strong>Consulta telnet na OLT</strong>
+              <span style={{ color: "var(--muted)", marginLeft: 8 }}>{selectedOltLabel}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--icon"
+              title="Repetir consulta telnet"
+              disabled={telnetLoading}
+              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim())}
+            >
+              <RefreshCw size={15} className={telnetLoading ? "map-refresh-spin" : undefined} />
+            </button>
+          </div>
+          {telnetLoading && !telnetResult ? (
+            <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>A consultar série via telnet…</p>
+          ) : telnetResult ? (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ margin: "0 0 6px", color: "var(--muted)" }}>
+                Comando: <span className="mono">{telnetResult.command ?? EM_DASH}</span>
+                {telnetResult.gpon_onu ? (
+                  <>
+                    {" "}
+                    · Interface: <span className="mono">{telnetResult.gpon_onu}</span>
+                  </>
+                ) : null}
+                {telnetResult.pon && telnetResult.onu ? (
+                  <>
+                    {" "}
+                    · PON <span className="mono">{telnetResult.pon}</span> / ONU <span className="mono">{telnetResult.onu}</span>
+                  </>
+                ) : null}
+              </p>
+              {telnetResult.output ? (
+                <pre
+                  className="mono"
+                  style={{
+                    margin: 0,
+                    maxHeight: 140,
+                    overflow: "auto",
+                    fontSize: 11,
+                    padding: 8,
+                    background: "var(--bg)",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {telnetResult.output}
+                </pre>
+              ) : (
+                <p style={{ margin: 0, color: "var(--muted)" }}>Sem saída do equipamento.</p>
+              )}
+              {telnetResult.ok && telnetResult.pon && telnetResult.onu ? (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: 8 }}
+                  disabled={reportLoading}
+                  onClick={() =>
+                    void runReport({
+                      olt_id: telnetResult.olt_id,
+                      olt_description: telnetResult.olt_description,
+                      pon: telnetResult.pon,
+                      onu: telnetResult.onu,
+                      serial: telnetResult.serial ?? debouncedQ.trim(),
+                      if_name: telnetResult.gpon_onu ?? undefined,
+                    })
+                  }
+                >
+                  <FileText size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                  Relatório completo telnet
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : canMutate && debouncedQ.trim().length >= 3 && !selectedOltId ? (
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px" }}>
+          Seleccione uma OLT para consultar o número de série via telnet (comando configurado em Definições → Perfis OLT).
+        </p>
+      ) : null}
 
       {searchMut.isPending && !searchMut.data ? <p>A pesquisar ONUs…</p> : null}
 
@@ -243,9 +446,16 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             </tr>
           </thead>
           <tbody>
-            {results.map((r) => (
-              <tr key={`${r.olt_id}-${r.pon}-${r.onu}-${r.serial ?? ""}`}>
-                <td>{r.olt_description ?? EM_DASH}</td>
+            {displayResults.map((r) => (
+              <tr key={`${r.olt_id}-${r.pon}-${r.onu}-${r.serial ?? ""}-${r.telnet_only ? "t" : "s"}`}>
+                <td>
+                  {r.olt_description ?? EM_DASH}
+                  {r.telnet_only ? (
+                    <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>
+                      telnet
+                    </span>
+                  ) : null}
+                </td>
                 <td className="mono">{r.pon ?? EM_DASH}</td>
                 <td className="mono">{r.onu ?? EM_DASH}</td>
                 <td className="mono">{r.serial ?? EM_DASH}</td>
@@ -265,24 +475,29 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                 <td className="mono">{r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}</td>
                 {canMutate ? (
                   <td>
-                    <button
-                      type="button"
-                      className="btn btn--icon"
-                      title="Relatório telnet desta ONU"
-                      disabled={reportLoading}
-                      onClick={() => void runReport(r)}
-                    >
-                      <FileText size={15} />
-                    </button>
+                    {r.pon && r.onu ? (
+                      <button
+                        type="button"
+                        className="btn btn--icon"
+                        title="Relatório telnet desta ONU"
+                        disabled={reportLoading}
+                        onClick={() => void runReport(r)}
+                      >
+                        <FileText size={15} />
+                      </button>
+                    ) : null}
                   </td>
                 ) : null}
               </tr>
             ))}
           </tbody>
         </table>
-        {!searchMut.isPending && results.length === 0 ? (
+        {!searchMut.isPending && displayResults.length === 0 ? (
           <p style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
-            Nenhuma ONU encontrada nos snapshots. Actualize as OLTs em Equipamentos ou ajuste os filtros.
+            Nenhuma ONU encontrada nos snapshots.
+            {canMutate && debouncedQ.trim().length >= 3 && !selectedOltId
+              ? " Seleccione uma OLT para pesquisar o serial via telnet."
+              : " Actualize as OLTs em Equipamentos ou ajuste os filtros."}
           </p>
         ) : null}
       </div>
@@ -291,21 +506,6 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setFiltersOpen(false)}>
           <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 520 }} onMouseDown={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Filtros de pesquisa ONU</h3>
-            <div className="field">
-              <label>OLT</label>
-              <select className="input" value={draftFilters.olt_id} onChange={(e) => setDraftFilters({ ...draftFilters, olt_id: e.target.value })}>
-                <option value="">Todas</option>
-                {olts.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.description ?? o.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Série (contém)</label>
-              <input className="input" value={draftFilters.serial} onChange={(e) => setDraftFilters({ ...draftFilters, serial: e.target.value })} />
-            </div>
             <div className="field">
               <label>Modelo (contém)</label>
               <input className="input" value={draftFilters.model} onChange={(e) => setDraftFilters({ ...draftFilters, model: e.target.value })} />

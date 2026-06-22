@@ -20,6 +20,7 @@ type oltVendorModelRow struct {
 	OnuMetrics         oltcollect.OnuMetricsConfig `json:"onu_metrics"`
 	CollectionSteps    []oltcollect.Step           `json:"collection_steps"`
 	OnuReportCommands  oltcollect.OnuReportConfig  `json:"onu_report_commands"`
+	PonTelnetCommands  oltcollect.PonTelnetConfig  `json:"pon_telnet_commands"`
 }
 
 func normalizeOltBrandModel(brand, model string) (string, string, bool) {
@@ -65,7 +66,8 @@ func (s *Server) listOltVendorModels(w http.ResponseWriter, r *http.Request) {
 			onu_online_oid, pon_status_oid, transceiver_oid, snmp_base_oid,
 			coalesce(onu_metrics::text, '{}'),
 			coalesce(collection_steps::text, '[]'),
-			coalesce(onu_report_commands::text, '{}')
+			coalesce(onu_report_commands::text, '{}'),
+			coalesce(pon_telnet_commands::text, '{}')
 		FROM olt_vendor_models
 		WHERE brand = $1 AND model <> 'Padrão'
 		ORDER BY model
@@ -78,14 +80,15 @@ func (s *Server) listOltVendorModels(w http.ResponseWriter, r *http.Request) {
 	var list []oltVendorModelRow
 	for rows.Next() {
 		var row oltVendorModelRow
-		var stepsRaw, metricsRaw, reportRaw []byte
-		if err := rows.Scan(&row.Brand, &row.Model, &row.OnuOnlineOID, &row.PonStatusOID, &row.TransceiverOID, &row.SNMPBaseOID, &metricsRaw, &stepsRaw, &reportRaw); err != nil {
+		var stepsRaw, metricsRaw, reportRaw, ponTelnetRaw []byte
+		if err := rows.Scan(&row.Brand, &row.Model, &row.OnuOnlineOID, &row.PonStatusOID, &row.TransceiverOID, &row.SNMPBaseOID, &metricsRaw, &stepsRaw, &reportRaw, &ponTelnetRaw); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		row.CollectionSteps = oltcollect.ParseSteps(stepsRaw)
 		row.OnuMetrics = oltcollect.ParseOnuMetrics(metricsRaw)
 		row.OnuReportCommands = oltcollect.ParseOnuReportConfig(reportRaw)
+		row.PonTelnetCommands = oltcollect.ParsePonTelnetConfig(ponTelnetRaw)
 		list = append(list, row)
 	}
 	if list == nil {
@@ -114,18 +117,20 @@ func (s *Server) getOltVendorModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) queryOltVendorModel(r *http.Request, brand, model string) (oltVendorModelRow, error) {
 	var row oltVendorModelRow
-	var stepsRaw, metricsRaw, reportRaw []byte
+	var stepsRaw, metricsRaw, reportRaw, ponTelnetRaw []byte
 	err := s.DB().QueryRow(r.Context(), `
 		SELECT brand, model, onu_online_oid, pon_status_oid, transceiver_oid, snmp_base_oid,
 			coalesce(onu_metrics::text, '{}'),
 			coalesce(collection_steps::text, '[]'),
-			coalesce(onu_report_commands::text, '{}')
+			coalesce(onu_report_commands::text, '{}'),
+			coalesce(pon_telnet_commands::text, '{}')
 		FROM olt_vendor_models WHERE brand = $1 AND model = $2
-	`, brand, model).Scan(&row.Brand, &row.Model, &row.OnuOnlineOID, &row.PonStatusOID, &row.TransceiverOID, &row.SNMPBaseOID, &metricsRaw, &stepsRaw, &reportRaw)
+	`, brand, model).Scan(&row.Brand, &row.Model, &row.OnuOnlineOID, &row.PonStatusOID, &row.TransceiverOID, &row.SNMPBaseOID, &metricsRaw, &stepsRaw, &reportRaw, &ponTelnetRaw)
 	if err == nil {
 		row.CollectionSteps = oltcollect.ParseSteps(stepsRaw)
 		row.OnuMetrics = oltcollect.ParseOnuMetrics(metricsRaw)
 		row.OnuReportCommands = oltcollect.ParseOnuReportConfig(reportRaw)
+		row.PonTelnetCommands = oltcollect.ParsePonTelnetConfig(ponTelnetRaw)
 	}
 	return row, err
 }
@@ -190,12 +195,13 @@ func (s *Server) patchOltVendorModel(w http.ResponseWriter, r *http.Request) {
 		OnuMetrics         oltcollect.OnuMetricsConfig `json:"onu_metrics"`
 		CollectionSteps    []oltcollect.Step           `json:"collection_steps"`
 		OnuReportCommands  *oltcollect.OnuReportConfig `json:"onu_report_commands"`
+		PonTelnetCommands  *oltcollect.PonTelnetConfig `json:"pon_telnet_commands"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
-	var stepsArg, metricsArg, reportArg any
+	var stepsArg, metricsArg, reportArg, ponTelnetArg any
 	if body.CollectionSteps != nil {
 		stepsArg = collectionStepsJSON(body.CollectionSteps)
 	}
@@ -204,6 +210,9 @@ func (s *Server) patchOltVendorModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.OnuReportCommands != nil {
 		reportArg = onuReportCommandsJSON(*body.OnuReportCommands)
+	}
+	if body.PonTelnetCommands != nil {
+		ponTelnetArg = ponTelnetCommandsJSON(*body.PonTelnetCommands)
 	}
 	tag, err := s.DB().Exec(r.Context(), `
 		UPDATE olt_vendor_models SET
@@ -214,9 +223,10 @@ func (s *Server) patchOltVendorModel(w http.ResponseWriter, r *http.Request) {
 			onu_metrics = COALESCE($7::jsonb, onu_metrics),
 			collection_steps = COALESCE($8::jsonb, collection_steps),
 			onu_report_commands = COALESCE($9::jsonb, onu_report_commands),
+			pon_telnet_commands = COALESCE($10::jsonb, pon_telnet_commands),
 			updated_at = now()
 		WHERE brand = $1 AND model = $2
-	`, brand, model, body.OnuOnlineOID, body.PonStatusOID, body.TransceiverOID, body.SNMPBaseOID, metricsArg, stepsArg, reportArg)
+	`, brand, model, body.OnuOnlineOID, body.PonStatusOID, body.TransceiverOID, body.SNMPBaseOID, metricsArg, stepsArg, reportArg, ponTelnetArg)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

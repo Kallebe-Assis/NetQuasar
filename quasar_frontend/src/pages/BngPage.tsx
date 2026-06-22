@@ -65,7 +65,7 @@ export function BngPage() {
         <PageCountPill label="Sessões" count={rows.length} />
       </div>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Sessões PPPoE activas recolhidas via SNMP (MikroTik IF-MIB / telemetria). Equipamentos BNG, concentradores e MikroTik.
+        Sessões PPPoE activas recolhidas via SNMP (MikroTik IF-MIB / telemetria). Apenas equipamentos com o switch BNG activo em Configurações → Equipamentos.
       </p>
       {note && (
         <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>{note}</p>

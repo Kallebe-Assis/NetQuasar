@@ -92,6 +92,10 @@ func runOltWorkerStep(ctx context.Context, st *oltWorkerExecState, step oltcolle
 		return oltWorkerSNMPWalk(ctx, st, step)
 	case oltcollect.MethodTelnet:
 		return oltWorkerTelnet(ctx, st, step)
+	case oltcollect.MethodOnuTelnetReport:
+		return oltWorkerOnuTelnetReport(ctx, st)
+	case oltcollect.MethodPonTelnetCollect:
+		return oltWorkerPonTelnetCollect(ctx, st)
 	case oltcollect.MethodDatacomBuildPons:
 		return oltWorkerDatacomBuildPons(st)
 	case oltcollect.MethodIfMibMergePons:
@@ -411,6 +415,57 @@ func oltWorkerTelnet(ctx context.Context, st *oltWorkerExecState, step oltcollec
 	}
 	st.Summary["zte_telnet_applied"] = true
 	st.SkipStab = true
+	return nil
+}
+
+// oltWorkerOnuTelnetReport enriquece vsol_onu_rows com dados CLI por ONU (perfil onu_report_commands).
+func oltWorkerOnuTelnetReport(ctx context.Context, st *oltWorkerExecState) error {
+	cfg := st.Profile.OnuReport
+	if !cfg.MonitorEnabled() {
+		st.Summary["onu_telnet_skipped"] = "desactivado no perfil"
+		return nil
+	}
+	rows := oltcollect.OnuRowsFromSummary(st.Summary)
+	if len(rows) == 0 {
+		st.Summary["onu_telnet_skipped"] = "sem ONUs SNMP para enriquecer"
+		return nil
+	}
+	creds, err := oltcollect.LoadTelnetCredentials(ctx, st.Pool)
+	if err != nil {
+		st.Summary["onu_telnet_error"] = err.Error()
+		return nil
+	}
+	telTO := st.TelnetTO
+	if telTO <= 0 {
+		telTO = 45 * time.Second
+	}
+	result := oltcollect.EnrichOnuRowsViaTelnet(ctx, st.Host, creds, cfg, rows, telTO)
+	oltcollect.ApplyOnuTelnetResultToSummary(st.Summary, result)
+	return nil
+}
+
+func oltWorkerPonTelnetCollect(ctx context.Context, st *oltWorkerExecState) error {
+	cfg := st.Profile.PonTelnet
+	if !cfg.MonitorEnabled() {
+		st.Summary["pon_telnet_skipped"] = "desactivado no perfil"
+		return nil
+	}
+	if len(st.Pons) == 0 {
+		st.Summary["pon_telnet_skipped"] = "sem PONs para enriquecer"
+		return nil
+	}
+	creds, err := oltcollect.LoadTelnetCredentials(ctx, st.Pool)
+	if err != nil {
+		st.Summary["pon_telnet_error"] = err.Error()
+		return nil
+	}
+	telTO := st.TelnetTO
+	if telTO <= 0 {
+		telTO = 35 * time.Second
+	}
+	result := oltcollect.EnrichPonRowsViaTelnet(ctx, st.Host, creds, cfg, st.Pons, telTO)
+	oltcollect.ApplyPonTelnetResultToSummary(st.Summary, result)
+	st.Pons = result.Rows
 	return nil
 }
 
