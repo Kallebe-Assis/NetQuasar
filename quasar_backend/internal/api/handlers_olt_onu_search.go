@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -31,6 +32,7 @@ type oltOnuSearchRequest struct {
 	VoltageMin *float64 `json:"voltage_min"`
 	VoltageMax *float64 `json:"voltage_max"`
 	OltID      string   `json:"olt_id"`
+	Pon        int      `json:"pon"`
 }
 
 type oltOnuReportRequest struct {
@@ -43,6 +45,7 @@ type oltOnuReportRequest struct {
 
 type oltOnuSerialSearchRequest struct {
 	Serial string `json:"serial"`
+	Pon    int    `json:"pon"` // 0 = todas as portas
 }
 
 type oltTelnetSession struct {
@@ -318,7 +321,7 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, 2*time.Minute)
+	extendWriteDeadline(w, 3*time.Minute)
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
@@ -361,58 +364,81 @@ func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {
 	}
 
 	secrets := oltcollect.TelnetSecrets{Password: sess.Password, Enable: sess.Enable}
-	target := oltcollect.OnuReportTarget{Serial: serial}
-	lookupCmd := sess.Cfg.RenderSerialSearchCommand(target, secrets)
-	preRendered := sess.Cfg.RenderPreCommands(target, secrets)
-
-	tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
-		Host: sess.Host, Port: "23", Timeout: 45 * time.Second,
-		User: sess.User, Password: sess.Password, Enable: sess.Enable,
-		Command: lookupCmd, PreCommands: preRendered, MaxReadBytes: 280000,
-	})
-
-	gponOnu := ""
-	pon, onu := 0, 0
-	if tel.OK {
-		gponOnu = oltcollect.ParseGponOnuFromOutput(tel.Output)
-		if gponOnu != "" {
-			pon, onu = oltcollect.ParsePonOnuFromGponOnu(gponOnu)
+	ponIndexes := oltcollect.LoadOLTPonIndexesFromSnapshot(ctx, s.DB(), id)
+	telTO := 90 * time.Second
+	if sess.Cfg.SerialSearchUsesPonPlaceholder() && body.Pon <= 0 && len(ponIndexes) > 4 {
+		telTO = time.Duration(len(ponIndexes)) * 12 * time.Second
+		if telTO > 3*time.Minute {
+			telTO = 3 * time.Minute
 		}
 	}
-	parsed := oltcollect.ExtractTelnetKVFieldsPublic(tel.Output)
+	telCtx, cancel := context.WithTimeout(ctx, telTO)
+	defer cancel()
+
+	searchRes := oltcollect.RunSerialSearchTelnet(
+		telCtx, sess.Host, sess.User, sess.Password, sess.Enable,
+		sess.Cfg, secrets,
+		oltcollect.SerialSearchRunOpts{Serial: serial, Pon: body.Pon},
+		ponIndexes, telTO,
+	)
+
+	first := oltcollect.FirstSerialSearchMatch(searchRes)
+	parsed := oltcollect.ExtractTelnetKVFieldsPublic(searchRes.Output)
+	if first.Serial != "" {
+		parsed["SN"] = first.Serial
+	}
+	if first.Model != "" {
+		parsed["Modelo"] = first.Model
+	}
+
+	var matches []map[string]any
+	for _, m := range searchRes.Matches {
+		matches = append(matches, oltcollect.SerialSearchEntryToMap(m))
+	}
+	if matches == nil {
+		matches = []map[string]any{}
+	}
 
 	out := map[string]any{
-		"ok":              tel.OK,
+		"ok":              searchRes.OK,
+		"mode":            searchRes.Mode,
 		"olt_id":          id,
 		"olt_description": sess.Desc,
 		"serial":          serial,
-		"command":         lookupCmd,
-		"output":          tel.Output,
-		"gpon_onu":        nilIfBlankStr(gponOnu),
+		"pon_filter":      body.Pon,
+		"command":         searchRes.Command,
+		"commands":        searchRes.Commands,
+		"output":          searchRes.Output,
+		"matches":         matches,
 		"parsed":          parsed,
+		"gpon_onu":        nilIfBlankStr(first.GponOnu),
 	}
-	if pon > 0 {
-		out["pon"] = pon
+	if first.Pon > 0 {
+		out["pon"] = first.Pon
 	}
-	if onu > 0 {
-		out["onu"] = onu
+	if first.Onu > 0 {
+		out["onu"] = first.Onu
 	}
-	if !tel.OK && tel.Error != "" {
-		out["error"] = tel.Error
+	if searchRes.Error != "" {
+		out["error"] = searchRes.Error
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) lookupGponOnuBySerial(ctx context.Context, sess oltTelnetSession, target oltcollect.OnuReportTarget, secrets oltcollect.TelnetSecrets) string {
-	lookupCmd := sess.Cfg.RenderSerialSearchCommand(target, secrets)
-	pre := sess.Cfg.RenderPreCommands(target, secrets)
-	tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
-		Host: sess.Host, Port: "23", Timeout: 45 * time.Second,
-		User: sess.User, Password: sess.Password, Enable: sess.Enable,
-		Command: lookupCmd, PreCommands: pre, MaxReadBytes: 280000,
-	})
-	if tel.OK {
-		return oltcollect.ParseGponOnuFromOutput(tel.Output)
+	ponIndexes := oltcollect.LoadOLTPonIndexesFromSnapshot(ctx, s.DB(), sess.DeviceID)
+	searchRes := oltcollect.RunSerialSearchTelnet(
+		ctx, sess.Host, sess.User, sess.Password, sess.Enable,
+		sess.Cfg, secrets,
+		oltcollect.SerialSearchRunOpts{Serial: target.Serial, Pon: target.Pon},
+		ponIndexes, 45*time.Second,
+	)
+	first := oltcollect.FirstSerialSearchMatch(searchRes)
+	if first.GponOnu != "" {
+		return first.GponOnu
+	}
+	if first.Pon > 0 && first.Onu > 0 {
+		return fmt.Sprintf("gpon_onu-1/1/%d:%d", first.Pon, first.Onu)
 	}
 	return ""
 }
@@ -454,6 +480,12 @@ func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ,
 			return false
 		}
 	}
+	if f.Pon > 0 {
+		pon := intFromOnuSearchRow(row, "pon")
+		if pon != f.Pon {
+			return false
+		}
+	}
 	rx := floatFromOnuRow(row, "rx_dbm", "rx_pwr", "rx")
 	if !rangeOK(rx, f.RxDbmMin, f.RxDbmMax) {
 		return false
@@ -471,6 +503,23 @@ func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ,
 		return false
 	}
 	return true
+}
+
+func intFromOnuSearchRow(row map[string]any, key string) int {
+	if row == nil {
+		return 0
+	}
+	switch v := row[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	default:
+		n, _ := strconv.Atoi(strings.TrimSpace(stringFromAny(row[key])))
+		return n
+	}
 }
 
 func stringFromAny(v any) string {

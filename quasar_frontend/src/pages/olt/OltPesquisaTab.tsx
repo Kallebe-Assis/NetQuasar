@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronDown, FileText, Filter, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DropdownMenu } from "../../components/DropdownMenu";
@@ -37,13 +37,26 @@ export type OltOnuSearchResult = {
   channel?: string;
 };
 
+type TelnetSerialMatch = {
+  pon?: number;
+  onu?: number;
+  serial?: string;
+  model?: string;
+  profile?: string;
+  gpon_onu?: string;
+};
+
 type TelnetSerialResult = {
   ok: boolean;
+  mode?: "direct" | "list";
   olt_id: string;
   olt_description?: string;
   serial?: string;
+  pon_filter?: number;
   command?: string;
+  commands?: Array<{ command?: string; output?: string; pon?: number; ok?: boolean }>;
   output?: string;
+  matches?: TelnetSerialMatch[];
   gpon_onu?: string | null;
   pon?: number;
   onu?: number;
@@ -98,6 +111,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 320);
   const [selectedOltId, setSelectedOltId] = useState("");
+  const [selectedPon, setSelectedPon] = useState(0);
   const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [draftFilters, setDraftFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -113,6 +127,31 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (!selectedOltId) return "Todas as OLTs";
     return olts.find((o) => o.id === selectedOltId)?.description ?? "OLT";
   }, [selectedOltId, olts]);
+
+  const oltDetailQ = useQuery({
+    queryKey: ["olt", "pesquisa-pons", selectedOltId],
+    enabled: Boolean(selectedOltId),
+    queryFn: () =>
+      apiFetch<{ pons_table?: Array<{ pon?: number; id?: string; name?: string }> }>(
+        `/api/v1/olt/devices/${selectedOltId}`,
+      ),
+    staleTime: 60_000,
+  });
+
+  const ponOptions = useMemo(() => {
+    const rows = oltDetailQ.data?.pons_table ?? [];
+    const nums = rows
+      .map((r) => {
+        if (typeof r.pon === "number" && r.pon > 0) return r.pon;
+        const name = String(r.name ?? r.id ?? "");
+        const m = name.match(/GPON0\/(\d+)/i);
+        return m ? Number.parseInt(m[1], 10) : 0;
+      })
+      .filter((n) => n > 0);
+    return [...new Set(nums)].sort((a, b) => a - b);
+  }, [oltDetailQ.data?.pons_table]);
+
+  const selectedPonLabel = selectedPon > 0 ? `PON ${selectedPon}` : "Todas as PONs";
 
   function openErrorModal(e: unknown, title: string) {
     setErrorModal(parseApiErrorForModal(e, title));
@@ -139,6 +178,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     const body: Record<string, unknown> = { q: debouncedQ.trim() };
     if (filters.model.trim()) body.model = filters.model.trim();
     if (selectedOltId) body.olt_id = selectedOltId;
+    if (selectedPon > 0) body.pon = selectedPon;
     if (filters.online === "true") body.online = true;
     if (filters.online === "false") body.online = false;
     const rxMin = parseOptFloat(filters.rx_dbm_min);
@@ -158,19 +198,19 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (voltMin != null) body.voltage_min = voltMin;
     if (voltMax != null) body.voltage_max = voltMax;
     return body;
-  }, [debouncedQ, filters, selectedOltId]);
+  }, [debouncedQ, filters, selectedOltId, selectedPon]);
 
   const payloadKey = JSON.stringify(payload);
   useEffect(() => {
     searchMut.mutate(payload);
   }, [payloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runTelnetSerialSearch = useCallback(async (oltId: string, serial: string) => {
+  const runTelnetSerialSearch = useCallback(async (oltId: string, serial: string, pon: number) => {
     setTelnetLoading(true);
     try {
       const res = await apiFetch<TelnetSerialResult>(`/api/v1/olt/devices/${oltId}/onu-serial-search`, {
         method: "POST",
-        json: { serial },
+        json: { serial, pon: pon > 0 ? pon : undefined },
       });
       setTelnetResult(res);
       if (!res.ok && res.error) {
@@ -184,7 +224,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     }
   }, []);
 
-  const telnetKey = `${selectedOltId}|${debouncedQ.trim()}`;
+  const telnetKey = `${selectedOltId}|${selectedPon}|${debouncedQ.trim()}`;
   useEffect(() => {
     const serial = debouncedQ.trim();
     if (!canMutate || !selectedOltId || serial.length < 3) {
@@ -192,35 +232,43 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       setTelnetLoading(false);
       return;
     }
-    void runTelnetSerialSearch(selectedOltId, serial);
-  }, [canMutate, telnetKey, runTelnetSerialSearch, selectedOltId, debouncedQ]);
+    void runTelnetSerialSearch(selectedOltId, serial, selectedPon);
+  }, [canMutate, telnetKey, runTelnetSerialSearch, selectedOltId, selectedPon, debouncedQ]);
 
   const snapshotResults = searchMut.data?.results ?? [];
 
   const displayResults = useMemo(() => {
     const list = [...snapshotResults];
-    if (telnetResult?.ok && telnetResult.pon && telnetResult.onu) {
+    const telnetMatches =
+      telnetResult?.matches && telnetResult.matches.length > 0
+        ? telnetResult.matches
+        : telnetResult?.ok && telnetResult.pon && telnetResult.onu
+          ? [
+              {
+                pon: telnetResult.pon,
+                onu: telnetResult.onu,
+                serial: telnetResult.serial,
+                gpon_onu: telnetResult.gpon_onu ?? undefined,
+              },
+            ]
+          : [];
+
+    for (const match of telnetMatches) {
+      if (!match.pon || !match.onu) continue;
       const exists = list.some(
-        (r) => r.olt_id === telnetResult.olt_id && r.pon === telnetResult.pon && r.onu === telnetResult.onu,
+        (r) => r.olt_id === telnetResult?.olt_id && r.pon === match.pon && r.onu === match.onu,
       );
-      if (!exists) {
-        const parsed = telnetResult.parsed ?? {};
-        list.unshift({
-          olt_id: telnetResult.olt_id,
-          olt_description: telnetResult.olt_description,
-          pon: telnetResult.pon,
-          onu: telnetResult.onu,
-          serial: telnetResult.serial ?? parsed.SN ?? debouncedQ.trim(),
-          model: parsed.Modelo ?? parsed["Modelo reportado"],
-          online: /online|working|up/i.test(parsed.Estado ?? parsed["Status ONU"] ?? ""),
-          rx_pwr: parsed.RX,
-          tx_pwr: parsed.TX,
-          temp: parsed.Temperatura,
-          voltage: parsed.Voltagem,
-          if_name: telnetResult.gpon_onu ?? undefined,
-          telnet_only: true,
-        });
-      }
+      if (exists) continue;
+      list.unshift({
+        olt_id: telnetResult!.olt_id,
+        olt_description: telnetResult!.olt_description,
+        pon: match.pon,
+        onu: match.onu,
+        serial: match.serial ?? telnetResult?.serial ?? debouncedQ.trim(),
+        model: match.model,
+        if_name: match.gpon_onu ?? undefined,
+        telnet_only: true,
+      });
     }
     return list;
   }, [snapshotResults, telnetResult, debouncedQ]);
@@ -304,6 +352,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                 className="action-menu__item"
                 onClick={() => {
                   setSelectedOltId("");
+                  setSelectedPon(0);
                   close();
                 }}
               >
@@ -316,6 +365,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                   className="action-menu__item"
                   onClick={() => {
                     setSelectedOltId(o.id);
+                    setSelectedPon(0);
                     close();
                   }}
                 >
@@ -325,6 +375,52 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             </div>
           )}
         </DropdownMenu>
+
+        {selectedOltId ? (
+          <DropdownMenu
+            align="start"
+            minWidth={160}
+            trigger={({ toggle }) => (
+              <button type="button" className="btn olt-pesquisa-toolbar__olt-btn" onClick={toggle} title="Filtrar porta PON na consulta telnet">
+                <span className="olt-pesquisa-toolbar__olt-label">{selectedPonLabel}</span>
+                <ChevronDown size={14} aria-hidden />
+              </button>
+            )}
+          >
+            {({ close }) => (
+              <div>
+                <button
+                  type="button"
+                  className="action-menu__item"
+                  onClick={() => {
+                    setSelectedPon(0);
+                    close();
+                  }}
+                >
+                  Todas as PONs
+                </button>
+                {ponOptions.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className="action-menu__item"
+                    onClick={() => {
+                      setSelectedPon(p);
+                      close();
+                    }}
+                  >
+                    PON {p}
+                  </button>
+                ))}
+                {ponOptions.length === 0 ? (
+                  <p style={{ padding: "8px 12px", margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                    Sem snapshot PON — use Todas ou actualize a OLT.
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </DropdownMenu>
+        ) : null}
 
         <button
           type="button"
@@ -350,13 +446,18 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             <div>
               <strong>Consulta telnet na OLT</strong>
               <span style={{ color: "var(--muted)", marginLeft: 8 }}>{selectedOltLabel}</span>
+              {selectedPon > 0 ? (
+                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· PON {selectedPon}</span>
+              ) : (
+                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· todas as PONs</span>
+              )}
             </div>
             <button
               type="button"
               className="btn btn--icon"
               title="Repetir consulta telnet"
               disabled={telnetLoading}
-              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim())}
+              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim(), selectedPon)}
             >
               <RefreshCw size={15} className={telnetLoading ? "map-refresh-spin" : undefined} />
             </button>
@@ -365,6 +466,15 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>A consultar série via telnet…</p>
           ) : telnetResult ? (
             <div style={{ marginTop: 8 }}>
+              <p style={{ margin: "0 0 6px", color: "var(--muted)" }}>
+                Modo: <span className="mono">{telnetResult.mode === "list" ? "listagem + filtro local" : "directo"}</span>
+                {typeof telnetResult.matches?.length === "number" ? (
+                  <>
+                    {" "}
+                    · Correspondências: <span className="mono">{telnetResult.matches.length}</span>
+                  </>
+                ) : null}
+              </p>
               <p style={{ margin: "0 0 6px", color: "var(--muted)" }}>
                 Comando: <span className="mono">{telnetResult.command ?? EM_DASH}</span>
                 {telnetResult.gpon_onu ? (
@@ -400,7 +510,29 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               ) : (
                 <p style={{ margin: 0, color: "var(--muted)" }}>Sem saída do equipamento.</p>
               )}
-              {telnetResult.ok && telnetResult.pon && telnetResult.onu ? (
+              {telnetResult.ok && (telnetResult.matches?.length ?? 0) > 0 ? (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: 8 }}
+                  disabled={reportLoading}
+                  onClick={() => {
+                    const first = telnetResult.matches?.[0];
+                    if (!first?.pon || !first?.onu) return;
+                    void runReport({
+                      olt_id: telnetResult.olt_id,
+                      olt_description: telnetResult.olt_description,
+                      pon: first.pon,
+                      onu: first.onu,
+                      serial: first.serial ?? telnetResult.serial ?? debouncedQ.trim(),
+                      if_name: first.gpon_onu ?? telnetResult.gpon_onu ?? undefined,
+                    });
+                  }}
+                >
+                  <FileText size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                  Relatório completo telnet
+                </button>
+              ) : telnetResult.ok && telnetResult.pon && telnetResult.onu ? (
                 <button
                   type="button"
                   className="btn"

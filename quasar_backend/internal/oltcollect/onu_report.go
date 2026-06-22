@@ -148,6 +148,23 @@ func ParseGponOnuFromOutput(output string) string {
 	return ""
 }
 
+// ResolveGponOnuFromSerialSearchOutput tenta listagem ou lookup directo na saída telnet.
+func ResolveGponOnuFromSerialSearchOutput(output, serial string, listMode bool) string {
+	if listMode {
+		matches := FilterSerialSearchEntries(ParseOnuListFromTelnetOutput(output), serial, 0)
+		if len(matches) > 0 {
+			if g := strings.TrimSpace(matches[0].GponOnu); g != "" {
+				return g
+			}
+			if matches[0].Pon > 0 && matches[0].Onu > 0 {
+				return fmt.Sprintf("gpon_onu-1/1/%d:%d", matches[0].Pon, matches[0].Onu)
+			}
+		}
+		return ""
+	}
+	return ParseGponOnuFromOutput(output)
+}
+
 // ParsePonOnuFromGponOnu extrai PON e ONU de interfaces como gpon_onu-1/1/9:80.
 func ParsePonOnuFromGponOnu(gpon string) (pon, onu int) {
 	m := gponOnuPonOnuRE.FindStringSubmatch(strings.TrimSpace(gpon))

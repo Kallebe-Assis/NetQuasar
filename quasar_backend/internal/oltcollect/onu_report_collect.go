@@ -251,7 +251,8 @@ func EnrichOnuRowsViaTelnet(
 			if lookupCmd != "" && session != nil {
 				script := session.ExecCommands([]string{lookupCmd}, cmdRead)
 				if script.OK {
-					if g := ParseGponOnuFromOutput(script.Output); g != "" {
+					listMode := !cfg.SerialSearchUsesSerialPlaceholder()
+					if g := ResolveGponOnuFromSerialSearchOutput(script.Output, target.Serial, listMode); g != "" {
 						target.GponOnu = g
 					}
 				}

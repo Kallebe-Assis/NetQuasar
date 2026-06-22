@@ -3233,11 +3233,17 @@ function OltVendorsPanel() {
                 placeholder={
                   brand.toUpperCase().includes("ZTE")
                     ? "show gpon onu by sn {serial}"
-                    : "show onu sn {serial}"
+                    : "show onu info {pon}"
                 }
               />
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                Comando executado na aba <strong>Pesquisa</strong> quando uma OLT está seleccionada. Use <code>{"{serial}"}</code>.
+                Comando na aba <strong>Pesquisa</strong>. Dois modos:
+                <br />
+                • Com <code>{"{serial}"}</code> — a OLT procura o serial directamente (ex.: ZTE).
+                <br />
+                • Sem <code>{"{serial}"}</code> — o sistema executa a listagem, interpreta todas as ONUs e filtra localmente pelo serial digitado (ex.: VSOL).
+                <br />
+                Use <code>{"{pon}"}</code> para listar uma porta específica; na Pesquisa o utilizador pode escolher uma PON ou «Todas» (percorre as portas do snapshot).
               </p>
             </div>
             <div className="field">
