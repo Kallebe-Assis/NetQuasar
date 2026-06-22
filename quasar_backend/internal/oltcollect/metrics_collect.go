@@ -114,8 +114,8 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 		if perWalk < 12*time.Second {
 			perWalk = 12 * time.Second
 		}
-		if perWalk > 75*time.Second {
-			perWalk = 75 * time.Second
+		if perWalk > 120*time.Second {
+			perWalk = 120 * time.Second
 		}
 		base := probing.NormalizeSNMPOID(def.OID)
 		if key == MetricStatus && strings.EqualFold(def.StatusMode, StatusModeIfMibIndex) && strings.TrimSpace(base) == "" {
@@ -418,6 +418,9 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	}
 	summary["onu_metrics_walks"] = walkLog
 	summary["onu_metrics_elapsed_ms"] = time.Since(t0All).Milliseconds()
+	if IsOltSnapshotIncomplete(summary) {
+		summary["onu_metrics_incomplete"] = true
+	}
 	if len(onuRows) == 0 && len(ponCountsByPon) == 0 {
 		summary["onu_metrics_note"] = "Nenhuma ONU encontrada nos walks SNMP — verifique OIDs, community e conectividade"
 	}
@@ -1766,13 +1769,13 @@ func BuildPonsFromOnuRows(onuRows []map[string]any, ponByIfIndex map[int]ponIfRe
 		if off < 0 {
 			off = 0
 		}
-		if a.total > a.online+off {
-			off = a.total - a.online
-		}
 		row := map[string]any{
 			"id": id, "name": name, "pon": pon,
 			"onu_total": a.total, "onu_online": a.online, "onu_offline": off,
 			"status": "snmp_metrics", "source_slice": "onu_metrics_collect",
+		}
+		if unk := a.total - a.online - off; unk > 0 {
+			row["onu_status_unknown"] = unk
 		}
 		if a.ifIndex > 0 {
 			row["if_index"] = a.ifIndex

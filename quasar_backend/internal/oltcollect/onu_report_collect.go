@@ -132,12 +132,14 @@ func intFromRow(row map[string]any, key string) int {
 }
 
 // EnrichOnuRowsViaTelnet executa comandos do perfil por ONU e funde campos na tabela.
+// O lote por ciclo roda entre todas as candidatas (rodízio); dados CLI de ONUs fora do lote são preservados do snapshot anterior.
 func EnrichOnuRowsViaTelnet(
 	ctx context.Context,
 	host string,
 	creds TelnetCredentials,
 	cfg OnuReportConfig,
 	rows []map[string]any,
+	opts OnuTelnetEnrichOpts,
 	telnetTimeout time.Duration,
 ) OnuTelnetCollectResult {
 	res := OnuTelnetCollectResult{
@@ -155,11 +157,12 @@ func EnrichOnuRowsViaTelnet(
 		return res
 	}
 	if telnetTimeout <= 0 {
-		telnetTimeout = 45 * time.Second
+		telnetTimeout = 10 * time.Minute
 	}
-	if telnetTimeout > 90*time.Second {
-		telnetTimeout = 90 * time.Second
-	}
+	res.Summary["onu_telnet_timeout_ms"] = telnetTimeout.Milliseconds()
+
+	telCtx, telCancel := context.WithTimeout(ctx, telnetTimeout)
+	defer telCancel()
 
 	secrets := TelnetSecrets{Password: creds.Password, Enable: creds.Enable}
 	if cfg.NeedsEnablePassword() && creds.Enable == "" {
@@ -169,19 +172,25 @@ func EnrichOnuRowsViaTelnet(
 	}
 
 	maxN := cfg.EffectiveMaxOnus()
-	candidates := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if cfg.MonitorOnlineOnly && !onuRowOnline(row) {
-			continue
-		}
-		candidates = append(candidates, row)
+	candidates := buildOnuTelnetCandidates(rows, cfg)
+	totalCandidates := len(candidates)
+	batch, nextOffset := selectRotatingOnuBatch(candidates, maxN, opts.RotateOffset)
+	if totalCandidates > maxN {
+		res.Summary["onu_telnet_truncated"] = totalCandidates - len(batch)
 	}
-	if len(candidates) == 0 {
-		candidates = rows
+	res.Summary["onu_telnet_rotate_total"] = totalCandidates
+	res.Summary["onu_telnet_rotate_offset"] = nextOffset
+	res.Summary["onu_telnet_rotate_batch"] = len(batch)
+	if totalCandidates > 0 && len(batch) > 0 {
+		res.Summary["onu_telnet_rotate_note"] = fmt.Sprintf(
+			"rodízio: %d/%d ONUs neste ciclo (próximo offset %d)",
+			len(batch), totalCandidates, nextOffset,
+		)
 	}
-	if len(candidates) > maxN {
-		candidates = candidates[:maxN]
-		res.Summary["onu_telnet_truncated"] = len(rows) - maxN
+
+	refreshKeys := make(map[string]bool, len(batch))
+	for _, row := range batch {
+		refreshKeys[onuRowKey(row)] = true
 	}
 
 	reportedAt := time.Now().UTC().Format(time.RFC3339)
@@ -197,61 +206,65 @@ func EnrichOnuRowsViaTelnet(
 		}
 	}
 	copyMaps(outRows)
+	carryForwardTelnetFromPrev(outRows, opts.PrevRows, refreshKeys)
 	rowIndex := map[string]int{}
 	for i, r := range outRows {
 		key := fmt.Sprintf("%d.%d", intFromRow(r, "pon"), intFromRow(r, "onu"))
 		rowIndex[key] = i
 	}
 
-	perOnuBudget := telnetTimeout
-	if n := len(candidates); n > 0 {
-		if dl, ok := ctx.Deadline(); ok {
-			if left := time.Until(dl) - 3*time.Second; left > 10*time.Second {
-				per := left / time.Duration(n)
-				if per < perOnuBudget {
-					perOnuBudget = per
-				}
-				if perOnuBudget < 12*time.Second {
-					perOnuBudget = 12 * time.Second
-				}
-			}
+	cmdRead := 10 * time.Second
+	if n := len(batch) * 3; n > 0 {
+		if avg := telnetTimeout / time.Duration(n); avg > 4*time.Second && avg < cmdRead {
+			cmdRead = avg
 		}
 	}
 
-	for _, row := range candidates {
-		if ctx.Err() != nil {
-			res.Summary["onu_telnet_cancelled"] = ctx.Err().Error()
+	var session *probing.TelnetSessionHandle
+	if len(batch) > 0 {
+		firstTarget := onuTargetFromRow(batch[0])
+		var err error
+		session, err = probing.OpenTelnetSession(telCtx, probing.TelnetRunScriptParams{
+			Host: host, Port: "23", Timeout: telnetTimeout,
+			User: creds.User, Password: creds.Password, Enable: creds.Enable,
+			PreCommands: cfg.RenderPreCommands(firstTarget, secrets),
+			RawPreCommands: cfg.PreCommands,
+			MaxReadBytes: 120000,
+		})
+		if err != nil {
+			res.Summary["onu_telnet_error"] = err.Error()
+			res.Rows = outRows
+			return res
+		}
+		defer session.Close()
+		res.Summary["onu_telnet_session_reuse"] = true
+	}
+
+	for _, row := range batch {
+		if telCtx.Err() != nil {
+			res.Summary["onu_telnet_cancelled"] = telCtx.Err().Error()
 			break
 		}
 		target := onuTargetFromRow(row)
 		if target.GponOnu == "" && cfg.NeedsGponOnu() && strings.TrimSpace(target.Serial) != "" {
 			lookupCmd := cfg.RenderSerialSearchCommand(target, secrets)
-			pre := cfg.RenderPreCommands(target, secrets)
-			tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
-				Host: host, Port: "23", Timeout: perOnuBudget,
-				User: creds.User, Password: creds.Password, Enable: creds.Enable,
-				Command: lookupCmd, PreCommands: pre, MaxReadBytes: 120000,
-			})
-			if tel.OK {
-				if g := ParseGponOnuFromOutput(tel.Output); g != "" {
-					target.GponOnu = g
+			if lookupCmd != "" && session != nil {
+				script := session.ExecCommands([]string{lookupCmd}, cmdRead)
+				if script.OK {
+					if g := ParseGponOnuFromOutput(script.Output); g != "" {
+						target.GponOnu = g
+					}
 				}
 			}
 		}
 
-		preRendered := cfg.RenderPreCommands(target, secrets)
 		cmds := cfg.RenderCommands(target, secrets)
 		if len(cmds) == 0 {
 			errCount++
 			continue
 		}
 
-		script := probing.TelnetRunScript(ctx, probing.TelnetRunScriptParams{
-			Host: host, Port: "23", Timeout: perOnuBudget,
-			User: creds.User, Password: creds.Password, Enable: creds.Enable,
-			PreCommands: preRendered, RawPreCommands: cfg.PreCommands,
-			Commands: cmds, MaxReadBytes: 120000,
-		})
+		script := session.ExecCommands(cmds, cmdRead)
 		if !script.OK {
 			errCount++
 			continue
@@ -285,7 +298,7 @@ func EnrichOnuRowsViaTelnet(
 	res.Rows = outRows
 	res.Summary["onu_telnet_collected"] = okCount
 	res.Summary["onu_telnet_errors"] = errCount
-	res.Summary["onu_telnet_candidates"] = len(candidates)
+	res.Summary["onu_telnet_candidates"] = len(batch)
 	res.Summary["onu_telnet_at"] = reportedAt
 	return res
 }

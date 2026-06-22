@@ -259,19 +259,22 @@ func mergeTelnetFieldsIntoOnuRow(row map[string]any, fields map[string]string, r
 		setIfEmpty("phase_sta", v)
 	}
 	if v := fields["RX"]; v != "" {
-		setIfEmpty("rx_pwr", v)
+		row["rx_pwr"] = v
 		if dbm := parseDbmValue(v); dbm != nil {
 			row["rx_dbm"] = *dbm
 		}
 	}
 	if v := fields["TX"]; v != "" {
-		setIfEmpty("tx_pwr", v)
+		row["tx_pwr"] = v
+		if dbm := parseDbmValue(v); dbm != nil {
+			row["tx_dbm"] = *dbm
+		}
 	}
 	if v := fields["Temperatura"]; v != "" {
-		setIfEmpty("temp", v)
+		row["temp"] = v
 	}
 	if v := fields["Voltagem"]; v != "" {
-		setIfEmpty("voltage", v)
+		row["voltage"] = v
 	}
 	if v := fields["Canal"]; v != "" {
 		setIfEmpty("channel", v)

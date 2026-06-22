@@ -12,6 +12,7 @@ type intervalConfig struct {
 	TelemetryTimeoutMs     int
 	InterfaceTimeoutMs     int
 	OltIfDerivedTimeoutMs  int
+	OltOnuTelnetTimeoutMs  int
 	ICMPPayloadBytes       int
 	OfflineThreshold       int
 	PingSeconds            int
@@ -48,12 +49,14 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			telemetry_seconds, telemetry_minutes,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
+			olt_onu_telnet_timeout_ms,
 			pipeline_cycle_seconds, mikrotik_timeout_ms,
 			COALESCE(ping_parallel, true)
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
 		&c.TelemetryTimeoutMs, &c.InterfaceTimeoutMs, &c.OltIfDerivedTimeoutMs,
+		&c.OltOnuTelnetTimeoutMs,
 		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.PingParallel); err != nil {
 		return intervalConfig{}, err
 	}

@@ -31,6 +31,10 @@ export type OltOnuSearchResult = {
   if_name?: string;
   snapshot_at?: string;
   telnet_only?: boolean;
+  telnet_report_at?: string;
+  data_source_telnet?: boolean;
+  phase_sta?: string;
+  channel?: string;
 };
 
 type TelnetSerialResult = {
@@ -454,6 +458,10 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                     <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>
                       telnet
                     </span>
+                  ) : r.data_source_telnet ? (
+                    <span className="badge badge--ok" style={{ marginLeft: 6, fontSize: 10 }} title={r.telnet_report_at ? `Telnet ${r.telnet_report_at}` : undefined}>
+                      CLI
+                    </span>
                   ) : null}
                 </td>
                 <td className="mono">{r.pon ?? EM_DASH}</td>
@@ -469,10 +477,38 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                     EM_DASH
                   )}
                 </td>
-                <td className="mono">{fmtRx(r)}</td>
-                <td className="mono">{r.tx_pwr ? formatSnmpMetricCell(r.tx_pwr) : EM_DASH}</td>
-                <td className="mono">{r.temp ? formatSnmpMetricCell(r.temp) : EM_DASH}</td>
-                <td className="mono">{r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}</td>
+                <td className="mono">
+                  {fmtRx(r)}
+                  {r.data_source_telnet ? (
+                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="RX via telnet">
+                      CLI
+                    </span>
+                  ) : null}
+                </td>
+                <td className="mono">
+                  {r.tx_pwr ? formatSnmpMetricCell(r.tx_pwr) : EM_DASH}
+                  {r.data_source_telnet && r.tx_pwr ? (
+                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="TX via telnet">
+                      CLI
+                    </span>
+                  ) : null}
+                </td>
+                <td className="mono">
+                  {r.temp ? formatSnmpMetricCell(r.temp) : EM_DASH}
+                  {r.data_source_telnet && r.temp ? (
+                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="Temperatura via telnet">
+                      CLI
+                    </span>
+                  ) : null}
+                </td>
+                <td className="mono">
+                  {r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}
+                  {r.data_source_telnet && r.voltage ? (
+                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="Voltagem via telnet">
+                      CLI
+                    </span>
+                  ) : null}
+                </td>
                 {canMutate ? (
                   <td>
                     {r.pon && r.onu ? (

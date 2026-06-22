@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
@@ -249,13 +250,23 @@ deriveLoop:
 		break
 	}
 
-	incomplete := truncated || len(pons) < len(prevMaps)
+	incomplete := truncated || len(pons) < len(prevMaps) || oltcollect.IsOltSnapshotIncomplete(sumPatch)
 	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, pons, prevSumm, incomplete)
 	pons = stabMaps
+	if incomplete && len(prevMaps) > 0 {
+		var carryPatch map[string]any
+		pons, carryPatch = oltifderive.PreservePonCountsOnIncomplete(prevMaps, pons)
+		for k, v := range carryPatch {
+			stabPatch[k] = v
+		}
+		sumPatch["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
+	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 
 	oltifderive.ApplyPonOperStatusAll(pons)
-	alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	if !incomplete {
+		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	}
 	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, log, deviceID, devDesc, host, pons)
 
 	summary := map[string]any{

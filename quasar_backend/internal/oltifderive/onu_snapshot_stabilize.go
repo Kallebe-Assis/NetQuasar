@@ -260,3 +260,44 @@ func StabilizePonSnapshotRows(prevPons []map[string]any, newPons []map[string]an
 
 	return DedupePonMaps(out), patchSumm
 }
+
+// PreservePonCountsOnIncomplete mantém contagens online/offline do snapshot anterior quando a coleta actual é incompleta.
+func PreservePonCountsOnIncomplete(prev, cur []map[string]any) ([]map[string]any, map[string]any) {
+	patch := map[string]any{}
+	if len(prev) == 0 || len(cur) == 0 {
+		return cur, patch
+	}
+	prevByKey := map[string]map[string]any{}
+	for _, p := range prev {
+		k := StablePonRowKey(p)
+		if k != "" {
+			prevByKey[k] = p
+		}
+	}
+	out := make([]map[string]any, 0, len(cur))
+	carried := 0
+	for _, p := range cur {
+		cp := map[string]any{}
+		for k, v := range p {
+			cp[k] = v
+		}
+		key := StablePonRowKey(p)
+		if prevP, ok := prevByKey[key]; ok {
+			prevOn, prevOK := OnuOnlineFromRow(prevP)
+			curOn, curOK := OnuOnlineFromRow(p)
+			if prevOK && curOK && curOn < prevOn {
+				cp["onu_online"] = prevOn
+				if v, ok := prevP["onu_offline"]; ok {
+					cp["onu_offline"] = v
+				}
+				cp["online_source"] = "carried_incomplete_snmp"
+				carried++
+			}
+		}
+		out = append(out, cp)
+	}
+	if carried > 0 {
+		patch["pon_counts_carried_incomplete"] = carried
+	}
+	return out, patch
+}

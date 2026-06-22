@@ -437,9 +437,14 @@ func oltWorkerOnuTelnetReport(ctx context.Context, st *oltWorkerExecState) error
 	}
 	telTO := st.TelnetTO
 	if telTO <= 0 {
-		telTO = 45 * time.Second
+		telTO = 10 * time.Minute
 	}
-	result := oltcollect.EnrichOnuRowsViaTelnet(ctx, st.Host, creds, cfg, rows, telTO)
+	telCtx, telCancel := context.WithTimeout(ctx, telTO)
+	defer telCancel()
+	prevRows, rotateOffset := oltcollect.LoadPrevOnuTelnetState(ctx, st.Pool, st.DeviceID)
+	result := oltcollect.EnrichOnuRowsViaTelnet(telCtx, st.Host, creds, cfg, rows, oltcollect.OnuTelnetEnrichOpts{
+		PrevRows: prevRows, RotateOffset: rotateOffset,
+	}, telTO)
 	oltcollect.ApplyOnuTelnetResultToSummary(st.Summary, result)
 	return nil
 }
@@ -461,9 +466,14 @@ func oltWorkerPonTelnetCollect(ctx context.Context, st *oltWorkerExecState) erro
 	}
 	telTO := st.TelnetTO
 	if telTO <= 0 {
-		telTO = 35 * time.Second
+		telTO = 10 * time.Minute
 	}
-	result := oltcollect.EnrichPonRowsViaTelnet(ctx, st.Host, creds, cfg, st.Pons, telTO)
+	telCtx, telCancel := context.WithTimeout(ctx, telTO)
+	defer telCancel()
+	prevPons, rotateOffset := oltcollect.LoadPrevPonTelnetState(ctx, st.Pool, st.DeviceID)
+	result := oltcollect.EnrichPonRowsViaTelnet(telCtx, st.Host, creds, cfg, st.Pons, oltcollect.PonTelnetEnrichOpts{
+		PrevRows: prevPons, RotateOffset: rotateOffset,
+	}, telTO)
 	oltcollect.ApplyPonTelnetResultToSummary(st.Summary, result)
 	st.Pons = result.Rows
 	return nil

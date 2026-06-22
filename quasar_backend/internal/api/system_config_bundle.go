@@ -288,17 +288,19 @@ func applyMonitoringIntervalsImport(ctx context.Context, s *Server, sections map
 			telemetry_timeout_ms = COALESCE($8::int, telemetry_timeout_ms),
 			interface_snapshot_timeout_ms = COALESCE($9::int, interface_snapshot_timeout_ms),
 			olt_if_derived_pon_timeout_ms = COALESCE($10::int, olt_if_derived_pon_timeout_ms),
-			icmp_payload_bytes = COALESCE($11::int, icmp_payload_bytes),
-			offline_ping_fail_threshold = COALESCE($12::int, offline_ping_fail_threshold),
-			uptime_restart_alert_minutes = COALESCE($13::int, uptime_restart_alert_minutes),
-			pipeline_cycle_seconds = COALESCE($14::int, pipeline_cycle_seconds),
-			mikrotik_timeout_ms = COALESCE($15::int, mikrotik_timeout_ms),
-			ping_parallel = COALESCE($16::boolean, ping_parallel),
-			pipeline_steps = COALESCE($17::jsonb, pipeline_steps), updated_at = now()
+			olt_onu_telnet_timeout_ms = COALESCE($11::int, olt_onu_telnet_timeout_ms),
+			icmp_payload_bytes = COALESCE($12::int, icmp_payload_bytes),
+			offline_ping_fail_threshold = COALESCE($13::int, offline_ping_fail_threshold),
+			uptime_restart_alert_minutes = COALESCE($14::int, uptime_restart_alert_minutes),
+			pipeline_cycle_seconds = COALESCE($15::int, pipeline_cycle_seconds),
+			mikrotik_timeout_ms = COALESCE($16::int, mikrotik_timeout_ms),
+			ping_parallel = COALESCE($17::boolean, ping_parallel),
+			pipeline_steps = COALESCE($18::jsonb, pipeline_steps), updated_at = now()
 		WHERE id=1`,
 		1, intField(m, "ping_seconds"), intField(m, "telemetry_minutes"), intField(m, "ping_timeout_ms"),
 		intField(m, "telemetry_seconds"), intField(m, "interface_snapshot_seconds"), intField(m, "olt_if_derived_pon_seconds"),
 		intField(m, "telemetry_timeout_ms"), intField(m, "interface_snapshot_timeout_ms"), intField(m, "olt_if_derived_pon_timeout_ms"),
+		intField(m, "olt_onu_telnet_timeout_ms"),
 		intField(m, "icmp_payload_bytes"), intField(m, "offline_ping_fail_threshold"), intField(m, "uptime_restart_alert_minutes"),
 		intField(m, "pipeline_cycle_seconds"), intField(m, "mikrotik_timeout_ms"), boolField(m, "ping_parallel"), psJSON)
 	return err

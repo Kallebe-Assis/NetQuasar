@@ -19,6 +19,7 @@ type MonitoringIntervalsPayload = {
   telemetry_timeout_ms?: number;
   interface_snapshot_timeout_ms?: number;
   olt_if_derived_pon_timeout_ms?: number;
+  olt_onu_telnet_timeout_ms?: number;
   mikrotik_timeout_ms?: number;
   icmp_payload_bytes?: number;
   offline_ping_fail_threshold?: number;
@@ -54,6 +55,7 @@ export function MonitoringPingIntervalsCard() {
   const [telTimeout, setTelTimeout] = useState("");
   const [ifaceTimeout, setIfaceTimeout] = useState("");
   const [oltTimeout, setOltTimeout] = useState("");
+  const [oltOnuTelnetTimeout, setOltOnuTelnetTimeout] = useState("");
   const [mikrotikTimeout, setMikrotikTimeout] = useState("");
   const [pipelineCycle, setPipelineCycle] = useState("");
   const [icmpSz, setIcmpSz] = useState("");
@@ -70,6 +72,7 @@ export function MonitoringPingIntervalsCard() {
     setTelTimeout((v) => (v === "" ? String(q.data.telemetry_timeout_ms ?? 120000) : v));
     setIfaceTimeout((v) => (v === "" ? String(q.data.interface_snapshot_timeout_ms ?? 120000) : v));
     setOltTimeout((v) => (v === "" ? String(q.data.olt_if_derived_pon_timeout_ms ?? 180000) : v));
+    setOltOnuTelnetTimeout((v) => (v === "" ? String(q.data.olt_onu_telnet_timeout_ms ?? 600000) : v));
     setMikrotikTimeout((v) => (v === "" ? String(q.data.mikrotik_timeout_ms ?? 120000) : v));
     setPipelineCycle((v) => (v === "" ? String(q.data.pipeline_cycle_seconds ?? 120) : v));
     setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
@@ -250,6 +253,24 @@ export function MonitoringPingIntervalsCard() {
             <input className="input mono" aria-label="Timeout OLT PON em ms" value={oltTimeout} onChange={(e) => setOltTimeout(e.target.value)} />
           </SettingsField>
           <SettingsField
+            label="OLT telnet ONU/PON (ms)"
+            hintLabel="Timeout coleta telnet CLI por ONU"
+            hint={
+              <p>
+                Tempo máximo da fase <strong>telnet</strong> (uma sessão por ciclo) para enriquecer ONUs e PONs/SFP.
+                Com 16 PONs ou muitas ONUs, use valores maiores (ex.: <strong>1800000</strong> = 30 min).
+                Intervalo válido: <strong>5000–3600000</strong> ms (até 60 min).
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Timeout telnet ONU OLT em ms"
+              value={oltOnuTelnetTimeout}
+              onChange={(e) => setOltOnuTelnetTimeout(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
             label="MikroTik (ms)"
             hintLabel="Timeout coleta MikroTik"
             hint={
@@ -349,6 +370,7 @@ export function MonitoringPingIntervalsCard() {
               telemetry_timeout_ms: telTimeout ? Number(telTimeout) : undefined,
               interface_snapshot_timeout_ms: ifaceTimeout ? Number(ifaceTimeout) : undefined,
               olt_if_derived_pon_timeout_ms: oltTimeout ? Number(oltTimeout) : undefined,
+              olt_onu_telnet_timeout_ms: oltOnuTelnetTimeout ? Number(oltOnuTelnetTimeout) : undefined,
               mikrotik_timeout_ms: mikrotikTimeout ? Number(mikrotikTimeout) : undefined,
               icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
               offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,

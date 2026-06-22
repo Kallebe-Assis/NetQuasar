@@ -14,25 +14,29 @@ func StepsForScope(steps []Step, scope string) []Step {
 	if scope != ScopeOnu && scope != "fast" {
 		return steps
 	}
-	var hasVsol, hasSnapshot bool
+	var hasVsol, hasSnapshot, hasMainOnu bool
 	out := make([]Step, 0, len(steps))
 	for _, s := range steps {
 		switch s.Method {
 		case MethodIfMibRefresh, MethodIfMibMergePons, MethodStabilizePons:
 			continue
-		case MethodOnuSNMPWalk:
+		case MethodOnuSNMPWalk, MethodOnuMetricsCollect:
+			if hasMainOnu {
+				continue
+			}
 			out = append(out, s)
-			return out
-		case MethodOnuMetricsCollect:
-			out = append(out, s)
-			return out
+			hasMainOnu = true
 		case MethodOnuTelnetReport, MethodPonTelnetCollect:
 			out = append(out, s)
 		case MethodIfMibSnapshot:
 			hasSnapshot = true
 			out = append(out, s)
 		case MethodVsolOnuCollect:
+			if hasMainOnu {
+				continue
+			}
 			hasVsol = true
+			hasMainOnu = true
 			out = append(out, s)
 		case MethodSNMPWalk, MethodSNMPGet, MethodTelnet, MethodDatacomBuildPons:
 			out = append(out, s)

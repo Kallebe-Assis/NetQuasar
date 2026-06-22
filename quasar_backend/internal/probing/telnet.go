@@ -381,8 +381,8 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 	if timeout <= 0 {
 		timeout = 45 * time.Second
 	}
-	if timeout > 120*time.Second {
-		timeout = 120 * time.Second
+	if timeout > 60*time.Minute {
+		timeout = 60 * time.Minute
 	}
 	maxRead := p.MaxReadBytes
 	if maxRead <= 0 {
@@ -429,20 +429,133 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 		return TelnetRunScriptResult{OK: false, LatencyMs: lat, Error: err.Error(), Note: note}
 	}
 
+	res := execTelnetCommands(sess, p.Commands, 8*time.Second)
+	res.LatencyMs = lat
+	res.Note = note
+	_, _ = fmt.Fprintf(conn, "exit\r\n")
+	return res
+}
+
+// TelnetSessionHandle sessão telnet reutilizável (login e pré-comandos uma vez).
+type TelnetSessionHandle struct {
+	ctx     context.Context
+	conn    net.Conn
+	sess    *telnetSession
+	maxRead int
+}
+
+// OpenTelnetSession abre TCP, autentica e executa pré-comandos uma única vez.
+func OpenTelnetSession(ctx context.Context, p TelnetRunScriptParams) (*TelnetSessionHandle, error) {
+	host := strings.TrimSpace(p.Host)
+	if host == "" {
+		return nil, fmt.Errorf("host obrigatório")
+	}
+	port := strings.TrimSpace(p.Port)
+	if port == "" {
+		port = "23"
+	}
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
+	if timeout > 60*time.Minute {
+		timeout = 60 * time.Minute
+	}
+	maxRead := p.MaxReadBytes
+	if maxRead <= 0 {
+		maxRead = 32768
+	}
+	if maxRead > 524288 {
+		maxRead = 524288
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl); left > 0 && left < timeout {
+			timeout = left
+		}
+	}
+	addr := net.JoinHostPort(host, port)
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	sess := &telnetSession{
+		conn: conn, timeout: timeout, maxRead: maxRead,
+		user: strings.TrimSpace(p.User),
+		pass: strings.TrimSpace(p.Password),
+		enable: strings.TrimSpace(p.Enable),
+	}
+	if err := sess.login(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	rawPre := p.RawPreCommands
+	if len(rawPre) == 0 {
+		rawPre = p.PreCommands
+	}
+	if strings.TrimSpace(sess.enable) != "" && !preCommandsIncludeEnable(rawPre) {
+		if _, err := sess.sendLine("enable"); err != nil {
+			conn.Close()
+			return nil, err
+		}
+	}
+	if err := runPreCommands(sess, rawPre, p.PreCommands); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &TelnetSessionHandle{ctx: ctx, conn: conn, sess: sess, maxRead: maxRead}, nil
+}
+
+func (h *TelnetSessionHandle) refreshDeadline() {
+	if h == nil || h.conn == nil || h.sess == nil {
+		return
+	}
+	timeout := h.sess.timeout
+	if dl, ok := h.ctx.Deadline(); ok {
+		if left := time.Until(dl); left > 2*time.Second && left < timeout {
+			timeout = left
+		}
+	}
+	_ = h.conn.SetDeadline(time.Now().Add(timeout))
+}
+
+// ExecCommands executa comandos na sessão já autenticada (sem novo login).
+func (h *TelnetSessionHandle) ExecCommands(commands []string, readWait time.Duration) TelnetRunScriptResult {
+	if h == nil || h.sess == nil {
+		return TelnetRunScriptResult{OK: false, Error: "sessão telnet fechada"}
+	}
+	h.refreshDeadline()
+	return execTelnetCommands(h.sess, commands, readWait)
+}
+
+func (h *TelnetSessionHandle) Close() {
+	if h == nil || h.conn == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(h.conn, "exit\r\n")
+	_ = h.conn.Close()
+	h.conn = nil
+}
+
+func execTelnetCommands(sess *telnetSession, commands []string, readWait time.Duration) TelnetRunScriptResult {
+	if readWait <= 0 {
+		readWait = 8 * time.Second
+	}
 	var steps []TelnetScriptStepResult
 	var combined strings.Builder
 	allOK := true
-	for _, cmd := range p.Commands {
+	for _, cmd := range commands {
 		cmd = strings.TrimSpace(cmd)
 		if cmd == "" {
 			continue
 		}
-		if _, err := fmt.Fprintf(conn, "%s\r\n", cmd); err != nil {
+		if _, err := fmt.Fprintf(sess.conn, "%s\r\n", cmd); err != nil {
 			steps = append(steps, TelnetScriptStepResult{Command: cmd, OK: false, Error: err.Error()})
 			allOK = false
 			break
 		}
-		out := sess.readUntilReady(8 * time.Second)
+		out := sess.readUntilReady(readWait)
 		step := TelnetScriptStepResult{Command: cmd, OK: true, Output: trim(out, 120000)}
 		steps = append(steps, step)
 		if combined.Len() > 0 {
@@ -453,15 +566,7 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 		combined.WriteString("\n")
 		combined.WriteString(step.Output)
 	}
-	_, _ = fmt.Fprintf(conn, "exit\r\n")
-
-	return TelnetRunScriptResult{
-		OK:        allOK,
-		Steps:     steps,
-		Output:    combined.String(),
-		LatencyMs: lat,
-		Note:      note,
-	}
+	return TelnetRunScriptResult{OK: allOK, Steps: steps, Output: combined.String()}
 }
 
 func TelnetRunCommand(ctx context.Context, p TelnetRunParams) TelnetRunResult {

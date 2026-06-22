@@ -64,11 +64,19 @@ func CollectOltVendorPeriodic(
 	}
 
 	cfg, _ := loadClampMonitoringIntervals(ctx, pool)
+	telnetTO := cfg.oltOnuTelnetTimeout()
 	budget := cfg.oltIfDerivedTimeout()
+	totalBudget := budget
+	if profile.OnuReport.MonitorEnabled() || profile.PonTelnet.MonitorEnabled() {
+		totalBudget = budget + telnetTO
+	}
 	if budget < 120*time.Second {
 		budget = 120 * time.Second
 	}
-	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	if totalBudget < budget {
+		totalBudget = budget
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), totalBudget)
 	defer cancel()
 
 	summary := map[string]any{
@@ -82,7 +90,7 @@ func CollectOltVendorPeriodic(
 		Host: host, Community: community,
 		Brand: brand, Model: model, DevDesc: devDesc,
 		MaxPons: maxPonsVal, Profile: profile,
-		Summary: summary, TelnetTO: budget / 2,
+		Summary: summary, TelnetTO: telnetTO,
 		StepsOverride: periodicSteps,
 	}
 	if err := runOltProfileStepsWorker(sctx, execSt, oltcollect.ScopeFull); err != nil {
@@ -118,7 +126,18 @@ func CollectOltVendorPeriodic(
 	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 	oltifderive.ApplyPonOperStatusAll(pons)
-	alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	incomplete := oltcollect.IsOltSnapshotIncomplete(execSt.Summary)
+	if incomplete && len(prevMaps) > 0 {
+		var carryPatch map[string]any
+		pons, carryPatch = oltifderive.PreservePonCountsOnIncomplete(prevMaps, pons)
+		for k, v := range carryPatch {
+			execSt.Summary[k] = v
+		}
+		execSt.Summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
+	}
+	if !incomplete {
+		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	}
 	alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
 
 	summary = execSt.Summary

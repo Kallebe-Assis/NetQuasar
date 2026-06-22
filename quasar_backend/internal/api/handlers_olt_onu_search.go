@@ -186,6 +186,10 @@ func (s *Server) searchOLTOnus(w http.ResponseWriter, r *http.Request) {
 				"if_index":        row["if_index"],
 				"if_name":         firstNonNil(row["if_name"], row["if_descr"]),
 				"vlan":            row["vlan"],
+				"data_source_telnet": row["data_source_telnet"],
+				"telnet_report_at":   row["telnet_report_at"],
+				"phase_sta":          row["phase_sta"],
+				"channel":            row["channel"],
 			}
 			if snapAt != nil {
 				item["snapshot_at"] = snapAt.UTC().Format(time.RFC3339)

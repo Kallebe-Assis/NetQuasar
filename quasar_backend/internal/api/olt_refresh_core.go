@@ -91,6 +91,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	}
 
 	collTO := s.loadCollectionTimeouts(ctx)
+	telnetTO := collTO.OltOnuTelnetTimeout()
 	oltRefreshTotal := collTO.OltRefreshTotal()
 	scope := strings.TrimSpace(strings.ToLower(opts.Scope))
 	if scope == "" {
@@ -99,11 +100,17 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	if scope == "fast" {
 		scope = oltcollect.ScopeOnu
 	}
+	snmpBudget := oltRefreshTotal
 	if oltcollect.IsSimpleOnuCollect(profile.Steps) || scope == oltcollect.ScopeOnu {
-		oltRefreshTotal = 100 * time.Second
+		snmpBudget = 300 * time.Second
+	}
+	needsTelnet := profile.OnuReport.MonitorEnabled() || profile.PonTelnet.MonitorEnabled()
+	if needsTelnet {
+		oltRefreshTotal = snmpBudget + telnetTO
+	} else if oltcollect.IsSimpleOnuCollect(profile.Steps) || scope == oltcollect.ScopeOnu {
+		oltRefreshTotal = snmpBudget
 	}
 	out.TimeoutMs = oltRefreshTotal.Milliseconds()
-	telnetTO := collTO.TelnetPhaseTimeout(oltRefreshTotal)
 	oltCtx, oltCancel := context.WithTimeout(context.WithoutCancel(ctx), oltRefreshTotal)
 	defer oltCancel()
 
@@ -139,6 +146,18 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 
 	curMaps := oltifderive.PonsAnySliceToMaps(pons)
 	oltifderive.ApplyPonOperStatusAll(curMaps)
+	incomplete := oltcollect.IsOltSnapshotIncomplete(summary)
+	var prevSnapPons, prevSnapSum []byte
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]'), COALESCE(summary::text,'{}') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons, &prevSnapSum)
+	prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
+	if incomplete && len(prevMaps) > 0 {
+		var carryPatch map[string]any
+		curMaps, carryPatch = oltifderive.PreservePonCountsOnIncomplete(prevMaps, curMaps)
+		for k, v := range carryPatch {
+			summary[k] = v
+		}
+		summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
+	}
 	pons = oltifderive.PonsMapsToAny(curMaps)
 	alertSource := source
 	if alertSource == "olt_refresh" {
@@ -146,10 +165,9 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	} else {
 		alertSource = "monitor_worker"
 	}
-	var prevSnapPons []byte
-	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons)
-	prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
-	alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
+	if !incomplete {
+		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
+	}
 
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)

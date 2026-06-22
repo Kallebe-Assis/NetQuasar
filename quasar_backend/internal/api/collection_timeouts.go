@@ -11,6 +11,7 @@ type collectionTimeouts struct {
 	TelemetryMs      int
 	InterfaceMs      int
 	OltIfDerivedMs   int
+	OltOnuTelnetMs   int
 }
 
 func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts {
@@ -24,9 +25,10 @@ func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts 
 		return out
 	}
 	_ = pool.QueryRow(ctx, `
-		SELECT telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms
+		SELECT telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
+			olt_onu_telnet_timeout_ms
 		FROM monitoring_intervals WHERE id=1
-	`).Scan(&out.TelemetryMs, &out.InterfaceMs, &out.OltIfDerivedMs)
+	`).Scan(&out.TelemetryMs, &out.InterfaceMs, &out.OltIfDerivedMs, &out.OltOnuTelnetMs)
 	return out
 }
 
@@ -69,4 +71,10 @@ func (t collectionTimeouts) TelnetPhaseTimeout(total time.Duration) time.Duratio
 		return total
 	}
 	return w
+}
+
+// OltOnuTelnetTimeout orçamento total da fase telnet ONU/PON (CLI sequencial).
+func (t collectionTimeouts) OltOnuTelnetTimeout() time.Duration {
+	ms := monitorworker.ClampOltOnuTelnetTimeoutMsPublic(t.OltOnuTelnetMs, 600_000)
+	return time.Duration(ms) * time.Millisecond
 }

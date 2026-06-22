@@ -592,6 +592,9 @@ export function OltPage() {
     const collected = summaryObj?.onu_telnet_collected;
     if (typeof collected === "number" && collected > 0) {
       parts.push(`Telnet: ${collected} ONU(s) enriquecidas com dados CLI`);
+      if (summaryObj?.onu_telnet_rotate_note) {
+        parts.push(String(summaryObj.onu_telnet_rotate_note));
+      }
       if (summaryObj?.onu_telnet_at) {
         parts.push(`(${String(summaryObj.onu_telnet_at)})`);
       }
@@ -599,6 +602,13 @@ export function OltPage() {
       parts.push(`Telnet: ${String(summaryObj.onu_telnet_skipped)}`);
     } else if (summaryObj?.onu_telnet_error) {
       parts.push(`Telnet: ${String(summaryObj.onu_telnet_error)}`);
+    } else if (summaryObj?.onu_telnet_cancelled) {
+      parts.push(`Telnet interrompido: ${String(summaryObj.onu_telnet_cancelled)} — aumente o timeout em Definições → Monitoramento`);
+    }
+    if (summaryObj?.onu_metrics_incomplete || summaryObj?.onu_walk_truncated || summaryObj?.vsol_walk_truncated) {
+      parts.push("SNMP truncado — alertas de queda ignorados neste ciclo");
+    } else if (summaryObj?.onu_delta_alerts_skipped) {
+      parts.push(String(summaryObj.onu_delta_alerts_skipped));
     }
     const base =
       summaryObj?.onu_metrics_note
@@ -619,10 +629,14 @@ export function OltPage() {
     const collected = summaryObj?.pon_telnet_collected;
     if (typeof collected === "number" && collected > 0) {
       const at = summaryObj?.pon_telnet_at ? ` (${String(summaryObj.pon_telnet_at)})` : "";
-      return `Telnet PON: ${collected} porta(s) com métricas SFP${at}`;
+      const rot = summaryObj?.pon_telnet_rotate_note ? ` · ${String(summaryObj.pon_telnet_rotate_note)}` : "";
+      return `Telnet PON: ${collected} porta(s) com métricas SFP${at}${rot}`;
     }
     if (summaryObj?.pon_telnet_skipped) return `Telnet PON: ${String(summaryObj.pon_telnet_skipped)}`;
     if (summaryObj?.pon_telnet_error) return `Telnet PON: ${String(summaryObj.pon_telnet_error)}`;
+    if (summaryObj?.pon_telnet_cancelled) {
+      return `Telnet PON interrompido: ${String(summaryObj.pon_telnet_cancelled)} — aumente o timeout em Definições → Monitoramento`;
+    }
     return undefined;
   }, [detail.data?.summary]);
 

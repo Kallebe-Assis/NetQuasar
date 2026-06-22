@@ -3154,7 +3154,9 @@ function OltVendorsPanel() {
           <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por ONU (Pesquisa e monitoramento)</h3>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
             Os mesmos comandos usados na aba <strong>Pesquisa</strong> («Relatório telnet»). Com monitoramento activo, o worker executa estes comandos
-            por ONU após a coleta SNMP e actualiza a tabela de ONUs na página OLT.
+            por ONU após a coleta SNMP e actualiza a tabela de ONUs na página OLT. O login telnet e os pré-comandos são feitos{" "}
+            <strong>uma vez por ciclo</strong>. O limite «Máx. ONUs/ciclo» usa <strong>rodízio</strong>: a cada ciclo
+            avança para o próximo lote até cobrir todas; dados CLI de ONUs fora do lote mantêm-se do ciclo anterior.
           </p>
           <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
             <input
@@ -3271,7 +3273,9 @@ function OltVendorsPanel() {
           <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por PON / SFP (GBIC)</h3>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
             Comandos CLI por porta PON para voltagem, temperatura, TX/RX e corrente de bias do módulo óptico. Os valores
-            actualizam a tabela de PONs na página OLT após cada coleta.
+            actualizam a tabela de PONs na página OLT após cada coleta. O login telnet e os pré-comandos são feitos{" "}
+            <strong>uma vez por ciclo</strong>; depois executa-se só o comando de cada porta. O limite «Máx. PONs/ciclo»
+            usa <strong>rodízio</strong> quando há mais portas que o máximo — métricas SFP fora do lote mantêm-se do ciclo anterior.
           </p>
           <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
             <input

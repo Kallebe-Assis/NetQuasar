@@ -86,3 +86,46 @@ func TestOnuReportConfig_MonitorEnabled(t *testing.T) {
 		t.Fatalf("max=%d", cfg.EffectiveMaxOnus())
 	}
 }
+
+func TestSelectRotatingOnuBatch_wraps(t *testing.T) {
+	cands := []map[string]any{
+		{"pon": 1, "onu": 1}, {"pon": 1, "onu": 2}, {"pon": 1, "onu": 3},
+		{"pon": 2, "onu": 1}, {"pon": 2, "onu": 2},
+	}
+	batch, next := selectRotatingOnuBatch(cands, 3, 4)
+	if len(batch) != 3 {
+		t.Fatalf("batch len=%d", len(batch))
+	}
+	if intFromRow(batch[0], "onu") != 2 || intFromRow(batch[1], "pon") != 1 {
+		t.Fatalf("batch0=%v batch1=%v", batch[0], batch[1])
+	}
+	if next != 2 {
+		t.Fatalf("next=%d", next)
+	}
+}
+
+func TestSelectRotatingOnuBatch_allWhenBelowMax(t *testing.T) {
+	cands := []map[string]any{{"pon": 1, "onu": 1}, {"pon": 1, "onu": 2}}
+	batch, next := selectRotatingOnuBatch(cands, 25, 10)
+	if len(batch) != 2 || next != 0 {
+		t.Fatalf("batch=%d next=%d", len(batch), next)
+	}
+}
+
+func TestCarryForwardTelnetFromPrev(t *testing.T) {
+	prev := []map[string]any{{
+		"pon": 1, "onu": 2, "data_source_telnet": true,
+		"rx_pwr": "-22.5", "telnet_report_at": "2026-01-01T00:00:00Z",
+	}}
+	out := []map[string]any{
+		{"pon": 1, "onu": 1, "online": true},
+		{"pon": 1, "onu": 2, "online": true},
+	}
+	carryForwardTelnetFromPrev(out, prev, map[string]bool{"1.1": true})
+	if out[1]["rx_pwr"] != "-22.5" {
+		t.Fatalf("expected carry forward, got %v", out[1]["rx_pwr"])
+	}
+	if out[0]["rx_pwr"] != nil {
+		t.Fatal("should not carry to refreshed key")
+	}
+}

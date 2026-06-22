@@ -292,7 +292,7 @@ func (s *Server) monitoringReloadDevices(w http.ResponseWriter, r *http.Request)
 func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout int
-	var telTimeout, ifaceTimeout, oltTimeout int
+	var telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout int
 	var icmpPB, offTh, uptimeRestart int
 	var pingParallel bool
 	var pipelineRaw []byte
@@ -301,13 +301,14 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
+			olt_onu_telnet_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
 			COALESCE(uptime_restart_alert_minutes, 0),
 			pipeline_cycle_seconds, mikrotik_timeout_ms,
 			COALESCE(ping_parallel, true),
 			coalesce(pipeline_steps::text, '[]')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
-		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart,
+		&telTimeout, &ifaceTimeout, &oltTimeout, &oltOnuTelnetTimeout, &icmpPB, &offTh, &uptimeRestart,
 		&pipelineSec, &mikrotikTimeout, &pingParallel, &pipelineRaw); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -328,6 +329,7 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 		"telemetry_timeout_ms":            telTimeout,
 		"interface_snapshot_timeout_ms":   ifaceTimeout,
 		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"olt_onu_telnet_timeout_ms":         oltOnuTelnetTimeout,
 		"mikrotik_timeout_ms":             mikrotikTimeout,
 		"icmp_payload_bytes":              icmpPB,
 		"offline_ping_fail_threshold":     offTh,
@@ -349,6 +351,7 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		TelemetryTimeoutMs            *int                           `json:"telemetry_timeout_ms"`
 		InterfaceSnapshotTimeoutMs    *int                           `json:"interface_snapshot_timeout_ms"`
 		OltIfDerivedPonTimeoutMs      *int                           `json:"olt_if_derived_pon_timeout_ms"`
+		OltOnuTelnetTimeoutMs         *int                           `json:"olt_onu_telnet_timeout_ms"`
 		MikrotikTimeoutMs             *int                           `json:"mikrotik_timeout_ms"`
 		IcmpPayloadBytes              *int                           `json:"icmp_payload_bytes"`
 		OfflinePingFailThreshold      *int                           `json:"offline_ping_fail_threshold"`
@@ -362,7 +365,7 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	}
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout int
-	var telTimeout, ifaceTimeout, oltTimeout int
+	var telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout int
 	var icmpPB, offTh, uptimeRestart int
 	var pingParallel bool
 	var pipelineRaw []byte
@@ -371,13 +374,14 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			telemetry_seconds,
 			interface_snapshot_seconds, olt_if_derived_pon_seconds,
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
+			olt_onu_telnet_timeout_ms,
 			icmp_payload_bytes, offline_ping_fail_threshold,
 			COALESCE(uptime_restart_alert_minutes, 0),
 			pipeline_cycle_seconds, mikrotik_timeout_ms,
 			COALESCE(ping_parallel, true),
 			coalesce(pipeline_steps::text, '[]')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
-		&telTimeout, &ifaceTimeout, &oltTimeout, &icmpPB, &offTh, &uptimeRestart,
+		&telTimeout, &ifaceTimeout, &oltTimeout, &oltOnuTelnetTimeout, &icmpPB, &offTh, &uptimeRestart,
 		&pipelineSec, &mikrotikTimeout, &pingParallel, &pipelineRaw); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -418,6 +422,9 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	if body.OltIfDerivedPonTimeoutMs != nil {
 		oltTimeout = *body.OltIfDerivedPonTimeoutMs
 	}
+	if body.OltOnuTelnetTimeoutMs != nil {
+		oltOnuTelnetTimeout = *body.OltOnuTelnetTimeoutMs
+	}
 	if body.MikrotikTimeoutMs != nil {
 		mikrotikTimeout = *body.MikrotikTimeoutMs
 	}
@@ -451,6 +458,10 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	if oltOnuTelnetTimeout < 5000 || oltOnuTelnetTimeout > 3600000 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_onu_telnet_timeout_ms entre 5000 e 3600000 (5 s – 60 min)", map[string]any{"olt_onu_telnet_timeout_ms": oltOnuTelnetTimeout})
+		return
+	}
 	if icmpPB < 0 || icmpPB > 65507 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "icmp_payload_bytes entre 0 e 65507 (0 usa defeito de 32 B no servidor)", map[string]any{"icmp_payload_bytes": icmpPB})
 		return
@@ -481,13 +492,14 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			pipeline_cycle_seconds=$6,
 			ping_timeout_ms=$7,
 			telemetry_timeout_ms=$8, interface_snapshot_timeout_ms=$9, olt_if_derived_pon_timeout_ms=$10,
-			mikrotik_timeout_ms=$11,
-			icmp_payload_bytes=$12, offline_ping_fail_threshold=$13,
-			uptime_restart_alert_minutes=$14,
-			pipeline_steps=$15::jsonb,
-			ping_parallel=$16,
+			olt_onu_telnet_timeout_ms=$11,
+			mikrotik_timeout_ms=$12,
+			icmp_payload_bytes=$13, offline_ping_fail_threshold=$14,
+			uptime_restart_alert_minutes=$15,
+			pipeline_steps=$16::jsonb,
+			ping_parallel=$17,
 			updated_at=now() WHERE id=1`,
-		ps, tm, telSec, ifaceSec, oltDerivedSec, pipelineSec, pto, telTimeout, ifaceTimeout, oltTimeout, mikrotikTimeout, icmpPB, offTh, uptimeRestart, stepsJSON, pingParallel)
+		ps, tm, telSec, ifaceSec, oltDerivedSec, pipelineSec, pto, telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout, mikrotikTimeout, icmpPB, offTh, uptimeRestart, stepsJSON, pingParallel)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -503,6 +515,7 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		"telemetry_timeout_ms":            telTimeout,
 		"interface_snapshot_timeout_ms":   ifaceTimeout,
 		"olt_if_derived_pon_timeout_ms":   oltTimeout,
+		"olt_onu_telnet_timeout_ms":         oltOnuTelnetTimeout,
 		"mikrotik_timeout_ms":             mikrotikTimeout,
 		"icmp_payload_bytes":              icmpPB,
 		"offline_ping_fail_threshold":     offTh,

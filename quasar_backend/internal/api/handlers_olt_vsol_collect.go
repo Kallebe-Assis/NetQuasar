@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
 
@@ -111,10 +112,33 @@ func (s *Server) collectVsolOLTWithPreload(parentCtx context.Context, deviceID u
 			vsolparse.ReconcileSummaryFromPons(sum, vPons)
 		} else {
 			sum["vsol_online_incomplete"] = true
-			for i := range vPons {
-				vPons[i]["onu_online"] = 0
-				vPons[i]["onu_offline"] = 0
-				vPons[i]["online_source"] = "vsol_4.1.8_incomplete"
+			var prevPonsRaw []byte
+			if err := s.DB().QueryRow(parentCtx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, deviceID).Scan(&prevPonsRaw); err == nil {
+				prevMaps := oltifderive.PonsJSONToMaps(prevPonsRaw)
+				prevByKey := map[string]map[string]any{}
+				for _, p := range prevMaps {
+					if k := oltifderive.StablePonRowKey(p); k != "" {
+						prevByKey[k] = p
+					}
+				}
+				for i := range vPons {
+					key := oltifderive.StablePonRowKey(vPons[i])
+					if prevP, ok := prevByKey[key]; ok {
+						if v, ok := prevP["onu_online"]; ok {
+							vPons[i]["onu_online"] = v
+						}
+						if v, ok := prevP["onu_offline"]; ok {
+							vPons[i]["onu_offline"] = v
+						}
+						vPons[i]["online_source"] = "vsol_4.1.8_incomplete_carried"
+					} else {
+						vPons[i]["online_source"] = "vsol_4.1.8_incomplete"
+					}
+				}
+			} else {
+				for i := range vPons {
+					vPons[i]["online_source"] = "vsol_4.1.8_incomplete"
+				}
 			}
 			finalPons = vPons
 		}

@@ -181,7 +181,7 @@ func (s *Server) oltStepOnuMetricsCollect(ctx context.Context, st *oltCollectExe
 		st.Summary["onu_metrics_note"] = "Nenhuma MIB SNMP configurada para monitoramento deste modelo"
 		return fmt.Errorf("nenhuma MIB SNMP configurada para monitoramento deste modelo")
 	}
-	budget := 240 * time.Second
+	budget := 300 * time.Second
 	if dl, ok := ctx.Deadline(); ok {
 		if left := time.Until(dl) - 2*time.Second; left > 10*time.Second && left < budget {
 			budget = left
@@ -438,9 +438,14 @@ func (s *Server) oltStepOnuTelnetReport(ctx context.Context, st *oltCollectExecS
 	}
 	telTO := st.TelnetTO
 	if telTO <= 0 {
-		telTO = 45 * time.Second
+		telTO = 10 * time.Minute
 	}
-	result := oltcollect.EnrichOnuRowsViaTelnet(ctx, st.Host, creds, cfg, rows, telTO)
+	telCtx, telCancel := context.WithTimeout(ctx, telTO)
+	defer telCancel()
+	prevRows, rotateOffset := oltcollect.LoadPrevOnuTelnetState(ctx, s.DB(), st.DeviceID)
+	result := oltcollect.EnrichOnuRowsViaTelnet(telCtx, st.Host, creds, cfg, rows, oltcollect.OnuTelnetEnrichOpts{
+		PrevRows: prevRows, RotateOffset: rotateOffset,
+	}, telTO)
 	oltcollect.ApplyOnuTelnetResultToSummary(st.Summary, result)
 	return nil
 }
@@ -463,9 +468,14 @@ func (s *Server) oltStepPonTelnetCollect(ctx context.Context, st *oltCollectExec
 	}
 	telTO := st.TelnetTO
 	if telTO <= 0 {
-		telTO = 35 * time.Second
+		telTO = 10 * time.Minute
 	}
-	result := oltcollect.EnrichPonRowsViaTelnet(ctx, st.Host, creds, cfg, pons, telTO)
+	telCtx, telCancel := context.WithTimeout(ctx, telTO)
+	defer telCancel()
+	prevPons, rotateOffset := oltcollect.LoadPrevPonTelnetState(ctx, s.DB(), st.DeviceID)
+	result := oltcollect.EnrichPonRowsViaTelnet(telCtx, st.Host, creds, cfg, pons, oltcollect.PonTelnetEnrichOpts{
+		PrevRows: prevPons, RotateOffset: rotateOffset,
+	}, telTO)
 	oltcollect.ApplyPonTelnetResultToSummary(st.Summary, result)
 	st.Pons = oltifderive.PonsMapsToAny(result.Rows)
 	return nil
@@ -536,7 +546,8 @@ func (s *Server) oltStepStabilizePons(ctx context.Context, st *oltCollectExecSta
 	prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
 	prevSumm := oltifderive.SummaryJSONBytesToMap(prevSnapSum)
 	newMaps := oltifderive.PonsAnySliceToMaps(st.Pons)
-	incomplete := len(newMaps) < len(prevMaps) && len(prevMaps) > 0
+	incomplete := oltcollect.IsOltSnapshotIncomplete(st.Summary) ||
+		(len(newMaps) < len(prevMaps) && len(prevMaps) > 0)
 	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, newMaps, prevSumm, incomplete)
 	st.Pons = oltifderive.PonsMapsToAny(stabMaps)
 	for k, v := range stabPatch {

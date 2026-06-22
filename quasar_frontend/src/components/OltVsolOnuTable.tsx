@@ -54,6 +54,19 @@ function rowHasText(u: VsOnuRow, key: keyof VsOnuRow): boolean {
   return v != null && String(v).trim() !== "";
 }
 
+function telnetCliBadge(u: { data_source_telnet?: boolean; telnet_report_at?: string }) {
+  if (!u.data_source_telnet) return null;
+  return (
+    <span
+      className="badge badge--ok"
+      style={{ marginLeft: 4, fontSize: 9, verticalAlign: "middle" }}
+      title={u.telnet_report_at ? `Telnet ${u.telnet_report_at}` : "Dados via telnet CLI"}
+    >
+      CLI
+    </span>
+  );
+}
+
 function onlineBadge(u: VsOnuRow, rxStatusMode?: boolean) {
   const useRx =
     rxStatusMode ||
@@ -242,11 +255,29 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
                 {visible.has("status") && <td>{onlineBadge(u, rxStatusMode)}</td>}
                 {visible.has("phase") && <td>{cell(u.phase_sta)}</td>}
                 {visible.has("rx") && (
-                  <td className="mono">{displayOnuRx(u)}</td>
+                  <td className="mono">
+                    {displayOnuRx(u)}
+                    {telnetCliBadge(u)}
+                  </td>
                 )}
-                {visible.has("tx") && <td className="mono">{metricCell(u.tx_pwr)}</td>}
-                {visible.has("voltage") && <td className="mono">{metricCell(u.voltage)}</td>}
-                {visible.has("temp") && <td className="mono">{metricCell(u.temp)}</td>}
+                {visible.has("tx") && (
+                  <td className="mono">
+                    {metricCell(u.tx_pwr)}
+                    {telnetCliBadge(u)}
+                  </td>
+                )}
+                {visible.has("voltage") && (
+                  <td className="mono">
+                    {metricCell(u.voltage)}
+                    {telnetCliBadge(u)}
+                  </td>
+                )}
+                {visible.has("temp") && (
+                  <td className="mono">
+                    {metricCell(u.temp)}
+                    {telnetCliBadge(u)}
+                  </td>
+                )}
                 {visible.has("model") && (
                   <td>
                     {cell(u.model)}
