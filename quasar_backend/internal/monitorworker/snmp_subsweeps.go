@@ -117,6 +117,15 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 						}
 					}
 				}
+				if bn, ok := c.Metrics["bng_collection"]; ok {
+					if doc, ok := bn.(map[string]any); ok {
+						if st, ok := doc["status"].(map[string]any); ok {
+							if coll, _ := st["collected"].(float64); coll > 0 {
+								snmpOK = true
+							}
+						}
+					}
+				}
 			}
 			var snmpDetail any
 			if telErr != nil {

@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 )
 
 const bngDeviceSQLFilter = `COALESCE(d.bng_enabled, false) = true`
@@ -398,5 +400,281 @@ func (s *Server) bngAuthLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"logs": list,
 		"note": "Autenticações RADIUS externas requerem integração dedicada; aqui: auditoria de login da plataforma e alterações em conexões.",
+	})
+}
+
+type bngDeviceRow struct {
+	ID          uuid.UUID
+	Description string
+	IP          string
+	Brand       string
+	Model       string
+	Category    string
+}
+
+func (s *Server) resolveBngDevice(ctx context.Context, id uuid.UUID) (bngDeviceRow, string, error) {
+	var row bngDeviceRow
+	err := s.DB().QueryRow(ctx, `
+		SELECT d.id, coalesce(d.description,''), coalesce(host(d.ip)::text,''),
+			coalesce(d.brand,''), coalesce(d.model,''), coalesce(d.category,'')
+		FROM devices d
+		WHERE d.id=$1 AND `+bngDeviceSQLFilter, id,
+	).Scan(&row.ID, &row.Description, &row.IP, &row.Brand, &row.Model, &row.Category)
+	if err != nil {
+		return row, "", err
+	}
+	var devComm *string
+	_ = s.DB().QueryRow(ctx, `SELECT snmp_community FROM devices WHERE id=$1`, id).Scan(&devComm)
+	var defComm *string
+	_ = s.DB().QueryRow(ctx, `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&defComm)
+	comm := ""
+	if devComm != nil && strings.TrimSpace(*devComm) != "" {
+		comm = strings.TrimSpace(*devComm)
+	} else if defComm != nil {
+		comm = strings.TrimSpace(*defComm)
+	}
+	return row, comm, nil
+}
+
+func (s *Server) bngListDevices(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT d.id, coalesce(d.description,''), coalesce(host(d.ip)::text,''),
+			coalesce(d.brand,''), coalesce(d.model,''), coalesce(d.category,'')
+		FROM devices d
+		WHERE `+bngDeviceSQLFilter+`
+		ORDER BY d.description
+	`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer rows.Close()
+	var list []map[string]any
+	for rows.Next() {
+		var id uuid.UUID
+		var desc, ip, brand, model, cat string
+		if err := rows.Scan(&id, &desc, &ip, &brand, &model, &cat); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		list = append(list, map[string]any{
+			"id": id, "description": desc, "ip": ip,
+			"brand": brand, "model": model, "category": cat,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": list})
+}
+
+func (s *Server) bngDeviceOverview(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, _, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+
+	var telAt *time.Time
+	var telRaw []byte
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT collected_at, metrics::text FROM telemetry_samples
+		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
+	`, id).Scan(&telAt, &telRaw)
+
+	fields := map[string]any{}
+	if len(telRaw) > 0 {
+		var doc map[string]any
+		if json.Unmarshal(telRaw, &doc) == nil {
+			if bc, ok := doc["bng_collection"].(map[string]any); ok {
+				if f, ok := bc["fields"].(map[string]any); ok {
+					for k, v := range f {
+						if fm, ok := v.(map[string]any); ok && fm["ok"] == true {
+							fields[k] = fm["value"]
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var statsAt *time.Time
+	var total, pppoe, ipv4, ipv6, dual *int
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+		FROM bng_stats_samples WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
+	`, id).Scan(&statsAt, &total, &pppoe, &ipv4, &ipv6, &dual)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device": map[string]any{
+			"id": dev.ID, "description": dev.Description, "ip": dev.IP,
+			"brand": dev.Brand, "model": dev.Model, "category": dev.Category,
+		},
+		"telemetry_collected_at": telAt,
+		"fields":                 fields,
+		"latest_stats": map[string]any{
+			"collected_at":       statsAt,
+			"total_online":       total,
+			"pppoe_online":       pppoe,
+			"ipv4_online":        ipv4,
+			"ipv6_online":        ipv6,
+			"dual_stack_online":  dual,
+		},
+	})
+}
+
+func (s *Server) bngStatsHistory(w http.ResponseWriter, r *http.Request) {
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	if deviceID == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "query device_id obrigatório", nil)
+		return
+	}
+	did, err := uuid.Parse(deviceID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "device_id inválido", nil)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 500 {
+		limit = 120
+	}
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+		FROM bng_stats_samples
+		WHERE device_id=$1
+		ORDER BY collected_at DESC
+		LIMIT $2
+	`, did, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer rows.Close()
+	var samples []map[string]any
+	for rows.Next() {
+		var ts time.Time
+		var total, pppoe, ipv4, ipv6, dual *int
+		if err := rows.Scan(&ts, &total, &pppoe, &ipv4, &ipv6, &dual); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		samples = append(samples, map[string]any{
+			"collected_at": ts, "total_online": total, "pppoe_online": pppoe,
+			"ipv4_online": ipv4, "ipv6_online": ipv6, "dual_stack_online": dual,
+		})
+	}
+	for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
+		samples[i], samples[j] = samples[j], samples[i]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"samples": samples})
+}
+
+func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	if _, _, err := s.resolveBngDevice(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	sessions, capturedAt, source, note := s.loadCachedBngSessions(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":    id,
+		"sessions":     sessions,
+		"captured_at":  capturedAt,
+		"source":       source,
+		"note":         note,
+		"count":        len(sessions),
+	})
+}
+
+func (s *Server) loadCachedBngSessions(ctx context.Context, deviceID uuid.UUID) ([]map[string]any, *time.Time, string, string) {
+	var capturedAt time.Time
+	var label string
+	var raw []byte
+	err := s.DB().QueryRow(ctx, `
+		SELECT captured_at, label, data::text FROM bng_session_snapshots
+		WHERE device_id=$1 ORDER BY captured_at DESC LIMIT 1
+	`, deviceID).Scan(&capturedAt, &label, &raw)
+	if err != nil {
+		return nil, nil, "", "Nenhuma consulta completa guardada. Execute «Consulta completa SNMP» na aba Sessões."
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, &capturedAt, label, "Snapshot inválido."
+	}
+	sess, _ := doc["sessions"].([]any)
+	out := make([]map[string]any, 0, len(sess))
+	for _, row := range sess {
+		if m, ok := row.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out, &capturedAt, label, ""
+}
+
+func (s *Server) bngDeviceSessionsCollect(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
+	defer cancel()
+	profile := bngcollect.LoadGlobalProfile(ctx, s.DB())
+	out, sessions := bngcollect.CollectSessionsWalk(ctx, strings.TrimSpace(dev.IP), comm, profile, 3*time.Minute)
+	if err := bngcollect.StoreSessionSnapshot(ctx, s.DB(), id, sessions, "snmp_access_table"); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"device_id":   id,
+		"sessions":    sessions,
+		"count":       len(sessions),
+		"collection":  out,
+		"captured_at": time.Now(),
+		"warning":     "Consulta completa via SNMP walk — pode demorar vários minutos em concentradores com milhares de sessões.",
+	})
+}
+
+func (s *Server) bngDeviceCollect(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	out, err := bngcollect.CollectAndStorePeriodic(ctx, s.DB(), id, strings.TrimSpace(dev.IP), comm, 45*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "COLLECT", err.Error(), nil)
+		return
+	}
+	st := bngcollect.ExtractStatsTotals(out)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "device_id": id, "collection": out, "latest_stats": st,
 	})
 }

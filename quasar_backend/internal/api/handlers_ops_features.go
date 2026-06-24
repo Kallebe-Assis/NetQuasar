@@ -185,6 +185,7 @@ func (s *Server) listOpsAudit(w http.ResponseWriter, r *http.Request) {
 					WHEN 'nightly_collection' THEN 'Automação — coleta noturna'
 					WHEN 'network_tool' THEN 'Ferramenta de rede'
 					WHEN 'settings_mikrotik_collection' THEN 'Coleta Mikrotik'
+					WHEN 'settings_bng_collection' THEN 'Coleta BNG'
 					ELSE NULL
 				END,
 				a.entity_id

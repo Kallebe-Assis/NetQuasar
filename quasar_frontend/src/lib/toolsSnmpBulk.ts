@@ -83,21 +83,63 @@ export function buildSnmpBulkResult(args: {
     return {
       hosts: out,
       oids,
-      note: `Até 50 hosts; cada coluna corresponde a um OID; valores formatados no servidor (ex.: MAC em aa:bb:cc:dd:ee:ff).`,
+      note: `Até 50 hosts; uma linha por host e OID na tabela; valores formatados no servidor (ex.: MAC em aa:bb:cc:dd:ee:ff).`,
     };
   })();
 }
 
+export type SnmpBulkFlatRow = {
+  host: string;
+  oid: string;
+  value: string;
+  snmpType?: string;
+  hostOk: boolean;
+  hostError?: string;
+};
+
+export function flattenSnmpBulkRows(data: SnmpBulkResult): SnmpBulkFlatRow[] {
+  const out: SnmpBulkFlatRow[] = [];
+  for (const h of data.hosts) {
+    if (!h.ok) {
+      out.push({
+        host: h.host,
+        oid: "—",
+        value: "—",
+        hostOk: false,
+        hostError: h.error,
+      });
+      continue;
+    }
+    for (const oid of data.oids) {
+      const cell = h.values[oid];
+      out.push({
+        host: h.host,
+        oid,
+        value: cell?.value?.trim() ? cell.value : "—",
+        snmpType: cell?.type,
+        hostOk: true,
+      });
+    }
+  }
+  return out;
+}
+
 export function exportSnmpBulkCsv(data: SnmpBulkResult): void {
-  const header = ["Host", "Estado", ...data.oids.map((o) => oidColumnTitle(o))];
+  const header = ["Host", "Estado", "OID", "Valor", "Tipo SNMP", "Detalhe"];
   const lines = [header.map(escapeCsvCell).join(",")];
-  for (const row of data.hosts) {
-    const status = row.ok ? "OK" : "Erro";
-    const cells = data.oids.map((oid) => {
-      if (!row.ok) return row.error ?? "";
-      return row.values[oid]?.value ?? "";
-    });
-    lines.push([row.host, status, ...cells].map(escapeCsvCell).join(","));
+  for (const row of flattenSnmpBulkRows(data)) {
+    lines.push(
+      [
+        row.host,
+        row.hostOk ? "OK" : "Erro",
+        row.hostOk ? row.oid : "—",
+        row.hostOk ? row.value : "—",
+        row.snmpType ?? "",
+        row.hostError ?? "",
+      ]
+        .map(escapeCsvCell)
+        .join(","),
+    );
   }
   const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");

@@ -15,7 +15,7 @@ import {
 } from "../components/ToolsOutputViews";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
-import { buildSnmpBulkResult, exportSnmpBulkCsv, oidColumnTitle } from "../lib/toolsSnmpBulk";
+import { buildSnmpBulkResult, exportSnmpBulkCsv, flattenSnmpBulkRows } from "../lib/toolsSnmpBulk";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -834,38 +834,46 @@ export function ToolsPage() {
             <>
               <ToolOutputError err={bulkRun.error as Error | null} />
               {bulkRun.data ? (
-                <div className="table-wrap" style={{ marginTop: 12 }}>
+                <div className="table-wrap tools-snmp-bulk-table" style={{ marginTop: 12 }}>
                   <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                     <p style={{ color: "var(--muted)", fontSize: 11, margin: 0 }}>{bulkRun.data.note}</p>
                     <button type="button" className="btn" onClick={() => exportSnmpBulkCsv(bulkRun.data!)}>
                       Exportar CSV
                     </button>
                   </div>
-                  <table>
+                  <table className="conn-table">
                     <thead>
                       <tr>
-                        <th>Host</th>
-                        <th>Estado</th>
-                        {bulkRun.data.oids.map((oid) => (
-                          <th key={oid} className="mono" style={{ fontSize: 11 }} title={oid}>
-                            {oidColumnTitle(oid)}
-                          </th>
-                        ))}
-                        <th>Detalhe</th>
+                        <th style={{ minWidth: 130 }}>Host</th>
+                        <th style={{ width: 72 }}>Estado</th>
+                        <th style={{ minWidth: 220 }}>OID</th>
+                        <th>Valor</th>
+                        <th style={{ width: 100 }}>Tipo</th>
+                        <th style={{ minWidth: 160 }}>Detalhe</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {bulkRun.data.hosts.map((r) => (
-                        <tr key={r.host}>
-                          <td className="mono">{r.host}</td>
-                          <td>{r.ok ? <span className="badge badge--ok">OK</span> : <span className="badge badge--off">Erro</span>}</td>
-                          {bulkRun.data!.oids.map((oid) => (
-                            <td key={oid} className="mono" style={{ fontSize: 11, maxWidth: 280, wordBreak: "break-all" }} title={r.values[oid]?.type}>
-                              {r.ok ? r.values[oid]?.value || "—" : "—"}
-                            </td>
-                          ))}
-                          <td style={{ fontSize: 11, color: "var(--muted)", maxWidth: 240 }}>
-                            {r.error ?? "—"}
+                      {flattenSnmpBulkRows(bulkRun.data).map((row, idx) => (
+                        <tr key={`${row.host}-${row.oid}-${idx}`}>
+                          <td className="mono" style={{ fontWeight: 500 }}>{row.host}</td>
+                          <td>
+                            {row.hostOk ? (
+                              <span className="badge badge--ok">OK</span>
+                            ) : (
+                              <span className="badge badge--off">Erro</span>
+                            )}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11, wordBreak: "break-all" }} title={row.oid}>
+                            {row.oid}
+                          </td>
+                          <td className="mono" style={{ fontSize: 12, wordBreak: "break-word", maxWidth: 420 }}>
+                            {row.hostOk ? row.value : "—"}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+                            {row.snmpType ?? "—"}
+                          </td>
+                          <td style={{ fontSize: 11, color: "var(--muted)", wordBreak: "break-word" }}>
+                            {row.hostError ?? "—"}
                           </td>
                         </tr>
                       ))}

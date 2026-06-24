@@ -148,6 +148,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Delete("/olt-vendors/{brand}/models/{model}", s.deleteOltVendorModel)
 				r.Get("/mikrotik-collection", s.getMikrotikCollection)
 				r.Patch("/mikrotik-collection", s.patchMikrotikCollection)
+				r.Get("/bng-collection", s.getBngCollection)
+				r.Patch("/bng-collection", s.patchBngCollection)
 				r.Get("/notifications/telegram/monitoring", s.getTelegramMonitoring)
 				r.Patch("/notifications/telegram/monitoring", s.patchTelegramMonitoring)
 				r.Post("/notifications/telegram/monitoring/test", s.testTelegramMonitoring)
@@ -406,11 +408,20 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		})
 
 		r.Route("/bng", func(r chi.Router) {
+			r.Get("/devices", s.bngListDevices)
+			r.Get("/devices/{id}/overview", s.bngDeviceOverview)
+			r.Get("/devices/{id}/sessions", s.bngDeviceSessions)
+			r.Get("/stats/history", s.bngStatsHistory)
 			r.Get("/sessions", s.bngSessions)
 			r.Get("/sessions/search", s.bngSessionsSearch)
 			r.Get("/auth/logs", s.bngAuthLogs)
 			r.Get("/traffic/users", s.bngTrafficUsers)
 			r.Get("/stats/summary", s.bngStatsSummary)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdminMiddleware)
+				r.Post("/devices/{id}/sessions/collect", s.bngDeviceSessionsCollect)
+				r.Post("/devices/{id}/collect", s.bngDeviceCollect)
+			})
 		})
 
 		r.Get("/realtime/ping", s.realtimePing)

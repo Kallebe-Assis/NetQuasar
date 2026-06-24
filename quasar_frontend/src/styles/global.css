@@ -465,6 +465,23 @@ h2 {
     grid-column: 1 / -1;
   }
 }
+
+/* Ferramentas — SNMP bulk: host fixo à esquerda ao rolar horizontalmente */
+.tools-snmp-bulk-table table {
+  font-size: 12px;
+}
+.tools-snmp-bulk-table th:first-child,
+.tools-snmp-bulk-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card, var(--bg));
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+}
+.tools-snmp-bulk-table thead th:first-child {
+  z-index: 2;
+}
+
 @media (max-width: 520px) {
   .tools-http-matrix-inputs {
     grid-template-columns: 1fr;
@@ -2453,6 +2470,37 @@ h3 .info-hint {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.settings-conn-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.settings-conn-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-conn-block {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2, rgba(0, 0, 0, 0.12));
+}
+.settings-conn-block h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.settings-conn-block:first-of-type {
+  margin-top: 0;
 }
 
 .theme-picker {

@@ -145,7 +145,6 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	summary["olt_refresh_elapsed_ms"] = time.Since(refreshT0).Milliseconds()
 
 	curMaps := oltifderive.PonsAnySliceToMaps(pons)
-	oltifderive.ApplyPonOperStatusAll(curMaps)
 	incomplete := oltcollect.IsOltSnapshotIncomplete(summary)
 	var prevSnapPons, prevSnapSum []byte
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]'), COALESCE(summary::text,'{}') FROM olt_snapshots WHERE device_id=$1`, id).Scan(&prevSnapPons, &prevSnapSum)
@@ -158,6 +157,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		}
 		summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
 	}
+	oltifderive.ApplyPonOperStatusAll(curMaps)
 	pons = oltifderive.PonsMapsToAny(curMaps)
 	alertSource := source
 	if alertSource == "olt_refresh" {

@@ -125,7 +125,6 @@ func CollectOltVendorPeriodic(
 		return out
 	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
-	oltifderive.ApplyPonOperStatusAll(pons)
 	incomplete := oltcollect.IsOltSnapshotIncomplete(execSt.Summary)
 	if incomplete && len(prevMaps) > 0 {
 		var carryPatch map[string]any
@@ -135,6 +134,7 @@ func CollectOltVendorPeriodic(
 		}
 		execSt.Summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
 	}
+	oltifderive.ApplyPonOperStatusAll(pons)
 	if !incomplete {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	}

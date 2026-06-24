@@ -236,6 +236,19 @@ func oltWorkerOnuMetricsCollect(ctx context.Context, st *oltWorkerExecState) err
 			}
 		}
 	}
+	if oltcollect.IsOltSnapshotIncomplete(st.Summary) && st.Pool != nil && len(st.Pons) > 0 {
+		var prevSnapPons []byte
+		_ = st.Pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, st.DeviceID).Scan(&prevSnapPons)
+		prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
+		if len(prevMaps) > 0 {
+			var carryPatch map[string]any
+			st.Pons, carryPatch = oltifderive.PreservePonCountsOnIncomplete(prevMaps, st.Pons)
+			for k, v := range carryPatch {
+				st.Summary[k] = v
+			}
+			st.Summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
+		}
+	}
 	st.SkipStab = true
 	return nil
 }
@@ -529,9 +542,17 @@ func oltWorkerStabilizePons(ctx context.Context, st *oltWorkerExecState) error {
 		Scan(&prevSnapPons, &prevSnapSum)
 	prevMaps := oltifderive.PonsJSONToMaps(prevSnapPons)
 	prevSumm := oltifderive.SummaryJSONBytesToMap(prevSnapSum)
-	incomplete := len(st.Pons) < len(prevMaps) && len(prevMaps) > 0
+	incomplete := oltcollect.IsOltSnapshotIncomplete(st.Summary) || (len(st.Pons) < len(prevMaps) && len(prevMaps) > 0)
 	stabMaps, stabPatch := oltifderive.StabilizePonSnapshotRows(prevMaps, st.Pons, prevSumm, incomplete)
 	st.Pons = stabMaps
+	if incomplete && len(prevMaps) > 0 {
+		var carryPatch map[string]any
+		st.Pons, carryPatch = oltifderive.PreservePonCountsOnIncomplete(prevMaps, st.Pons)
+		for k, v := range carryPatch {
+			stabPatch[k] = v
+		}
+		st.Summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
+	}
 	for k, v := range stabPatch {
 		st.Summary[k] = v
 	}

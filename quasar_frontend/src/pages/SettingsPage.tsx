@@ -12,6 +12,7 @@ import { MonitoringSettingsPanel } from "./settings/MonitoringPipelinePanel";
 import { AuditingPanel } from "./settings/AuditingPanel";
 import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { MikrotikCollectionPanel } from "./settings/MikrotikCollectionPanel";
+import { BngCollectionPanel } from "./settings/BngCollectionPanel";
 import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
@@ -26,6 +27,7 @@ type SettingsTab =
   | "telegram"
   | "olt"
   | "mikrotik"
+  | "bng"
   | "automation";
 
 export function SettingsPage() {
@@ -34,7 +36,7 @@ export function SettingsPage() {
     <>
       <h1>Configurações</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik e relatórios automáticos.
+        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/BNG e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
@@ -49,6 +51,7 @@ export function SettingsPage() {
             ["telegram", "Telegram"],
             ["olt", "Perfis OLT"],
             ["mikrotik", "MikroTik"],
+            ["bng", "BNG"],
             ["automation", "Relatórios agendados"],
           ] as const
         ).map(([k, lab]) => (
@@ -72,6 +75,7 @@ export function SettingsPage() {
       )}
       {tab === "olt" && <OltVendorsPanel />}
       {tab === "mikrotik" && <MikrotikCollectionPanel />}
+      {tab === "bng" && <BngCollectionPanel />}
       {tab === "automation" && <ScheduledReportsPanel />}
     </>
   );
@@ -1130,33 +1134,105 @@ function ConnectionPanel() {
     memory_size_oid?: string;
     temp_oid?: string;
     uptime_oid?: string;
+    brand_oids?: string[];
+    model_oids?: string[];
+    serial_oids?: string[];
+    software_oids?: string[];
+    hardware_oids?: string[];
+    sysname_oids?: string[];
+    sysdescr_oids?: string[];
     interface_oids?: string[];
     optical_oids?: string[];
     pon_oids?: string[];
     onu_oids?: string[];
     bridge_oids?: string[];
     traffic_oids?: string[];
+    custom_oids?: string[];
     /** OID normalizado (sem ponto inicial) → descrição mostrada no relatório. */
     oid_labels?: Record<string, string>;
   };
   type OverridesDoc = {
     olt?: CategoryOverrides;
     mikrotik?: CategoryOverrides;
+    bng?: CategoryOverrides;
     servidor?: CategoryOverrides;
     bridge?: CategoryOverrides;
   };
-  type OidExtraCategory = "olt" | "mikrotik" | "servidor" | "bridge";
-  type OidExtraKind = "interface" | "optical" | "pon" | "onu" | "bridge" | "traffic";
+  type OidExtraCategory = "olt" | "mikrotik" | "bng" | "servidor" | "bridge";
+  type OidArrayKey = keyof Pick<
+    CategoryOverrides,
+    | "brand_oids"
+    | "model_oids"
+    | "serial_oids"
+    | "software_oids"
+    | "hardware_oids"
+    | "sysname_oids"
+    | "sysdescr_oids"
+    | "interface_oids"
+    | "traffic_oids"
+    | "optical_oids"
+    | "pon_oids"
+    | "onu_oids"
+    | "bridge_oids"
+    | "custom_oids"
+  >;
+  type OidExtraKind =
+    | "brand"
+    | "model"
+    | "serial"
+    | "software"
+    | "hardware"
+    | "sysname"
+    | "sysdescr"
+    | "interface"
+    | "traffic"
+    | "optical"
+    | "pon"
+    | "onu"
+    | "bridge"
+    | "custom";
+  type OidKindMeta = { value: OidExtraKind; label: string; jsonKey: OidArrayKey; defaultLabel: string };
   type ExtraOidRow = { id: string; kind: OidExtraKind; oid: string; label: string };
 
-  const OID_KIND_OPTIONS: { value: OidExtraKind; label: string }[] = [
-    { value: "interface", label: "Interface" },
-    { value: "traffic", label: "Tráfego (banda RX/TX etc.)" },
-    { value: "optical", label: "Óptica / SFP" },
-    { value: "pon", label: "PON" },
-    { value: "onu", label: "ONU" },
-    { value: "bridge", label: "Bridge" },
+  const OID_KIND_GROUPS: { label: string; kinds: OidKindMeta[] }[] = [
+    {
+      label: "Inventário / identificação",
+      kinds: [
+        { value: "brand", label: "Fabricante / marca", jsonKey: "brand_oids", defaultLabel: "Fabricante" },
+        { value: "model", label: "Modelo", jsonKey: "model_oids", defaultLabel: "Modelo" },
+        { value: "serial", label: "Número de série", jsonKey: "serial_oids", defaultLabel: "Número de série" },
+        { value: "software", label: "Versão de software / firmware", jsonKey: "software_oids", defaultLabel: "Versão de software" },
+        { value: "hardware", label: "Versão de hardware", jsonKey: "hardware_oids", defaultLabel: "Versão de hardware" },
+        { value: "sysname", label: "Nome do sistema (sysName)", jsonKey: "sysname_oids", defaultLabel: "Nome do sistema" },
+        { value: "sysdescr", label: "Descrição do sistema (sysDescr)", jsonKey: "sysdescr_oids", defaultLabel: "Descrição do sistema" },
+      ],
+    },
+    {
+      label: "Rede / telemetria",
+      kinds: [
+        { value: "interface", label: "Interface", jsonKey: "interface_oids", defaultLabel: "Interface" },
+        { value: "traffic", label: "Tráfego (banda RX/TX etc.)", jsonKey: "traffic_oids", defaultLabel: "Tráfego" },
+        { value: "optical", label: "Óptica / SFP", jsonKey: "optical_oids", defaultLabel: "Óptica" },
+        { value: "pon", label: "PON", jsonKey: "pon_oids", defaultLabel: "PON" },
+        { value: "onu", label: "ONU", jsonKey: "onu_oids", defaultLabel: "ONU" },
+        { value: "bridge", label: "Bridge", jsonKey: "bridge_oids", defaultLabel: "Bridge" },
+      ],
+    },
+    {
+      label: "Outros",
+      kinds: [{ value: "custom", label: "Outro / personalizado", jsonKey: "custom_oids", defaultLabel: "Leitura extra" }],
+    },
   ];
+
+  const OID_KIND_META: OidKindMeta[] = OID_KIND_GROUPS.flatMap((g) => g.kinds);
+  const OID_KIND_BY_VALUE = Object.fromEntries(OID_KIND_META.map((k) => [k.value, k])) as Record<OidExtraKind, OidKindMeta>;
+  const OID_ARRAY_KEYS: OidArrayKey[] = OID_KIND_META.map((k) => k.jsonKey);
+
+  /** OIDs reservados nos cartões de telemetria avançada (não aparecem na lista de extras). */
+  const RESERVED_OID_SLOTS: Partial<Record<OidExtraCategory, Partial<Record<OidExtraKind, number>>>> = {
+    olt: { onu: 1, pon: 2 },
+    mikrotik: { interface: 1, traffic: 2, optical: 2 },
+  };
 
   const compact = (arr: Array<string | undefined | null>): string[] =>
     arr.map((s) => String(s ?? "").trim()).filter((s) => s.length > 0);
@@ -1193,18 +1269,12 @@ function ConnectionPanel() {
 
   const oidsInCategoryArrays = (blk: CategoryOverrides): Set<string> => {
     const s = new Set<string>();
-    const addArr = (arr?: string[]) => {
-      for (const x of arr ?? []) {
+    for (const key of OID_ARRAY_KEYS) {
+      for (const x of blk[key] ?? []) {
         const o = String(x).trim().replace(/^\./, "");
         if (o) s.add(o);
       }
-    };
-    addArr(blk.interface_oids);
-    addArr(blk.optical_oids);
-    addArr(blk.pon_oids);
-    addArr(blk.onu_oids);
-    addArr(blk.bridge_oids);
-    addArr(blk.traffic_oids);
+    }
     return s;
   };
 
@@ -1223,28 +1293,65 @@ function ConnectionPanel() {
   const emptyExtraRows = (): Record<OidExtraCategory, ExtraOidRow[]> => ({
     olt: [],
     mikrotik: [],
+    bng: [],
     servidor: [],
     bridge: [],
   });
 
+  const OID_EXTRA_CATEGORY_LABELS: Record<OidExtraCategory, string> = {
+    olt: "OLT",
+    mikrotik: "MikroTik",
+    bng: "BNG",
+    servidor: "Servidor",
+    bridge: "Pontes",
+  };
+
+  type TelemetryOidValues = {
+    cpu: string;
+    cpuAvail: string;
+    memUsed: string;
+    memSize: string;
+    temp: string;
+    uptime: string;
+  };
+
+  const renderBaseTelemetryFields = (values: TelemetryOidValues, onChange: (patch: Partial<TelemetryOidValues>) => void) => (
+    <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+      <div className="field">
+        <label>CPU utilizada (uso / carga)</label>
+        <input className="input mono" value={values.cpu} onChange={(e) => onChange({ cpu: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>CPU disponível (% idle)</label>
+        <input className="input mono" value={values.cpuAvail} onChange={(e) => onChange({ cpuAvail: e.target.value })} placeholder="opcional" />
+      </div>
+      <div className="field">
+        <label>Memória em uso</label>
+        <input className="input mono" value={values.memUsed} onChange={(e) => onChange({ memUsed: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>Memória total</label>
+        <input className="input mono" value={values.memSize} onChange={(e) => onChange({ memSize: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>Temperatura</label>
+        <input className="input mono" value={values.temp} onChange={(e) => onChange({ temp: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>Tempo ligado (uptime)</label>
+        <input className="input mono" value={values.uptime} onChange={(e) => onChange({ uptime: e.target.value })} />
+      </div>
+    </div>
+  );
+
   /** Junta OIDs extra por tipo; mantém ordem e remove duplicados vazios. */
   const mergeOidsByKind = (rows: ExtraOidRow[]): Record<OidExtraKind, string[]> => {
-    const acc: Record<OidExtraKind, string[]> = {
-      interface: [],
-      optical: [],
-      pon: [],
-      onu: [],
-      bridge: [],
-      traffic: [],
-    };
-    const seen: Record<OidExtraKind, Set<string>> = {
-      interface: new Set(),
-      optical: new Set(),
-      pon: new Set(),
-      onu: new Set(),
-      bridge: new Set(),
-      traffic: new Set(),
-    };
+    const acc = {} as Record<OidExtraKind, string[]>;
+    const seen = {} as Record<OidExtraKind, Set<string>>;
+    for (const meta of OID_KIND_META) {
+      acc[meta.value] = [];
+      seen[meta.value] = new Set();
+    }
     for (const r of rows) {
       const o = String(r.oid ?? "").trim();
       if (!o) continue;
@@ -1253,6 +1360,39 @@ function ConnectionPanel() {
       acc[r.kind].push(o);
     }
     return acc;
+  };
+
+  const mergeCategoryOidArrays = (
+    block: CategoryOverrides,
+    rows: ExtraOidRow[],
+    reserved?: Partial<Record<OidExtraKind, string[]>>,
+  ) => {
+    const merged = mergeOidsByKind(rows);
+    for (const meta of OID_KIND_META) {
+      const combined = compact([...(reserved?.[meta.value] ?? []), ...merged[meta.value]]);
+      if (combined.length) (block as Record<string, unknown>)[meta.jsonKey] = combined;
+      else delete (block as Record<string, unknown>)[meta.jsonKey];
+    }
+    Object.keys(block).forEach((k) => {
+      const v = (block as Record<string, unknown>)[k];
+      if (v === undefined || (Array.isArray(v) && v.length === 0) || v === "") {
+        delete (block as Record<string, unknown>)[k];
+      }
+    });
+  };
+
+  const loadCategoryExtraRows = (
+    cat: OidExtraCategory,
+    block: CategoryOverrides,
+    labels: Record<string, string>,
+    into: ExtraOidRow[],
+    fromArr: (labels: Record<string, string>, kind: OidExtraKind, list: string[] | undefined) => ExtraOidRow[],
+  ) => {
+    for (const meta of OID_KIND_META) {
+      const skip = RESERVED_OID_SLOTS[cat]?.[meta.value] ?? 0;
+      const arr = (block[meta.jsonKey] ?? []).slice(skip);
+      into.push(...fromArr(labels, meta.value, arr));
+    }
   };
 
   /**
@@ -1274,40 +1414,20 @@ function ConnectionPanel() {
 
     const o = doc.olt ?? {};
     const m = doc.mikrotik ?? {};
+    const bn = doc.bng ?? {};
     const s = doc.servidor ?? {};
     const b = doc.bridge ?? {};
     const lo = oidLabelMapFromUnknown(o.oid_labels);
     const lm = oidLabelMapFromUnknown(m.oid_labels);
+    const lbn = oidLabelMapFromUnknown(bn.oid_labels);
     const ls = oidLabelMapFromUnknown(s.oid_labels);
     const lb = oidLabelMapFromUnknown(b.oid_labels);
 
-    out.olt.push(...fromArr(lo, "onu", (o.onu_oids ?? []).slice(1)));
-    out.olt.push(...fromArr(lo, "pon", (o.pon_oids ?? []).slice(2)));
-    out.olt.push(...fromArr(lo, "interface", o.interface_oids));
-    out.olt.push(...fromArr(lo, "optical", o.optical_oids));
-    out.olt.push(...fromArr(lo, "traffic", o.traffic_oids));
-    out.olt.push(...fromArr(lo, "bridge", o.bridge_oids));
-
-    out.mikrotik.push(...fromArr(lm, "interface", (m.interface_oids ?? []).slice(1)));
-    out.mikrotik.push(...fromArr(lm, "traffic", (m.traffic_oids ?? []).slice(2)));
-    out.mikrotik.push(...fromArr(lm, "optical", (m.optical_oids ?? []).slice(2)));
-    out.mikrotik.push(...fromArr(lm, "pon", m.pon_oids));
-    out.mikrotik.push(...fromArr(lm, "onu", m.onu_oids));
-    out.mikrotik.push(...fromArr(lm, "bridge", m.bridge_oids));
-
-    out.servidor.push(...fromArr(ls, "interface", s.interface_oids));
-    out.servidor.push(...fromArr(ls, "optical", s.optical_oids));
-    out.servidor.push(...fromArr(ls, "traffic", s.traffic_oids));
-    out.servidor.push(...fromArr(ls, "pon", s.pon_oids));
-    out.servidor.push(...fromArr(ls, "onu", s.onu_oids));
-    out.servidor.push(...fromArr(ls, "bridge", s.bridge_oids));
-
-    out.bridge.push(...fromArr(lb, "interface", b.interface_oids));
-    out.bridge.push(...fromArr(lb, "optical", b.optical_oids));
-    out.bridge.push(...fromArr(lb, "traffic", b.traffic_oids));
-    out.bridge.push(...fromArr(lb, "pon", b.pon_oids));
-    out.bridge.push(...fromArr(lb, "onu", b.onu_oids));
-    out.bridge.push(...fromArr(lb, "bridge", b.bridge_oids));
+    loadCategoryExtraRows("olt", o, lo, out.olt, fromArr);
+    loadCategoryExtraRows("mikrotik", m, lm, out.mikrotik, fromArr);
+    loadCategoryExtraRows("bng", bn, lbn, out.bng, fromArr);
+    loadCategoryExtraRows("servidor", s, ls, out.servidor, fromArr);
+    loadCategoryExtraRows("bridge", b, lb, out.bridge, fromArr);
 
     return out;
   };
@@ -1331,6 +1451,7 @@ function ConnectionPanel() {
         oid_defaults: {
           olt: { cpu_oid: string; cpu_available_oid?: string; memory_used_oid: string; memory_size_oid: string; temp_oid: string; uptime_oid: string };
           mikrotik: { cpu_oid: string; cpu_available_oid?: string; memory_used_oid: string; memory_size_oid: string; temp_oid: string; uptime_oid: string };
+          bng: { cpu_oid: string; cpu_available_oid?: string; memory_used_oid: string; memory_size_oid: string; temp_oid: string; uptime_oid: string };
           server: { cpu_oid: string; cpu_available_oid?: string; memory_used_oid: string; memory_size_oid: string; temp_oid: string; uptime_oid: string };
         };
         snmp_oid_overrides: unknown;
@@ -1355,6 +1476,12 @@ function ConnectionPanel() {
   const [mkMemSize, setMkMemSize] = useState("");
   const [mkTemp, setMkTemp] = useState("");
   const [mkUptime, setMkUptime] = useState("");
+  const [bngCpu, setBngCpu] = useState("");
+  const [bngCpuAvail, setBngCpuAvail] = useState("");
+  const [bngMemUsed, setBngMemUsed] = useState("");
+  const [bngMemSize, setBngMemSize] = useState("");
+  const [bngTemp, setBngTemp] = useState("");
+  const [bngUptime, setBngUptime] = useState("");
   const [svCpu, setSvCpu] = useState("");
   const [svCpuAvail, setSvCpuAvail] = useState("");
   const [svMemUsed, setSvMemUsed] = useState("");
@@ -1391,6 +1518,12 @@ function ConnectionPanel() {
     setMkMemSize(q.data.oid_defaults?.mikrotik?.memory_size_oid ?? "");
     setMkTemp(q.data.oid_defaults?.mikrotik?.temp_oid ?? "");
     setMkUptime(q.data.oid_defaults?.mikrotik?.uptime_oid ?? "");
+    setBngCpu(q.data.oid_defaults?.bng?.cpu_oid ?? "");
+    setBngCpuAvail(q.data.oid_defaults?.bng?.cpu_available_oid ?? "");
+    setBngMemUsed(q.data.oid_defaults?.bng?.memory_used_oid ?? "");
+    setBngMemSize(q.data.oid_defaults?.bng?.memory_size_oid ?? "");
+    setBngTemp(q.data.oid_defaults?.bng?.temp_oid ?? "");
+    setBngUptime(q.data.oid_defaults?.bng?.uptime_oid ?? "");
     setSvCpu(q.data.oid_defaults?.server?.cpu_oid ?? "");
     setSvCpuAvail(q.data.oid_defaults?.server?.cpu_available_oid ?? "");
     setSvMemUsed(q.data.oid_defaults?.server?.memory_used_oid ?? "");
@@ -1421,21 +1554,13 @@ function ConnectionPanel() {
     const base = JSON.parse(JSON.stringify(overridesBaseline)) as OverridesDoc;
     base.olt = base.olt ?? {};
     base.mikrotik = base.mikrotik ?? {};
+    base.bng = base.bng ?? {};
     base.servidor = base.servidor ?? {};
     base.bridge = base.bridge ?? {};
 
-    const mergedOlt = mergeOidsByKind(extraOidRows.olt);
-    base.olt.onu_oids = compact([oltOnuTotalOid, ...mergedOlt.onu]);
-    base.olt.pon_oids = compact([oltPonTxOid, oltPonStatusOid, ...mergedOlt.pon]);
-    base.olt.interface_oids = mergedOlt.interface.length ? mergedOlt.interface : undefined;
-    base.olt.optical_oids = mergedOlt.optical.length ? mergedOlt.optical : undefined;
-    base.olt.traffic_oids = mergedOlt.traffic.length ? mergedOlt.traffic : undefined;
-    base.olt.bridge_oids = mergedOlt.bridge.length ? mergedOlt.bridge : undefined;
-    Object.keys(base.olt).forEach((k) => {
-      const v = (base.olt as Record<string, unknown>)[k];
-      if (v === undefined || (Array.isArray(v) && v.length === 0) || v === "") {
-        delete (base.olt as Record<string, unknown>)[k];
-      }
+    mergeCategoryOidArrays(base.olt as CategoryOverrides, extraOidRows.olt, {
+      onu: compact([oltOnuTotalOid]),
+      pon: compact([oltPonTxOid, oltPonStatusOid]),
     });
     delete (base.olt as CategoryOverrides).oid_labels;
     const oltOidLabels = pruneOidLabelsToBlock(
@@ -1444,21 +1569,10 @@ function ConnectionPanel() {
     );
     if (oltOidLabels) (base.olt as CategoryOverrides).oid_labels = oltOidLabels;
 
-    const mergedMk = mergeOidsByKind(extraOidRows.mikrotik);
-    base.mikrotik.interface_oids = compact([mkInterfacesStatusOid, ...mergedMk.interface]);
-    base.mikrotik.traffic_oids = compact([mkBandwidthRxOid, mkBandwidthTxOid, ...mergedMk.traffic]);
-    base.mikrotik.optical_oids = compact([mkSfpTxOid, mkSfpRxOid, ...mergedMk.optical]);
-    if (mergedMk.pon.length) base.mikrotik.pon_oids = mergedMk.pon;
-    else delete base.mikrotik.pon_oids;
-    if (mergedMk.onu.length) base.mikrotik.onu_oids = mergedMk.onu;
-    else delete base.mikrotik.onu_oids;
-    if (mergedMk.bridge.length) base.mikrotik.bridge_oids = mergedMk.bridge;
-    else delete base.mikrotik.bridge_oids;
-    Object.keys(base.mikrotik).forEach((k) => {
-      const v = (base.mikrotik as Record<string, unknown>)[k];
-      if (v === undefined || (Array.isArray(v) && v.length === 0) || v === "") {
-        delete (base.mikrotik as Record<string, unknown>)[k];
-      }
+    mergeCategoryOidArrays(base.mikrotik as CategoryOverrides, extraOidRows.mikrotik, {
+      interface: compact([mkInterfacesStatusOid]),
+      traffic: compact([mkBandwidthRxOid, mkBandwidthTxOid]),
+      optical: compact([mkSfpTxOid, mkSfpRxOid]),
     });
     delete (base.mikrotik as CategoryOverrides).oid_labels;
     const mkOidLabels = pruneOidLabelsToBlock(
@@ -1467,25 +1581,15 @@ function ConnectionPanel() {
     );
     if (mkOidLabels) (base.mikrotik as CategoryOverrides).oid_labels = mkOidLabels;
 
-    const mergedSrv = mergeOidsByKind(extraOidRows.servidor);
-    if (mergedSrv.interface.length) base.servidor.interface_oids = mergedSrv.interface;
-    else delete base.servidor.interface_oids;
-    if (mergedSrv.optical.length) base.servidor.optical_oids = mergedSrv.optical;
-    else delete base.servidor.optical_oids;
-    if (mergedSrv.traffic.length) base.servidor.traffic_oids = mergedSrv.traffic;
-    else delete base.servidor.traffic_oids;
-    if (mergedSrv.pon.length) base.servidor.pon_oids = mergedSrv.pon;
-    else delete base.servidor.pon_oids;
-    if (mergedSrv.onu.length) base.servidor.onu_oids = mergedSrv.onu;
-    else delete base.servidor.onu_oids;
-    if (mergedSrv.bridge.length) base.servidor.bridge_oids = mergedSrv.bridge;
-    else delete base.servidor.bridge_oids;
-    Object.keys(base.servidor).forEach((k) => {
-      const v = (base.servidor as Record<string, unknown>)[k];
-      if (v === undefined || (Array.isArray(v) && v.length === 0) || v === "") {
-        delete (base.servidor as Record<string, unknown>)[k];
-      }
-    });
+    mergeCategoryOidArrays(base.bng as CategoryOverrides, extraOidRows.bng);
+    delete (base.bng as CategoryOverrides).oid_labels;
+    const bngOidLabels = pruneOidLabelsToBlock(
+      base.bng as CategoryOverrides,
+      mergeCategoryOidLabels(overridesBaseline.bng, extraOidRows.bng),
+    );
+    if (bngOidLabels) (base.bng as CategoryOverrides).oid_labels = bngOidLabels;
+
+    mergeCategoryOidArrays(base.servidor as CategoryOverrides, extraOidRows.servidor);
     delete (base.servidor as CategoryOverrides).oid_labels;
     const srvOidLabels = pruneOidLabelsToBlock(
       base.servidor as CategoryOverrides,
@@ -1493,25 +1597,7 @@ function ConnectionPanel() {
     );
     if (srvOidLabels) (base.servidor as CategoryOverrides).oid_labels = srvOidLabels;
 
-    const mergedBr = mergeOidsByKind(extraOidRows.bridge);
-    if (mergedBr.interface.length) base.bridge.interface_oids = mergedBr.interface;
-    else delete base.bridge.interface_oids;
-    if (mergedBr.optical.length) base.bridge.optical_oids = mergedBr.optical;
-    else delete base.bridge.optical_oids;
-    if (mergedBr.traffic.length) base.bridge.traffic_oids = mergedBr.traffic;
-    else delete base.bridge.traffic_oids;
-    if (mergedBr.pon.length) base.bridge.pon_oids = mergedBr.pon;
-    else delete base.bridge.pon_oids;
-    if (mergedBr.onu.length) base.bridge.onu_oids = mergedBr.onu;
-    else delete base.bridge.onu_oids;
-    if (mergedBr.bridge.length) base.bridge.bridge_oids = mergedBr.bridge;
-    else delete base.bridge.bridge_oids;
-    Object.keys(base.bridge).forEach((k) => {
-      const v = (base.bridge as Record<string, unknown>)[k];
-      if (v === undefined || (Array.isArray(v) && v.length === 0) || v === "") {
-        delete (base.bridge as Record<string, unknown>)[k];
-      }
-    });
+    mergeCategoryOidArrays(base.bridge as CategoryOverrides, extraOidRows.bridge);
     delete (base.bridge as CategoryOverrides).oid_labels;
     const brOidLabels = pruneOidLabelsToBlock(
       base.bridge as CategoryOverrides,
@@ -1519,7 +1605,7 @@ function ConnectionPanel() {
     );
     if (brOidLabels) (base.bridge as CategoryOverrides).oid_labels = brOidLabels;
 
-    (["olt", "mikrotik", "servidor", "bridge"] as const).forEach((ck) => {
+    (["olt", "mikrotik", "bng", "servidor", "bridge"] as const).forEach((ck) => {
       const blk = base[ck] as Record<string, unknown> | undefined;
       if (blk && Object.keys(blk).length === 0) {
         delete base[ck];
@@ -1528,11 +1614,13 @@ function ConnectionPanel() {
     return base;
   };
 
-  const addExtraRow = (cat: OidExtraCategory, kind?: OidExtraKind) =>
+  const addExtraRow = (cat: OidExtraCategory, kind?: OidExtraKind) => {
+    const k = kind ?? "brand";
     setExtraOidRows((prev) => ({
       ...prev,
-      [cat]: [...prev[cat], { id: newOidRowId(), kind: kind ?? "interface", oid: "", label: "" }],
+      [cat]: [...prev[cat], { id: newOidRowId(), kind: k, oid: "", label: OID_KIND_BY_VALUE[k]?.defaultLabel ?? "" }],
     }));
+  };
 
   const removeExtraRow = (cat: OidExtraCategory, id: string) =>
     setExtraOidRows((prev) => ({ ...prev, [cat]: prev[cat].filter((r) => r.id !== id) }));
@@ -1540,19 +1628,31 @@ function ConnectionPanel() {
   const updateExtraRow = (cat: OidExtraCategory, id: string, patchRow: Partial<Pick<ExtraOidRow, "kind" | "oid" | "label">>) =>
     setExtraOidRows((prev) => ({
       ...prev,
-      [cat]: prev[cat].map((r) => (r.id === id ? { ...r, ...patchRow } : r)),
+      [cat]: prev[cat].map((r) => {
+        if (r.id !== id) return r;
+        const next = { ...r, ...patchRow };
+        if (patchRow.kind && patchRow.kind !== r.kind && !String(next.label ?? "").trim()) {
+          next.label = OID_KIND_BY_VALUE[patchRow.kind]?.defaultLabel ?? "";
+        }
+        return next;
+      }),
     }));
 
   const renderOidExtrasBlock = (cat: OidExtraCategory, title: string) => {
     const rows = extraOidRows[cat];
     return (
-      <div className="card" style={{ marginTop: 8 }}>
-        <h4 style={{ marginTop: 0 }}>{title}</h4>
-        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-          Um identificador SNMP por linha, com descrição para o relatório (ex.: «CPU 02»). Escolha o tipo de métrica para o sistema organizar os dados ao salvar.
-        </p>
+      <div className="settings-conn-block" style={{ marginTop: 10 }}>
+        <h4 style={{ marginTop: 0 }}>
+          {title}
+          <InfoHint label="Leituras SNMP extra">
+            <p>
+              Um identificador SNMP por linha. Escolha o tipo (fabricante, modelo, série, interface, PON, etc.) para organizar os dados ao salvar.
+              A descrição aparece nos relatórios de telemetria.
+            </p>
+          </InfoHint>
+        </h4>
         {rows.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((r) => (
@@ -1561,14 +1661,18 @@ function ConnectionPanel() {
                   title="Tipo de métrica"
                   aria-label="Tipo de métrica SNMP"
                   className="select"
-                  style={{ minWidth: 200, fontSize: 11, padding: "4px 6px", minHeight: 32 }}
+                  style={{ minWidth: 220, fontSize: 11, padding: "4px 6px", minHeight: 32 }}
                   value={r.kind}
                   onChange={(e) => updateExtraRow(cat, r.id, { kind: e.target.value as OidExtraKind })}
                 >
-                  {OID_KIND_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
+                  {OID_KIND_GROUPS.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.kinds.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <input
@@ -1628,6 +1732,12 @@ function ConnectionPanel() {
           mikrotik_memory_size_oid: mkMemSize || undefined,
           mikrotik_temp_oid: mkTemp || undefined,
           mikrotik_uptime_oid: mkUptime || undefined,
+          bng_cpu_oid: bngCpu || undefined,
+          bng_cpu_available_oid: bngCpuAvail || undefined,
+          bng_memory_used_oid: bngMemUsed || undefined,
+          bng_memory_size_oid: bngMemSize || undefined,
+          bng_temp_oid: bngTemp || undefined,
+          bng_uptime_oid: bngUptime || undefined,
           server_cpu_oid: svCpu || undefined,
           server_cpu_available_oid: svCpuAvail || undefined,
           server_memory_used_oid: svMemUsed || undefined,
@@ -1662,154 +1772,168 @@ function ConnectionPanel() {
           Palavra-passe SSH: {q.data?.ssh_password_configured ? "definida" : "não definida"}
         </span>
       </div>
-      <div className="field">
-        <label>Comunidade SNMP padrão</label>
-        <input className="input" value={snmp} onChange={(e) => setSnmp(e.target.value)} />
-      </div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <div className="field" style={{ minWidth: 220 }}><label>Utilizador Telnet</label><input className="input" value={tu} onChange={(e) => setTu(e.target.value)} /></div>
-        <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe Telnet</label><input className="input" type="password" value={tp} onChange={(e) => setTp(e.target.value)} /></div>
-        <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe enable (Telnet)</label><input className="input" type="password" value={te} onChange={(e) => setTe(e.target.value)} /></div>
-      </div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-        <div className="field" style={{ minWidth: 220 }}><label>Utilizador SSH</label><input className="input" value={su} onChange={(e) => setSu(e.target.value)} /></div>
-        <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe SSH</label><input className="input" type="password" value={sp} onChange={(e) => setSp(e.target.value)} /></div>
-      </div>
-      <h3 style={{ marginTop: 14, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        Leituras SNMP preferidas por tipo de equipamento
-        <InfoHint label="OIDs SNMP preferidos">
-          <p>
-            Se preencher, estes endereços têm prioridade sobre a descoberta automática. Em «CPU utilizada» indique a carga; em «CPU disponível» use normalmente
-            a percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e só depois deriva a partir da disponível (100 − idle).
-          </p>
-        </InfoHint>
-      </h3>
-      <div className="field"><label>OLT — CPU, memória, temperatura, tempo ligado</label></div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+      <div className="settings-conn-section" style={{ marginTop: 14 }}>
+        <h3 style={{ marginTop: 0 }}>Credenciais</h3>
         <div className="field">
-          <label>CPU utilizada (uso / carga)</label>
-          <input className="input mono" value={oltCpu} onChange={(e) => setOltCpu(e.target.value)} />
+          <label>Comunidade SNMP padrão</label>
+          <input className="input" value={snmp} onChange={(e) => setSnmp(e.target.value)} />
         </div>
-        <div className="field">
-          <label>CPU disponível (% idle)</label>
-          <input className="input mono" value={oltCpuAvail} onChange={(e) => setOltCpuAvail(e.target.value)} placeholder="opcional" />
-        </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={oltMemUsed} onChange={(e) => setOltMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={oltMemSize} onChange={(e) => setOltMemSize(e.target.value)} /></div>
-        <div className="field"><label>Temperatura</label><input className="input mono" value={oltTemp} onChange={(e) => setOltTemp(e.target.value)} /></div>
-        <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={oltUptime} onChange={(e) => setOltUptime(e.target.value)} /></div>
-      </div>
-      <div className="field"><label>MikroTik — CPU, memória, temperatura, tempo ligado</label></div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <div className="field">
-          <label>CPU utilizada (uso / carga)</label>
-          <input className="input mono" value={mkCpu} onChange={(e) => setMkCpu(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>CPU disponível (% idle)</label>
-          <input className="input mono" value={mkCpuAvail} onChange={(e) => setMkCpuAvail(e.target.value)} placeholder="opcional" />
-        </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={mkMemUsed} onChange={(e) => setMkMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={mkMemSize} onChange={(e) => setMkMemSize(e.target.value)} /></div>
-        <div className="field"><label>Temperatura</label><input className="input mono" value={mkTemp} onChange={(e) => setMkTemp(e.target.value)} /></div>
-        <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={mkUptime} onChange={(e) => setMkUptime(e.target.value)} /></div>
-      </div>
-      <div className="field"><label>Servidor — CPU, memória, temperatura, tempo ligado</label></div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <div className="field">
-          <label>CPU utilizada (uso / carga)</label>
-          <input className="input mono" value={svCpu} onChange={(e) => setSvCpu(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>CPU disponível (% idle)</label>
-          <input className="input mono" value={svCpuAvail} onChange={(e) => setSvCpuAvail(e.target.value)} placeholder="opcional" />
-        </div>
-        <div className="field"><label>Memória em uso</label><input className="input mono" value={svMemUsed} onChange={(e) => setSvMemUsed(e.target.value)} /></div>
-        <div className="field"><label>Memória total</label><input className="input mono" value={svMemSize} onChange={(e) => setSvMemSize(e.target.value)} /></div>
-        <div className="field"><label>Temperatura</label><input className="input mono" value={svTemp} onChange={(e) => setSvTemp(e.target.value)} /></div>
-        <div className="field"><label>Tempo ligado (uptime)</label><input className="input mono" value={svUptime} onChange={(e) => setSvUptime(e.target.value)} /></div>
-      </div>
-      <h3 style={{ marginTop: 14 }}>Telemetria OLT e MikroTik (PON, interfaces, SFP)</h3>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>Campos rápidos para métricas frequentes; o restante pode ir na secção seguinte.</p>
-      <div className="card" style={{ marginTop: 8 }}>
-        <h4 style={{ marginTop: 0 }}>OLT (PON / GBIC / ONU)</h4>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Total de ONUs (identificador SNMP)</label>
-            <input className="input mono" value={oltOnuTotalOid} onChange={(e) => setOltOnuTotalOid(e.target.value)} />
+          <div className="field" style={{ minWidth: 220 }}><label>Utilizador Telnet</label><input className="input" value={tu} onChange={(e) => setTu(e.target.value)} /></div>
+          <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe Telnet</label><input className="input" type="password" value={tp} onChange={(e) => setTp(e.target.value)} /></div>
+          <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe enable (Telnet)</label><input className="input" type="password" value={te} onChange={(e) => setTe(e.target.value)} /></div>
+        </div>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          <div className="field" style={{ minWidth: 220 }}><label>Utilizador SSH</label><input className="input" value={su} onChange={(e) => setSu(e.target.value)} /></div>
+          <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe SSH</label><input className="input" type="password" value={sp} onChange={(e) => setSp(e.target.value)} /></div>
+        </div>
+      </div>
+      <div className="settings-conn-section">
+        <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          Leituras SNMP por tipo de equipamento
+          <InfoHint label="OIDs SNMP preferidos">
+            <p>
+              Se preencher, estes endereços têm prioridade sobre a descoberta automática. Em «CPU utilizada» indique a carga; em «CPU disponível» use normalmente
+              a percentagem em idle (ociosidade). O painel tenta primeiro a utilizada e só depois deriva a partir da disponível (100 − idle).
+            </p>
+          </InfoHint>
+        </h3>
+        <div className="settings-conn-block">
+          <h4>OLT</h4>
+          {renderBaseTelemetryFields(
+            { cpu: oltCpu, cpuAvail: oltCpuAvail, memUsed: oltMemUsed, memSize: oltMemSize, temp: oltTemp, uptime: oltUptime },
+            (p) => {
+              if (p.cpu !== undefined) setOltCpu(p.cpu);
+              if (p.cpuAvail !== undefined) setOltCpuAvail(p.cpuAvail);
+              if (p.memUsed !== undefined) setOltMemUsed(p.memUsed);
+              if (p.memSize !== undefined) setOltMemSize(p.memSize);
+              if (p.temp !== undefined) setOltTemp(p.temp);
+              if (p.uptime !== undefined) setOltUptime(p.uptime);
+            },
+          )}
+        </div>
+        <div className="settings-conn-block">
+          <h4>MikroTik</h4>
+          {renderBaseTelemetryFields(
+            { cpu: mkCpu, cpuAvail: mkCpuAvail, memUsed: mkMemUsed, memSize: mkMemSize, temp: mkTemp, uptime: mkUptime },
+            (p) => {
+              if (p.cpu !== undefined) setMkCpu(p.cpu);
+              if (p.cpuAvail !== undefined) setMkCpuAvail(p.cpuAvail);
+              if (p.memUsed !== undefined) setMkMemUsed(p.memUsed);
+              if (p.memSize !== undefined) setMkMemSize(p.memSize);
+              if (p.temp !== undefined) setMkTemp(p.temp);
+              if (p.uptime !== undefined) setMkUptime(p.uptime);
+            },
+          )}
+        </div>
+        <div className="settings-conn-block">
+          <h4>Servidor</h4>
+          {renderBaseTelemetryFields(
+            { cpu: svCpu, cpuAvail: svCpuAvail, memUsed: svMemUsed, memSize: svMemSize, temp: svTemp, uptime: svUptime },
+            (p) => {
+              if (p.cpu !== undefined) setSvCpu(p.cpu);
+              if (p.cpuAvail !== undefined) setSvCpuAvail(p.cpuAvail);
+              if (p.memUsed !== undefined) setSvMemUsed(p.memUsed);
+              if (p.memSize !== undefined) setSvMemSize(p.memSize);
+              if (p.temp !== undefined) setSvTemp(p.temp);
+              if (p.uptime !== undefined) setSvUptime(p.uptime);
+            },
+          )}
+        </div>
+      </div>
+
+      <div className="settings-conn-section">
+        <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          Telemetria avançada
+          <InfoHint label="PON, interfaces e SFP">
+            <p>Campos rápidos para métricas frequentes em OLT e MikroTik. O restante pode ser configurado na secção de leituras extra.</p>
+          </InfoHint>
+        </h3>
+        <div className="settings-conn-block">
+          <h4>OLT — PON / GBIC / ONU</h4>
+          <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Total de ONUs</label>
+              <input className="input mono" value={oltOnuTotalOid} onChange={(e) => setOltOnuTotalOid(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Potência TX da PON</label>
+              <input className="input mono" value={oltPonTxOid} onChange={(e) => setOltPonTxOid(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Status da PON</label>
+              <input className="input mono" value={oltPonStatusOid} onChange={(e) => setOltPonStatusOid(e.target.value)} />
+            </div>
           </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência TX da PON</label>
-            <input className="input mono" value={oltPonTxOid} onChange={(e) => setOltPonTxOid(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Status da PON</label>
-            <input className="input mono" value={oltPonStatusOid} onChange={(e) => setOltPonStatusOid(e.target.value)} />
+        </div>
+        <div className="settings-conn-block">
+          <h4 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+            MikroTik — interfaces / SFP
+            <InfoHint label="MikroTik SFP e interfaces">
+              <p>
+                A página de interfaces faz walk em <span className="mono">mtxrOpticalTable</span> (<span className="mono">1.3.6.1.4.1.14988.1.1.19</span>, MIB MIKROTIK) e em{" "}
+                <span className="mono">mtxrInterfaceStatsName</span> (<span className="mono">1.3.6.1.4.1.14988.1.1.14.1.1.2</span>) para obter o nome igual ao{" "}
+                <span className="mono">ifName</span>. Potências: colunas <strong>9</strong> (TX) e <strong>10</strong> (RX), tipo <strong>IDiv1000</strong> (milésimos de dBm). O índice da linha mtxr não é o ifIndex; o cruzamento usa o nome de <span className="mono">…14.1.1.2</span>, o valor de{" "}
+                <span className="mono">mtxrOpticalIndex</span> (col.1) quando coincidir com um ifIndex, e heurísticas sobre <span className="mono">mtxrOpticalName</span> (col.2). Os campos abaixo são OIDs <strong>opcionais</strong> para telemetria SNMP GET.
+              </p>
+            </InfoHint>
+          </h4>
+          <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Status das interfaces</label>
+              <input className="input mono" value={mkInterfacesStatusOid} onChange={(e) => setMkInterfacesStatusOid(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Banda recebida (RX)</label>
+              <input className="input mono" value={mkBandwidthRxOid} onChange={(e) => setMkBandwidthRxOid(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Banda enviada (TX)</label>
+              <input className="input mono" value={mkBandwidthTxOid} onChange={(e) => setMkBandwidthTxOid(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Potência SFP (TX)</label>
+              <input
+                className="input mono"
+                value={mkSfpTxOid}
+                onChange={(e) => setMkSfpTxOid(e.target.value)}
+                placeholder="1.3.6.1.4.1.14988.1.1.19.1.1.9"
+              />
+            </div>
+            <div className="field" style={{ minWidth: 260 }}>
+              <label>Potência SFP (RX)</label>
+              <input
+                className="input mono"
+                value={mkSfpRxOid}
+                onChange={(e) => setMkSfpRxOid(e.target.value)}
+                placeholder="1.3.6.1.4.1.14988.1.1.19.1.1.10"
+              />
+            </div>
           </div>
         </div>
       </div>
-      <div className="card" style={{ marginTop: 8 }}>
-        <h4 style={{ marginTop: 0 }}>MikroTik (Interfaces / SFP)</h4>
-        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}>
-          A página de interfaces faz walk em <span className="mono">mtxrOpticalTable</span> (<span className="mono">1.3.6.1.4.1.14988.1.1.19</span>, MIB MIKROTIK) e em <span className="mono">mtxrInterfaceStatsName</span> (
-          <span className="mono">1.3.6.1.4.1.14988.1.1.14.1.1.2</span>) para obter o nome igual ao <span className="mono">ifName</span>. Potências: colunas <strong>9</strong> (TX) e <strong>10</strong> (RX), tipo <strong>IDiv1000</strong> (milésimos de dBm). O índice da linha mtxr não é o ifIndex; o cruzamento usa o nome de <span className="mono">…14.1.1.2</span>, o valor de <span className="mono">mtxrOpticalIndex</span> (col.1) quando coincidir com um ifIndex, e heurísticas sobre <span className="mono">mtxrOpticalName</span> (col.2). Os campos abaixo são OIDs <strong>opcionais</strong> para telemetria SNMP GET.
-        </p>
-        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Status das interfaces (ligado / desligado)</label>
-            <input className="input mono" value={mkInterfacesStatusOid} onChange={(e) => setMkInterfacesStatusOid(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Banda recebida (RX) por interface</label>
-            <input className="input mono" value={mkBandwidthRxOid} onChange={(e) => setMkBandwidthRxOid(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Banda enviada (TX) por interface</label>
-            <input className="input mono" value={mkBandwidthTxOid} onChange={(e) => setMkBandwidthTxOid(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência SFP (TX) — telemetria GET opcional</label>
-            <input
-              className="input mono"
-              value={mkSfpTxOid}
-              onChange={(e) => setMkSfpTxOid(e.target.value)}
-              placeholder="1.3.6.1.4.1.14988.1.1.19.1.1.9"
-            />
-          </div>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label>Potência SFP (RX) — telemetria GET opcional</label>
-            <input
-              className="input mono"
-              value={mkSfpRxOid}
-              onChange={(e) => setMkSfpRxOid(e.target.value)}
-              placeholder="1.3.6.1.4.1.14988.1.1.19.1.1.10"
-            />
-          </div>
-        </div>
+
+      <div className="settings-conn-section">
+        <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          Leituras SNMP extra
+          <InfoHint label="OIDs adicionais">
+            <p>Use quando precisar de mais objetos além dos cartões acima. Ao salvar, tudo é enviado para o servidor de forma estruturada (sem editar JSON à mão).</p>
+          </InfoHint>
+        </h3>
+        {renderOidExtrasBlock("olt", "OLT")}
+        {renderOidExtrasBlock("mikrotik", "MikroTik")}
+        {renderOidExtrasBlock("servidor", "Servidor")}
+        {renderOidExtrasBlock("bridge", "Pontes")}
       </div>
-      <h3 style={{ marginTop: 14 }}>Outras leituras SNMP por categoria</h3>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>
-        Use quando precisar de mais objetos além dos cartões acima. Ao salvar, tudo é enviado para o servidor de forma estruturada (sem editar JSON à mão).
-      </p>
-      {renderOidExtrasBlock("olt", "OLT — leituras extra")}
-      {renderOidExtrasBlock("mikrotik", "MikroTik — leituras extra")}
-      {renderOidExtrasBlock("servidor", "Servidor — leituras extra")}
-      {renderOidExtrasBlock("bridge", "Pontes — leituras extra")}
-      <div className="card" style={{ marginTop: 10 }}>
-        <h4 style={{ marginTop: 0 }}>Extras atualmente configurados</h4>
-        {(["olt", "mikrotik", "servidor", "bridge"] as const).map((cat) => {
+      <div className="settings-conn-section">
+        <div className="settings-conn-block">
+          <h4 style={{ marginTop: 0 }}>Resumo dos extras configurados</h4>
+        {(["olt", "mikrotik", "bng", "servidor", "bridge"] as const).map((cat) => {
           const block = builtOverridesPreview()[cat];
-          const list = [
-            ...(block?.interface_oids ?? []),
-            ...(block?.traffic_oids ?? []),
-            ...(block?.optical_oids ?? []),
-            ...(block?.pon_oids ?? []),
-            ...(block?.onu_oids ?? []),
-            ...(block?.bridge_oids ?? []),
-          ].filter((v) => String(v).trim() !== "");
+          const list = OID_ARRAY_KEYS.flatMap((key) => block?.[key] ?? []).filter((v) => String(v).trim() !== "");
           return (
             <div key={cat} style={{ marginBottom: 8 }}>
-              <strong style={{ textTransform: "capitalize" }}>{cat}</strong>
+              <strong>{OID_EXTRA_CATEGORY_LABELS[cat]}</strong>
               {list.length === 0 ? (
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>Sem extras configurados.</p>
               ) : (
@@ -1824,6 +1948,7 @@ function ConnectionPanel() {
             </div>
           );
         })}
+        </div>
       </div>
       <div className="field" style={{ marginTop: 12 }}>
         <label className="row" style={{ gap: 8, alignItems: "center", cursor: "pointer" }}>

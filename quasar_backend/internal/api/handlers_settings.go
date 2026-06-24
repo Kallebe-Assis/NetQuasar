@@ -342,6 +342,7 @@ func (s *Server) getConnectionDefaults(w http.ResponseWriter, r *http.Request) {
 	var snmp, tu, tp, te, su, sp *string
 	var oltCPU, oltCPUAvail, oltMemUsed, oltMemSize, oltTemp, oltUptime *string
 	var mkCPU, mkCPUAvail, mkMemUsed, mkMemSize, mkTemp, mkUptime *string
+	var bngCPU, bngCPUAvail, bngMemUsed, bngMemSize, bngTemp, bngUptime *string
 	var srvCPU, srvCPUAvail, srvMemUsed, srvMemSize, srvTemp, srvUptime *string
 	var snmpOIDOverrides []byte
 	var updated time.Time
@@ -349,6 +350,7 @@ func (s *Server) getConnectionDefaults(w http.ResponseWriter, r *http.Request) {
 		SELECT snmp_community, telnet_user, telnet_password, telnet_enable, ssh_user, ssh_password,
 			olt_cpu_oid, olt_memory_used_oid, olt_memory_size_oid, olt_temp_oid, olt_uptime_oid, olt_cpu_available_oid,
 			mikrotik_cpu_oid, mikrotik_memory_used_oid, mikrotik_memory_size_oid, mikrotik_temp_oid, mikrotik_uptime_oid, mikrotik_cpu_available_oid,
+			bng_cpu_oid, bng_memory_used_oid, bng_memory_size_oid, bng_temp_oid, bng_uptime_oid, bng_cpu_available_oid,
 			server_cpu_oid, server_memory_used_oid, server_memory_size_oid, server_temp_oid, server_uptime_oid, server_cpu_available_oid,
 			snmp_oid_overrides::text,
 			updated_at
@@ -357,6 +359,7 @@ func (s *Server) getConnectionDefaults(w http.ResponseWriter, r *http.Request) {
 		&snmp, &tu, &tp, &te, &su, &sp,
 		&oltCPU, &oltMemUsed, &oltMemSize, &oltTemp, &oltUptime, &oltCPUAvail,
 		&mkCPU, &mkMemUsed, &mkMemSize, &mkTemp, &mkUptime, &mkCPUAvail,
+		&bngCPU, &bngMemUsed, &bngMemSize, &bngTemp, &bngUptime, &bngCPUAvail,
 		&srvCPU, &srvMemUsed, &srvMemSize, &srvTemp, &srvUptime, &srvCPUAvail,
 		&snmpOIDOverrides,
 		&updated,
@@ -393,6 +396,14 @@ func (s *Server) getConnectionDefaults(w http.ResponseWriter, r *http.Request) {
 				"memory_size_oid":   derefStrOr(mkMemSize, ""),
 				"temp_oid":          derefStrOr(mkTemp, ""),
 				"uptime_oid":        derefStrOr(mkUptime, ""),
+			},
+			"bng": map[string]any{
+				"cpu_oid":           derefStrOr(bngCPU, ""),
+				"cpu_available_oid": derefStrOr(bngCPUAvail, ""),
+				"memory_used_oid":   derefStrOr(bngMemUsed, ""),
+				"memory_size_oid":   derefStrOr(bngMemSize, ""),
+				"temp_oid":          derefStrOr(bngTemp, ""),
+				"uptime_oid":        derefStrOr(bngUptime, ""),
 			},
 			"server": map[string]any{
 				"cpu_oid":           derefStrOr(srvCPU, ""),
@@ -439,6 +450,12 @@ func (s *Server) patchConnectionDefaults(w http.ResponseWriter, r *http.Request)
 		MikrotikMemorySizeOID *string         `json:"mikrotik_memory_size_oid"`
 		MikrotikTempOID       *string         `json:"mikrotik_temp_oid"`
 		MikrotikUptimeOID     *string         `json:"mikrotik_uptime_oid"`
+		BNGCPUOID             *string         `json:"bng_cpu_oid"`
+		BNGCPUAvailOID        *string         `json:"bng_cpu_available_oid"`
+		BNGMemoryUsedOID      *string         `json:"bng_memory_used_oid"`
+		BNGMemorySizeOID      *string         `json:"bng_memory_size_oid"`
+		BNGTempOID            *string         `json:"bng_temp_oid"`
+		BNGUptimeOID          *string         `json:"bng_uptime_oid"`
 		ServerCPUOID          *string         `json:"server_cpu_oid"`
 		ServerCPUAvailOID     *string         `json:"server_cpu_available_oid"`
 		ServerMemoryUsedOID   *string         `json:"server_memory_used_oid"`
@@ -471,18 +488,25 @@ func (s *Server) patchConnectionDefaults(w http.ResponseWriter, r *http.Request)
 			mikrotik_temp_oid = COALESCE($16, mikrotik_temp_oid),
 			mikrotik_uptime_oid = COALESCE($17, mikrotik_uptime_oid),
 			mikrotik_cpu_available_oid = COALESCE($18, mikrotik_cpu_available_oid),
-			server_cpu_oid = COALESCE($19, server_cpu_oid),
-			server_memory_used_oid = COALESCE($20, server_memory_used_oid),
-			server_memory_size_oid = COALESCE($21, server_memory_size_oid),
-			server_temp_oid = COALESCE($22, server_temp_oid),
-			server_uptime_oid = COALESCE($23, server_uptime_oid),
-			server_cpu_available_oid = COALESCE($24, server_cpu_available_oid),
-			snmp_oid_overrides = CASE WHEN COALESCE($25::text, '') = '' THEN snmp_oid_overrides ELSE $25::jsonb END,
+			bng_cpu_oid = COALESCE($19, bng_cpu_oid),
+			bng_memory_used_oid = COALESCE($20, bng_memory_used_oid),
+			bng_memory_size_oid = COALESCE($21, bng_memory_size_oid),
+			bng_temp_oid = COALESCE($22, bng_temp_oid),
+			bng_uptime_oid = COALESCE($23, bng_uptime_oid),
+			bng_cpu_available_oid = COALESCE($24, bng_cpu_available_oid),
+			server_cpu_oid = COALESCE($25, server_cpu_oid),
+			server_memory_used_oid = COALESCE($26, server_memory_used_oid),
+			server_memory_size_oid = COALESCE($27, server_memory_size_oid),
+			server_temp_oid = COALESCE($28, server_temp_oid),
+			server_uptime_oid = COALESCE($29, server_uptime_oid),
+			server_cpu_available_oid = COALESCE($30, server_cpu_available_oid),
+			snmp_oid_overrides = CASE WHEN COALESCE($31::text, '') = '' THEN snmp_oid_overrides ELSE $31::jsonb END,
 			updated_at = now()
 		WHERE id=1
 	`, body.SNMPCommunity, body.TelnetUser, body.TelnetPassword, body.TelnetEnable, body.SSHUser, body.SSHPassword,
 		body.OltCPUOID, body.OltMemoryUsedOID, body.OltMemorySizeOID, body.OltTempOID, body.OltUptimeOID, body.OltCPUAvailOID,
 		body.MikrotikCPUOID, body.MikrotikMemoryUsedOID, body.MikrotikMemorySizeOID, body.MikrotikTempOID, body.MikrotikUptimeOID, body.MikrotikCPUAvailOID,
+		body.BNGCPUOID, body.BNGMemoryUsedOID, body.BNGMemorySizeOID, body.BNGTempOID, body.BNGUptimeOID, body.BNGCPUAvailOID,
 		body.ServerCPUOID, body.ServerMemoryUsedOID, body.ServerMemorySizeOID, body.ServerTempOID, body.ServerUptimeOID, body.ServerCPUAvailOID, body.SNMPOIDOverrides)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -502,6 +526,9 @@ func (s *Server) patchConnectionDefaults(w http.ResponseWriter, r *http.Request)
 		"mikrotik_cpu_oid": body.MikrotikCPUOID, "mikrotik_cpu_available_oid": body.MikrotikCPUAvailOID,
 		"mikrotik_memory_used_oid": body.MikrotikMemoryUsedOID, "mikrotik_memory_size_oid": body.MikrotikMemorySizeOID,
 		"mikrotik_temp_oid": body.MikrotikTempOID, "mikrotik_uptime_oid": body.MikrotikUptimeOID,
+		"bng_cpu_oid": body.BNGCPUOID, "bng_cpu_available_oid": body.BNGCPUAvailOID,
+		"bng_memory_used_oid": body.BNGMemoryUsedOID, "bng_memory_size_oid": body.BNGMemorySizeOID,
+		"bng_temp_oid": body.BNGTempOID, "bng_uptime_oid": body.BNGUptimeOID,
 		"server_cpu_oid": body.ServerCPUOID, "server_cpu_available_oid": body.ServerCPUAvailOID,
 		"server_memory_used_oid": body.ServerMemoryUsedOID, "server_memory_size_oid": body.ServerMemorySizeOID,
 		"server_temp_oid": body.ServerTempOID, "server_uptime_oid": body.ServerUptimeOID,

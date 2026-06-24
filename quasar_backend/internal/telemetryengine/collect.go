@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpprofile"
@@ -39,18 +40,27 @@ type categoryOIDOverride struct {
 	MemorySizeOID string            `json:"memory_size_oid"`
 	TempOID       string            `json:"temp_oid"`
 	UptimeOID     string            `json:"uptime_oid"`
+	BrandOIDs     []string          `json:"brand_oids"`
+	ModelOIDs     []string          `json:"model_oids"`
+	SerialOIDs    []string          `json:"serial_oids"`
+	SoftwareOIDs  []string          `json:"software_oids"`
+	HardwareOIDs  []string          `json:"hardware_oids"`
+	SysNameOIDs   []string          `json:"sysname_oids"`
+	SysDescrOIDs  []string          `json:"sysdescr_oids"`
 	InterfaceOIDs []string          `json:"interface_oids"`
 	OpticalOIDs   []string          `json:"optical_oids"`
 	PonOIDs       []string          `json:"pon_oids"`
 	OnuOIDs       []string          `json:"onu_oids"`
 	BridgeOIDs    []string          `json:"bridge_oids"`
 	TrafficOIDs   []string          `json:"traffic_oids"`
+	CustomOIDs    []string          `json:"custom_oids"`
 	OIDLabels     map[string]string `json:"oid_labels"`
 }
 
 type snmpOIDOverridesDoc struct {
 	OLT      categoryOIDOverride `json:"olt"`
 	Mikrotik categoryOIDOverride `json:"mikrotik"`
+	BNG      categoryOIDOverride `json:"bng"`
 	Servidor categoryOIDOverride `json:"servidor"`
 	Bridge   categoryOIDOverride `json:"bridge"`
 }
@@ -184,6 +194,8 @@ func loadDefaultOIDProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 		prefix = "olt"
 	} else if strings.Contains(brand, "mikrotik") || strings.Contains(category, "mikrotik") {
 		prefix = "mikrotik"
+	} else if category == "bng" || strings.Contains(category, "bng") {
+		prefix = "bng"
 	} else if category == "servidor" || category == "server" {
 		prefix = "server"
 	}
@@ -199,6 +211,12 @@ func loadDefaultOIDProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 		_ = pool.QueryRow(ctx, `
 			SELECT coalesce(mikrotik_cpu_oid,''), coalesce(mikrotik_cpu_available_oid,''),
 				coalesce(mikrotik_memory_used_oid,''), coalesce(mikrotik_memory_size_oid,''), coalesce(mikrotik_temp_oid,''), coalesce(mikrotik_uptime_oid,'')
+			FROM settings_connection_defaults WHERE id=1
+		`).Scan(&d.CPUOID, &d.CPUAvailOID, &d.MemoryUsedOID, &d.MemorySizeOID, &d.TempOID, &d.UptimeOID)
+	case "bng":
+		_ = pool.QueryRow(ctx, `
+			SELECT coalesce(bng_cpu_oid,''), coalesce(bng_cpu_available_oid,''),
+				coalesce(bng_memory_used_oid,''), coalesce(bng_memory_size_oid,''), coalesce(bng_temp_oid,''), coalesce(bng_uptime_oid,'')
 			FROM settings_connection_defaults WHERE id=1
 		`).Scan(&d.CPUOID, &d.CPUAvailOID, &d.MemoryUsedOID, &d.MemorySizeOID, &d.TempOID, &d.UptimeOID)
 	default:
@@ -219,6 +237,8 @@ func loadDefaultOIDProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 				c = doc.OLT
 			case "mikrotik":
 				c = doc.Mikrotik
+			case "bng":
+				c = doc.BNG
 			case "bridge":
 				c = doc.Bridge
 			default:
@@ -242,7 +262,11 @@ func loadDefaultOIDProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 			if strings.TrimSpace(c.UptimeOID) != "" {
 				d.UptimeOID = strings.TrimSpace(c.UptimeOID)
 			}
-			join := [][]string{c.InterfaceOIDs, c.OpticalOIDs, c.PonOIDs, c.OnuOIDs, c.BridgeOIDs, c.TrafficOIDs}
+			join := [][]string{
+				c.BrandOIDs, c.ModelOIDs, c.SerialOIDs, c.SoftwareOIDs, c.HardwareOIDs,
+				c.SysNameOIDs, c.SysDescrOIDs,
+				c.InterfaceOIDs, c.OpticalOIDs, c.PonOIDs, c.OnuOIDs, c.BridgeOIDs, c.TrafficOIDs, c.CustomOIDs,
+			}
 			for _, arr := range join {
 				for _, o := range arr {
 					if s := strings.TrimSpace(o); s != "" {
@@ -325,10 +349,16 @@ func appendUniqueOID(list []string, v string) []string {
 // CollectAndStore executa GET SNMP dinâmico e persiste em telemetry_samples.
 func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
 	var category, brand, model, description string
+	var bngEnabled bool
 	_ = pool.QueryRow(ctx, `
-		SELECT coalesce(category,''), coalesce(brand,''), coalesce(model,''), coalesce(description,'')
+		SELECT coalesce(category,''), coalesce(brand,''), coalesce(model,''), coalesce(description,''),
+			coalesce(bng_enabled, false)
 		FROM devices WHERE id=$1
-	`, deviceID).Scan(&category, &brand, &model, &description)
+	`, deviceID).Scan(&category, &brand, &model, &description, &bngEnabled)
+
+	if bngEnabled && !mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
+		return collectBngProfile(ctx, pool, deviceID, host, community)
+	}
 
 	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
 		return collectMikrotikProfile(ctx, pool, deviceID, host, community)
@@ -408,6 +438,34 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 		"mikrotik_collection": out,
 		"oids":                oids,
 		"profile_source":        "settings_mikrotik_collection",
+	}
+	return CollectResult{OK: snmpOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
+}
+
+func collectBngProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+	out, err := bngcollect.CollectAndStorePeriodic(ctx, pool, deviceID, host, community, 45*time.Second)
+	snmpOK := err == nil && out.Status.Collected > 0
+	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
+		snmpOK = false
+	}
+	var oids []string
+	for _, fr := range out.Fields {
+		if fr.OID != "" {
+			oids = append(oids, fr.OID)
+		}
+	}
+	sn := probing.SNMPGetResult{
+		OK:    snmpOK,
+		Note:  out.Status.Message,
+		Error: out.Status.Message,
+	}
+	if snmpOK {
+		sn.Error = ""
+	}
+	metrics := map[string]any{
+		"bng_collection": out,
+		"oids":           oids,
+		"profile_source": "settings_bng_collection",
 	}
 	return CollectResult{OK: snmpOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
 }

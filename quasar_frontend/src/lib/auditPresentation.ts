@@ -36,6 +36,7 @@ const ENTITY_LABELS: Record<string, string> = {
   settings_ui: "Aparência",
   settings_smtp: "E-mail (SMTP)",
   settings_mikrotik_collection: "Coleta Mikrotik",
+  settings_bng_collection: "Coleta BNG",
   device_config_backup: "Backup de configuração",
   commercial_report: "Relatório comercial",
 };

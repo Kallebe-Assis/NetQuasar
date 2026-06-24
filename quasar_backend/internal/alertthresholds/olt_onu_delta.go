@@ -83,10 +83,11 @@ func EvaluateOltOnuQuantityDeltaAlerts(
 			if prev > 0 {
 				deltaPct = (delta / prev) * 100.0
 			}
+			dropMsg := fmt.Sprintf("PON %s — queda de %.0f ONUs online (%.0f%% de %.0f) — OLT %s (%s).", k, delta, deltaPct, prev, oltLabel, host)
 			if okCnt {
 				evalOltOnuDeltaSide(ctx, pool, log, deviceID, oltLabel, host, k, source,
 					alertTypeOltOnuDrop, "onu_drop_count:"+k, "Queda de ONUs online — PON",
-					fmt.Sprintf("Queda de %.0f ONUs online na PON %s da OLT %s (%s).", delta, k, oltLabel, host),
+					dropMsg,
 					delta, deltaPct, prev, curOn, prevSt, currSt, thCnt, "drop_online_count", "drop_online_pct")
 			} else {
 				closeOltOnuDeltaAlert(ctx, pool, log, deviceID, alertTypeOltOnuDrop, "onu_drop_count:"+k)
@@ -94,7 +95,7 @@ func EvaluateOltOnuQuantityDeltaAlerts(
 			if okPct {
 				evalOltOnuDeltaSide(ctx, pool, log, deviceID, oltLabel, host, k, source,
 					alertTypeOltOnuDrop, "onu_drop_pct:"+k, "Queda percentual de ONUs online — PON",
-					fmt.Sprintf("Queda de %.0f%% (%.0f ONUs) das ONUs online na PON %s da OLT %s (%s).", deltaPct, delta, k, oltLabel, host),
+					dropMsg,
 					delta, deltaPct, prev, curOn, prevSt, currSt, thPct, "drop_online_count", "drop_online_pct")
 			} else {
 				closeOltOnuDeltaAlert(ctx, pool, log, deviceID, alertTypeOltOnuDrop, "onu_drop_pct:"+k)
@@ -109,10 +110,11 @@ func EvaluateOltOnuQuantityDeltaAlerts(
 		if prev > 0 {
 			deltaPct = (delta / prev) * 100.0
 		}
+		riseMsg := fmt.Sprintf("PON %s — subida de %.0f ONUs online (%.0f%% de %.0f) — OLT %s (%s).", k, delta, deltaPct, prev, oltLabel, host)
 		if okCnt {
 			evalOltOnuDeltaSide(ctx, pool, log, deviceID, oltLabel, host, k, source,
 				alertTypeOltOnuRise, "onu_rise_count:"+k, "Subida de ONUs online — PON",
-				fmt.Sprintf("Subida de %.0f ONUs online na PON %s da OLT %s (%s).", delta, k, oltLabel, host),
+				riseMsg,
 				delta, deltaPct, prev, curOn, prevSt, currSt, thCnt, "rise_online_count", "rise_online_pct")
 		} else {
 			closeOltOnuDeltaAlert(ctx, pool, log, deviceID, alertTypeOltOnuRise, "onu_rise_count:"+k)
@@ -120,7 +122,7 @@ func EvaluateOltOnuQuantityDeltaAlerts(
 		if okPct && prev > 0 {
 			evalOltOnuDeltaSide(ctx, pool, log, deviceID, oltLabel, host, k, source,
 				alertTypeOltOnuRise, "onu_rise_pct:"+k, "Subida percentual de ONUs online — PON",
-				fmt.Sprintf("Subida de %.0f%% (%.0f ONUs) das ONUs online na PON %s da OLT %s (%s).", deltaPct, delta, k, oltLabel, host),
+				riseMsg,
 				delta, deltaPct, prev, curOn, prevSt, currSt, thPct, "rise_online_count", "rise_online_pct")
 		} else {
 			closeOltOnuDeltaAlert(ctx, pool, log, deviceID, alertTypeOltOnuRise, "onu_rise_pct:"+k)

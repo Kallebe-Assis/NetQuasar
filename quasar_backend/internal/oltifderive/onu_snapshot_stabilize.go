@@ -283,14 +283,20 @@ func PreservePonCountsOnIncomplete(prev, cur []map[string]any) ([]map[string]any
 		}
 		key := StablePonRowKey(p)
 		if prevP, ok := prevByKey[key]; ok {
-			prevOn, prevOK := OnuOnlineFromRow(prevP)
-			curOn, curOK := OnuOnlineFromRow(p)
-			if prevOK && curOK && curOn < prevOn {
+			prevOn, prevOnOK := OnuOnlineFromRow(prevP)
+			curOn, curOnOK := OnuOnlineFromRow(p)
+			if prevOnOK {
 				cp["onu_online"] = prevOn
 				if v, ok := prevP["onu_offline"]; ok {
 					cp["onu_offline"] = v
 				}
+				if v, ok := prevP["onu_total"]; ok {
+					cp["onu_total"] = v
+				}
 				cp["online_source"] = "carried_incomplete_snmp"
+				if curOnOK && curOn != prevOn {
+					cp["onu_online_skipped_delta"] = curOn
+				}
 				carried++
 			}
 		}

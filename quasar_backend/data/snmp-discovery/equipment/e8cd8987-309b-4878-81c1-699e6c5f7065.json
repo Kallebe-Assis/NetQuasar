@@ -1,26 +1,55 @@
 {
   "device_id": "e8cd8987-309b-4878-81c1-699e6c5f7065",
   "brand": "huawei",
-  "model": "unknown-model",
-  "collected_at": "2026-05-10T02:17:42Z",
+  "model": "NE8000",
+  "collected_at": "2026-06-24T12:57:14Z",
   "root_oid": "1.3.6.1.2.1",
-  "row_count": 0,
+  "row_count": 428,
   "truncated": false,
   "walk_note": "request timeout (after 0 retries)",
   "class_summary": {
     "bridge": 0,
-    "host_resources": 0,
-    "interfaces": 0,
+    "host_resources": 2,
+    "interfaces": 412,
     "ip": 0,
-    "other": 0,
+    "other": 7,
     "snmp": 0,
-    "system": 0,
+    "system": 7,
     "tcp_udp": 0
   },
-  "collect_profile": {},
+  "collect_profile": {
+    "uptime_oid": "1.3.6.1.2.1.1.3.0",
+    "sysname_oid": "1.3.6.1.2.1.1.5.0",
+    "sysdescr_oid": "1.3.6.1.2.1.1.1.0",
+    "memory_size_oid": "1.3.6.1.2.1.25.2.2.0",
+    "memory_oids": [
+      "1.3.6.1.2.1.25.2.2.0"
+    ]
+  },
   "discovery_debug": {
-    "selected": {},
+    "selected": {
+      "memory_size_oid": "1.3.6.1.2.1.25.2.2.0",
+      "uptime_oid": "1.3.6.1.2.1.1.3.0"
+    },
     "candidates": [
+      {
+        "oid": "1.3.6.1.2.1.25.3.3.1.2.1",
+        "metric": "cpu",
+        "decision": "rejected",
+        "reason": "OID hrProcessorLoad sem valor válido"
+      },
+      {
+        "oid": "1.3.6.1.4.1.14988.1.1.3.10.0",
+        "metric": "cpu",
+        "decision": "rejected",
+        "reason": "OID CPU MikroTik sem valor válido"
+      },
+      {
+        "oid": "1.3.6.1.4.1.2021.11.11.0",
+        "metric": "cpu",
+        "decision": "rejected",
+        "reason": "OID UCD CPU idle sem valor válido"
+      },
       {
         "oid": "",
         "metric": "cpu",
@@ -28,10 +57,40 @@
         "reason": "nenhum OID de CPU encontrado"
       },
       {
-        "oid": "",
+        "oid": "1.3.6.1.2.1.25.2.2.0",
+        "metric": "memory",
+        "decision": "accepted",
+        "reason": "fallback hrMemorySize (capacidade total)"
+      },
+      {
+        "oid": "1.3.6.1.4.1.2021.4.5.0",
         "metric": "memory",
         "decision": "rejected",
-        "reason": "nenhum par used/size identificado"
+        "reason": "UCD memTotalReal inválido"
+      },
+      {
+        "oid": "1.3.6.1.4.1.2021.4.6.0",
+        "metric": "memory",
+        "decision": "rejected",
+        "reason": "UCD memAvailReal inválido"
+      },
+      {
+        "oid": "1.3.6.1.4.1.9.9.13.1.3.1.3.1",
+        "metric": "temperature",
+        "decision": "rejected",
+        "reason": "OID de temperatura sem objeto válido"
+      },
+      {
+        "oid": "1.3.6.1.2.1.99.1.1.1.4.1",
+        "metric": "temperature",
+        "decision": "rejected",
+        "reason": "OID de temperatura sem objeto válido"
+      },
+      {
+        "oid": "1.3.6.1.4.1.14988.1.1.3.14.0",
+        "metric": "temperature",
+        "decision": "rejected",
+        "reason": "OID MikroTik temperatura retornou inválido"
       },
       {
         "oid": "",
@@ -41,5 +100,2146 @@
       }
     ]
   },
-  "rows": []
+  "rows": [
+    {
+      "oid": "1.3.6.1.2.1.1.1.0",
+      "type": "OctetString",
+      "value": "Huawei Versatile Routing Platform Software \r\nVRP (R) software, Version 8.230 (NetEngine 8000 V800R023C00SPC500) \r\nCopyright (C) 2012-2023 Huawei Technologies Co., Ltd. \r\nHUAWEI NetEngine 8000 M8"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.2.0",
+      "type": "ObjectIdentifier",
+      "value": ".1.3.6.1.4.1.2011.2.360.1.9"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.3.0",
+      "type": "TimeTicks",
+      "value": "2170199326"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.4.0",
+      "type": "OctetString",
+      "value": "R\u0026D Beijing, Huawei Technologies co.,Ltd."
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.5.0",
+      "type": "OctetString",
+      "value": "BNG-Huawei-G2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.6.0",
+      "type": "OctetString",
+      "value": "Beijing China"
+    },
+    {
+      "oid": "1.3.6.1.2.1.1.7.0",
+      "type": "Integer",
+      "value": "78"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.1.0",
+      "type": "Integer",
+      "value": "31"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.1",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.2",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.3",
+      "type": "Integer",
+      "value": "3"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.4",
+      "type": "Integer",
+      "value": "4"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.7",
+      "type": "Integer",
+      "value": "7"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.8",
+      "type": "Integer",
+      "value": "8"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.9",
+      "type": "Integer",
+      "value": "9"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.15",
+      "type": "Integer",
+      "value": "15"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.16",
+      "type": "Integer",
+      "value": "16"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.36",
+      "type": "Integer",
+      "value": "36"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.46",
+      "type": "Integer",
+      "value": "46"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.67",
+      "type": "Integer",
+      "value": "67"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.70",
+      "type": "Integer",
+      "value": "70"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.71",
+      "type": "Integer",
+      "value": "71"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.72",
+      "type": "Integer",
+      "value": "72"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.73",
+      "type": "Integer",
+      "value": "73"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.74",
+      "type": "Integer",
+      "value": "74"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.75",
+      "type": "Integer",
+      "value": "75"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.76",
+      "type": "Integer",
+      "value": "76"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.77",
+      "type": "Integer",
+      "value": "77"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.95",
+      "type": "Integer",
+      "value": "95"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.96",
+      "type": "Integer",
+      "value": "96"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.99",
+      "type": "Integer",
+      "value": "99"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.100",
+      "type": "Integer",
+      "value": "100"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.101",
+      "type": "Integer",
+      "value": "101"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.103",
+      "type": "Integer",
+      "value": "103"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.104",
+      "type": "Integer",
+      "value": "104"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.106",
+      "type": "Integer",
+      "value": "106"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.107",
+      "type": "Integer",
+      "value": "107"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.111",
+      "type": "Integer",
+      "value": "111"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.1.131",
+      "type": "Integer",
+      "value": "131"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.1",
+      "type": "OctetString",
+      "value": "Virtual-Template0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.2",
+      "type": "OctetString",
+      "value": "NULL0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.3",
+      "type": "OctetString",
+      "value": "InLoopBack0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.4",
+      "type": "OctetString",
+      "value": "Ethernet0/0/0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.7",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.8",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.9",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.15",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.16",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/9"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.36",
+      "type": "OctetString",
+      "value": "LoopBack0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.46",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/9.22"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.67",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/9.21"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.70",
+      "type": "OctetString",
+      "value": "Virtual-Template1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.71",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.1000"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.72",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.100"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.73",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.1001"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.74",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.110"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.75",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.1002"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.76",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.109"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.77",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.95",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.1003"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.96",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/9.998"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.99",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.1100"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.100",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.601"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.101",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.710"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.103",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.720"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.104",
+      "type": "OctetString",
+      "value": "LoopBack1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.106",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.700"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.107",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.730"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.111",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.111"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.2.131",
+      "type": "OctetString",
+      "value": "GigabitEthernet0/1/8.741"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.1",
+      "type": "Integer",
+      "value": "23"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.2",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.3",
+      "type": "Integer",
+      "value": "24"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.4",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.7",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.8",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.9",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.15",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.16",
+      "type": "Integer",
+      "value": "6"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.36",
+      "type": "Integer",
+      "value": "24"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.46",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.67",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.70",
+      "type": "Integer",
+      "value": "23"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.71",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.72",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.73",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.74",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.75",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.76",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.77",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.95",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.96",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.99",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.100",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.101",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.103",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.104",
+      "type": "Integer",
+      "value": "24"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.106",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.107",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.111",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.3.131",
+      "type": "Integer",
+      "value": "135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.1",
+      "type": "Integer",
+      "value": "1492"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.2",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.3",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.4",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.7",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.8",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.9",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.15",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.16",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.36",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.46",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.67",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.70",
+      "type": "Integer",
+      "value": "1492"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.71",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.72",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.73",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.74",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.75",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.76",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.77",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.95",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.96",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.99",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.100",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.101",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.103",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.104",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.106",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.107",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.111",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.4.131",
+      "type": "Integer",
+      "value": "1500"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.1",
+      "type": "Gauge32",
+      "value": "64000"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.2",
+      "type": "Gauge32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.3",
+      "type": "Gauge32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.4",
+      "type": "Gauge32",
+      "value": "1000000000"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.7",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.8",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.9",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.15",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.16",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.36",
+      "type": "Gauge32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.46",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.67",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.70",
+      "type": "Gauge32",
+      "value": "64000"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.71",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.72",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.73",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.74",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.75",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.76",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.77",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.95",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.96",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.99",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.100",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.101",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.103",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.104",
+      "type": "Gauge32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.106",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.107",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.111",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.5.131",
+      "type": "Gauge32",
+      "value": "4294967295"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.1",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.2",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.3",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.4",
+      "type": "OctetString",
+      "value": "7c:00:4d:2d:3c:d3"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.7",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:60"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.8",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:61"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.9",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:62"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.15",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.16",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:69"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.36",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.46",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:69"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.67",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:69"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.70",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.71",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.72",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.73",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.74",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.75",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.76",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.77",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.95",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.96",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:69"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.99",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.100",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.101",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.103",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.104",
+      "type": "OctetString",
+      "value": ""
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.106",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.107",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.111",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.6.131",
+      "type": "OctetString",
+      "value": "b8:d6:f6:d4:b5:68"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.1",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.2",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.3",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.4",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.7",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.8",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.9",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.15",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.16",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.36",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.46",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.67",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.70",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.71",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.72",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.73",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.74",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.75",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.76",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.77",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.95",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.96",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.99",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.100",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.101",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.103",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.104",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.106",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.107",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.111",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.7.131",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.1",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.2",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.3",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.4",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.7",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.8",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.9",
+      "type": "Integer",
+      "value": "2"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.15",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.16",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.36",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.46",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.67",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.70",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.71",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.72",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.73",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.74",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.75",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.76",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.77",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.95",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.96",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.99",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.100",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.101",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.103",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.104",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.106",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.107",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.111",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.8.131",
+      "type": "Integer",
+      "value": "1"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.1",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.2",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.3",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.4",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.7",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.8",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.9",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.15",
+      "type": "TimeTicks",
+      "value": "1111140957"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.16",
+      "type": "TimeTicks",
+      "value": "1111140957"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.36",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.46",
+      "type": "TimeTicks",
+      "value": "1111140959"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.67",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.70",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.71",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.72",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.73",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.74",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.75",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.76",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.77",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.95",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.96",
+      "type": "TimeTicks",
+      "value": "1111140959"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.99",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.100",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.101",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.103",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.104",
+      "type": "TimeTicks",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.106",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.107",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.111",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.9.131",
+      "type": "TimeTicks",
+      "value": "1111140958"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.1",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.2",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.3",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.4",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.7",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.8",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.9",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.15",
+      "type": "Counter32",
+      "value": "3295605916"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.16",
+      "type": "Counter32",
+      "value": "710974902"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.36",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.46",
+      "type": "Counter32",
+      "value": "1483547250"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.67",
+      "type": "Counter32",
+      "value": "4153108252"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.70",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.71",
+      "type": "Counter32",
+      "value": "1351326947"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.72",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.73",
+      "type": "Counter32",
+      "value": "240752529"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.74",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.75",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.76",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.77",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.95",
+      "type": "Counter32",
+      "value": "2602435669"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.96",
+      "type": "Counter32",
+      "value": "3475996629"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.99",
+      "type": "Counter32",
+      "value": "2878416135"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.100",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.101",
+      "type": "Counter32",
+      "value": "1699315247"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.103",
+      "type": "Counter32",
+      "value": "1206988049"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.104",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.106",
+      "type": "Counter32",
+      "value": "456209809"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.107",
+      "type": "Counter32",
+      "value": "1808148359"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.111",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.10.131",
+      "type": "Counter32",
+      "value": "2842281342"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.1",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.2",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.3",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.4",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.7",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.8",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.9",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.15",
+      "type": "Counter32",
+      "value": "3972764165"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.16",
+      "type": "Counter32",
+      "value": "263898534"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.36",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.46",
+      "type": "Counter32",
+      "value": "1280683013"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.67",
+      "type": "Counter32",
+      "value": "143276766"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.70",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.71",
+      "type": "Counter32",
+      "value": "2810850759"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.72",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.73",
+      "type": "Counter32",
+      "value": "704094599"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.74",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.75",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.76",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.77",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.95",
+      "type": "Counter32",
+      "value": "3417871842"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.96",
+      "type": "Counter32",
+      "value": "3135034495"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.99",
+      "type": "Counter32",
+      "value": "195724470"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.100",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.101",
+      "type": "Counter32",
+      "value": "3895099146"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.103",
+      "type": "Counter32",
+      "value": "1117097036"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.104",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.106",
+      "type": "Counter32",
+      "value": "656105371"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.107",
+      "type": "Counter32",
+      "value": "3300287733"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.111",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.11.131",
+      "type": "Counter32",
+      "value": "2327856726"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.1",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.2",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.3",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.4",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.7",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.8",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.9",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.15",
+      "type": "Counter32",
+      "value": "3924365701"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.16",
+      "type": "Counter32",
+      "value": "41820397"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.36",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.46",
+      "type": "Counter32",
+      "value": "19003427"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.67",
+      "type": "Counter32",
+      "value": "10864138"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.70",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.71",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.72",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.73",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.74",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.75",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.76",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.77",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.95",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.96",
+      "type": "Counter32",
+      "value": "10867936"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.99",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.100",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.101",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.103",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.104",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.106",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.107",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.111",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.12.131",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.1",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.2",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.3",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.4",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.7",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.8",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.9",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.15",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.16",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.36",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.46",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.67",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.70",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.71",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.72",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.73",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.74",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.75",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.76",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.77",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.95",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.96",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.99",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.100",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.101",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.103",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.104",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.106",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.107",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.111",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.13.131",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.1",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.2",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.3",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.4",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.7",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.8",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.9",
+      "type": "Counter32",
+      "value": "0"
+    },
+    {
+      "oid": "1.3.6.1.2.1.2.2.1.14.15",
+      "type": "Counter32",
+      "value": "52"
+    },
+    {
+      "oid": "1.3.6.1.2.1.25.3.3.1.2.1",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.2.1.25.2.2.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.2.1.99.1.1.1.4.1",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.14988.1.1.3.10.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.14988.1.1.3.14.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.2021.11.11.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.2021.4.5.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.2021.4.6.0",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    },
+    {
+      "oid": "1.3.6.1.4.1.9.9.13.1.3.1.3.1",
+      "type": "NoSuchObject",
+      "value": "\u003cnil\u003e"
+    }
+  ]
 }
