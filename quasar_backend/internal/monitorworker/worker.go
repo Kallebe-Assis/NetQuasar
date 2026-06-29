@@ -89,6 +89,9 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		return nil
 	}
 
+	// Totais BNG (PPPoE online, etc.) em paralelo — intervalo telemetry_seconds.
+	TryStartParallelBngCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+
 	var lastPipeline *time.Time
 	if err := pool.QueryRow(ctx, `SELECT last_pipeline_cycle_at FROM monitoring_runtime WHERE id=1`).Scan(&lastPipeline); err != nil {
 		return err

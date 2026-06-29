@@ -113,6 +113,16 @@ func FirstEnabledPingStep(steps []PipelineStep) *PipelineStep {
 	return nil
 }
 
+// FirstEnabledBngStep devolve o primeiro passo BNG activo (scope/modo para coleta paralela).
+func FirstEnabledBngStep(steps []PipelineStep) *PipelineStep {
+	for i := range steps {
+		if steps[i].Enabled && steps[i].Kind == StepKindBng {
+			return &steps[i]
+		}
+	}
+	return nil
+}
+
 func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep, error) {
 	if pool == nil {
 		return DefaultPipelineSteps(), nil

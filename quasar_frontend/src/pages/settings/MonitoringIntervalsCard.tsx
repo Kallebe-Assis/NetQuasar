@@ -117,6 +117,8 @@ export function MonitoringPingIntervalsCard() {
           <p>
             O <strong>ping (ICMP/TCP)</strong> corre em <strong>paralelo</strong> ao pipeline SNMP/OLT (intervalo «Intervalo entre pings»),
             para que a latência e alertas offline não parem durante colectas longas (ex.: dezenas de OLT).
+            Os <strong>totais BNG</strong> (PPPoE online, IPv4/IPv6) também correm em paralelo, no intervalo de <strong>telemetria</strong>,
+            com alertas de queda entre coletas conforme os limiares em Alertas.
             Telemetria, interfaces e ONU seguem em sequência no pipeline (~<strong>{minCycle} s</strong> entre ciclos).
           </p>
           <p>
@@ -170,8 +172,8 @@ export function MonitoringPingIntervalsCard() {
             hintLabel="Intervalo de telemetria SNMP"
             hint={
               <p>
-                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria ativa
-                (exceto BNG com coleta dedicada — ver passo BNG na ordem de monitoramento).
+                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria ativa.
+                O mesmo intervalo aplica-se à coleta paralela de <strong>totais BNG</strong> (PPPoE online) quando o passo BNG está activo no pipeline.
                 Ex.: 180 s = 3 minutos entre amostras.
               </p>
             }
@@ -290,7 +292,8 @@ export function MonitoringPingIntervalsCard() {
             hintLabel="Timeout coleta BNG"
             hint={
               <p>
-                Tempo máximo por concentrador BNG no passo dedicado do pipeline (totais PPPoE/IPv4/IPv6 e saúde SNMP).
+                Tempo máximo por concentrador BNG (totais PPPoE/IPv4/IPv6 e saúde SNMP). A coleta periódica e os alertas de queda usam amostras em{" "}
+                <code className="mono">bng_stats_samples</code>.
                 Intervalo válido: <strong>5000–600000</strong> ms.
               </p>
             }

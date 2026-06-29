@@ -21,9 +21,14 @@ func RunBngSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, m
 	if err != nil {
 		return err
 	}
-	devices, err := resolveSweepDevices(ctx, pool, opts, false)
-	if err != nil {
-		return err
+	var devices []pingableDeviceRow
+	if len(opts.ScopedDevices) > 0 {
+		devices = opts.ScopedDevices
+	} else {
+		devices, err = loadBngDevicesForCollect(ctx, pool, opts.DeviceID)
+		if err != nil {
+			return err
+		}
 	}
 	if len(devices) == 0 {
 		_, err = pool.Exec(ctx, `UPDATE monitoring_runtime SET last_bng_cycle_at = now(), updated_at = now(), last_cycle_at = now() WHERE id=1`)
@@ -50,10 +55,7 @@ func RunBngSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, m
 	timeout := cfg.bngTimeout()
 
 	for _, row := range devices {
-		if !isBngDevice(row) {
-			continue
-		}
-		if !row.telemetryEnabled {
+		if !row.bngEnabled {
 			skipN++
 			continue
 		}

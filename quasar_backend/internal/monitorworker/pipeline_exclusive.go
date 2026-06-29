@@ -15,6 +15,9 @@ var telemetryCycleMu sync.Mutex
 // latencyCycleMu permite ICMP/TCP em paralelo ao pipeline SNMP, para não atrasar ping/alertas.
 var latencyCycleMu sync.Mutex
 
+// bngCycleMu permite totais BNG (PPPoE online, etc.) em paralelo ao pipeline pesado.
+var bngCycleMu sync.Mutex
+
 // TryLockMonitoringPipeline tenta adquirir o pipeline sem bloquear.
 func TryLockMonitoringPipeline() bool {
 	return monitoringPipelineMu.TryLock()
@@ -79,3 +82,16 @@ func LockLatencyCycle() {
 
 // ErrLatencyCycleBusy indica que já corre outro ciclo de latência.
 var ErrLatencyCycleBusy = errors.New("monitor: ciclo de latência ocupado")
+
+// TryLockBngCycle tenta adquirir o ciclo BNG sem bloquear.
+func TryLockBngCycle() bool {
+	return bngCycleMu.TryLock()
+}
+
+// UnlockBngCycle liberta o ciclo BNG.
+func UnlockBngCycle() {
+	bngCycleMu.Unlock()
+}
+
+// ErrBngCycleBusy indica que já corre outro ciclo BNG.
+var ErrBngCycleBusy = errors.New("monitor: ciclo BNG ocupado")
