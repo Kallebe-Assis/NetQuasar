@@ -18,6 +18,7 @@ import {
   NETWORK_INFRA_GC_MS,
   NETWORK_INFRA_STALE_MS,
 } from "../../lib/networkInfraCache";
+import { pageCachedQueryOptions, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import {
   INFRA_CSV_TEMPLATES,
@@ -233,10 +234,8 @@ export function InfrastructureTab({
 
   const listQ = useQuery({
     queryKey: meta.queryKey,
-    queryFn: async () => apiFetch<Record<string, Row[]>>(meta.api),
-    staleTime: NETWORK_INFRA_STALE_MS,
-    gcTime: NETWORK_INFRA_GC_MS,
-    refetchOnWindowFocus: false,
+    queryFn: wrapPageCachedQueryFn(meta.queryKey, async () => apiFetch<Record<string, Row[]>>(meta.api)),
+    ...pageCachedQueryOptions<Record<string, Row[]>>(meta.queryKey, NETWORK_INFRA_STALE_MS, NETWORK_INFRA_GC_MS),
     placeholderData: keepPreviousData,
   });
 

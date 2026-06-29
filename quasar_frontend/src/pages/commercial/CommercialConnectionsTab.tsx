@@ -10,6 +10,8 @@ import { apiFetch, ApiError, downloadBlob } from "../../lib/api";
 import { errorMessageFromUnknown } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { filterClientConnectionsList } from "../../lib/connectionsListCache";
+import { invalidatePageCachedQuery, pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import { CONN_IMPORT_BATCH_SIZE, parseConnectionsCsvFile } from "../../lib/connCsvImport";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { toastErr, toastLoading, toastOk } from "../../lib/operationToast";
@@ -301,14 +303,15 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
   const [nearestCtoOpen, setNearestCtoOpen] = useState(false);
 
   const list = useQuery({
-    queryKey: [...queryKeys.clientConnections, kindQ, debouncedQ],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (kindQ) params.set("connection_kind", kindQ);
-      if (debouncedQ) params.set("q", debouncedQ);
-      const qs = params.toString();
-      return apiFetch<{ connections: ClientConnection[] }>(`/api/v1/commercial/connections${qs ? `?${qs}` : ""}`);
-    },
+    queryKey: queryKeys.clientConnectionsList,
+    queryFn: wrapPageCachedQueryFn(queryKeys.clientConnectionsList, () =>
+      apiFetch<{ connections: ClientConnection[] }>("/api/v1/commercial/connections"),
+    ),
+    ...pageCachedQueryOptions<{ connections: ClientConnection[] }>(
+      queryKeys.clientConnectionsList,
+      PAGE_DATA_STALE_MS,
+      PAGE_DATA_GC_MS,
+    ),
     placeholderData: keepPreviousData,
   });
 
@@ -316,9 +319,15 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
     queryKey: queryKeys.integrations,
     queryFn: () => apiFetch<{ integrations: IntegrationSummary[] }>("/api/v1/integrations"),
     enabled: lookupOpen,
+    staleTime: PAGE_DATA_STALE_MS,
+    gcTime: PAGE_DATA_GC_MS,
+    refetchOnWindowFocus: false,
   });
 
-  const connections = list.data?.connections ?? [];
+  const connections = useMemo(
+    () => filterClientConnectionsList(list.data?.connections ?? [], kindQ, debouncedQ),
+    [list.data?.connections, kindQ, debouncedQ],
+  );
 
   const connectionsFiltered = useMemo(() => {
     let rows = connections;
@@ -373,7 +382,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
       });
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: queryKeys.clientConnections });
+      void invalidatePageCachedQuery(qc, queryKeys.clientConnectionsList);
       qc.invalidateQueries({ queryKey: queryKeys.mapConnectionPoints });
       setFormOpen(false);
       setEditId(null);
@@ -429,7 +438,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
   const deleteMut = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/connections/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.clientConnections });
+      void invalidatePageCachedQuery(qc, queryKeys.clientConnectionsList);
       qc.invalidateQueries({ queryKey: queryKeys.mapConnectionPoints });
       setDeleteId(null);
       toastOk(pushToast, "Conexão removida.");
@@ -494,7 +503,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
         });
       }
 
-      await qc.invalidateQueries({ queryKey: queryKeys.clientConnections });
+      await invalidatePageCachedQuery(qc, queryKeys.clientConnectionsList);
       await qc.invalidateQueries({ queryKey: queryKeys.mapConnectionPoints });
 
       const report: ImportReport = { imported, skipped, failed, fileName: file.name };

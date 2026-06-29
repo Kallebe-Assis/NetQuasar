@@ -11,6 +11,7 @@ import { useAppToast } from "../../lib/appToast";
 import { queryKeys } from "../../lib/queryKeys";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { filterProjectRows, NETWORK_INFRA_GC_MS, NETWORK_INFRA_STALE_MS } from "../../lib/networkInfraCache";
+import { pageCachedQueryOptions, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import {
   PROJECT_STATUSES,
   fmtCoord,
@@ -66,10 +67,14 @@ export function ProjectsTab({
 
   const listQ = useQuery({
     queryKey: queryKeys.networkProjects,
-    queryFn: async () => apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
-    staleTime: NETWORK_INFRA_STALE_MS,
-    gcTime: NETWORK_INFRA_GC_MS,
-    refetchOnWindowFocus: false,
+    queryFn: wrapPageCachedQueryFn(queryKeys.networkProjects, async () =>
+      apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
+    ),
+    ...pageCachedQueryOptions<{ projects: NetworkProject[] }>(
+      queryKeys.networkProjects,
+      NETWORK_INFRA_STALE_MS,
+      NETWORK_INFRA_GC_MS,
+    ),
     placeholderData: keepPreviousData,
   });
 

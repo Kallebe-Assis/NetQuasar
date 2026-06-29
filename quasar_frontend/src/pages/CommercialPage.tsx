@@ -23,6 +23,8 @@ import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoic
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
+import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
+import { queryKeys } from "../lib/queryKeys";
 
 type Locality = { id: string; name: string; region_code?: string | null; created_at?: string };
 type MonthlyRecord = {
@@ -109,30 +111,54 @@ export function CommercialPage() {
   const seed = seededYearMonth();
   const monthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const locs = useQuery({
-    queryKey: ["commercial-loc"],
-    queryFn: () => apiFetch<{ localities: Locality[] }>("/api/v1/commercial/localities"),
+    queryKey: queryKeys.commercialLocalities,
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialLocalities, () =>
+      apiFetch<{ localities: Locality[] }>("/api/v1/commercial/localities"),
+    ),
+    ...pageCachedQueryOptions<{ localities: Locality[] }>(queryKeys.commercialLocalities, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
   const recs = useQuery({
-    queryKey: ["commercial-rec"],
-    queryFn: () => apiFetch<{ records: MonthlyRecord[] }>("/api/v1/commercial/monthly-records"),
+    queryKey: queryKeys.commercialRecords,
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialRecords, () =>
+      apiFetch<{ records: MonthlyRecord[] }>("/api/v1/commercial/monthly-records"),
+    ),
+    ...pageCachedQueryOptions<{ records: MonthlyRecord[] }>(queryKeys.commercialRecords, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
   const [month, setMonth] = useState(seed);
   const [tgSendConfirmOpen, setTgSendConfirmOpen] = useState(false);
   const [aggRefreshConfirmOpen, setAggRefreshConfirmOpen] = useState(false);
   const agg = useQuery({
-    queryKey: ["commercial-agg", month],
-    queryFn: () => apiFetch<AggregatesResponse>(`/api/v1/commercial/aggregates?month=${encodeURIComponent(month)}`),
+    queryKey: queryKeys.commercialAgg(month),
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialAgg(month), () =>
+      apiFetch<AggregatesResponse>(`/api/v1/commercial/aggregates?month=${encodeURIComponent(month)}`),
+    ),
+    ...pageCachedQueryOptions<AggregatesResponse>(queryKeys.commercialAgg(month), PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
   const cmp = useQuery({
-    queryKey: ["commercial-cmp", month],
-    queryFn: () => apiFetch<{ month: string; previous_month: string; rows: MonthCompareRow[] }>(`/api/v1/commercial/comparison?month=${encodeURIComponent(month)}`),
+    queryKey: queryKeys.commercialCmp(month),
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialCmp(month), () =>
+      apiFetch<{ month: string; previous_month: string; rows: MonthCompareRow[] }>(
+        `/api/v1/commercial/comparison?month=${encodeURIComponent(month)}`,
+      ),
+    ),
+    ...pageCachedQueryOptions<{ month: string; previous_month: string; rows: MonthCompareRow[] }>(
+      queryKeys.commercialCmp(month),
+      PAGE_DATA_STALE_MS,
+      PAGE_DATA_GC_MS,
+    ),
   });
   const totalsHist = useQuery({
-    queryKey: ["commercial-totals-history"],
-    queryFn: () =>
+    queryKey: queryKeys.commercialTotalsHistory,
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialTotalsHistory, () =>
       apiFetch<{ months: Array<{ year_month: string; total: number; delta: number; delta_percent?: number }> }>(
         "/api/v1/commercial/totals-history?months=18",
       ),
+    ),
+    ...pageCachedQueryOptions<{ months: Array<{ year_month: string; total: number; delta: number; delta_percent?: number }> }>(
+      queryKeys.commercialTotalsHistory,
+      PAGE_DATA_STALE_MS,
+      PAGE_DATA_GC_MS,
+    ),
   });
   const totalsChartData = useMemo(() => {
     const rows = totalsHist.data?.months ?? [];
@@ -187,8 +213,11 @@ export function CommercialPage() {
 
   const cmpSortMark = useCallback((key: CmpSortKey) => (cmpSort.key === key ? (cmpSort.dir === "asc" ? " ▲" : " ▼") : ""), [cmpSort]);
   const devices = useQuery({
-    queryKey: ["commercial-olt-devices"],
-    queryFn: () => apiFetch<{ devices: OltDeviceLite[] }>("/api/v1/devices"),
+    queryKey: queryKeys.commercialOltDevices,
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialOltDevices, () =>
+      apiFetch<{ devices: OltDeviceLite[] }>("/api/v1/devices"),
+    ),
+    ...pageCachedQueryOptions<{ devices: OltDeviceLite[] }>(queryKeys.commercialOltDevices, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
 
   const locById = useMemo(() => {
@@ -236,7 +265,7 @@ export function CommercialPage() {
   const createLoc = useMutation({
     mutationFn: () => apiFetch("/api/v1/commercial/localities", { method: "POST", json: { name: locName, region_code: locRc || null } }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-loc"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
       setLocName("");
       setLocRc("");
       setLocModalOpen(false);
@@ -252,7 +281,7 @@ export function CommercialPage() {
     mutationFn: ({ id, name, region_code }: { id: string; name: string; region_code: string | null }) =>
       apiFetch(`/api/v1/commercial/localities/${id}`, { method: "PATCH", json: { name, region_code } }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-loc"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
       setEditingLocId(null);
       notify("Guardado com sucesso (localidade).");
     },
@@ -261,8 +290,8 @@ export function CommercialPage() {
   const delLoc = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/localities/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-loc"] });
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
       setEditingLocId(null);
       notify("Localidade eliminada.");
     },
@@ -282,9 +311,9 @@ export function CommercialPage() {
         json: { records: [{ locality_id: lid, year_month: ym, client_count: Number(cnt) }] },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
-      qc.invalidateQueries({ queryKey: ["commercial-agg"] });
-      qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       const locLabel = lid ? locById.get(lid) ?? lid : "—";
       setSingleRecModalOpen(false);
       notify(`Registo salvo: ${locLabel} — ${cnt} cliente(s) em ${formatYearMonthPt(ym)}.`);
@@ -297,9 +326,9 @@ export function CommercialPage() {
       apiFetch<{ upserted: number }>("/api/v1/commercial/monthly-records/bulk", { method: "POST", json: { records } }),
     onSuccess: (data, records) => {
       const ymShown = records[0]?.year_month ?? "";
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
-      qc.invalidateQueries({ queryKey: ["commercial-agg"] });
-      qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       setBulkModalOpen(false);
       notify(`${data.upserted} localidade(s) actualizada(s) de uma vez (${formatYearMonthPt(ymShown)}).`);
     },
@@ -310,9 +339,9 @@ export function CommercialPage() {
     mutationFn: ({ id, year_month, client_count }: { id: string; year_month: string; client_count: number }) =>
       apiFetch(`/api/v1/commercial/monthly-records/${id}`, { method: "PATCH", json: { year_month, client_count } }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
-      qc.invalidateQueries({ queryKey: ["commercial-agg"] });
-      qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       setRecEditOpen(false);
       setEditRecRow(null);
       notify("Registo actualizado.");
@@ -323,9 +352,9 @@ export function CommercialPage() {
   const delRec = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/monthly-records/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
-      qc.invalidateQueries({ queryKey: ["commercial-agg"] });
-      qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       notify("Registo eliminado.");
     },
     onError: (e) => toastErr(pushToast, e),
@@ -474,9 +503,9 @@ export function CommercialPage() {
         json: { records: byLocalitySelected.map((r) => ({ locality_id: r.locality_id, year_month: month, client_count: r.client_count })) },
       }),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["commercial-rec"] });
-      qc.invalidateQueries({ queryKey: ["commercial-agg"] });
-      qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
+      qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       notify(`Registos comerciais actualizados (${data.upserted} localidade(s)) para ${formatYearMonthPt(month)}.`);
       setOltCollectConfirmOpen(false);
       setOltCollectModalOpen(false);

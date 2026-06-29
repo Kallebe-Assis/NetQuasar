@@ -6,6 +6,8 @@ import { useAppToast } from "../lib/appToast";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { isAdminUser } from "../lib/auth";
 import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
+import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
+import { queryKeys } from "../lib/queryKeys";
 import { ActionMenu } from "../components/ActionMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EquipmentMap } from "../components/EquipmentMap";
@@ -69,12 +71,14 @@ export function PopsPage() {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const list = useQuery({
-    queryKey: ["pops"],
-    queryFn: () => apiFetch<{ pops: Pop[] }>("/api/v1/pops"),
+    queryKey: queryKeys.pops,
+    queryFn: wrapPageCachedQueryFn(queryKeys.pops, () => apiFetch<{ pops: Pop[] }>("/api/v1/pops")),
+    ...pageCachedQueryOptions<{ pops: Pop[] }>(queryKeys.pops, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
   const devices = useQuery({
-    queryKey: ["devices"],
-    queryFn: () => apiFetch<{ devices: DeviceRow[] }>("/api/v1/devices"),
+    queryKey: queryKeys.devices,
+    queryFn: wrapPageCachedQueryFn(queryKeys.devices, () => apiFetch<{ devices: DeviceRow[] }>("/api/v1/devices")),
+    ...pageCachedQueryOptions<{ devices: DeviceRow[] }>(queryKeys.devices, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -102,7 +106,7 @@ export function PopsPage() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pops"] });
+      qc.invalidateQueries({ queryKey: queryKeys.pops });
       setDesc("");
       setAddr("");
       setLat("");
@@ -142,7 +146,7 @@ export function PopsPage() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pops"] });
+      qc.invalidateQueries({ queryKey: queryKeys.pops });
       setEdit(null);
       toastOk(pushToast, "POP actualizado com sucesso.");
     },
@@ -152,7 +156,7 @@ export function PopsPage() {
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/pops/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pops"] });
+      qc.invalidateQueries({ queryKey: queryKeys.pops });
       toastOk(pushToast, "POP excluído.");
     },
     onError: (err: Error) => toastErr(pushToast, err, "Falha ao excluir POP."),
@@ -168,10 +172,14 @@ export function PopsPage() {
   const [contactInfo, setContactInfo] = useState("");
   const [contactShift, setContactShift] = useState("");
   const [contactNotes, setContactNotes] = useState("");
+  const contactsKey = queryKeys.popContacts(contactsPop?.id ?? "");
   const contacts = useQuery({
-    queryKey: ["pop-contacts", contactsPop?.id],
+    queryKey: contactsKey,
     enabled: !!contactsPop,
-    queryFn: () => apiFetch<{ items: PopContact[] }>(`/api/v1/pops/${contactsPop?.id}/contacts`),
+    queryFn: wrapPageCachedQueryFn(contactsKey, () =>
+      apiFetch<{ items: PopContact[] }>(`/api/v1/pops/${contactsPop!.id}/contacts`),
+    ),
+    ...pageCachedQueryOptions<{ items: PopContact[] }>(contactsKey, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
   });
   const addContact = useMutation({
     mutationFn: () =>
@@ -209,8 +217,8 @@ export function PopsPage() {
       }
     },
     onSuccess: (_, { ids }) => {
-      qc.invalidateQueries({ queryKey: ["pops"] });
-      qc.invalidateQueries({ queryKey: ["devices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.pops });
+      qc.invalidateQueries({ queryKey: queryKeys.devices });
       setAssignPop(null);
       setSelectedDeviceIds(new Set());
       toastOk(pushToast, `${ids.length} equipamento(s) associado(s) ao POP.`);

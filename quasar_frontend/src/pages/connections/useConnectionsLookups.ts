@@ -1,23 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../../lib/api";
+import { NETWORK_INFRA_GC_MS, NETWORK_INFRA_STALE_MS } from "../../lib/networkInfraCache";
+import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import { queryKeys } from "../../lib/queryKeys";
 import type { CommercialLocality, NetworkProject } from "../../lib/networkInfrastructure";
-
-const LOOKUP_STALE_MS = 5 * 60 * 1000;
 
 /** Localidades (Clientes) e projetos — cache partilhado entre abas e filtros. */
 export function useConnectionsLookups(enabled = true) {
   const localitiesQ = useQuery({
     queryKey: queryKeys.commercialLocalities,
-    queryFn: () => apiFetch<{ localities: CommercialLocality[] }>("/api/v1/commercial/localities"),
+    queryFn: wrapPageCachedQueryFn(queryKeys.commercialLocalities, () =>
+      apiFetch<{ localities: CommercialLocality[] }>("/api/v1/commercial/localities"),
+    ),
     enabled,
-    staleTime: LOOKUP_STALE_MS,
+    ...pageCachedQueryOptions<{ localities: CommercialLocality[] }>(
+      queryKeys.commercialLocalities,
+      PAGE_DATA_STALE_MS,
+      PAGE_DATA_GC_MS,
+    ),
   });
   const projectsQ = useQuery({
     queryKey: queryKeys.networkProjects,
-    queryFn: () => apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
+    queryFn: wrapPageCachedQueryFn(queryKeys.networkProjects, () =>
+      apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
+    ),
     enabled,
-    staleTime: LOOKUP_STALE_MS,
+    ...pageCachedQueryOptions<{ projects: NetworkProject[] }>(
+      queryKeys.networkProjects,
+      NETWORK_INFRA_STALE_MS,
+      NETWORK_INFRA_GC_MS,
+    ),
   });
   return {
     localities: localitiesQ.data?.localities ?? [],

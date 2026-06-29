@@ -15,6 +15,7 @@ import {
 } from "../lib/nearestCtoMatch";
 import type { NetworkCto } from "../lib/networkInfrastructure";
 import { NETWORK_INFRA_GC_MS, NETWORK_INFRA_STALE_MS } from "../lib/networkInfraCache";
+import { invalidatePageCachedQuery, pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
 import { queryKeys } from "../lib/queryKeys";
 import type { ClientConnection } from "../pages/commercial/CommercialConnectionsTab";
 
@@ -42,18 +43,25 @@ export function NearestCtoMatchModal({ open, onClose, canMutate }: Props) {
   const [applying, setApplying] = useState(false);
 
   const loginsQ = useQuery({
-    queryKey: [...queryKeys.clientConnections, "nearest-cto-match"],
-    queryFn: () => apiFetch<{ connections: ClientConnection[] }>("/api/v1/commercial/connections"),
+    queryKey: queryKeys.clientConnectionsList,
+    queryFn: wrapPageCachedQueryFn(queryKeys.clientConnectionsList, () =>
+      apiFetch<{ connections: ClientConnection[] }>("/api/v1/commercial/connections"),
+    ),
     enabled: open,
+    ...pageCachedQueryOptions<{ connections: ClientConnection[] }>(
+      queryKeys.clientConnectionsList,
+      PAGE_DATA_STALE_MS,
+      PAGE_DATA_GC_MS,
+    ),
   });
 
   const ctosQ = useQuery({
     queryKey: queryKeys.networkCtos,
-    queryFn: () => apiFetch<{ ctos: NetworkCto[] }>("/api/v1/commercial/network/ctos"),
+    queryFn: wrapPageCachedQueryFn(queryKeys.networkCtos, () =>
+      apiFetch<{ ctos: NetworkCto[] }>("/api/v1/commercial/network/ctos"),
+    ),
     enabled: open,
-    staleTime: NETWORK_INFRA_STALE_MS,
-    gcTime: NETWORK_INFRA_GC_MS,
-    refetchOnWindowFocus: false,
+    ...pageCachedQueryOptions<{ ctos: NetworkCto[] }>(queryKeys.networkCtos, NETWORK_INFRA_STALE_MS, NETWORK_INFRA_GC_MS),
   });
 
   const matches = useMemo(() => {
@@ -167,7 +175,7 @@ export function NearestCtoMatchModal({ open, onClose, canMutate }: Props) {
           fail++;
         }
       }
-      await qc.invalidateQueries({ queryKey: queryKeys.clientConnections });
+      await invalidatePageCachedQuery(qc, queryKeys.clientConnectionsList);
       if (fail === 0) {
         toastOk(pushToast, `${ok} login(s) actualizado(s) com a CTO sugerida.`);
       } else {

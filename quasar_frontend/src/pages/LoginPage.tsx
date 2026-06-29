@@ -16,7 +16,7 @@ import {
   saveUserDisplayLabel,
   saveUserRole,
 } from "../lib/auth";
-import { prefetchDashboard } from "../lib/dashboardCache";
+import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 
 type SetupStatus = { database_configured?: boolean };
 
@@ -84,7 +84,7 @@ export function LoginPage() {
       }
       setPostLoginNavPending(true);
       try {
-        await Promise.all([prefetchDashboard(qc), new Promise((r) => window.setTimeout(r, remain))]);
+        await Promise.all([prefetchStaticPages(qc), new Promise((r) => window.setTimeout(r, remain))]);
       } catch {
         /* dashboard pode falhar; a página tenta de novo */
       }

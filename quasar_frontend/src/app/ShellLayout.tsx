@@ -24,7 +24,7 @@ import {
   Zap,
 } from "lucide-react";
 import { clearSession, getAuthToken, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
-import { prefetchDashboard } from "../lib/dashboardCache";
+import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { AppToastProvider } from "../lib/appToast";
@@ -124,7 +124,7 @@ export function ShellLayout() {
 
   useEffect(() => {
     if (getAuthToken()) {
-      void prefetchDashboard(qc);
+      void prefetchStaticPages(qc);
     }
   }, [qc]);
 

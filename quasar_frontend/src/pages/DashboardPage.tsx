@@ -27,6 +27,7 @@ import {
   dashboardTopLatencyKey,
   refreshDashboard,
 } from "../lib/dashboardCache";
+import { pageCachedQueryOptions, wrapPageCachedQueryFn } from "../lib/pageDataCache";
 import { displayAlertType } from "../lib/alertLabels";
 
 const CHART_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#79c0ff", "#ff7b72", "#56d364", "#ffa657"];
@@ -182,22 +183,23 @@ export function DashboardPage() {
 
   const dash = useQuery({
     queryKey: dashboardAnalyticsKey(days),
-    queryFn: () => apiFetch<DashboardAnalytics>(`/api/v1/dashboard/analytics?days=${days}`),
-    staleTime: DASHBOARD_STALE_MS,
-    gcTime: DASHBOARD_GC_MS,
+    queryFn: wrapPageCachedQueryFn(dashboardAnalyticsKey(days), () =>
+      apiFetch<DashboardAnalytics>(`/api/v1/dashboard/analytics?days=${days}`),
+    ),
+    ...pageCachedQueryOptions<DashboardAnalytics>(dashboardAnalyticsKey(days), DASHBOARD_STALE_MS, DASHBOARD_GC_MS),
   });
 
   const topProbe = useQuery({
     queryKey: dashboardTopLatencyKey,
-    queryFn: () => apiFetch<{ top: TopRow[] }>("/api/v1/overview/top-latency?limit=8"),
-    staleTime: DASHBOARD_STALE_MS,
-    gcTime: DASHBOARD_GC_MS,
+    queryFn: wrapPageCachedQueryFn(dashboardTopLatencyKey, () =>
+      apiFetch<{ top: TopRow[] }>("/api/v1/overview/top-latency?limit=8"),
+    ),
+    ...pageCachedQueryOptions<{ top: TopRow[] }>(dashboardTopLatencyKey, DASHBOARD_STALE_MS, DASHBOARD_GC_MS),
   });
   const cap = useQuery({
     queryKey: dashboardOltCapacityKey,
-    queryFn: () => apiFetch<OltCapacity>("/api/v1/dashboard/olt-capacity"),
-    staleTime: DASHBOARD_STALE_MS,
-    gcTime: DASHBOARD_GC_MS,
+    queryFn: wrapPageCachedQueryFn(dashboardOltCapacityKey, () => apiFetch<OltCapacity>("/api/v1/dashboard/olt-capacity")),
+    ...pageCachedQueryOptions<OltCapacity>(dashboardOltCapacityKey, DASHBOARD_STALE_MS, DASHBOARD_GC_MS),
   });
 
   const runFullRefresh = async () => {

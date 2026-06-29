@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
+import { PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "./pageDataCache";
 
 export const DASHBOARD_DEFAULT_DAYS = 30;
 /** Cache longo: dados pré-carregados no login e reutilizados na página. */
@@ -13,22 +14,41 @@ export function dashboardAnalyticsKey(days: number) {
 export const dashboardTopLatencyKey = ["top-latency"] as const;
 export const dashboardOltCapacityKey = ["dashboard-olt-capacity"] as const;
 
+function dashAnalyticsFn(days: number) {
+  return wrapPageCachedQueryFn(dashboardAnalyticsKey(days), () =>
+    apiFetch(`/api/v1/dashboard/analytics?days=${days}`),
+  );
+}
+
+function dashTopLatencyFn() {
+  return wrapPageCachedQueryFn(dashboardTopLatencyKey, () =>
+    apiFetch<{ top: unknown[] }>("/api/v1/overview/top-latency?limit=8"),
+  );
+}
+
+function dashOltCapacityFn() {
+  return wrapPageCachedQueryFn(dashboardOltCapacityKey, () => apiFetch("/api/v1/dashboard/olt-capacity"));
+}
+
 export async function prefetchDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT_DAYS): Promise<void> {
   await Promise.all([
     qc.prefetchQuery({
       queryKey: dashboardAnalyticsKey(days),
-      queryFn: () => apiFetch(`/api/v1/dashboard/analytics?days=${days}`),
+      queryFn: dashAnalyticsFn(days),
       staleTime: DASHBOARD_STALE_MS,
+      gcTime: DASHBOARD_GC_MS,
     }),
     qc.prefetchQuery({
       queryKey: dashboardTopLatencyKey,
-      queryFn: () => apiFetch<{ top: unknown[] }>("/api/v1/overview/top-latency?limit=8"),
+      queryFn: dashTopLatencyFn(),
       staleTime: DASHBOARD_STALE_MS,
+      gcTime: DASHBOARD_GC_MS,
     }),
     qc.prefetchQuery({
       queryKey: dashboardOltCapacityKey,
-      queryFn: () => apiFetch("/api/v1/dashboard/olt-capacity"),
+      queryFn: dashOltCapacityFn(),
       staleTime: DASHBOARD_STALE_MS,
+      gcTime: DASHBOARD_GC_MS,
     }),
   ]);
 }
@@ -38,17 +58,17 @@ export async function refreshDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT
   await Promise.all([
     qc.fetchQuery({
       queryKey: dashboardAnalyticsKey(days),
-      queryFn: () => apiFetch(`/api/v1/dashboard/analytics?days=${days}`),
+      queryFn: dashAnalyticsFn(days),
       staleTime: DASHBOARD_STALE_MS,
     }),
     qc.fetchQuery({
       queryKey: dashboardTopLatencyKey,
-      queryFn: () => apiFetch<{ top: unknown[] }>("/api/v1/overview/top-latency?limit=8"),
+      queryFn: dashTopLatencyFn(),
       staleTime: DASHBOARD_STALE_MS,
     }),
     qc.fetchQuery({
       queryKey: dashboardOltCapacityKey,
-      queryFn: () => apiFetch("/api/v1/dashboard/olt-capacity"),
+      queryFn: dashOltCapacityFn(),
       staleTime: DASHBOARD_STALE_MS,
     }),
   ]);
