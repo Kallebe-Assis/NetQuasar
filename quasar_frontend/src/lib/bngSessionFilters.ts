@@ -34,12 +34,15 @@ export const EMPTY_BNG_SESSION_FILTERS: BngSessionAdvancedFilters = {
 };
 
 export type BngSessionLike = PppoeSessionFields & {
+  index?: string;
   login?: string;
   ipv4?: string;
   ipv6?: string;
   ipv6_pd?: string;
   mac?: string;
   vlan?: string;
+  status?: string;
+  auth_state?: string;
   ip_type?: string;
   ip_type_raw?: string;
   online_time_sec?: string;

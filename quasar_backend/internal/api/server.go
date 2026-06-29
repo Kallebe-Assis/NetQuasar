@@ -129,6 +129,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/database", s.getDatabaseMeta)
 				r.Patch("/database", s.patchDatabaseMeta)
 				r.Post("/database/test", s.testDatabaseConnection)
+				r.Get("/database/cleanup/overview", s.databaseCleanupOverview)
 				r.Post("/database/cleanup/scan", s.databaseCleanupScan)
 				r.Post("/database/cleanup/execute", s.databaseCleanupExecute)
 				r.Get("/database/logs", s.settingsDatabaseLogs)

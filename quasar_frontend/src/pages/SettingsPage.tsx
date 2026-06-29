@@ -14,6 +14,7 @@ import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { MikrotikCollectionPanel } from "./settings/MikrotikCollectionPanel";
 import { BngCollectionPanel } from "./settings/BngCollectionPanel";
 import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
+import { DatabaseCleanupButton } from "./settings/DatabaseCleanupModal";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -231,166 +232,6 @@ function missingDbFieldsForTest(opts: {
 }
 
 type DbTestResponse = { ok?: boolean; message?: string };
-
-type DbCleanupScanItem = { table: string; label: string; date_column: string; count: number };
-type DbCleanupScanResponse = {
-  older_than_days: number;
-  cutoff_at: string;
-  items: DbCleanupScanItem[];
-  total_rows: number;
-};
-
-function DatabaseCleanupPanel() {
-  const { push: pushToast } = useAppToast();
-  const [olderThanDays, setOlderThanDays] = useState("90");
-  const [scanResult, setScanResult] = useState<DbCleanupScanResponse | null>(null);
-  const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0);
-
-  const scan = useMutation({
-    mutationFn: () => {
-      const d = Math.max(60, parseInt(olderThanDays, 10) || 60);
-      return apiFetch<DbCleanupScanResponse>("/api/v1/settings/database/cleanup/scan", {
-        method: "POST",
-        json: { older_than_days: d },
-      });
-    },
-    onSuccess: (data) => {
-      setScanResult(data);
-      setConfirmStep(0);
-      toastOk(pushToast, `Análise concluída: ${data.total_rows.toLocaleString("pt-PT")} registo(s) elegíveis.`);
-    },
-    onError: (e) => toastErr(pushToast, e, "Falha ao analisar a base de dados."),
-  });
-
-  const execute = useMutation({
-    mutationFn: () => {
-      const d = scanResult?.older_than_days ?? Math.max(60, parseInt(olderThanDays, 10) || 60);
-      return apiFetch<{ ok?: boolean; deleted_total?: number; message?: string }>("/api/v1/settings/database/cleanup/execute", {
-        method: "POST",
-        json: { older_than_days: d, confirm: true },
-      });
-    },
-    onSuccess: (data) => {
-      setConfirmStep(0);
-      const n = data.deleted_total ?? 0;
-      toastOk(pushToast, data.message ?? `${n.toLocaleString("pt-PT")} registo(s) apagado(s).`);
-      scan.mutate();
-    },
-    onError: (e) => toastErr(pushToast, e, "Falha ao apagar dados antigos."),
-  });
-
-  return (
-    <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Limpeza de dados históricos</h3>
-      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.45 }}>
-        Analisa telemetria, históricos de ping, amostras OLT/BNG, eventos, jobs SNMP, logs de automação e alertas encerrados com mais
-        antiguidade do que o período indicado (mínimo <strong>60 dias</strong>). A auditoria regista quem executou a análise e a
-        eliminação. Configurações e o log de auditoria não são apagados.
-      </p>
-      <div className="row stack-mobile" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div className="field" style={{ margin: 0, minWidth: 140 }}>
-          <label htmlFor="db-cleanup-days">Mais antigos que (dias)</label>
-          <input
-            id="db-cleanup-days"
-            className="input"
-            type="number"
-            min={60}
-            value={olderThanDays}
-            onChange={(e) => setOlderThanDays(e.target.value)}
-            style={{ maxWidth: 120 }}
-          />
-        </div>
-        <button type="button" className="btn btn--primary" disabled={scan.isPending} onClick={() => scan.mutate()}>
-          {scan.isPending ? "A analisar…" : "Analisar dados antigos"}
-        </button>
-      </div>
-
-      {scan.isError && <div className="msg msg--err" style={{ marginTop: 10 }}>{(scan.error as Error).message}</div>}
-
-      {scanResult && (
-        <div style={{ marginTop: 16 }}>
-          <p style={{ fontSize: 13, margin: "0 0 8px" }}>
-            <strong>{scanResult.total_rows.toLocaleString("pt-PT")}</strong> registo(s) anteriores a{" "}
-            <span className="mono">{new Date(scanResult.cutoff_at).toLocaleString("pt-PT")}</span> ({scanResult.older_than_days} dias).
-          </p>
-          <div className="table-wrap" style={{ maxHeight: 280, overflow: "auto", marginBottom: 12 }}>
-            <table style={{ fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th>Tabela</th>
-                  <th>Coluna de data</th>
-                  <th style={{ textAlign: "right" }}>Registos</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scanResult.items.map((it) => (
-                  <tr key={it.table}>
-                    <td>
-                      {it.label}
-                      <div className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
-                        {it.table}
-                      </div>
-                    </td>
-                    <td className="mono">{it.date_column}</td>
-                    <td style={{ textAlign: "right" }}>{it.count.toLocaleString("pt-PT")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {scanResult.total_rows > 0 ? (
-            <button type="button" className="btn btn--danger" disabled={execute.isPending} onClick={() => setConfirmStep(1)}>
-              Apagar {scanResult.total_rows.toLocaleString("pt-PT")} registo(s)
-            </button>
-          ) : (
-            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum registo elegível para eliminação.</p>
-          )}
-        </div>
-      )}
-
-      {confirmStep > 0 && scanResult && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !execute.isPending && setConfirmStep(0)}>
-          <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: "0 0 8px", fontSize: 16 }}>
-              {confirmStep === 1 ? "Confirmar limpeza" : "Confirmação final"}
-            </h2>
-            {confirmStep === 1 ? (
-              <>
-                <p style={{ fontSize: 13, lineHeight: 1.5, margin: "0 0 12px" }}>
-                  Serão apagados permanentemente <strong>{scanResult.total_rows.toLocaleString("pt-PT")}</strong> registo(s) com mais de{" "}
-                  {scanResult.older_than_days} dias. Esta ação não pode ser desfeita.
-                </p>
-                <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button type="button" className="btn" disabled={execute.isPending} onClick={() => setConfirmStep(0)}>
-                    Cancelar
-                  </button>
-                  <button type="button" className="btn btn--danger" onClick={() => setConfirmStep(2)}>
-                    Sim, quero apagar
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, lineHeight: 1.5, margin: "0 0 12px" }}>
-                  Tem <strong>absoluta certeza</strong>? Digite mentalmente o impacto: {scanResult.total_rows.toLocaleString("pt-PT")} linhas
-                  serão removidas da base de dados. A operação fica registada na auditoria com o seu utilizador.
-                </p>
-                <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button type="button" className="btn" disabled={execute.isPending} onClick={() => setConfirmStep(1)}>
-                    Voltar
-                  </button>
-                  <button type="button" className="btn btn--danger" disabled={execute.isPending} onClick={() => execute.mutate()}>
-                    {execute.isPending ? "A apagar…" : "Apagar definitivamente"}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function DatabasePanel() {
   const qc = useQueryClient();
@@ -662,7 +503,7 @@ function DatabasePanel() {
       )}
 
       <SystemConfigBackupPanel />
-      <DatabaseCleanupPanel />
+      <DatabaseCleanupButton />
     </div>
   );
 }

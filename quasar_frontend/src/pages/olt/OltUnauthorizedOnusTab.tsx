@@ -5,7 +5,7 @@ import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 
-type OltOption = { id: string; description?: string; ip?: string };
+type OltOption = { id: string; description?: string | null; ip?: string | null };
 
 type UnauthorizedEntry = {
   serial?: string;

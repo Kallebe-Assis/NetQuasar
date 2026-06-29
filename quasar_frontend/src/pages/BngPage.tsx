@@ -4,12 +4,8 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Eye, Filter, Loader2, RefreshCw, Search } from "lucide-react";
 import {
   CartesianGrid,
-  Cell,
-  Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -22,10 +18,8 @@ import { isAdminUser } from "../lib/auth";
 import {
   BNG_SESSION_DISPLAY_LIMITS,
   formatBngDateTime,
-  formatBngDuration,
   formatBngIpv6Display,
   formatBngIpType,
-  formatBngKbitRate,
   formatBngSessionStatus,
   formatOverviewField,
   sessionDisplayDnLimit,
@@ -247,8 +241,6 @@ type BngCollectProgress = {
 
 const OVERVIEW_KEYS: OverviewFieldKey[] = ["sys_name", "sys_uptime", "cpu_usage", "memory_usage", "temperature"];
 
-const BNG_CHART_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#79c0ff", "#ff7b72", "#56d364", "#ffa657"];
-
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -374,56 +366,6 @@ function BngAuthRecordsPanel({
           {rows.length.toLocaleString("pt-PT")} registo(s) exibido(s)
           {filter.trim() ? ` (filtrado de ${data!.count})` : ""}.
         </p>
-      )}
-    </div>
-  );
-}
-
-function VlanPieSection({ rows }: { rows: { label: string; count: number }[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const pieData = useMemo(
-    () => rows.map((r) => ({ name: r.label, value: r.count })),
-    [rows],
-  );
-  if (rows.length === 0) return null;
-  return (
-    <div className="card" style={{ padding: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <h3 style={{ margin: 0, fontSize: 15 }}>Logins por VLAN</h3>
-        <button type="button" className="btn btn--sm" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? "Ocultar tabela" : "Ver tabela"}
-        </button>
-      </div>
-      <ResponsiveContainer width="100%" height={260}>
-        <PieChart margin={{ top: 8, right: 8, bottom: 48, left: 8 }}>
-          <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="42%" outerRadius={78} label={false}>
-            {pieData.map((_, i) => (
-              <Cell key={i} fill={BNG_CHART_COLORS[i % BNG_CHART_COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip formatter={(v: number) => [v.toLocaleString("pt-PT"), "Logins"]} />
-          <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: 11, lineHeight: 1.35, paddingTop: 8 }} />
-        </PieChart>
-      </ResponsiveContainer>
-      {expanded && (
-        <div className="table-wrap" style={{ marginTop: 12 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>VLAN</th>
-                <th style={{ width: 100, textAlign: "right" }}>Logins</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.label}>
-                  <td>{r.label}</td>
-                  <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.count.toLocaleString("pt-PT")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       )}
     </div>
   );
@@ -635,41 +577,6 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
   );
 }
 
-function BreakdownTable({
-  title,
-  rows,
-  valueHeader,
-}: {
-  title: string;
-  rows: { label: string; count: number }[];
-  valueHeader: string;
-}) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="card" style={{ padding: 14 }}>
-      <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>{title}</h3>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>{valueHeader}</th>
-              <th style={{ width: 100, textAlign: "right" }}>Logins</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <td>{r.label}</td>
-                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.count.toLocaleString("pt-PT")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse; loading: boolean }) {
   if (loading) return <p style={{ fontSize: 13, color: "var(--muted)" }}>A carregar relatório de sessões…</p>;
   const rep = data?.report;
@@ -848,7 +755,10 @@ function BngStatsMiniChart({
               const ts = payload?.[0]?.payload?.ts;
               return ts ? new Date(String(ts)).toLocaleString("pt-BR") : "";
             }}
-            formatter={(value: number | null) => [value == null ? "—" : value, label]}
+            formatter={(value) => {
+              const n = value == null ? null : Number(value);
+              return [n == null || !Number.isFinite(n) ? "—" : n, label];
+            }}
           />
           <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} connectNulls={false} />
         </LineChart>
