@@ -381,6 +381,17 @@ func (s *Server) patchAlertRule(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn().Err(cerr).Msg("fechar olt_onu_drop após desactivar limiar")
 		}
 	}
+	if ruleName == alertthresholds.GlobalThresholdRuleName() && !alertthresholds.BngSubscriberDropAlertsEnabled(r.Context(), s.DB()) {
+		_, cerr := s.DB().Exec(r.Context(), `
+			UPDATE alert_instances SET
+				closed_at = now(),
+				meta = COALESCE(meta, '{}'::jsonb) || '{"resolved":"bng_drop_threshold_disabled","source":"alert_rules"}'::jsonb
+			WHERE alert_type = 'bng_subscriber_drop' AND closed_at IS NULL
+		`)
+		if cerr != nil {
+			s.Log.Warn().Err(cerr).Msg("fechar bng_subscriber_drop após desactivar limiar")
+		}
+	}
 	s.appendAuditLog(r.Context(), "alert_rule", id.String(), "patch", s.actorFromRequest(r), nil, body)
 	s.getAlertRule(w, r)
 }

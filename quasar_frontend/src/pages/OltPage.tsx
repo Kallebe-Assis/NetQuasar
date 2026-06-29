@@ -17,6 +17,7 @@ import { formatYearMonthPt, monthSelectChoicesWithFallback, recentYearMonthChoic
 import { DropdownMenu } from "../components/DropdownMenu";
 import { OltReportsTab } from "./olt/OltReportsTab";
 import { OltPesquisaTab } from "./olt/OltPesquisaTab";
+import { OltUnauthorizedOnusTab } from "./olt/OltUnauthorizedOnusTab";
 import { OltMetricsCollectLogModal, type MetricsWalkRow } from "../components/OltMetricsCollectLogModal";
 import { OltSnmpDebugPanel } from "../components/OltSnmpDebugPanel";
 import { OltVsolOnuTable, type VsOnuRow } from "../components/OltVsolOnuTable";
@@ -293,7 +294,7 @@ function OltIfaceSection({ rows }: { rows: IfRow[] }) {
   );
 }
 
-type OltPageTab = "equipamentos" | "relatorios" | "pesquisa";
+type OltPageTab = "equipamentos" | "relatorios" | "pesquisa" | "nao_autorizadas";
 
 function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: OltPageTab) => void }) {
   return (
@@ -303,6 +304,9 @@ function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: O
       </button>
       <button type="button" className={active === "pesquisa" ? "active" : ""} onClick={() => onChange("pesquisa")}>
         Pesquisa
+      </button>
+      <button type="button" className={active === "nao_autorizadas" ? "active" : ""} onClick={() => onChange("nao_autorizadas")}>
+        Não autorizadas
       </button>
       <button type="button" className={active === "relatorios" ? "active" : ""} onClick={() => onChange("relatorios")}>
         Relatórios
@@ -719,6 +723,18 @@ export function OltPage() {
         </div>
         <OltPageTabs active={pageTab} onChange={setPageTab} />
         <OltPesquisaTab canMutate={canMutate} olts={list.data?.olts ?? []} />
+      </>
+    );
+  }
+
+  if (pageTab === "nao_autorizadas") {
+    return (
+      <>
+        <div className="page-heading" style={{ marginBottom: 8 }}>
+          <h1>OLT</h1>
+        </div>
+        <OltPageTabs active={pageTab} onChange={setPageTab} />
+        <OltUnauthorizedOnusTab canMutate={canMutate} olts={list.data?.olts ?? []} />
       </>
     );
   }

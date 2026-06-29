@@ -13,6 +13,7 @@ import (
 const (
 	StepKindPing               = "ping"
 	StepKindTelemetry          = "telemetry"
+	StepKindBng                = "bng"
 	StepKindOltOnu             = "olt_onu"
 	StepKindMikrotik           = "mikrotik"
 	StepKindInterfacesOLT      = "interfaces_olt"
@@ -31,6 +32,7 @@ type StepOptions struct {
 	TelemetryFields []string `json:"telemetry_fields,omitempty"`
 	OltOnuMode      string   `json:"olt_onu_mode,omitempty"`
 	MikrotikMode    string   `json:"mikrotik_mode,omitempty"`
+	BngMode         string   `json:"bng_mode,omitempty"`
 }
 
 // PipelineStep um passo configurável na ordem de monitoramento.
@@ -47,6 +49,7 @@ func DefaultPipelineSteps() []PipelineStep {
 	return []PipelineStep{
 		{ID: "ping-all", Kind: StepKindPing, Enabled: true, Scope: StepScope{Target: "all"}},
 		{ID: "telemetry-all", Kind: StepKindTelemetry, Enabled: true, Scope: StepScope{Target: "all"}},
+		{ID: "bng-subscribers", Kind: StepKindBng, Enabled: true, Scope: StepScope{Target: "category", Category: "bng"}, Options: StepOptions{BngMode: "totals"}},
 		{ID: "mikrotik-if", Kind: StepKindMikrotik, Enabled: true, Scope: StepScope{Target: "category", Category: "mikrotik"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "olt-if", Kind: StepKindInterfacesOLT, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}},
 		{ID: "olt-onu", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "full"}},
@@ -123,7 +126,43 @@ func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep,
 	if len(steps) == 0 {
 		return DefaultPipelineSteps(), nil
 	}
-	return steps, nil
+	return ensureBngPipelineStep(steps), nil
+}
+
+func hasPipelineKind(steps []PipelineStep, kind string) bool {
+	for _, s := range steps {
+		if s.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureBngPipelineStep expõe inserção do passo BNG para API/UI.
+func EnsureBngPipelineStep(steps []PipelineStep) []PipelineStep {
+	return ensureBngPipelineStep(steps)
+}
+
+// ensureBngPipelineStep insere passo BNG após telemetria quando ausente (instalações anteriores à migração 070).
+func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
+	if hasPipelineKind(steps, StepKindBng) {
+		return steps
+	}
+	bng := PipelineStep{
+		ID: "bng-subscribers", Kind: StepKindBng, Enabled: true,
+		Scope: StepScope{Target: "category", Category: "bng"},
+		Options: StepOptions{BngMode: "totals"},
+	}
+	for i, s := range steps {
+		if s.Kind == StepKindTelemetry {
+			out := make([]PipelineStep, 0, len(steps)+1)
+			out = append(out, steps[:i+1]...)
+			out = append(out, bng)
+			out = append(out, steps[i+1:]...)
+			return out
+		}
+	}
+	return append([]PipelineStep{bng}, steps...)
 }
 
 func pipelineStepLabel(kind string) string {
@@ -132,6 +171,8 @@ func pipelineStepLabel(kind string) string {
 		return "Ping (ICMP/TCP)"
 	case StepKindTelemetry:
 		return "Telemetria SNMP"
+	case StepKindBng:
+		return "BNG (logins / saúde)"
 	case StepKindOltOnu:
 		return "Coleta ONUs (OLT)"
 	case StepKindMikrotik:
@@ -156,6 +197,10 @@ func scopeDeviceUUIDs(scope StepScope) []uuid.UUID {
 	return out
 }
 
+func isBngDevice(row pingableDeviceRow) bool {
+	return row.bngEnabled || strings.EqualFold(strings.TrimSpace(row.category), "bng")
+}
+
 func deviceMatchesScope(row pingableDeviceRow, scope StepScope) bool {
 	target := strings.ToLower(strings.TrimSpace(scope.Target))
 	if target == "" || target == "all" {
@@ -165,6 +210,9 @@ func deviceMatchesScope(row pingableDeviceRow, scope StepScope) bool {
 		cat := strings.ToLower(strings.TrimSpace(scope.Category))
 		if cat == "" || cat == "olt" {
 			return strings.EqualFold(strings.TrimSpace(row.category), "olt")
+		}
+		if cat == "bng" {
+			return isBngDevice(row)
 		}
 		return strings.EqualFold(strings.TrimSpace(row.category), scope.Category)
 	}
@@ -202,6 +250,8 @@ func loadDevicesForPipelineStep(ctx context.Context, pool *pgxpool.Pool, step Pi
 	switch step.Kind {
 	case StepKindOltOnu:
 		base, err = loadOltDevicesForCollect(ctx, pool, only)
+	case StepKindBng:
+		base, err = loadBngDevicesForCollect(ctx, pool, only)
 	default:
 		base, err = loadPingableDevices(ctx, pool, only)
 	}
@@ -213,6 +263,10 @@ func loadDevicesForPipelineStep(ctx context.Context, pool *pgxpool.Pool, step Pi
 	}
 	// Coleta ONU: por defeito TODAS as OLTs; filtro só se utilizador escolheu equipamentos específicos.
 	if step.Kind == StepKindOltOnu && !strings.EqualFold(strings.TrimSpace(step.Scope.Target), "devices") {
+		return base, nil
+	}
+	// BNG: por defeito todos os BNG com coleta activa; filtro só com alvo «equipamentos».
+	if step.Kind == StepKindBng && !strings.EqualFold(strings.TrimSpace(step.Scope.Target), "devices") {
 		return base, nil
 	}
 	return filterDevicesByScope(base, step.Scope), nil

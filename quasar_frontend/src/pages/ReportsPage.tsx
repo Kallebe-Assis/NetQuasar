@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { FileDown, FileText, RefreshCw, Search, Send, X } from "lucide-react";
 import { PageCountPill } from "../components/PageCountPill";
+import { formatBngDateTime } from "../lib/bngDisplay";
 import { isAdminUser } from "../lib/auth";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -25,6 +26,147 @@ import {
   type SystemReportId,
   type SystemReportPayload,
 } from "../lib/systemReports";
+
+function bngChartLabel(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function BngDeviceChart({ device, points, title }: { device?: string; points: NonNullable<SystemReportPayload["chart"]>["points"]; title?: string }) {
+  const data = useMemo(
+    () =>
+      (points ?? []).map((p) => {
+        const iso = String(p.collected_at ?? p.t ?? "");
+        return {
+          iso,
+          label: bngChartLabel(iso),
+          device: p.device,
+          Total: p.total ?? null,
+          PPPoE: p.pppoe ?? null,
+          IPv4: p.ipv4 ?? null,
+          IPv6: p.ipv6 ?? null,
+          "Dual-stack": p.dual_stack ?? null,
+        };
+      }),
+    [points],
+  );
+
+  const yDomain = useMemo(() => {
+    const numeric: number[] = [];
+    for (const row of data) {
+      for (const v of [row.Total, row.PPPoE, row.IPv4, row.IPv6, row["Dual-stack"]]) {
+        if (v != null && Number.isFinite(v)) numeric.push(v);
+      }
+    }
+    if (numeric.length === 0) return [0, 1] as [number, number];
+    const min = Math.min(...numeric);
+    const max = Math.max(...numeric);
+    const span = Math.max(1, max - min);
+    const pad = Math.max(1, Math.round(span * 0.08));
+    return [min - pad, max + pad] as [number, number];
+  }, [data]);
+
+  if (data.length === 0) return null;
+
+  return (
+    <div className="card" style={{ padding: 12, marginTop: 12 }}>
+      <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>
+        {title ?? "Gráfico BNG"}
+        {device ? <span style={{ fontWeight: 400, color: "var(--muted)" }}> — {device}</span> : null}
+      </h3>
+      <ResponsiveContainer width="100%" height={260}>
+        <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis dataKey="label" tick={{ fontSize: 9 }} interval="preserveStartEnd" minTickGap={28} />
+          <YAxis tick={{ fontSize: 10 }} width={48} allowDecimals={false} domain={yDomain} />
+          <Tooltip
+            labelFormatter={(_, items) => {
+              const iso = items?.[0]?.payload?.iso;
+              return iso ? new Date(String(iso)).toLocaleString("pt-BR") : "";
+            }}
+          />
+          <Legend />
+          <Line type="monotone" dataKey="Total" stroke="#64748b" strokeWidth={2} dot={false} connectNulls={false} />
+          <Line type="monotone" dataKey="PPPoE" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls={false} />
+          <Line type="monotone" dataKey="IPv4" stroke="#22c55e" strokeWidth={2} dot={false} connectNulls={false} />
+          <Line type="monotone" dataKey="IPv6" stroke="#a855f7" strokeWidth={2} dot={false} connectNulls={false} />
+          <Line type="monotone" dataKey="Dual-stack" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function BngReportAverages({ payload }: { payload: SystemReportPayload }) {
+  const windows = payload.averages?.windows ?? [];
+  if (windows.length === 0) return null;
+  return (
+    <section style={{ marginBottom: 16 }}>
+      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Médias de logins (BNG)</h3>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>
+        Média aritmética das coletas SNMP por janela — incluída no envio Telegram quando há dados suficientes.
+      </p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Período</th>
+              <th>Amostras</th>
+              <th>Total</th>
+              <th>PPPoE</th>
+              <th>IPv4</th>
+              <th>IPv6</th>
+              <th>Dual-stack</th>
+            </tr>
+          </thead>
+          <tbody>
+            {windows.map((w) => (
+              <tr key={w.days}>
+                <td>{w.label}</td>
+                <td>{w.samples.toLocaleString("pt-PT")}</td>
+                <td>{w.total != null ? w.total.toLocaleString("pt-PT") : "—"}</td>
+                <td>{w.pppoe != null ? w.pppoe.toLocaleString("pt-PT") : "—"}</td>
+                <td>{w.ipv4 != null ? w.ipv4.toLocaleString("pt-PT") : "—"}</td>
+                <td>{w.ipv6 != null ? w.ipv6.toLocaleString("pt-PT") : "—"}</td>
+                <td>{w.dual_stack != null ? w.dual_stack.toLocaleString("pt-PT") : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function BngReportChart({ payload }: { payload: SystemReportPayload }) {
+  const pts = payload.chart?.points ?? [];
+  const byDevice = useMemo(() => {
+    const map = new Map<string, typeof pts>();
+    for (const p of pts) {
+      const key = p.device?.trim() || "BNG";
+      const list = map.get(key) ?? [];
+      list.push(p);
+      map.set(key, list);
+    }
+    return map;
+  }, [pts]);
+
+  if (pts.length === 0) return null;
+
+  if (byDevice.size <= 1) {
+    const only = [...byDevice.values()][0] ?? pts;
+    return <BngDeviceChart points={only} title={payload.chart?.label} />;
+  }
+
+  return (
+    <>
+      {[...byDevice.entries()].map(([device, devicePts]) => (
+        <BngDeviceChart key={device} device={device} points={devicePts} title={payload.chart?.label} />
+      ))}
+    </>
+  );
+}
 
 function ReportChart({ payload }: { payload: SystemReportPayload }) {
   const pts = payload.chart?.points ?? [];
@@ -89,6 +231,8 @@ function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
       )}
 
       {payload.report_id === "olt-overview" && <ReportChart payload={payload} />}
+      {payload.report_id === "bng-subscribers" && <BngReportAverages payload={payload} />}
+      {payload.report_id === "bng-subscribers" && <BngReportChart payload={payload} />}
 
       {rows.length > 0 && (
         <section>
@@ -107,11 +251,16 @@ function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
               <tbody>
                 {rows.slice(0, 500).map((row, i) => (
                   <tr key={i}>
-                    {row.map((cell, j) => (
-                      <td key={j} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }} title={cell}>
-                        {cell || "—"}
-                      </td>
-                    ))}
+                    {row.map((cell, j) => {
+                      const col = cols[j] ?? "";
+                      const display =
+                        col === "Última coleta" && cell ? formatBngDateTime(cell) : cell || "—";
+                      return (
+                        <td key={j} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }} title={display}>
+                          {display}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

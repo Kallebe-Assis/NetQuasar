@@ -29,6 +29,7 @@ type Server struct {
 	// sysCfgImportMu protege o mapa de jobs de importação de configuração (aba Base de dados).
 	sysCfgImportMu    sync.Mutex
 	sysCfgImportJobs  map[string]*sysConfigImportJob
+	bngCollectProgress *bngCollectProgressStore
 }
 
 // DB retorna o pool PostgreSQL ativo ou nil (testes sem holder).
@@ -60,11 +61,12 @@ func (s *Server) ensureBackgroundSchedulers() {
 
 func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[pgxpool.Pool], workerCtx context.Context) http.Handler {
 	s := &Server{
-		Log:              log,
-		Cfg:              cfg,
-		DBHolder:         dbHolder,
-		WorkerCtx:        workerCtx,
-		sysCfgImportJobs: make(map[string]*sysConfigImportJob),
+		Log:                log,
+		Cfg:                cfg,
+		DBHolder:           dbHolder,
+		WorkerCtx:          workerCtx,
+		sysCfgImportJobs:   make(map[string]*sysConfigImportJob),
+		bngCollectProgress: newBngCollectProgressStore(),
 	}
 	if workerCtx != nil {
 		registerOltManualRefresher(s)
@@ -127,6 +129,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/database", s.getDatabaseMeta)
 				r.Patch("/database", s.patchDatabaseMeta)
 				r.Post("/database/test", s.testDatabaseConnection)
+				r.Post("/database/cleanup/scan", s.databaseCleanupScan)
+				r.Post("/database/cleanup/execute", s.databaseCleanupExecute)
 				r.Get("/database/logs", s.settingsDatabaseLogs)
 				r.Get("/system-config/export", s.exportSystemConfiguration)
 				r.Post("/system-config/import", s.startSystemConfigurationImport)
@@ -166,6 +170,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/automation/commercial-report", s.getAutomationCommercialReport)
 				r.Patch("/automation/commercial-report", s.patchAutomationCommercialReport)
 				r.Post("/automation/commercial-report/run", s.runAutomationCommercialReport)
+				r.Get("/automation/bng-stats-report", s.getAutomationBngStatsReport)
+				r.Patch("/automation/bng-stats-report", s.patchAutomationBngStatsReport)
+				r.Post("/automation/bng-stats-report/run", s.runAutomationBngStatsReport)
 				r.Get("/automation/history", s.getAutomationExecutionHistory)
 				r.Get("/notifications/smtp", s.getSMTPSettings)
 				r.Patch("/notifications/smtp", s.patchSMTPSettings)
@@ -395,6 +402,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/snmp-debug", s.postOLTSnmpDebug)
 				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
 				r.Post("/devices/{id}/onu-serial-search", s.searchOLTOnuBySerial)
+				r.Post("/devices/{id}/unauthorized-onus", s.listOLTUnauthorizedOnus)
+				r.Post("/devices/{id}/onu-authorize", s.authorizeOLTOnu)
+				r.Post("/devices/{id}/onu-deauthorize", s.deauthorizeOLTOnu)
 			})
 		})
 
@@ -411,6 +421,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices", s.bngListDevices)
 			r.Get("/devices/{id}/overview", s.bngDeviceOverview)
 			r.Get("/devices/{id}/sessions", s.bngDeviceSessions)
+			r.Get("/devices/{id}/sessions/report", s.bngDeviceSessionReport)
+			r.Get("/devices/{id}/sessions/lookup", s.bngDeviceSessionLookup)
+			r.Get("/devices/{id}/sessions/lookup/auth", s.bngDeviceSessionAuthLogs)
+			r.Get("/devices/{id}/sessions/traffic-rate", s.bngDeviceSessionTrafficRate)
+			r.Get("/devices/{id}/auth-records", s.bngDeviceAuthRecords)
+			r.Get("/devices/{id}/sessions/collect/status", s.bngDeviceSessionsCollectStatus)
 			r.Get("/stats/history", s.bngStatsHistory)
 			r.Get("/sessions", s.bngSessions)
 			r.Get("/sessions/search", s.bngSessionsSearch)

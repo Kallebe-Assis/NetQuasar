@@ -5,6 +5,13 @@ import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { InfoHint } from "../../components/InfoHint";
 import { apiFetch } from "../../lib/api";
+import {
+  bngExtraRowsFromBlock,
+  buildBngOverridesFromRows,
+  type CategoryOverrides,
+  type ExtraOidRow,
+} from "../../lib/oidExtrasConfig";
+import { OidExtrasEditor } from "./OidExtrasEditor";
 
 type BngMetricDef = {
   enabled?: boolean;
@@ -28,9 +35,14 @@ type CatalogEntry = {
 
 type BngCollectionResponse = {
   metrics: BngMetricsForm;
+  options?: BngCollectionOptions;
   catalog: CatalogEntry[];
   sections: Record<string, string>;
   collect_mode_labels: Record<string, string>;
+};
+
+type BngCollectionOptions = {
+  pppoe_login_strip_suffix?: string;
 };
 
 const SECTION_ORDER = ["system", "health", "subscribers", "pppoe"];
@@ -82,6 +94,9 @@ export function BngCollectionPanel() {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<BngMetricsForm>({});
+  const [options, setOptions] = useState<BngCollectionOptions>({});
+  const [extraRows, setExtraRows] = useState<ExtraOidRow[]>([]);
+  const [extrasBaseline, setExtrasBaseline] = useState<CategoryOverrides | undefined>();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SECTION_ORDER.map((s) => [s, s === "subscribers" || s === "system"])),
   );
@@ -91,6 +106,12 @@ export function BngCollectionPanel() {
     queryFn: () => apiFetch<BngCollectionResponse>("/api/v1/settings/bng-collection"),
   });
 
+  const connDefaults = useQuery({
+    queryKey: ["settings-conn-def"],
+    queryFn: () =>
+      apiFetch<{ snmp_oid_overrides?: { bng?: CategoryOverrides } }>("/api/v1/settings/connection/defaults"),
+  });
+
   const catalog = config.data?.catalog ?? [];
   const sectionLabels = config.data?.sections ?? {};
   const modeLabels = config.data?.collect_mode_labels ?? {};
@@ -98,25 +119,51 @@ export function BngCollectionPanel() {
   useEffect(() => {
     if (!config.data) return;
     setMetrics(mergeMetricsFromApi(config.data.metrics, config.data.catalog));
+    setOptions(config.data.options ?? {});
   }, [config.data]);
+
+  useEffect(() => {
+    if (!connDefaults.data) return;
+    const overrides = connDefaults.data.snmp_oid_overrides;
+    const bngBlock =
+      overrides && typeof overrides === "object" && !Array.isArray(overrides)
+        ? (overrides as { bng?: CategoryOverrides }).bng
+        : undefined;
+    setExtrasBaseline(bngBlock);
+    setExtraRows(bngExtraRowsFromBlock(bngBlock));
+  }, [connDefaults.data]);
 
   const stats = useMemo(() => countEnabled(metrics, catalog), [metrics, catalog]);
 
   const patch = useMutation({
-    mutationFn: () =>
-      apiFetch<{ ok: boolean; message?: string }>("/api/v1/settings/bng-collection", {
+    mutationFn: async () => {
+      await apiFetch<{ ok: boolean; message?: string }>("/api/v1/settings/bng-collection", {
         method: "PATCH",
-        json: { metrics },
-      }),
-    onSuccess: (data) => {
+        json: { metrics, options },
+      });
+      const bngOverrides = buildBngOverridesFromRows(extraRows, extrasBaseline);
+      const prev =
+        connDefaults.data?.snmp_oid_overrides && typeof connDefaults.data.snmp_oid_overrides === "object"
+          ? (connDefaults.data.snmp_oid_overrides as Record<string, unknown>)
+          : {};
+      await apiFetch("/api/v1/settings/connection/defaults", {
+        method: "PATCH",
+        json: {
+          snmp_oid_overrides: { ...prev, bng: bngOverrides },
+        },
+      });
+    },
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bng-collection"] });
-      toastOk(pushToast, data.message || "Perfil BNG guardado.");
+      qc.invalidateQueries({ queryKey: ["settings-conn-def"] });
+      toastOk(pushToast, "Perfil BNG e OIDs extra guardados.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
-  if (config.isLoading) return <p>A carregar perfil BNG…</p>;
+  if (config.isLoading || connDefaults.isLoading) return <p>A carregar perfil BNG…</p>;
   if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
+  if (connDefaults.isError) return <div className="msg msg--err">{(connDefaults.error as Error).message}</div>;
 
   const bySection = SECTION_ORDER.map((section) => ({
     section,
@@ -158,7 +205,9 @@ export function BngCollectionPanel() {
         <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — BNG</h2>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
           Perfil para concentradores BNG (Huawei NE8000 e similares). O monitoramento periódico coleta métricas{" "}
-          <strong>activas</strong> com OID preenchido. A secção «Sessões PPPoE» é só para consulta manual na página BNG —
+          <strong>activas</strong> com OID preenchido no intervalo de <strong>Telemetria SNMP</strong> (Configurações → Monitoramento).
+          Totais de logins (PPPoE, IPv4, IPv6, dual-stack) entram nesse ciclo — o equipamento precisa de{" "}
+          <strong>telemetria activa</strong> e <strong>BNG activo</strong> no inventário. A secção «Sessões PPPoE» é só para consulta manual na página BNG —
           não active walks de sessão no ciclo automático (milhares de linhas SNMP).
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, fontSize: 12, alignItems: "center" }}>
@@ -179,8 +228,25 @@ export function BngCollectionPanel() {
         </div>
       </div>
 
+      <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Logins PPPoE</h3>
+        <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+          Sufixo RADIUS a ignorar nos logins SNMP (ex.: <span className="mono">@g2.com.br</span>). O valor é removido na
+          exibição e na pesquisa; o equipamento continua a reportar o login completo.
+        </p>
+        <div className="field" style={{ maxWidth: 360, margin: 0 }}>
+          <label style={{ fontSize: 11 }}>Sufixo a ignorar</label>
+          <input
+            className="input mono"
+            placeholder="@g2.com.br"
+            value={options.pppoe_login_strip_suffix ?? ""}
+            onChange={(e) => setOptions((prev) => ({ ...prev, pppoe_login_strip_suffix: e.target.value }))}
+          />
+        </div>
+      </div>
+
       <div className="msg msg--off" style={{ marginBottom: 12, fontSize: 12 }}>
-        <strong>Recomendado no ciclo automático:</strong> sistema (nome, modelo, versão), totais de assinantes (PPPoE, IPv4,
+        <strong>Recomendado no ciclo automático:</strong> sistema (nome, modelo, versão), totais de logins (PPPoE, IPv4,
         IPv6, dual-stack) e saúde (CPU). Consulta completa de sessões PPPoE — login, MAC, IP, estados — na página{" "}
         <em>BNG → Sessões PPPoE</em>.
       </div>
@@ -316,6 +382,8 @@ export function BngCollectionPanel() {
           </div>
         );
       })}
+
+      <OidExtrasEditor title="OIDs extra (telemetria BNG)" rows={extraRows} onChange={setExtraRows} />
 
       <div className="row" style={{ marginTop: 16, gap: 8 }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>

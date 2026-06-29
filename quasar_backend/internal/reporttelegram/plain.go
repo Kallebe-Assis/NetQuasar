@@ -136,6 +136,9 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 				if cell == "" {
 					continue
 				}
+				if col == "Última coleta" && strings.Contains(cell, "T") {
+					cell = FormatGeneratedAt(cell)
+				}
 				if col != "" {
 					parts = append(parts, fmt.Sprintf("%s: %s", col, cell))
 				} else {
@@ -148,7 +151,12 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 	}
 
 	if chart, ok := payload["chart"].(map[string]any); ok {
-		if pts, ok := chart["points"].([]map[string]any); ok && len(pts) > 0 {
+		chartKind, _ := chart["kind"].(string)
+		if chartKind == "bng-subscribers" {
+			if av, ok := payload["averages"].(map[string]any); ok {
+				writeBngLoginAverages(&sb, av)
+			}
+		} else if pts, ok := chart["points"].([]map[string]any); ok && len(pts) > 0 {
 			label := "Evolução"
 			if l, ok := chart["label"].(string); ok && l != "" {
 				label = l
@@ -161,12 +169,66 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 					sb.WriteString("… (mais pontos no relatório completo)\n")
 					break
 				}
-				sb.WriteString(fmt.Sprintf("• %v — total %v | online %v | offline %v\n",
-					p["t"], p["total"], p["online"], p["offline"]))
+				if _, hasOnline := p["online"]; hasOnline {
+					sb.WriteString(fmt.Sprintf("• %v — total %v | online %v | offline %v\n",
+						p["t"], p["total"], p["online"], p["offline"]))
+					continue
+				}
+				ts := p["t"]
+				if ca, ok := p["collected_at"]; ok && ca != nil {
+					ts = ca
+				}
+				tsLabel := fmt.Sprint(ts)
+				if dev, ok := p["device"].(string); ok && strings.TrimSpace(dev) != "" {
+					tsLabel = fmt.Sprintf("%s (%s)", FormatGeneratedAt(fmt.Sprint(ts)), dev)
+				} else if strings.Contains(tsLabel, "T") {
+					tsLabel = FormatGeneratedAt(tsLabel)
+				}
+				parts := []string{tsLabel}
+				for _, k := range []string{"total", "pppoe", "ipv4", "ipv6", "dual_stack"} {
+					if v, ok := p[k]; ok && v != nil && fmt.Sprint(v) != "" {
+						parts = append(parts, fmt.Sprintf("%s %v", k, v))
+					}
+				}
+				sb.WriteString("• " + strings.Join(parts, " | ") + "\n")
 			}
 		}
 	}
 
 	sb.WriteString("\n—\nNetQuasar · relatório")
 	return strings.TrimSpace(sb.String())
+}
+
+func writeBngLoginAverages(sb *strings.Builder, av map[string]any) {
+	wins, ok := av["windows"].([]map[string]any)
+	if !ok || len(wins) == 0 {
+		return
+	}
+	metricLabels := map[string]string{
+		"pppoe":      "PPPoE",
+		"ipv4":       "IPv4",
+		"ipv6":       "IPv6",
+		"dual_stack": "Dual-stack",
+		"total":      "Total",
+	}
+	sb.WriteString("\nMédias de logins\n")
+	for i, w := range wins {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		label := fmt.Sprint(w["label"])
+		if label == "" || label == "<nil>" {
+			label = fmt.Sprintf("%v dias", w["days"])
+		}
+		sb.WriteString(label)
+		sb.WriteString("\n")
+		if n, ok := w["samples"]; ok {
+			sb.WriteString(fmt.Sprintf("  %v coletas\n", n))
+		}
+		for _, k := range []string{"pppoe", "ipv4", "ipv6", "dual_stack", "total"} {
+			if v, ok := w[k]; ok && v != nil {
+				sb.WriteString(fmt.Sprintf("  %s: %v\n", metricLabels[k], v))
+			}
+		}
+	}
 }

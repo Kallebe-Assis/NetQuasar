@@ -19,6 +19,7 @@ export type PipelineStepOptions = {
   telemetry_fields?: string[];
   olt_onu_mode?: string;
   mikrotik_mode?: string;
+  bng_mode?: string;
 };
 
 export type PipelineStep = {
@@ -36,14 +37,15 @@ type MonitoringConfigPayload = {
 
 const STEP_KINDS = [
   { value: "ping", label: "Ping (ICMP/TCP)" },
-  { value: "telemetry", label: "Telemetria SNMP" },
-  { value: "olt_onu", label: "Coleta ONUs (OLT)" },
+  { value: "telemetry", label: "Telemetria SNMP (CPU, memória, uptime)" },
+  { value: "bng", label: "BNG (logins / saúde SNMP)" },
   { value: "mikrotik", label: "MikroTik (interfaces/métricas)" },
   { value: "interfaces_olt", label: "Interfaces SNMP (OLT)" },
   { value: "interfaces_mikrotik", label: "Interfaces SNMP (MikroTik)" },
+  { value: "olt_onu", label: "Coleta ONUs (OLT SNMP/telnet)" },
 ];
 
-const CATEGORIES = ["olt", "mikrotik", "router", "switch", "radio", "outro"];
+const CATEGORIES = ["olt", "bng", "mikrotik", "router", "switch", "radio", "servidor", "outro"];
 
 const TELEMETRY_FIELDS = [
   { value: "cpu", label: "CPU" },
@@ -61,6 +63,10 @@ function newStep(kind: string): PipelineStep {
     options: {},
   };
   if (kind === "telemetry") base.options = { telemetry_fields: [] };
+  if (kind === "bng") {
+    base.scope = { target: "category", category: "bng" };
+    base.options = { bng_mode: "totals" };
+  }
   if (kind === "olt_onu") {
     base.scope = { target: "category", category: "olt" };
     base.options = { olt_onu_mode: "full" };
@@ -72,10 +78,6 @@ function newStep(kind: string): PipelineStep {
   if (kind === "interfaces_olt") base.scope = { target: "category", category: "olt" };
   if (kind === "interfaces_mikrotik") base.scope = { target: "category", category: "mikrotik" };
   return base;
-}
-
-function kindLabel(kind: string): string {
-  return STEP_KINDS.find((k) => k.value === kind)?.label ?? kind;
 }
 
 export function MonitoringSettingsPanel() {
@@ -134,128 +136,80 @@ function MonitoringPipelineCard() {
         Ordem de monitoramento
         <InfoHint label="Pipeline sequencial">
           <p>
-            Telemetria, interfaces e coleta ONU correm <strong>em sequência</strong> (cada etapa só inicia após a anterior).
+            Telemetria, BNG, interfaces e coleta ONU correm <strong>em sequência</strong> (cada etapa só inicia após a anterior).
+            Equipamentos com coleta BNG activa são recolhidos no passo <strong>BNG</strong>, não na telemetria genérica.
             O passo <strong>Ping</strong> na lista abaixo serve para definir o alvo (todos/categoria); com «Ping em paralelo» activo
             (Configurações → Intervalos), o ping <strong>não entra na fila</strong> — corre à parte, no intervalo «Intervalo entre pings».
           </p>
         </InfoHint>
       </h2>
 
-      <div className="settings-fields-grid" style={{ marginBottom: 16, maxWidth: 320 }}>
-        <label>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>Intervalo entre ciclos completos (s)</span>
+      <div className="pipeline-cycle-field" style={{ marginBottom: 10 }}>
+        <label className="pipeline-step-field pipeline-step-field--cycle">
+          <span className="pipeline-step-field__label">Intervalo entre ciclos (s)</span>
           <input className="input mono" value={cycleSec} onChange={(e) => setCycleSec(e.target.value)} aria-label="Intervalo pipeline" />
         </label>
       </div>
 
-      <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+      <ol className="pipeline-steps-list">
         {steps.map((step, idx) => (
-          <li key={step.id} className="card" style={{ padding: 12, margin: 0, background: "var(--surface-2, rgba(0,0,0,.04))" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-              <strong>{idx + 1}.</strong>
-              <select
-                className="input"
-                value={step.kind}
-                onChange={(e) => updateStep(idx, { kind: e.target.value })}
-                aria-label={`Tipo passo ${idx + 1}`}
-              >
-                {STEP_KINDS.map((k) => (
-                  <option key={k.value} value={k.value}>{k.label}</option>
-                ))}
-              </select>
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+          <li key={step.id} className="pipeline-step-card">
+            <div className="pipeline-step-card__row">
+              <span className="pipeline-step-index" aria-hidden>{idx + 1}.</span>
+              <label className="pipeline-step-field pipeline-step-field--kind">
+                <span className="pipeline-step-field__label">Tipo</span>
+                <select
+                  className="input"
+                  value={step.kind}
+                  onChange={(e) => updateStep(idx, { kind: e.target.value })}
+                  aria-label={`Tipo passo ${idx + 1}`}
+                >
+                  {STEP_KINDS.map((k) => (
+                    <option key={k.value} value={k.value}>{k.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="pipeline-step-check">
                 <input type="checkbox" checked={step.enabled} onChange={(e) => updateStep(idx, { enabled: e.target.checked })} />
                 Activo
               </label>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                <button type="button" className="btn btn--ghost btn--sm" disabled={idx === 0} onClick={() => move(idx, -1)} aria-label="Subir"><ChevronUp size={16} /></button>
-                <button type="button" className="btn btn--ghost btn--sm" disabled={idx === steps.length - 1} onClick={() => move(idx, 1)} aria-label="Descer"><ChevronDown size={16} /></button>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setSteps((p) => p.filter((_, i) => i !== idx))} aria-label="Remover"><Trash2 size={16} /></button>
-              </div>
-            </div>
-
-            <div className="settings-fields-grid">
-              <label>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>Alvo</span>
+              <label className="pipeline-step-field pipeline-step-field--target">
+                <span className="pipeline-step-field__label">Alvo</span>
                 <select
                   className="input"
                   value={step.scope.target}
                   onChange={(e) => updateStep(idx, { scope: { ...step.scope, target: e.target.value as PipelineStepScope["target"] } })}
                 >
-                  <option value="all">Todos os equipamentos</option>
-                  <option value="category">Categoria específica</option>
-                  <option value="devices">Equipamentos (IDs UUID)</option>
+                  <option value="all">Todos</option>
+                  <option value="category">Categoria</option>
+                  <option value="devices">Equipamentos</option>
                 </select>
               </label>
               {step.scope.target === "category" && (
-                <label>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Categoria</span>
+                <label className="pipeline-step-field pipeline-step-field--category">
+                  <span className="pipeline-step-field__label">Categoria</span>
                   <select className="input" value={step.scope.category ?? ""} onChange={(e) => updateStep(idx, { scope: { ...step.scope, category: e.target.value } })}>
                     {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
               )}
-              {step.scope.target === "devices" && (
-                <label style={{ gridColumn: "1 / -1" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>IDs (separados por vírgula)</span>
-                  <input
-                    className="input mono"
-                    value={(step.scope.device_ids ?? []).join(", ")}
-                    onChange={(e) =>
-                      updateStep(idx, {
-                        scope: {
-                          ...step.scope,
-                          device_ids: e.target.value.split(",").map((x) => x.trim()).filter(Boolean),
-                        },
-                      })
-                    }
-                  />
-                </label>
-              )}
-
-              {step.kind === "telemetry" && (
-                <label style={{ gridColumn: "1 / -1" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Métricas (vazio = completo)</span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-                    {TELEMETRY_FIELDS.map((f) => {
-                      const sel = step.options?.telemetry_fields ?? [];
-                      const on = sel.includes(f.value);
-                      return (
-                        <label key={f.value} style={{ fontSize: 13, display: "flex", gap: 4 }}>
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={(e) => {
-                              const next = e.target.checked ? [...sel, f.value] : sel.filter((x) => x !== f.value);
-                              updateStep(idx, { options: { ...step.options, telemetry_fields: next } });
-                            }}
-                          />
-                          {f.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </label>
-              )}
-
               {step.kind === "olt_onu" && (
-                <label>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Modo coleta ONU</span>
+                <label className="pipeline-step-field pipeline-step-field--mode">
+                  <span className="pipeline-step-field__label">Modo ONU</span>
                   <select
                     className="input"
                     value={step.options?.olt_onu_mode ?? "full"}
                     onChange={(e) => updateStep(idx, { options: { ...step.options, olt_onu_mode: e.target.value } })}
                   >
                     <option value="full">Completo</option>
-                    <option value="status_only">Só status UP/DOWN</option>
+                    <option value="status_only">Só UP/DOWN</option>
                     <option value="status_rx">Status + RX</option>
                   </select>
                 </label>
               )}
-
               {step.kind === "mikrotik" && (
-                <label>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Modo MikroTik</span>
+                <label className="pipeline-step-field pipeline-step-field--mode">
+                  <span className="pipeline-step-field__label">Modo MikroTik</span>
                   <select
                     className="input"
                     value={step.options?.mikrotik_mode ?? "full"}
@@ -264,17 +218,78 @@ function MonitoringPipelineCard() {
                     <option value="full">Completo</option>
                     <option value="pppoe">Só PPPoE</option>
                     <option value="interfaces">Só interfaces</option>
-                    <option value="interface_traffic">Consumo por interface</option>
+                    <option value="interface_traffic">Tráfego/interface</option>
                   </select>
                 </label>
               )}
+              {step.kind === "bng" && (
+                <label className="pipeline-step-field pipeline-step-field--mode">
+                  <span className="pipeline-step-field__label">Modo BNG</span>
+                  <select
+                    className="input"
+                    value={step.options?.bng_mode ?? "totals"}
+                    onChange={(e) => updateStep(idx, { options: { ...step.options, bng_mode: e.target.value } })}
+                  >
+                    <option value="totals">Totais de logins</option>
+                    <option value="health">Saúde + sistema</option>
+                    <option value="system">Só sistema</option>
+                    <option value="full">Perfil completo</option>
+                  </select>
+                </label>
+              )}
+              <div className="pipeline-step-actions">
+                <button type="button" className="btn btn--ghost btn--sm" disabled={idx === 0} onClick={() => move(idx, -1)} aria-label="Subir"><ChevronUp size={14} /></button>
+                <button type="button" className="btn btn--ghost btn--sm" disabled={idx === steps.length - 1} onClick={() => move(idx, 1)} aria-label="Descer"><ChevronDown size={14} /></button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setSteps((p) => p.filter((_, i) => i !== idx))} aria-label="Remover"><Trash2 size={14} /></button>
+              </div>
             </div>
-            <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>{kindLabel(step.kind)}</p>
+
+            {step.scope.target === "devices" && (
+              <label className="pipeline-step-field pipeline-step-field--devices">
+                <span className="pipeline-step-field__label">IDs (vírgula)</span>
+                <input
+                  className="input mono"
+                  value={(step.scope.device_ids ?? []).join(", ")}
+                  onChange={(e) =>
+                    updateStep(idx, {
+                      scope: {
+                        ...step.scope,
+                        device_ids: e.target.value.split(",").map((x) => x.trim()).filter(Boolean),
+                      },
+                    })
+                  }
+                />
+              </label>
+            )}
+
+            {step.kind === "telemetry" && (
+              <div className="pipeline-step-metrics">
+                <span className="pipeline-step-field__label" style={{ marginRight: 2 }}>Métricas</span>
+                {TELEMETRY_FIELDS.map((f) => {
+                  const sel = step.options?.telemetry_fields ?? [];
+                  const on = sel.includes(f.value);
+                  return (
+                    <label key={f.value} className="pipeline-step-metric-check">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) => {
+                          const next = e.target.checked ? [...sel, f.value] : sel.filter((x) => x !== f.value);
+                          updateStep(idx, { options: { ...step.options, telemetry_fields: next } });
+                        }}
+                      />
+                      {f.label}
+                    </label>
+                  );
+                })}
+                <span className="pipeline-step-metrics-hint">vazio = completo</span>
+              </div>
+            )}
           </li>
         ))}
       </ol>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
         <select className="input" value={addKind} onChange={(e) => setAddKind(e.target.value)} style={{ maxWidth: 280 }}>
           {STEP_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
         </select>

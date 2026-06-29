@@ -17,6 +17,7 @@ const (
 	CycleSlugTelemetry     = "telemetry"
 	CycleSlugInterfaces    = "interfaces"
 	CycleSlugOltIfDerived  = "olt-if-derived"
+	CycleSlugBng           = "bng"
 )
 
 // ErrUnknownCycle o slug não corresponde a nenhum ciclo suportado.
@@ -40,6 +41,7 @@ func ListCycleKinds() []CycleKindMeta {
 		{Slug: CycleSlugTelemetry, RequiresFull: true, IntervalField: "telemetry_seconds", Description: "Telemetria SNMP (CPU, memória, temperatura, uptime)"},
 		{Slug: CycleSlugInterfaces, RequiresFull: true, IntervalField: "interface_snapshot_seconds", Description: "Snapshots IF-MIB (+ Mikrotik quando aplicável)"},
 		{Slug: CycleSlugOltIfDerived, RequiresFull: true, IntervalField: "olt_if_derived_pon_seconds", Description: "Coleta ONU/PON SNMP por OLT (round-robin; VSOL/ZTE/Datacom por perfil)"},
+		{Slug: CycleSlugBng, RequiresFull: true, IntervalField: "telemetry_seconds", Description: "Totais de logins BNG (PPPoE, IPv4, IPv6) e saúde SNMP"},
 	}
 }
 
@@ -55,6 +57,8 @@ func NormalizeCycleSlug(raw string) (string, error) {
 		return CycleSlugInterfaces, nil
 	case "olt-if-derived", "olt_if_derived", "pon", "olt-pon", "olt_pon":
 		return CycleSlugOltIfDerived, nil
+	case "bng", "bng-subscribers", "bng_subscribers", "subscribers":
+		return CycleSlugBng, nil
 	default:
 		return "", fmt.Errorf("%w: %q", ErrUnknownCycle, raw)
 	}
@@ -130,6 +134,20 @@ func EnforceAPICycleInterval(ctx context.Context, pool *pgxpool.Pool, slug strin
 		if last != nil && time.Since(*last) < time.Duration(cfg.OltDerivedSeconds)*time.Second {
 			return fmt.Errorf("%w: global aguardar %ds", ErrCycleIntervalNotElapsed, cfg.OltDerivedSeconds)
 		}
+	case CycleSlugBng:
+		if opts.DeviceID != nil {
+			var last *time.Time
+			_ = pool.QueryRow(ctx, `SELECT max(collected_at) FROM bng_stats_samples WHERE device_id=$1`, *opts.DeviceID).Scan(&last)
+			if last != nil && time.Since(*last) < time.Duration(cfg.TelemetrySeconds)*time.Second {
+				return fmt.Errorf("%w: equipamento aguardar %ds", ErrCycleIntervalNotElapsed, cfg.TelemetrySeconds)
+			}
+			return nil
+		}
+		var last *time.Time
+		_ = pool.QueryRow(ctx, `SELECT last_bng_cycle_at FROM monitoring_runtime WHERE id=1`).Scan(&last)
+		if last != nil && time.Since(*last) < time.Duration(cfg.TelemetrySeconds)*time.Second {
+			return fmt.Errorf("%w: global aguardar %ds", ErrCycleIntervalNotElapsed, cfg.TelemetrySeconds)
+		}
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownCycle, slug)
 	}
@@ -150,6 +168,8 @@ func RunMonitorCycleBySlug(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
 	case CycleSlugOltIfDerived:
 		return RunOltIfDerivedSweep(ctx, pool, log, mode, opts)
+	case CycleSlugBng:
+		return RunBngSweep(ctx, pool, log, mode, opts)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownCycle, slug)
 	}

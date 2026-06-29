@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 )
 
@@ -582,6 +584,9 @@ func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions, capturedAt, source, note := s.loadCachedBngSessions(r.Context(), id)
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	sessions = normalizeCachedSessionLogins(sessions, profile.Options.PPPoELoginStripSuffix)
+	sessions = bngcollect.EnrichSessionMaps(sessions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device_id":    id,
 		"sessions":     sessions,
@@ -632,23 +637,78 @@ func (s *Server) bngDeviceSessionsCollect(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
-	defer cancel()
-	profile := bngcollect.LoadGlobalProfile(ctx, s.DB())
-	out, sessions := bngcollect.CollectSessionsWalk(ctx, strings.TrimSpace(dev.IP), comm, profile, 3*time.Minute)
-	if err := bngcollect.StoreSessionSnapshot(ctx, s.DB(), id, sessions, "snmp_access_table"); err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+	if !s.bngCollectProgress.start(id) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "already_running",
+			"message": "Já existe uma consulta completa em curso neste equipamento.",
+			"status":  s.bngCollectProgress.get(id),
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          true,
-		"device_id":   id,
-		"sessions":    sessions,
-		"count":       len(sessions),
-		"collection":  out,
-		"captured_at": time.Now(),
-		"warning":     "Consulta completa via SNMP walk — pode demorar vários minutos em concentradores com milhares de sessões.",
+	host := strings.TrimSpace(dev.IP)
+	go s.runBngSessionsCollect(id, host, comm)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":  true,
+		"device_id": id,
+		"message":   "Consulta SNMP iniciada. Acompanhe o progresso em /sessions/collect/status.",
 	})
+}
+
+func (s *Server) bngDeviceSessionsCollectStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.bngCollectProgress.get(id))
+}
+
+func (s *Server) runBngSessionsCollect(deviceID uuid.UUID, host, comm string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+
+	profile := bngcollect.LoadGlobalProfile(ctx, s.DB())
+	reporter := &bngcollect.CollectProgressReporter{
+		OnLoginsLoaded: func(n int) {
+			s.bngCollectProgress.update(deviceID, func(j *bngCollectJob) {
+				j.LoginsLoaded = n
+				j.Phase = "login"
+				j.Message = fmt.Sprintf("%d logins carregados…", n)
+			})
+		},
+		OnSessionsLoaded: func(enriched, total int) {
+			s.bngCollectProgress.update(deviceID, func(j *bngCollectJob) {
+				j.SessionsEnriched = enriched
+				j.SessionsTotal = total
+				j.Phase = "details"
+				j.Message = fmt.Sprintf("%d / %d sessões detalhadas…", enriched, total)
+			})
+		},
+		OnPhase: func(key, label string) {
+			s.bngCollectProgress.update(deviceID, func(j *bngCollectJob) {
+				j.Phase = key
+				j.Message = label
+			})
+		},
+	}
+
+	out, sessions := bngcollect.CollectSessionsWalk(ctx, host, comm, profile, 5*time.Minute, reporter)
+	if ctx.Err() != nil {
+		s.bngCollectProgress.finish(deviceID, 0, ctx.Err().Error())
+		return
+	}
+	if len(sessions) == 0 && out.Status.Message != "" {
+		s.bngCollectProgress.finish(deviceID, 0, out.Status.Message)
+		return
+	}
+	if err := bngcollect.StoreSessionSnapshot(ctx, s.DB(), deviceID, sessions, "snmp_access_table"); err != nil {
+		s.bngCollectProgress.finish(deviceID, 0, err.Error())
+		return
+	}
+	infra := bngcollect.CollectInfrastructure(ctx, host, comm, 2*time.Minute)
+	_ = bngcollect.StoreInfrastructureSnapshot(ctx, s.DB(), deviceID, infra)
+	_ = out
+	s.bngCollectProgress.finish(deviceID, len(sessions), "")
 }
 
 func (s *Server) bngDeviceCollect(w http.ResponseWriter, r *http.Request) {
@@ -674,7 +734,224 @@ func (s *Server) bngDeviceCollect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := bngcollect.ExtractStatsTotals(out)
+	alertthresholds.EvaluateBngSubscriberDropAlerts(ctx, s.DB(), &s.Log, id, strings.TrimSpace(dev.Description), strings.TrimSpace(dev.IP), "bng_manual_collect")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "device_id": id, "collection": out, "latest_stats": st,
+	})
+}
+
+func sessionRowToJSON(row bngcollect.SessionRow) map[string]any {
+	return bngcollect.EnrichSessionRow(row)
+}
+
+func (s *Server) bngDeviceSessionReport(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	if _, _, err := s.resolveBngDevice(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	sessions, capturedAt, source, note := s.loadCachedBngSessions(r.Context(), id)
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	sessions = normalizeCachedSessionLogins(sessions, profile.Options.PPPoELoginStripSuffix)
+	sessions = bngcollect.EnrichSessionMaps(sessions)
+	report := bngcollect.BuildSessionReportFromMaps(sessions)
+	infra, infraAt, hasInfra := bngcollect.LoadLatestInfrastructureSnapshot(r.Context(), s.DB(), id)
+	resp := map[string]any{
+		"device_id":     id,
+		"captured_at":   capturedAt,
+		"source":        source,
+		"note":          note,
+		"session_count": report.SessionCount,
+		"report":        report,
+	}
+	if hasInfra {
+		resp["infrastructure"] = infra
+		resp["infrastructure_captured_at"] = infraAt
+	} else {
+		resp["infrastructure_note"] = "Execute a coleta completa SNMP ou «Coletar totais agora» para obter pools, RADIUS, CGN e energia."
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func normalizeCachedSessionLogins(sessions []map[string]any, stripSuffix string) []map[string]any {
+	for _, s := range sessions {
+		if l, ok := s["login"]; ok {
+			s["login"] = bngcollect.NormalizeSNMPLoginValue(fmt.Sprint(l), stripSuffix)
+		}
+	}
+	return sessions
+}
+
+func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("login"))
+	}
+	if q == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "query q ou login obrigatória", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	hintIndex := bngcollect.FindSessionIndexInLatestSnapshot(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix)
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+	row, found, err := bngcollect.LookupSessionByLogin(ctx, strings.TrimSpace(dev.IP), comm, q, profile, 25*time.Second, hintIndex)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "SNMP", err.Error(), nil)
+		return
+	}
+
+	if !found {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"found": false, "source": "snmp_live", "query": q,
+			"session": sessionRowToJSON(row),
+			"note":    "Utilizador não encontrado online no BNG.",
+		})
+		return
+	}
+	if err := bngcollect.UpsertSessionInLatestSnapshot(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
+		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao actualizar snapshot")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"found": true, "source": "snmp_live", "query": q,
+		"session": sessionRowToJSON(row), "list_updated": true,
+	})
+}
+
+func (s *Server) bngDeviceSessionAuthLogs(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("login"))
+	}
+	if q == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "query q ou login obrigatória", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	authLogs := bngcollect.FetchAuthAttemptsForLogin(ctx, strings.TrimSpace(dev.IP), comm, q, 30*time.Second, profile.Options.PPPoELoginStripSuffix)
+
+	if sessions, _, _, _ := s.loadCachedBngSessions(r.Context(), id); len(sessions) > 0 {
+		targets := bngcollect.PPPoELoginLookupTargets(q, profile.Options.PPPoELoginStripSuffix)
+		for _, sm := range sessions {
+			loginVal := strings.TrimSpace(fmt.Sprint(sm["login"]))
+			matched := false
+			for _, t := range targets {
+				if bngcollect.MatchPPPoELogin(t, loginVal, profile.Options.PPPoELoginStripSuffix) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			row := bngcollect.SessionRowFromMap(sm)
+			authLogs = append(bngcollect.AuthLogsFromSession(row, profile.Options.PPPoELoginStripSuffix), authLogs...)
+			break
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query": q, "auth_attempts": authLogs,
+	})
+}
+
+func (s *Server) bngDeviceSessionTrafficRate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	idx := strings.TrimSpace(r.URL.Query().Get("index"))
+	if idx == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "index obrigatório", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	rate, err := bngcollect.MeasureSessionFlow64Rate(ctx, strings.TrimSpace(dev.IP), comm, profile, idx, 1500*time.Millisecond)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "SNMP", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, rate)
+}
+
+func (s *Server) bngDeviceAuthRecords(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	records := bngcollect.FetchRecentBngAuthRecordsCached(ctx, id, strings.TrimSpace(dev.IP), comm, limit, profile.Options.PPPoELoginStripSuffix)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":  id,
+		"count":      len(records),
+		"records":    records,
+		"fetched_at": time.Now().UTC().Format(time.RFC3339),
+		"note":       "Log de autenticação em tempo real via SNMP (falhas AAA + novos logins online). Equivalente aproximado ao log RADIUS.",
 	})
 }

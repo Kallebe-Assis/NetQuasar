@@ -22,6 +22,10 @@ func MetaKeyFromAlert(alertType string, meta map[string]any) string {
 			}
 			return p
 		}
+	case "bng_subscriber_drop":
+		if k := strings.TrimSpace(fmt.Sprint(meta["key"])); k != "" && k != "<nil>" {
+			return k
+		}
 	case "telemetry_threshold":
 		if m := strings.TrimSpace(fmt.Sprint(meta["metric_id"])); m != "" && m != "<nil>" {
 			return "telemetry:" + m

@@ -96,6 +96,8 @@ func runPipelineStep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 		return RunLatencySweep(ctx, pool, log, mode, opts)
 	case StepKindTelemetry:
 		return RunTelemetrySweep(ctx, pool, log, mode, opts)
+	case StepKindBng:
+		return RunBngSweep(ctx, pool, log, mode, opts)
 	case StepKindOltOnu:
 		return RunOltIfDerivedSweep(ctx, pool, log, mode, opts)
 	case StepKindMikrotik:

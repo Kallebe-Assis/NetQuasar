@@ -21,6 +21,7 @@ type MonitoringIntervalsPayload = {
   olt_if_derived_pon_timeout_ms?: number;
   olt_onu_telnet_timeout_ms?: number;
   mikrotik_timeout_ms?: number;
+  bng_timeout_ms?: number;
   icmp_payload_bytes?: number;
   offline_ping_fail_threshold?: number;
   uptime_restart_alert_minutes?: number;
@@ -57,6 +58,7 @@ export function MonitoringPingIntervalsCard() {
   const [oltTimeout, setOltTimeout] = useState("");
   const [oltOnuTelnetTimeout, setOltOnuTelnetTimeout] = useState("");
   const [mikrotikTimeout, setMikrotikTimeout] = useState("");
+  const [bngTimeout, setBngTimeout] = useState("");
   const [pipelineCycle, setPipelineCycle] = useState("");
   const [icmpSz, setIcmpSz] = useState("");
   const [offTh, setOffTh] = useState("");
@@ -74,6 +76,7 @@ export function MonitoringPingIntervalsCard() {
     setOltTimeout((v) => (v === "" ? String(q.data.olt_if_derived_pon_timeout_ms ?? 180000) : v));
     setOltOnuTelnetTimeout((v) => (v === "" ? String(q.data.olt_onu_telnet_timeout_ms ?? 600000) : v));
     setMikrotikTimeout((v) => (v === "" ? String(q.data.mikrotik_timeout_ms ?? 120000) : v));
+    setBngTimeout((v) => (v === "" ? String(q.data.bng_timeout_ms ?? q.data.telemetry_timeout_ms ?? 120000) : v));
     setPipelineCycle((v) => (v === "" ? String(q.data.pipeline_cycle_seconds ?? 120) : v));
     setIcmpSz((v) => (v === "" ? String(q.data.icmp_payload_bytes ?? 32) : v));
     setOffTh((v) => (v === "" ? String(q.data.offline_ping_fail_threshold ?? 3) : v));
@@ -167,7 +170,8 @@ export function MonitoringPingIntervalsCard() {
             hintLabel="Intervalo de telemetria SNMP"
             hint={
               <p>
-                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria ativa.
+                De quanto em quanto tempo o worker recolhe <strong>CPU, memória, temperatura e uptime</strong> (SNMP) nos equipamentos com telemetria ativa
+                (exceto BNG com coleta dedicada — ver passo BNG na ordem de monitoramento).
                 Ex.: 180 s = 3 minutos entre amostras.
               </p>
             }
@@ -281,6 +285,18 @@ export function MonitoringPingIntervalsCard() {
           >
             <input className="input mono" aria-label="Timeout MikroTik em ms" value={mikrotikTimeout} onChange={(e) => setMikrotikTimeout(e.target.value)} />
           </SettingsField>
+          <SettingsField
+            label="BNG (ms)"
+            hintLabel="Timeout coleta BNG"
+            hint={
+              <p>
+                Tempo máximo por concentrador BNG no passo dedicado do pipeline (totais PPPoE/IPv4/IPv6 e saúde SNMP).
+                Intervalo válido: <strong>5000–600000</strong> ms.
+              </p>
+            }
+          >
+            <input className="input mono" aria-label="Timeout BNG em ms" value={bngTimeout} onChange={(e) => setBngTimeout(e.target.value)} />
+          </SettingsField>
         </div>
       </section>
 
@@ -372,6 +388,7 @@ export function MonitoringPingIntervalsCard() {
               olt_if_derived_pon_timeout_ms: oltTimeout ? Number(oltTimeout) : undefined,
               olt_onu_telnet_timeout_ms: oltOnuTelnetTimeout ? Number(oltOnuTelnetTimeout) : undefined,
               mikrotik_timeout_ms: mikrotikTimeout ? Number(mikrotikTimeout) : undefined,
+              bng_timeout_ms: bngTimeout ? Number(bngTimeout) : undefined,
               icmp_payload_bytes: icmpSz !== "" ? Number(icmpSz) : undefined,
               offline_ping_fail_threshold: offTh !== "" ? Number(offTh) : undefined,
               uptime_restart_alert_minutes: uptimeRestart !== "" ? Number(uptimeRestart) : undefined,

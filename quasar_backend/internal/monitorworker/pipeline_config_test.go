@@ -14,8 +14,20 @@ func TestFirstEnabledPingStep(t *testing.T) {
 	}
 }
 
-func TestFirstEnabledPingStep_none(t *testing.T) {
-	if FirstEnabledPingStep([]PipelineStep{{Kind: StepKindPing, Enabled: false}}) != nil {
-		t.Fatal("expected nil")
+func TestEnsureBngPipelineStep(t *testing.T) {
+	steps := []PipelineStep{
+		{Kind: StepKindPing, Enabled: true},
+		{Kind: StepKindTelemetry, Enabled: true},
+		{Kind: StepKindMikrotik, Enabled: true},
+	}
+	out := ensureBngPipelineStep(steps)
+	if len(out) != 4 {
+		t.Fatalf("expected 4 steps, got %d", len(out))
+	}
+	if out[2].Kind != StepKindBng {
+		t.Fatalf("expected bng at index 2, got %s", out[2].Kind)
+	}
+	if ensureBngPipelineStep(append(out, PipelineStep{Kind: StepKindBng})) == nil {
+		t.Fatal("unexpected nil")
 	}
 }

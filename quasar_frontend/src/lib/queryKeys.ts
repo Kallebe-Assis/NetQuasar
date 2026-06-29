@@ -13,6 +13,7 @@ export const queryKeys = {
   automationOnuRuns: ["automation-onu-runs"] as const,
   automationAlertsDigest: ["automation-alerts-digest"] as const,
   automationCommercial: ["automation-commercial"] as const,
+  automationBngStats: ["automation-bng-stats"] as const,
   automationHistory: ["automation-history"] as const,
   smtpSettings: ["smtp-settings"] as const,
   alertsIncidents: ["alerts-incidents"] as const,

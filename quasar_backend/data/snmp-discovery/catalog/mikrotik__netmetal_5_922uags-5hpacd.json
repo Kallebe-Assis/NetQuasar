@@ -2,8 +2,8 @@
   "key": "mikrotik__netmetal 5 922uags-5hpacd",
   "brand": "mikrotik",
   "model": "NetMetal 5 922UAGS-5HPacD",
-  "updated_at": "2026-06-24T13:04:01Z",
-  "sample_count": 17,
+  "updated_at": "2026-06-27T15:01:44Z",
+  "sample_count": 23,
   "known_oids": [
     "1.3.6.1.2.1.1.1.0",
     "1.3.6.1.2.1.1.2.0",

@@ -12,6 +12,11 @@ type SessionRow struct {
 	IPv4           string `json:"ipv4,omitempty"`
 	MAC            string `json:"mac,omitempty"`
 	IPv6           string `json:"ipv6,omitempty"`
+	IPv6PD         string `json:"ipv6_pd,omitempty"`
+	IPType         string `json:"ip_type,omitempty"`
+	IPTypeRaw      string `json:"ip_type_raw,omitempty"`
+	OnlineTimeSec  string `json:"online_time_sec,omitempty"`
+	OnlineTime     string `json:"online_time,omitempty"`
 	PortType       string `json:"port_type,omitempty"`
 	PortTypeRaw    string `json:"port_type_raw,omitempty"`
 	AuthState      string `json:"auth_state,omitempty"`
@@ -20,6 +25,14 @@ type SessionRow struct {
 	AuthorStateRaw string `json:"author_state_raw,omitempty"`
 	AcctState      string `json:"acct_state,omitempty"`
 	AcctStateRaw   string `json:"acct_state_raw,omitempty"`
+	VLAN           string `json:"vlan,omitempty"`
+	Interface      string `json:"interface,omitempty"`
+	Domain         string `json:"domain,omitempty"`
+	UpFlowBytes    string `json:"up_flow_bytes,omitempty"`
+	DnFlowBytes    string `json:"dn_flow_bytes,omitempty"`
+	CarUpCIRKbps   string `json:"car_up_cir_kbps,omitempty"`
+	CarDnCIRKbps   string `json:"car_dn_cir_kbps,omitempty"`
+	QoSProfile     string `json:"qos_profile,omitempty"`
 	Status         string `json:"status"`
 }
 
@@ -76,6 +89,14 @@ func mapAuthorStateLabel(v string) string {
 	}
 }
 
+func formatOnlineTimeSeconds(v string) string {
+	n, ok := parseIntMetric(v)
+	if !ok || n <= 0 {
+		return ""
+	}
+	return FormatDurationSeconds(n)
+}
+
 func mapAcctStateLabel(v string) string {
 	switch strings.TrimSpace(v) {
 	case "1":
@@ -110,7 +131,8 @@ func parseIntMetric(v string) (int, bool) {
 	return n, true
 }
 
-func mergeSessionMaps(maps map[string]map[string]string) []SessionRow {
+func mergeSessionMaps(maps map[string]map[string]string, skipPortTypeFilter ...bool) []SessionRow {
+	skipPortFilter := len(skipPortTypeFilter) > 0 && skipPortTypeFilter[0]
 	if len(maps) == 0 {
 		return nil
 	}
@@ -138,6 +160,17 @@ func mergeSessionMaps(maps map[string]map[string]string) []SessionRow {
 		if v, ok := maps["access_ipv6"][idx]; ok {
 			row.IPv6 = v
 		}
+		if v, ok := maps["access_ipv6_pd"][idx]; ok {
+			row.IPv6PD = v
+		}
+		if v, ok := maps["access_ip_type"][idx]; ok {
+			row.IPTypeRaw = v
+			row.IPType = mapIPTypeLabel(v)
+		}
+		if v, ok := maps["access_online_time"][idx]; ok {
+			row.OnlineTimeSec = v
+			row.OnlineTime = formatOnlineTimeSeconds(v)
+		}
 		if v, ok := maps["access_port_type"][idx]; ok {
 			row.PortTypeRaw = v
 			if isPPPoEPortType(v) {
@@ -158,9 +191,34 @@ func mergeSessionMaps(maps map[string]map[string]string) []SessionRow {
 			row.AcctStateRaw = v
 			row.AcctState = mapAcctStateLabel(v)
 		}
-		if row.PortTypeRaw != "" && !isPPPoEPortType(row.PortTypeRaw) {
+		if v, ok := maps["access_vlan"][idx]; ok {
+			row.VLAN = v
+		}
+		if v, ok := maps["access_interface"][idx]; ok {
+			row.Interface = v
+		}
+		if v, ok := maps["access_domain"][idx]; ok {
+			row.Domain = v
+		}
+		if v, ok := maps["access_up_flow"][idx]; ok {
+			row.UpFlowBytes = v
+		}
+		if v, ok := maps["access_dn_flow"][idx]; ok {
+			row.DnFlowBytes = v
+		}
+		if v, ok := maps["access_car_up_cir"][idx]; ok {
+			row.CarUpCIRKbps = v
+		}
+		if v, ok := maps["access_car_dn_cir"][idx]; ok {
+			row.CarDnCIRKbps = v
+		}
+		if v, ok := maps["access_qos_profile"][idx]; ok {
+			row.QoSProfile = v
+		}
+		if !skipPortFilter && row.PortTypeRaw != "" && !isPPPoEPortType(row.PortTypeRaw) {
 			continue
 		}
+		finalizeSessionRow(&row)
 		out = append(out, row)
 	}
 	return out

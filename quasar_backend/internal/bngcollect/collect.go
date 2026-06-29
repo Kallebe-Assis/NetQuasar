@@ -3,11 +3,13 @@ package bngcollect
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
@@ -44,15 +46,20 @@ type CollectOutput struct {
 
 // CollectPeriodic executa métricas leves (GET escalares + sistema) para ciclo de monitoramento.
 func CollectPeriodic(ctx context.Context, host, community string, profile Profile, timeout time.Duration) CollectOutput {
-	return collectInternal(ctx, host, community, profile, timeout, false)
+	return collectInternal(ctx, host, community, profile, timeout, false, nil)
 }
 
-// CollectSessionsWalk coleta colunas de sessão PPPoE (vários walks — operação pesada).
-func CollectSessionsWalk(ctx context.Context, host, community string, profile Profile, timeout time.Duration) (CollectOutput, []SessionRow) {
+// CollectProgressReporter callbacks de progresso (consulta completa PPPoE).
+type CollectProgressReporter struct {
+	OnLoginsLoaded   func(count int)
+	OnSessionsLoaded func(enriched, total int)
+	OnPhase          func(key, label string)
+}
+
+// CollectSessionsWalk coleta sessões PPPoE: 1 walk de logins + GET por índice.
+func CollectSessionsWalk(ctx context.Context, host, community string, profile Profile, timeout time.Duration, report *CollectProgressReporter) (CollectOutput, []SessionRow) {
 	profile = profileWithSessionWalksEnabled(profile)
-	out := collectInternal(ctx, host, community, profile, timeout, true)
-	sessions := buildSessionsFromOutput(profile, out)
-	return out, sessions
+	return collectSessionsByIndex(ctx, host, community, profile, timeout, report)
 }
 
 func profileWithSessionWalksEnabled(p Profile) Profile {
@@ -73,7 +80,7 @@ func profileWithSessionWalksEnabled(p Profile) Profile {
 	return p
 }
 
-func collectInternal(ctx context.Context, host, community string, profile Profile, timeout time.Duration, sessionsOnly bool) CollectOutput {
+func collectInternal(ctx context.Context, host, community string, profile Profile, timeout time.Duration, sessionsOnly bool, report *CollectProgressReporter) CollectOutput {
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
 	out := CollectOutput{
@@ -145,11 +152,24 @@ func collectInternal(ctx context.Context, host, community string, profile Profil
 			OID:         oid,
 		}
 
+		if report != nil && report.OnPhase != nil {
+			report.OnPhase(entry.Key, "A carregar "+entry.Label+"…")
+		}
+
 		switch mode {
 		case ModeSNMPWalk, ModeAccessSessions:
+			var onProgress func(int)
+			if report != nil && report.OnLoginsLoaded != nil && entry.Key == "access_login" {
+				onProgress = func(n int) {
+					if n == 1 || n%500 == 0 {
+						report.OnLoginsLoaded(n)
+					}
+				}
+			}
 			vars, truncated, walkErr := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 				Host: host, Community: community, RootOID: oid, Version: "2c",
 				Timeout: walkTimeout, MaxRows: maxSessionWalkRows,
+				OnProgress: onProgress,
 			})
 			fr.RowCount = len(vars)
 			fr.Truncated = truncated
@@ -160,6 +180,9 @@ func collectInternal(ctx context.Context, host, community string, profile Profil
 				fr.OK = true
 				out.Status.Collected++
 				fr.Value = vars
+				if report != nil && report.OnLoginsLoaded != nil && entry.Key == "access_login" && len(vars) > 0 {
+					report.OnLoginsLoaded(len(vars))
+				}
 			}
 		default:
 			res := probing.SNMPGet(ctx, probing.SNMPGetParams{
@@ -205,7 +228,8 @@ func buildSessionsFromOutput(profile Profile, out CollectOutput) []SessionRow {
 		}
 		columnMaps[key] = m
 	}
-	return mergeSessionMaps(columnMaps)
+	sessions := mergeSessionMaps(columnMaps)
+	return ApplyLoginStripToSessions(sessions, profile.Options.PPPoELoginStripSuffix)
 }
 
 func catalogPlaceholder(key string) string {
@@ -284,9 +308,144 @@ func StoreSessionSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid
 	return err
 }
 
+// UpsertSessionInLatestSnapshot actualiza ou insere uma sessão no snapshot mais recente do BNG.
+func UpsertSessionInLatestSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, row SessionRow, stripSuffix string) error {
+	if pool == nil {
+		return fmt.Errorf("pool indisponível")
+	}
+	row.Login = strings.TrimSpace(NormalizeSNMPLoginValue(row.Login, stripSuffix))
+	if row.Login == "" {
+		row.Login = strings.TrimSpace(row.Login)
+	}
+
+	var snapID int64
+	var label string
+	var raw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT id, label, data::text FROM bng_session_snapshots
+		WHERE device_id=$1 ORDER BY captured_at DESC LIMIT 1
+	`, deviceID).Scan(&snapID, &label, &raw)
+
+	sessions := parseSessionRowsFromSnapshotJSON(raw)
+	idx := findSessionRowIndex(sessions, row, stripSuffix)
+	if idx >= 0 {
+		sessions[idx] = row
+	} else {
+		sessions = append(sessions, row)
+	}
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return StoreSessionSnapshot(ctx, pool, deviceID, sessions, "snmp_login_lookup")
+		}
+		return err
+	}
+
+	source := strings.TrimSpace(label)
+	if source == "" {
+		source = "snmp_access_table"
+	}
+	payload := map[string]any{
+		"sessions": sessions,
+		"source":   source,
+		"count":    len(sessions),
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
+		UPDATE bng_session_snapshots
+		SET data=$1::jsonb, session_count=$2, captured_at=now()
+		WHERE id=$3
+	`, b, len(sessions), snapID)
+	return err
+}
+
+func parseSessionRowsFromSnapshotJSON(raw []byte) []SessionRow {
+	if len(raw) == 0 {
+		return nil
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil
+	}
+	arr, ok := doc["sessions"].([]any)
+	if !ok || len(arr) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(arr)
+	if err != nil {
+		return nil
+	}
+	var sessions []SessionRow
+	if json.Unmarshal(b, &sessions) != nil {
+		return nil
+	}
+	return sessions
+}
+
+// FindSessionIndexInLatestSnapshot devolve índice SNMP da sessão no último snapshot (lookup rápido).
+func FindSessionIndexInLatestSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, login, stripSuffix string) string {
+	if pool == nil {
+		return ""
+	}
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return ""
+	}
+	var raw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT data::text FROM bng_session_snapshots
+		WHERE device_id=$1 ORDER BY captured_at DESC LIMIT 1
+	`, deviceID).Scan(&raw)
+	if err != nil {
+		return ""
+	}
+	sessions := parseSessionRowsFromSnapshotJSON(raw)
+	targets := PPPoELoginLookupTargets(login, stripSuffix)
+	for _, s := range sessions {
+		idx := strings.TrimSpace(s.Index)
+		if idx == "" {
+			continue
+		}
+		for _, t := range targets {
+			if MatchPPPoELogin(t, s.Login, stripSuffix) {
+				return idx
+			}
+		}
+	}
+	return ""
+}
+
+func findSessionRowIndex(sessions []SessionRow, row SessionRow, stripSuffix string) int {
+	if row.Index != "" {
+		want := strings.TrimSpace(row.Index)
+		for i, s := range sessions {
+			if strings.TrimSpace(s.Index) == want {
+				return i
+			}
+		}
+	}
+	if row.Login != "" {
+		for i, s := range sessions {
+			if MatchPPPoELogin(row.Login, s.Login, stripSuffix) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // CollectAndStorePeriodic coleta periódica + grava telemetria e stats.
 func CollectAndStorePeriodic(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (CollectOutput, error) {
+	return CollectAndStorePeriodicMode(ctx, pool, deviceID, host, community, timeout, "full")
+}
+
+// CollectAndStorePeriodicMode coleta periódica filtrada por modo (totals, health, system, full).
+func CollectAndStorePeriodicMode(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration, mode string) (CollectOutput, error) {
 	profile := LoadGlobalProfile(ctx, pool)
+	profile = ProfileWithCollectMode(profile, mode)
 	out := CollectPeriodic(ctx, host, community, profile, timeout)
 	st := ExtractStatsTotals(out)
 	_ = StoreStatsSample(ctx, pool, deviceID, st)
@@ -294,6 +453,12 @@ func CollectAndStorePeriodic(ctx context.Context, pool *pgxpool.Pool, deviceID u
 	metrics := map[string]any{
 		"bng_collection": out,
 		"profile_source": "settings_bng_collection",
+		"collect_mode":   strings.TrimSpace(mode),
+	}
+	mode = strings.TrimSpace(mode)
+	if mode == "" || mode == "full" {
+		infra := CollectInfrastructure(ctx, host, community, timeout)
+		_ = StoreInfrastructureSnapshot(ctx, pool, deviceID, infra)
 	}
 	b, _ := json.Marshal(metrics)
 	_, err := pool.Exec(ctx, `

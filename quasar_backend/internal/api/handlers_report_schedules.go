@@ -32,6 +32,7 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 		l.Debug().Str("trigger", trigger).Msg("verificação relatórios agendados (alertas/comercial)")
 		s.tryScheduledAlertsDigest(ctx, &l)
 		s.tryScheduledCommercialReport(ctx, &l)
+		s.tryScheduledBngStatsReport(ctx, &l)
 	}
 	corr := time.NewTicker(5 * time.Minute)
 	defer corr.Stop()
@@ -581,6 +582,30 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 	emailTo, _ := body["email_to"].(string)
 	resetLast := schedulePatchResetsLastRun(body)
 	switch table {
+	case "automation_bng_stats_report":
+		freq, _ := body["frequency"].(string)
+		var dow *int
+		if v, ok := body["day_of_week"].(float64); ok {
+			d := int(v)
+			dow = &d
+		}
+		_, err := pool.Exec(ctx, `
+			UPDATE automation_bng_stats_report SET
+				enabled = COALESCE($1, enabled),
+				frequency = COALESCE(NULLIF($2,''), frequency),
+				day_of_week = COALESCE($3, day_of_week),
+				time_hhmm = COALESCE(NULLIF($4,''), time_hhmm),
+				timezone = COALESCE(NULLIF($5,''), timezone),
+				channel_telegram = COALESCE($6, channel_telegram),
+				channel_email = COALESCE($7, channel_email),
+				email_to = COALESCE($8, email_to),
+				last_run_key = CASE WHEN $9 THEN NULL ELSE last_run_key END,
+				last_run_at = CASE WHEN $9 THEN NULL ELSE last_run_at END,
+				running = CASE WHEN $9 THEN false ELSE running END,
+				updated_at = now()
+			WHERE id = 1
+		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast)
+		return err
 	case "automation_alerts_digest":
 		freq, _ := body["frequency"].(string)
 		var dow *int

@@ -274,4 +274,7 @@ func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zer
 			evaluateUptimeRestartAlert(ctx, pool, log, deviceID, deviceDesc, host, *uptimeMin)
 		}
 	}
+	if _, hasBng := col.Metrics["bng_collection"]; hasBng {
+		alertthresholds.EvaluateBngSubscriberDropAlerts(ctx, pool, log, deviceID, deviceDesc, host, "monitoring_telemetry")
+	}
 }

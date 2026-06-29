@@ -134,6 +134,8 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		return verifyUptimeRestartLow(ctx, pool, row)
 	case "olt_onu_drop", "olt_onu_rise":
 		return verifyOltOnuDelta(ctx, pool, row)
+	case "bng_subscriber_drop":
+		return verifyBngSubscriberDrop(ctx, pool, row)
 	case "olt_onu_rx", "olt_onu_tx":
 		return verifyOltOnuOptical(ctx, pool, row)
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
@@ -314,6 +316,87 @@ func verifyOltOnuDelta(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (
 		return true, fmt.Sprintf("PON %s: variação estabilizada (%.0f online).", pon, cur), collected, map[string]any{"curr_online": cur}
 	}
 	return false, fmt.Sprintf("PON %s: %.0f ONUs online na última coleta OLT.", pon, cur), collected, map[string]any{"curr_online": cur, "onu_online": collected["onu_online"]}
+}
+
+func verifyBngSubscriberDrop(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+	collected := map[string]any{}
+	field := strings.TrimSpace(fmt.Sprint(row.Meta["subscriber_field"]))
+	metricID := strings.TrimSpace(fmt.Sprint(row.Meta["metric_id"]))
+	if metricID == "" || metricID == "<nil>" {
+		metricID = "bng_pppoe_drop_count"
+	}
+	if field == "" || field == "<nil>" {
+		field = "pppoe_online"
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+		FROM bng_stats_samples
+		WHERE device_id = $1
+		ORDER BY collected_at DESC
+		LIMIT 2
+	`, row.DeviceID)
+	if err != nil {
+		return false, "Sem amostras BNG recentes para verificar.", collected, nil
+	}
+	defer rows.Close()
+
+	type bngSample struct {
+		total, pppoe, ipv4, ipv6, dual *int
+	}
+	var samples []bngSample
+	for rows.Next() {
+		var s bngSample
+		if rows.Scan(&s.total, &s.pppoe, &s.ipv4, &s.ipv6, &s.dual) == nil {
+			samples = append(samples, s)
+		}
+	}
+	if len(samples) < 2 {
+		return false, "Aguardando segunda coleta BNG para comparar.", collected, nil
+	}
+
+	fieldPtr := func(s bngSample, f string) *int {
+		switch f {
+		case "total_online":
+			return s.total
+		case "pppoe_online":
+			return s.pppoe
+		case "ipv4_online":
+			return s.ipv4
+		case "ipv6_online":
+			return s.ipv6
+		case "dual_stack_online":
+			return s.dual
+		default:
+			return nil
+		}
+	}
+
+	prevV, curV := fieldPtr(samples[1], field), fieldPtr(samples[0], field)
+	if prevV == nil || curV == nil {
+		return false, "Métrica indisponível nas últimas coletas BNG.", collected, map[string]any{"subscriber_field": field}
+	}
+	collected["prev_online"] = *prevV
+	collected["curr_online"] = *curV
+	collected["subscriber_field"] = field
+
+	if *curV >= *prevV {
+		return true, fmt.Sprintf("Logins %s normalizados (%.0f → %.0f).", field, float64(*prevV), float64(*curV)), collected,
+			map[string]any{"prev_online": *prevV, "curr_online": *curV}
+	}
+
+	delta := float64(*prevV - *curV)
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, metricID, "bng")
+	if !ok {
+		return true, "Limiar BNG desactivado — situação considerada normalizada.", collected, map[string]any{"drop_count": delta}
+	}
+	sev := severityGte(delta, th)
+	if sev == "ok" {
+		return true, fmt.Sprintf("%s: queda de %.0f abaixo do limiar (%.0f → %.0f).", label, delta, float64(*prevV), float64(*curV)), collected,
+			map[string]any{"drop_count": delta, "prev_online": *prevV, "curr_online": *curV}
+	}
+	return false, fmt.Sprintf("%s: queda de %.0f ainda acima do limiar (%.0f → %.0f).", label, delta, float64(*prevV), float64(*curV)), collected,
+		map[string]any{"drop_count": delta, "prev_online": *prevV, "curr_online": *curV}
 }
 
 func verifyOltOnuOptical(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {

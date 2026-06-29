@@ -46,6 +46,14 @@ func (c intervalConfig) mikrotikTimeout() time.Duration {
 	return time.Duration(clampCollectionTimeoutMs(c.MikrotikTimeoutMs, defaultInterfaceTimeoutMs)) * time.Millisecond
 }
 
+func (c intervalConfig) bngTimeout() time.Duration {
+	ms := c.BngTimeoutMs
+	if ms < minCollectionTimeoutMs {
+		ms = c.TelemetryTimeoutMs
+	}
+	return time.Duration(clampCollectionTimeoutMs(ms, defaultTelemetryTimeoutMs)) * time.Millisecond
+}
+
 func (c intervalConfig) interfaceTimeout(oltPhase bool, mikrotikPhase bool) time.Duration {
 	if mikrotikPhase {
 		return c.mikrotikTimeout()

@@ -35,10 +35,10 @@ type CatalogEntry struct {
 }
 
 var SectionLabels = map[string]string{
-	"system":     "Sistema / inventário",
-	"health":     "Saúde do equipamento",
-	"subscribers": "Totais de assinantes (escalares)",
-	"pppoe":      "Sessões PPPoE (walk — pesado)",
+	"system":  "Sistema / inventário",
+	"health":  "Saúde do equipamento",
+	"subscribers": "Totais de logins (escalares)",
+	"pppoe":   "Sessões PPPoE (walk — pesado)",
 }
 
 // MetricCatalog catálogo de métricas BNG (Huawei AAA / NE8000 por defeito).
@@ -62,8 +62,19 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "access_login", Section: "pppoe", Label: "Login (hwAccessUserName)", Description: "Walk coluna de utilizadores — hwAccessTable.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.3", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "access_ipv4", Section: "pppoe", Label: "IPv4 (hwAccessIPAddress)", Description: "Endereço IPv4 por sessão (CGNAT ou público).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.15", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "access_mac", Section: "pppoe", Label: "MAC (hwAccessMACAddress)", Description: "MAC do cliente PPPoE.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.17", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
-	{Key: "access_ipv6", Section: "pppoe", Label: "IPv6 WAN", Description: "hwAccessIPv6WanAddress.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.59", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_ipv6", Section: "pppoe", Label: "IPv6 WAN", Description: "hwAccessIPv6WanAddress — endereço IPv6 atribuído na WAN.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.59", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_ipv6_pd", Section: "pppoe", Label: "IPv6 PD/LAN", Description: "hwAccessIPv6LanAddress — prefixo/delegação IPv6 (PD) para a LAN do cliente.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.61", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_ip_type", Section: "pppoe", Label: "Tipo IP (v4/v6)", Description: "hwAccessBasicIPType — flags ASCII/binários (ex.: «100» = IPv4 activo, sem IPv6).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.63", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "access_port_type", Section: "pppoe", Label: "Tipo de porta", Description: "hwAccessPortType — valor 2 = PPP/PPPoE.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.5", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_online_time", Section: "pppoe", Label: "Tempo online", Description: "hwAccessOnlineTime — segundos desde o login (Gauge32).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.16.1.18", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk, Unit: "s"},
+	{Key: "access_vlan", Section: "pppoe", Label: "VLAN (hwAccessVLANID)", Description: "VLAN de acesso do utilizador (QinQ/PPPoE).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.11", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_interface", Section: "pppoe", Label: "Interface de acesso", Description: "hwAccessInterface — interface física/lógica de entrada.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.57", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_domain", Section: "pppoe", Label: "Domínio AAA", Description: "hwAccessDomainName — domínio RADIUS/local do login.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.16.1.7", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_up_flow", Section: "pppoe", Label: "Tráfego upstream (bytes)", Description: "hwAccessUpFlow64 — contador acumulado; calcular taxa por delta entre coletas.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.36", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_dn_flow", Section: "pppoe", Label: "Tráfego downstream (bytes)", Description: "hwAccessDnFlow64 — contador acumulado; calcular taxa por delta entre coletas.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.37", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
+	{Key: "access_car_up_cir", Section: "pppoe", Label: "Limite upstream (CIR kbit/s)", Description: "hwAccessCARUpCIR — taxa contratada/limitada upstream (não é taxa instantânea).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.45", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk, Unit: "kbit/s"},
+	{Key: "access_car_dn_cir", Section: "pppoe", Label: "Limite downstream (CIR kbit/s)", Description: "hwAccessCARDnCIR — taxa contratada/limitada downstream.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.49", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk, Unit: "kbit/s"},
+	{Key: "access_qos_profile", Section: "pppoe", Label: "Perfil QoS", Description: "hwAccessQosProfile — perfil de QoS aplicado ao login.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.56", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "auth_state", Section: "pppoe", Label: "Estado autenticação", Description: "hwAuthenticationState (hwAccessExtTable).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.16.1.4", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "author_state", Section: "pppoe", Label: "Estado autorização", Description: "hwAuthorizationState.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.16.1.5", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "acct_state", Section: "pppoe", Label: "Estado accounting", Description: "hwAccountingState.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.16.1.6", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
@@ -144,8 +155,11 @@ func HasEnabledMetrics(m MetricsConfig) bool {
 
 func SessionWalkKeys() []string {
 	return []string{
-		"access_login", "access_ipv4", "access_mac", "access_ipv6",
-		"access_port_type", "auth_state", "author_state", "acct_state",
+		"access_login", "access_ipv4", "access_mac", "access_ipv6", "access_ipv6_pd",
+		"access_ip_type", "access_port_type", "access_online_time",
+		"access_vlan", "access_interface", "access_domain",
+		"access_up_flow", "access_dn_flow", "access_car_up_cir", "access_car_dn_cir", "access_qos_profile",
+		"auth_state", "author_state", "acct_state",
 	}
 }
 

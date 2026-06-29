@@ -24,6 +24,9 @@ type OnuReportConfig struct {
 	Command              string   `json:"command"`
 	Commands             []string `json:"commands"`
 	SerialSearchCommand  string   `json:"serial_search_command"`
+	OnuAuthorizeCommand  string   `json:"onu_authorize_command"`
+	OnuDeauthorizeCommand string  `json:"onu_deauthorize_command"`
+	UnauthorizedOnuQueryCommand string `json:"unauthorized_onu_query_command"`
 }
 
 // MonitorEnabled indica se o monitoramento deve enriquecer ONUs via telnet.
@@ -63,6 +66,9 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 	}
 	cfg.Command = strings.TrimSpace(cfg.Command)
 	cfg.SerialSearchCommand = strings.TrimSpace(cfg.SerialSearchCommand)
+	cfg.OnuAuthorizeCommand = strings.TrimSpace(cfg.OnuAuthorizeCommand)
+	cfg.OnuDeauthorizeCommand = strings.TrimSpace(cfg.OnuDeauthorizeCommand)
+	cfg.UnauthorizedOnuQueryCommand = strings.TrimSpace(cfg.UnauthorizedOnuQueryCommand)
 	return cfg
 }
 

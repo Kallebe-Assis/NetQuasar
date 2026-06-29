@@ -52,7 +52,7 @@ export function SettingsPage() {
             ["olt", "Perfis OLT"],
             ["mikrotik", "MikroTik"],
             ["bng", "BNG"],
-            ["automation", "Relatórios agendados"],
+            ["automation", "Automações"],
           ] as const
         ).map(([k, lab]) => (
           <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
@@ -231,6 +231,166 @@ function missingDbFieldsForTest(opts: {
 }
 
 type DbTestResponse = { ok?: boolean; message?: string };
+
+type DbCleanupScanItem = { table: string; label: string; date_column: string; count: number };
+type DbCleanupScanResponse = {
+  older_than_days: number;
+  cutoff_at: string;
+  items: DbCleanupScanItem[];
+  total_rows: number;
+};
+
+function DatabaseCleanupPanel() {
+  const { push: pushToast } = useAppToast();
+  const [olderThanDays, setOlderThanDays] = useState("90");
+  const [scanResult, setScanResult] = useState<DbCleanupScanResponse | null>(null);
+  const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0);
+
+  const scan = useMutation({
+    mutationFn: () => {
+      const d = Math.max(60, parseInt(olderThanDays, 10) || 60);
+      return apiFetch<DbCleanupScanResponse>("/api/v1/settings/database/cleanup/scan", {
+        method: "POST",
+        json: { older_than_days: d },
+      });
+    },
+    onSuccess: (data) => {
+      setScanResult(data);
+      setConfirmStep(0);
+      toastOk(pushToast, `Análise concluída: ${data.total_rows.toLocaleString("pt-PT")} registo(s) elegíveis.`);
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao analisar a base de dados."),
+  });
+
+  const execute = useMutation({
+    mutationFn: () => {
+      const d = scanResult?.older_than_days ?? Math.max(60, parseInt(olderThanDays, 10) || 60);
+      return apiFetch<{ ok?: boolean; deleted_total?: number; message?: string }>("/api/v1/settings/database/cleanup/execute", {
+        method: "POST",
+        json: { older_than_days: d, confirm: true },
+      });
+    },
+    onSuccess: (data) => {
+      setConfirmStep(0);
+      const n = data.deleted_total ?? 0;
+      toastOk(pushToast, data.message ?? `${n.toLocaleString("pt-PT")} registo(s) apagado(s).`);
+      scan.mutate();
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao apagar dados antigos."),
+  });
+
+  return (
+    <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Limpeza de dados históricos</h3>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.45 }}>
+        Analisa telemetria, históricos de ping, amostras OLT/BNG, eventos, jobs SNMP, logs de automação e alertas encerrados com mais
+        antiguidade do que o período indicado (mínimo <strong>60 dias</strong>). A auditoria regista quem executou a análise e a
+        eliminação. Configurações e o log de auditoria não são apagados.
+      </p>
+      <div className="row stack-mobile" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div className="field" style={{ margin: 0, minWidth: 140 }}>
+          <label htmlFor="db-cleanup-days">Mais antigos que (dias)</label>
+          <input
+            id="db-cleanup-days"
+            className="input"
+            type="number"
+            min={60}
+            value={olderThanDays}
+            onChange={(e) => setOlderThanDays(e.target.value)}
+            style={{ maxWidth: 120 }}
+          />
+        </div>
+        <button type="button" className="btn btn--primary" disabled={scan.isPending} onClick={() => scan.mutate()}>
+          {scan.isPending ? "A analisar…" : "Analisar dados antigos"}
+        </button>
+      </div>
+
+      {scan.isError && <div className="msg msg--err" style={{ marginTop: 10 }}>{(scan.error as Error).message}</div>}
+
+      {scanResult && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+            <strong>{scanResult.total_rows.toLocaleString("pt-PT")}</strong> registo(s) anteriores a{" "}
+            <span className="mono">{new Date(scanResult.cutoff_at).toLocaleString("pt-PT")}</span> ({scanResult.older_than_days} dias).
+          </p>
+          <div className="table-wrap" style={{ maxHeight: 280, overflow: "auto", marginBottom: 12 }}>
+            <table style={{ fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>Tabela</th>
+                  <th>Coluna de data</th>
+                  <th style={{ textAlign: "right" }}>Registos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scanResult.items.map((it) => (
+                  <tr key={it.table}>
+                    <td>
+                      {it.label}
+                      <div className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
+                        {it.table}
+                      </div>
+                    </td>
+                    <td className="mono">{it.date_column}</td>
+                    <td style={{ textAlign: "right" }}>{it.count.toLocaleString("pt-PT")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {scanResult.total_rows > 0 ? (
+            <button type="button" className="btn btn--danger" disabled={execute.isPending} onClick={() => setConfirmStep(1)}>
+              Apagar {scanResult.total_rows.toLocaleString("pt-PT")} registo(s)
+            </button>
+          ) : (
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum registo elegível para eliminação.</p>
+          )}
+        </div>
+      )}
+
+      {confirmStep > 0 && scanResult && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !execute.isPending && setConfirmStep(0)}>
+          <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+            <h2 style={{ margin: "0 0 8px", fontSize: 16 }}>
+              {confirmStep === 1 ? "Confirmar limpeza" : "Confirmação final"}
+            </h2>
+            {confirmStep === 1 ? (
+              <>
+                <p style={{ fontSize: 13, lineHeight: 1.5, margin: "0 0 12px" }}>
+                  Serão apagados permanentemente <strong>{scanResult.total_rows.toLocaleString("pt-PT")}</strong> registo(s) com mais de{" "}
+                  {scanResult.older_than_days} dias. Esta ação não pode ser desfeita.
+                </p>
+                <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button type="button" className="btn" disabled={execute.isPending} onClick={() => setConfirmStep(0)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn btn--danger" onClick={() => setConfirmStep(2)}>
+                    Sim, quero apagar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, lineHeight: 1.5, margin: "0 0 12px" }}>
+                  Tem <strong>absoluta certeza</strong>? Digite mentalmente o impacto: {scanResult.total_rows.toLocaleString("pt-PT")} linhas
+                  serão removidas da base de dados. A operação fica registada na auditoria com o seu utilizador.
+                </p>
+                <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button type="button" className="btn" disabled={execute.isPending} onClick={() => setConfirmStep(1)}>
+                    Voltar
+                  </button>
+                  <button type="button" className="btn btn--danger" disabled={execute.isPending} onClick={() => execute.mutate()}>
+                    {execute.isPending ? "A apagar…" : "Apagar definitivamente"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DatabasePanel() {
   const qc = useQueryClient();
@@ -502,6 +662,7 @@ function DatabasePanel() {
       )}
 
       <SystemConfigBackupPanel />
+      <DatabaseCleanupPanel />
     </div>
   );
 }
@@ -794,6 +955,11 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
     { id: "olt_onu_drop_count", label: "Variação de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
     { id: "olt_onu_drop_percent", label: "Variação de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
+    { id: "bng_pppoe_drop_count", label: "Queda de PPPoE online (entre coletas)", unit: "sessões", scope: "bng", enabled: true, operator: "gte", green_min: "0", warning_min: "50", critical_min: "150", apply_categories: ["bng"] },
+    { id: "bng_ipv4_drop_count", label: "Queda de IPv4 online (entre coletas)", unit: "sessões", scope: "bng", enabled: true, operator: "gte", green_min: "0", warning_min: "50", critical_min: "150", apply_categories: ["bng"] },
+    { id: "bng_ipv6_drop_count", label: "Queda de IPv6 online (entre coletas)", unit: "sessões", scope: "bng", enabled: true, operator: "gte", green_min: "0", warning_min: "50", critical_min: "150", apply_categories: ["bng"] },
+    { id: "bng_total_drop_count", label: "Queda de total online (entre coletas)", unit: "sessões", scope: "bng", enabled: false, operator: "gte", green_min: "0", warning_min: "50", critical_min: "150", apply_categories: ["bng"] },
+    { id: "bng_dual_stack_drop_count", label: "Queda de dual-stack (entre coletas)", unit: "sessões", scope: "bng", enabled: false, operator: "gte", green_min: "0", warning_min: "20", critical_min: "80", apply_categories: ["bng"] },
     { id: "iface_down_count", label: "Mudança de interface UP→DOWN", unit: "evento", scope: "interface", enabled: true, operator: "gte", green_min: "0", warning_min: "1", critical_min: "1", apply_categories: [] },
     { id: "mikrotik_sfp_tx_dbm", label: "SFP — potência TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
     { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "-20", apply_categories: ["mikrotik"] },
@@ -818,6 +984,7 @@ function AlertThresholdsPanel() {
   const scopeOptions: { value: string; label: string }[] = [
     { value: "equipamento", label: "Equipamento" },
     { value: "olt_pon", label: "PON da OLT" },
+    { value: "bng", label: "BNG (logins)" },
     { value: "mikrotik_sfp", label: "SFP da MikroTik" },
     { value: "interface", label: "Interface de rede" },
     { value: "onu", label: "ONU" },
@@ -856,7 +1023,11 @@ function AlertThresholdsPanel() {
           apply_categories: applyCats,
         };
       });
-      setRows(parsed);
+      const merged = [...parsed];
+      for (const def of defaultAlertMetrics()) {
+        if (!merged.some((m) => m.id === def.id)) merged.push(def);
+      }
+      setRows(merged);
     }
   }, [thresholdRule]);
 
@@ -2138,6 +2309,9 @@ type OltOnuReportCommands = {
   command?: string;
   commands?: string[];
   serial_search_command?: string;
+  onu_authorize_command?: string;
+  onu_deauthorize_command?: string;
+  unauthorized_onu_query_command?: string;
 };
 
 type OltPonTelnetCommands = {
@@ -2508,6 +2682,9 @@ function OltVendorsPanel() {
   const [onuReportPreText, setOnuReportPreText] = useState("");
   const [onuReportCommandsText, setOnuReportCommandsText] = useState("");
   const [onuReportSerialSearchText, setOnuReportSerialSearchText] = useState("");
+  const [onuAuthorizeCmd, setOnuAuthorizeCmd] = useState("");
+  const [onuDeauthorizeCmd, setOnuDeauthorizeCmd] = useState("");
+  const [onuUnauthorizedQueryCmd, setOnuUnauthorizedQueryCmd] = useState("");
   const [ponTelnetPreText, setPonTelnetPreText] = useState("");
   const [ponTelnetCommandsText, setPonTelnetCommandsText] = useState("");
   const [ponTelnetEnabled, setPonTelnetEnabled] = useState(false);
@@ -2588,6 +2765,9 @@ function OltVendorsPanel() {
     setOnuReportPreText(parsed.pre_commands.join("\n"));
     setOnuReportCommandsText(parsed.commands.join("\n"));
     setOnuReportSerialSearchText(rc?.serial_search_command?.trim() ?? "");
+    setOnuAuthorizeCmd(rc?.onu_authorize_command?.trim() ?? "");
+    setOnuDeauthorizeCmd(rc?.onu_deauthorize_command?.trim() ?? "");
+    setOnuUnauthorizedQueryCmd(rc?.unauthorized_onu_query_command?.trim() ?? "");
     setOnuReportEnabled(rc?.enabled === true);
     setOnuReportOnlineOnly(rc?.monitor_online_only !== false);
     setOnuReportMaxPerCycle(rc?.max_onus_per_cycle != null && rc.max_onus_per_cycle > 0 ? String(rc.max_onus_per_cycle) : "25");
@@ -2638,6 +2818,9 @@ function OltVendorsPanel() {
             pre_commands: preCommands,
             commands,
             serial_search_command: serialSearch || undefined,
+            onu_authorize_command: onuAuthorizeCmd.trim() || undefined,
+            onu_deauthorize_command: onuDeauthorizeCmd.trim() || undefined,
+            unauthorized_onu_query_command: onuUnauthorizedQueryCmd.trim() || undefined,
           },
           pon_telnet_commands: {
             enabled: ponTelnetEnabled,
@@ -2743,6 +2926,9 @@ function OltVendorsPanel() {
       setOnuReportPreText(parsed.pre_commands.join("\n"));
       setOnuReportCommandsText(parsed.commands.join("\n"));
       setOnuReportSerialSearchText(src.onu_report_commands?.serial_search_command?.trim() ?? "");
+      setOnuAuthorizeCmd(src.onu_report_commands?.onu_authorize_command?.trim() ?? "");
+      setOnuDeauthorizeCmd(src.onu_report_commands?.onu_deauthorize_command?.trim() ?? "");
+      setOnuUnauthorizedQueryCmd(src.onu_report_commands?.unauthorized_onu_query_command?.trim() ?? "");
       setOnuReportEnabled(src.onu_report_commands?.enabled === true);
       setOnuReportOnlineOnly(src.onu_report_commands?.monitor_online_only !== false);
       setOnuReportMaxPerCycle(
@@ -3369,6 +3555,36 @@ function OltVendorsPanel() {
                 • Sem <code>{"{serial}"}</code> — o sistema executa a listagem, interpreta todas as ONUs e filtra localmente pelo serial digitado (ex.: VSOL).
                 <br />
                 Use <code>{"{pon}"}</code> para listar uma porta específica; na Pesquisa o utilizador pode escolher uma PON ou «Todas» (percorre as portas do snapshot).
+              </p>
+            </div>
+            <div className="field">
+              <label>Consulta ONUs não autorizadas (telnet)</label>
+              <input
+                className="input mono"
+                value={onuUnauthorizedQueryCmd}
+                onChange={(e) => setOnuUnauthorizedQueryCmd(e.target.value)}
+                placeholder="show gpon onu uncfg"
+              />
+            </div>
+            <div className="field">
+              <label>Autorizar ONU (telnet)</label>
+              <input
+                className="input mono"
+                value={onuAuthorizeCmd}
+                onChange={(e) => setOnuAuthorizeCmd(e.target.value)}
+                placeholder="ont add {pon} {onu} sn-auth {serial} omci ..."
+              />
+            </div>
+            <div className="field">
+              <label>Desautorizar ONU (telnet)</label>
+              <input
+                className="input mono"
+                value={onuDeauthorizeCmd}
+                onChange={(e) => setOnuDeauthorizeCmd(e.target.value)}
+                placeholder="ont delete {pon} {onu}"
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                Placeholders: <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{serial}"}</code>, <code>{"{gpon_onu}"}</code>.
               </p>
             </div>
             <div className="field">

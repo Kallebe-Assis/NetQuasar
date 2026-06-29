@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -49,7 +50,61 @@ type SNMPWalkParams struct {
 	Version   string // "2c" | "1"
 	Timeout   time.Duration
 	Retries   int
-	MaxRows   int
+	MaxRows    int
+	OnProgress func(rowCount int)
+}
+
+// SNMPWalkStopSentinel indica paragem intencional do walk (ex.: login encontrado).
+var SNMPWalkStopSentinel = errors.New("snmp walk: stopped")
+
+const snmpBulkMaxRepetitions = 50
+
+func setupGoSNMP(ctx context.Context, p SNMPWalkParams) (*gosnmp.GoSNMP, time.Duration, error) {
+	host := strings.TrimSpace(p.Host)
+	if host == "" {
+		return nil, 0, fmt.Errorf("host vazio")
+	}
+	reqTimeout := p.Timeout
+	if reqTimeout <= 0 {
+		reqTimeout = 30 * time.Second
+	}
+	// Timeout por pedido SNMP (não o tempo total do walk — isso vem do ctx).
+	const maxReqTimeout = 45 * time.Second
+	if reqTimeout > maxReqTimeout {
+		reqTimeout = maxReqTimeout
+	}
+	if p.Port == 0 {
+		p.Port = 161
+	}
+	if p.Retries < 0 {
+		p.Retries = 0
+	}
+	if p.Retries > 2 {
+		p.Retries = 2
+	}
+	comm := strings.TrimSpace(p.Community)
+	if comm == "" {
+		comm = "public"
+	}
+	g := &gosnmp.GoSNMP{
+		Target:         host,
+		Port:           p.Port,
+		Community:      comm,
+		Timeout:        reqTimeout,
+		Retries:        p.Retries,
+		Context:        ctx,
+		MaxRepetitions: snmpBulkMaxRepetitions,
+	}
+	switch strings.ToLower(strings.TrimSpace(p.Version)) {
+	case "1", "v1":
+		g.Version = gosnmp.Version1
+	default:
+		g.Version = gosnmp.Version2c
+	}
+	if err := g.Connect(); err != nil {
+		return nil, 0, fmt.Errorf("connect: %w", err)
+	}
+	return g, reqTimeout, nil
 }
 
 // SNMPGet executa SNMP GET (v1 ou v2c).
@@ -125,7 +180,7 @@ func SNMPGet(ctx context.Context, p SNMPGetParams) SNMPGetResult {
 		var vars []SNMPVar
 		for _, v := range w.r.Variables {
 			vars = append(vars, SNMPVar{
-				OID:   v.Name,
+				OID:   NormalizeSNMPOID(v.Name),
 				Type:  fmt.Sprintf("%v", v.Type),
 				Value: snmpValueToString(v.Value),
 			})
@@ -159,6 +214,15 @@ func octetStringToUTF8(b []byte) string {
 	}
 	if len(b) == 0 {
 		return ""
+	}
+	if dt, ok := formatSNMPDateAndTime(b); ok {
+		return dt
+	}
+	if ip, ok := bytesAsIPv4(b); ok {
+		return ip
+	}
+	if ip, ok := bytesAsIPv6(b); ok {
+		return ip
 	}
 	// Nomes de interface (ex.: «combo1», «ether1») podem ter exactamente 6 octetos ASCII —
 	// tratar como texto antes de ifPhysAddress (também 6 octetos binários).
@@ -196,6 +260,26 @@ func bytesAsMAC(b []byte) (string, bool) {
 		parts[i] = fmt.Sprintf("%02x", b[i])
 	}
 	return strings.Join(parts, ":"), true
+}
+
+func bytesAsIPv4(b []byte) (string, bool) {
+	b = trimTrailingNulls(append([]byte(nil), b...))
+	if len(b) != 4 {
+		return "", false
+	}
+	return net.IP(b).String(), true
+}
+
+func bytesAsIPv6(b []byte) (string, bool) {
+	b = trimTrailingNulls(append([]byte(nil), b...))
+	if len(b) != 16 {
+		return "", false
+	}
+	ip := net.IP(b)
+	if ip.IsUnspecified() {
+		return "", false
+	}
+	return ip.String(), true
 }
 
 func isPrintableASCII(b []byte) bool {
@@ -315,15 +399,11 @@ func SNMPWalkLimited(ctx context.Context, host, community, rootOID string, maxRo
 	})
 }
 
-// SNMPWalk faz Walk SNMP com parâmetros equivalentes ao GET.
+// SNMPWalk faz Walk SNMP (v2c: GET-BULK em lotes; v1: GET-NEXT).
 func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
-	host := strings.TrimSpace(p.Host)
 	rootOID := strings.TrimSpace(p.RootOID)
-	if host == "" || rootOID == "" {
-		return nil, false, "host ou root_oid vazio"
-	}
-	if p.Port == 0 {
-		p.Port = 161
+	if rootOID == "" {
+		return nil, false, "root_oid vazio"
 	}
 	if p.MaxRows <= 0 {
 		p.MaxRows = 4000
@@ -332,39 +412,10 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 	if p.MaxRows > snmpWalkMaxRowsCap {
 		p.MaxRows = snmpWalkMaxRowsCap
 	}
-	if p.Timeout <= 0 {
-		p.Timeout = 60 * time.Second
-	}
-	const snmpWalkMaxTimeout = 300 * time.Second
-	if p.Timeout > snmpWalkMaxTimeout {
-		p.Timeout = snmpWalkMaxTimeout
-	}
-	if p.Retries < 0 {
-		p.Retries = 0
-	}
-	if p.Retries > 3 {
-		p.Retries = 3
-	}
-	comm := strings.TrimSpace(p.Community)
-	if comm == "" {
-		comm = "public"
-	}
 
-	g := &gosnmp.GoSNMP{
-		Target:    host,
-		Port:      p.Port,
-		Community: comm,
-		Timeout:   p.Timeout,
-		Retries:   p.Retries,
-	}
-	switch strings.ToLower(strings.TrimSpace(p.Version)) {
-	case "1", "v1":
-		g.Version = gosnmp.Version1
-	default:
-		g.Version = gosnmp.Version2c
-	}
-	if err := g.Connect(); err != nil {
-		return nil, false, fmt.Sprintf("connect: %v", err)
+	g, _, err := setupGoSNMP(ctx, p)
+	if err != nil {
+		return nil, false, err.Error()
 	}
 	defer func() {
 		if g.Conn != nil {
@@ -372,9 +423,10 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 		}
 	}()
 
+	useBulk := g.Version == gosnmp.Version2c
 	var out []SNMPVar
 	truncated := false
-	walkErr := g.Walk(rootOID, func(pdu gosnmp.SnmpPDU) error {
+	walkFn := func(pdu gosnmp.SnmpPDU) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -390,8 +442,18 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 			Type:  fmt.Sprintf("%v", pdu.Type),
 			Value: val,
 		})
+		if p.OnProgress != nil {
+			p.OnProgress(len(out))
+		}
 		return nil
-	})
+	}
+
+	var walkErr error
+	if useBulk {
+		walkErr = g.BulkWalk(rootOID, walkFn)
+	} else {
+		walkErr = g.Walk(rootOID, walkFn)
+	}
 
 	switch {
 	case walkErr == nil:
@@ -399,8 +461,79 @@ func SNMPWalk(ctx context.Context, p SNMPWalkParams) ([]SNMPVar, bool, string) {
 	case errors.Is(walkErr, errSNMPWalkMaxRows):
 		return out, true, ""
 	case ctx.Err() != nil && errors.Is(walkErr, ctx.Err()):
+		if len(out) > 0 {
+			return out, true, ""
+		}
 		return out, true, ctx.Err().Error()
 	default:
+		// Mantém dados parciais se o walk já recolheu linhas (ex.: timeout a meio).
+		if len(out) > 0 {
+			return out, truncated, ""
+		}
 		return out, truncated, walkErr.Error()
+	}
+}
+
+// SNMPWalkUntil executa walk até fn(v) retornar true (match encontrado).
+func SNMPWalkUntil(ctx context.Context, p SNMPWalkParams, fn func(v SNMPVar) bool) (SNMPVar, bool, string) {
+	rootOID := strings.TrimSpace(p.RootOID)
+	if rootOID == "" {
+		return SNMPVar{}, false, "root_oid vazio"
+	}
+	if p.MaxRows <= 0 {
+		p.MaxRows = 50000
+	}
+
+	g, _, err := setupGoSNMP(ctx, p)
+	if err != nil {
+		return SNMPVar{}, false, err.Error()
+	}
+	defer func() {
+		if g.Conn != nil {
+			_ = g.Conn.Close()
+		}
+	}()
+
+	useBulk := g.Version == gosnmp.Version2c
+	var matched SNMPVar
+	found := false
+	walkFn := func(pdu gosnmp.SnmpPDU) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if found {
+			return SNMPWalkStopSentinel
+		}
+		v := SNMPVar{
+			OID:   NormalizeSNMPOID(pdu.Name),
+			Type:  fmt.Sprintf("%v", pdu.Type),
+			Value: snmpValueToString(pdu.Value),
+		}
+		if fn != nil && fn(v) {
+			matched = v
+			found = true
+			return SNMPWalkStopSentinel
+		}
+		return nil
+	}
+
+	var walkErr error
+	if useBulk {
+		walkErr = g.BulkWalk(rootOID, walkFn)
+	} else {
+		walkErr = g.Walk(rootOID, walkFn)
+	}
+
+	switch {
+	case found:
+		return matched, true, ""
+	case walkErr == nil, errors.Is(walkErr, SNMPWalkStopSentinel):
+		return SNMPVar{}, false, ""
+	case ctx.Err() != nil && errors.Is(walkErr, ctx.Err()):
+		return SNMPVar{}, false, ctx.Err().Error()
+	default:
+		return SNMPVar{}, false, walkErr.Error()
 	}
 }

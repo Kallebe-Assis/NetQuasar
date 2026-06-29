@@ -11,7 +11,8 @@ export type SystemReportId =
   | "integrations"
   | "attention-devices"
   | "alerts-by-category"
-  | "onu-per-pon";
+  | "onu-per-pon"
+  | "bng-subscribers";
 
 export type SystemReportCatalogItem = {
   id: SystemReportId;
@@ -27,7 +28,34 @@ export type SystemReportPayload = {
   summary?: Record<string, unknown>;
   columns?: string[];
   rows?: string[][];
-  chart?: { label?: string; points?: Array<{ t: string; total?: number; online?: number; offline?: number }> };
+  chart?: {
+    label?: string;
+    kind?: string;
+    points?: Array<{
+      t: string;
+      collected_at?: string;
+      device?: string;
+      total?: number;
+      online?: number;
+      offline?: number;
+      pppoe?: number;
+      ipv4?: number;
+      ipv6?: number;
+      dual_stack?: number;
+    }>;
+  };
+  averages?: {
+    windows?: Array<{
+      days: number;
+      label: string;
+      samples: number;
+      total?: number;
+      pppoe?: number;
+      ipv4?: number;
+      ipv6?: number;
+      dual_stack?: number;
+    }>;
+  };
 };
 
 export const SYSTEM_REPORT_IDS: SystemReportId[] = [
@@ -40,6 +68,7 @@ export const SYSTEM_REPORT_IDS: SystemReportId[] = [
   "attention-devices",
   "alerts-by-category",
   "onu-per-pon",
+  "bng-subscribers",
 ];
 
 export function fetchSystemReportCatalog() {

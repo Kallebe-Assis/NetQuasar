@@ -18,6 +18,7 @@ const ALERT_TYPE_PT: Record<string, string> = {
   telemetry_threshold: "Telemetria — limiar global",
   olt_onu_drop: "Queda de ONUs online (OLT)",
   olt_onu_rise: "Subida de ONUs online (OLT)",
+  bng_subscriber_drop: "Queda de logins (BNG)",
 };
 
 export function displayAlertType(code: string | null | undefined): string {

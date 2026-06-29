@@ -149,6 +149,8 @@ func ResolutionStatusLine(alertType, originalMessage string) string {
 			}
 		}
 		return "ONUs online normalizadas"
+	case "bng_subscriber_drop":
+		return "Logins BNG normalizados"
 	case "olt_onu_rise":
 		return "Variação de ONUs online normalizada"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
@@ -590,6 +592,8 @@ func ResolutionHeadlineForAlertType(alertType string) string {
 		return "Interface voltou a operação UP"
 	case "olt_onu_drop":
 		return "Contagem de ONUs online normalizada"
+	case "bng_subscriber_drop":
+		return "Contagem de logins BNG normalizada"
 	case "olt_onu_rise":
 		return "Variação de ONUs online normalizada"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":

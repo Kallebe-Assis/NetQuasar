@@ -56,6 +56,14 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			})
 			continue
 		}
+		if isBngDevice(row) {
+			skipN++
+			recordTelemetryCycleOutcome(ctx, pool, row.id, src, telemetryCycleOutcome{
+				Skipped: true,
+				Reason:  "coleta BNG no passo dedicado do pipeline",
+			})
+			continue
+		}
 		comm := resolveSNMPCommunity(row, defCommunity)
 		if comm == "" {
 			skipN++

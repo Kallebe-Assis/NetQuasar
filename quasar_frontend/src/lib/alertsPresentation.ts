@@ -19,6 +19,7 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   mikrotik_sfp_rx: "optical",
   olt_onu_drop: "olt",
   olt_onu_rise: "olt",
+  bng_subscriber_drop: "equipment",
   pon_down: "olt",
 };
 
@@ -66,6 +67,8 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "Queda de ONUs";
     case "olt_onu_rise":
       return "Subida de ONUs";
+    case "bng_subscriber_drop":
+      return "Queda de logins BNG";
     default:
       return "Alerta";
   }
@@ -143,6 +146,7 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "mikrotik_sfp_tx", label: "SFP — TX" },
   { value: "mikrotik_sfp_rx", label: "SFP — RX" },
   { value: "olt_onu_drop", label: "OLT — queda de ONUs" },
+  { value: "bng_subscriber_drop", label: "BNG — queda de logins" },
   { value: "olt_onu_rise", label: "OLT — subida de ONUs" },
 ];
 

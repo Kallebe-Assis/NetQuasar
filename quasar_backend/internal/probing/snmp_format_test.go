@@ -1,6 +1,9 @@
 package probing
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestOctetStringToUTF8_macAddress(t *testing.T) {
 	mac := []byte{0x64, 0xd1, 0x54, 0xdc, 0x97, 0x22}
@@ -32,6 +35,18 @@ func TestOctetStringToUTF8_sixCharInterfaceNameNotMAC(t *testing.T) {
 	got := octetStringToUTF8([]byte("combo1"))
 	if got != "combo1" {
 		t.Fatalf("got %q want combo1", got)
+	}
+}
+
+func TestOctetStringToUTF8_ipv6Binary(t *testing.T) {
+	// 16 octetos IPv6 — não deve interpretar como texto ASCII
+	b := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	got := octetStringToUTF8(b)
+	if got == "" || got == string(b) {
+		t.Fatalf("expected IPv6 string, got %q", got)
+	}
+	if !strings.Contains(got, ":") {
+		t.Fatalf("expected colon IPv6, got %q", got)
 	}
 }
 

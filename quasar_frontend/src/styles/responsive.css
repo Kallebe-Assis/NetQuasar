@@ -245,20 +245,22 @@
   }
 
   .btn {
-    min-height: 40px;
-    padding: 0.45rem 0.85rem;
-    font-size: 13px;
+    min-height: 36px;
+    padding: 0.35rem 0.65rem;
+    font-size: 12px;
   }
 
   .btn--sm {
-    min-height: 34px;
+    min-height: 30px;
+    padding: 0.25rem 0.55rem;
+    font-size: 11px;
   }
 
   .input,
   .select,
   .textarea {
     font-size: 16px; /* evita zoom automático no iOS */
-    min-height: 40px;
+    min-height: 36px;
   }
 
   .field {
@@ -280,8 +282,14 @@
   .tabs button {
     flex-shrink: 0;
     white-space: nowrap;
-    padding: 0.55rem 0.85rem;
-    min-height: 40px;
+    padding: 0.45rem 0.65rem;
+    min-height: 34px;
+    font-size: 12px;
+  }
+
+  .page-heading .row,
+  .card > .row {
+    flex-wrap: wrap;
   }
 
   .table-wrap {
@@ -347,6 +355,29 @@
 
   .settings-fields-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pipeline-step-card__row {
+    gap: 6px 8px;
+  }
+  .pipeline-step-field--kind,
+  .pipeline-step-field--mode {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .pipeline-step-field--target,
+  .pipeline-step-field--category {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+  }
+  .pipeline-step-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .pipeline-step-metrics-hint {
+    margin-left: 0;
+    width: 100%;
   }
 
   .settings-field .input.mono {

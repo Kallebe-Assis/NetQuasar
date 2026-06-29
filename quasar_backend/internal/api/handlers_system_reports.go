@@ -27,6 +27,7 @@ var systemReportCatalog = []map[string]string{
 	{"id": "attention-devices", "title": "Equipamentos precisando de atenção", "description": "Lacunas de cadastro e equipamentos com alertas abertos."},
 	{"id": "alerts-by-category", "title": "Alertas por categoria", "description": "Alertas ativos agrupados por categoria operacional."},
 	{"id": "onu-per-pon", "title": "ONUs por PON", "description": "Última coleta por porta PON (sem nova coleta SNMP)."},
+	{"id": "bng-subscribers", "title": "BNG — totais de logins", "description": "Totais PPPoE, IPv4, IPv6 e dual-stack por BNG e evolução recente (7 dias)."},
 }
 
 func systemReportIDValid(id string) bool {
@@ -145,6 +146,8 @@ func (s *Server) buildSystemReport(ctx context.Context, id string) (map[string]a
 		return s.reportAlertsByCategory(ctx, pool, base)
 	case "onu-per-pon":
 		return s.reportOnuPerPon(ctx, pool, base)
+	case "bng-subscribers":
+		return s.reportBngSubscribers(ctx, pool, base)
 	default:
 		return nil, fmt.Errorf("relatório desconhecido")
 	}
@@ -158,6 +161,8 @@ func alertCategoryLabelGo(alertType string) string {
 		return "Interface"
 	case "olt_onu_drop", "olt_onu_rise", "pon_down":
 		return "OLT / PON"
+	case "bng_subscriber_drop":
+		return "BNG"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
 		return "Óptica / SFP"
 	case "latency_high", "latency_degraded", "cpu_high", "memory_high", "temperature_high", "temperature_low":
@@ -785,4 +790,172 @@ func (s *Server) reportOnuPerPon(ctx context.Context, pool *pgxpool.Pool, base m
 		"Offline":      totalOff,
 	}
 	return base, nil
+}
+
+func intPtrStr(p *int) string {
+	if p == nil {
+		return "—"
+	}
+	return strconv.Itoa(*p)
+}
+
+func (s *Server) reportBngSubscribers(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT d.description, host(d.ip)::text, s.collected_at,
+			s.total_online, s.pppoe_online, s.ipv4_online, s.ipv6_online, s.dual_stack_online
+		FROM devices d
+		LEFT JOIN LATERAL (
+			SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+			FROM bng_stats_samples
+			WHERE device_id = d.id
+			ORDER BY collected_at DESC
+			LIMIT 1
+		) s ON true
+		WHERE coalesce(d.bng_enabled, false) = true
+		ORDER BY d.description
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := []string{"BNG", "IP", "Última coleta", "Total online", "PPPoE", "IPv4", "IPv6", "Dual-stack"}
+	var dataRows [][]string
+	var fleetTotal, fleetPPPoE, fleetIPv4, fleetIPv6, fleetDual int64
+	var devicesWithStats int
+	for rows.Next() {
+		var desc, ip string
+		var collectedAt *time.Time
+		var total, pppoe, ipv4, ipv6, dual *int
+		if err := rows.Scan(&desc, &ip, &collectedAt, &total, &pppoe, &ipv4, &ipv6, &dual); err != nil {
+			return nil, err
+		}
+		if collectedAt != nil {
+			devicesWithStats++
+		}
+		if total != nil {
+			fleetTotal += int64(*total)
+		}
+		if pppoe != nil {
+			fleetPPPoE += int64(*pppoe)
+		}
+		if ipv4 != nil {
+			fleetIPv4 += int64(*ipv4)
+		}
+		if ipv6 != nil {
+			fleetIPv6 += int64(*ipv6)
+		}
+		if dual != nil {
+			fleetDual += int64(*dual)
+		}
+		lastAt := "—"
+		if collectedAt != nil {
+			lastAt = reporttelegram.FormatGeneratedAt(collectedAt.UTC().Format(time.RFC3339))
+		}
+		dataRows = append(dataRows, []string{
+			desc, ip, lastAt,
+			intPtrStr(total), intPtrStr(pppoe), intPtrStr(ipv4), intPtrStr(ipv6), intPtrStr(dual),
+		})
+	}
+
+	since := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	chartPts := []map[string]any{}
+	sampleRows, err := pool.Query(ctx, `
+		SELECT b.collected_at, d.description,
+			b.total_online, b.pppoe_online, b.ipv4_online, b.ipv6_online, b.dual_stack_online
+		FROM bng_stats_samples b
+		JOIN devices d ON d.id = b.device_id AND coalesce(d.bng_enabled, false) = true
+		WHERE b.collected_at >= $1
+		ORDER BY b.collected_at ASC
+		LIMIT 500
+	`, since)
+	if err == nil {
+		defer sampleRows.Close()
+		for sampleRows.Next() {
+			var ts time.Time
+			var device string
+			var total, pppoe, ipv4, ipv6, dual *int
+			if sampleRows.Scan(&ts, &device, &total, &pppoe, &ipv4, &ipv6, &dual) == nil {
+				pt := map[string]any{
+					"t":            ts.UTC().Format(time.RFC3339),
+					"collected_at": ts.UTC().Format(time.RFC3339),
+					"device":       device,
+				}
+				if total != nil {
+					pt["total"] = *total
+				}
+				if pppoe != nil {
+					pt["pppoe"] = *pppoe
+				}
+				if ipv4 != nil {
+					pt["ipv4"] = *ipv4
+				}
+				if ipv6 != nil {
+					pt["ipv6"] = *ipv6
+				}
+				if dual != nil {
+					pt["dual_stack"] = *dual
+				}
+				chartPts = append(chartPts, pt)
+			}
+		}
+	}
+
+	averages := bngSubscriberAverages(ctx, pool)
+
+	base["title"] = "BNG — totais de logins"
+	base["columns"] = cols
+	base["rows"] = dataRows
+	base["summary"] = map[string]any{
+		"BNGs activos":     len(dataRows),
+		"BNGs com amostra": devicesWithStats,
+		"Total online":     fleetTotal,
+		"PPPoE online":     fleetPPPoE,
+		"IPv4 online":      fleetIPv4,
+		"IPv6 online":      fleetIPv6,
+		"Dual-stack":       fleetDual,
+	}
+	base["averages"] = averages
+	base["chart"] = map[string]any{"points": chartPts, "label": "Totais por coleta (últimos 7 dias — UI)", "kind": "bng-subscribers"}
+	return base, nil
+}
+
+func bngSubscriberAverages(ctx context.Context, pool *pgxpool.Pool) map[string]any {
+	windows := []int{7, 30, 60}
+	var out []map[string]any
+	for _, days := range windows {
+		since := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+		var sampleCount int64
+		var avgTotal, avgPPPoE, avgIPv4, avgIPv6, avgDual *float64
+		_ = pool.QueryRow(ctx, `
+			SELECT COUNT(*)::bigint,
+				AVG(b.total_online::float), AVG(b.pppoe_online::float), AVG(b.ipv4_online::float),
+				AVG(b.ipv6_online::float), AVG(b.dual_stack_online::float)
+			FROM bng_stats_samples b
+			JOIN devices d ON d.id = b.device_id AND coalesce(d.bng_enabled, false) = true
+			WHERE b.collected_at >= $1
+		`, since).Scan(&sampleCount, &avgTotal, &avgPPPoE, &avgIPv4, &avgIPv6, &avgDual)
+		if sampleCount == 0 {
+			continue
+		}
+		win := map[string]any{
+			"days": days, "label": fmt.Sprintf("%d dias", days), "samples": sampleCount,
+		}
+		if avgTotal != nil {
+			win["total"] = int64(*avgTotal + 0.5)
+		}
+		if avgPPPoE != nil {
+			win["pppoe"] = int64(*avgPPPoE + 0.5)
+		}
+		if avgIPv4 != nil {
+			win["ipv4"] = int64(*avgIPv4 + 0.5)
+		}
+		if avgIPv6 != nil {
+			win["ipv6"] = int64(*avgIPv6 + 0.5)
+		}
+		if avgDual != nil {
+			win["dual_stack"] = int64(*avgDual + 0.5)
+		}
+		out = append(out, win)
+	}
+	return map[string]any{"windows": out}
 }

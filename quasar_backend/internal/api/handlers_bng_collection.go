@@ -10,17 +10,18 @@ import (
 
 type bngCollectionResponse struct {
 	Metrics      bngcollect.MetricsConfig   `json:"metrics"`
+	Options      bngcollect.CollectionOptions `json:"options"`
 	Catalog      []bngcollect.CatalogEntry  `json:"catalog"`
 	Sections     map[string]string          `json:"sections"`
 	CollectModes map[string]string          `json:"collect_mode_labels"`
 }
 
 func (s *Server) getBngCollection(w http.ResponseWriter, r *http.Request) {
-	var metricsRaw []byte
+	var metricsRaw, optionsRaw []byte
 	err := s.DB().QueryRow(r.Context(), `
-		SELECT coalesce(metrics::text, '{}')
+		SELECT coalesce(metrics::text, '{}'), coalesce(options::text, '{}')
 		FROM settings_bng_collection WHERE id = 1
-	`).Scan(&metricsRaw)
+	`).Scan(&metricsRaw, &optionsRaw)
 	metrics := bngcollect.DefaultMetrics()
 	if err == nil {
 		if parsed := bngcollect.ParseMetrics(metricsRaw); len(parsed) > 0 {
@@ -29,6 +30,7 @@ func (s *Server) getBngCollection(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, bngCollectionResponse{
 		Metrics:  metrics,
+		Options:  bngcollect.ParseCollectionOptions(optionsRaw),
 		Catalog:  bngcollect.MetricCatalog,
 		Sections: bngcollect.SectionLabels,
 		CollectModes: map[string]string{
@@ -40,7 +42,8 @@ func (s *Server) getBngCollection(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchBngCollectionBody struct {
-	Metrics bngcollect.MetricsConfig `json:"metrics"`
+	Metrics bngcollect.MetricsConfig     `json:"metrics"`
+	Options bngcollect.CollectionOptions `json:"options"`
 }
 
 func (s *Server) patchBngCollection(w http.ResponseWriter, r *http.Request) {
@@ -53,12 +56,14 @@ func (s *Server) patchBngCollection(w http.ResponseWriter, r *http.Request) {
 	if clean == nil {
 		clean = bngcollect.MetricsConfig{}
 	}
+	options := body.Options
 	mb, _ := json.Marshal(clean)
+	ob, _ := json.Marshal(options)
 	_, err := s.DB().Exec(r.Context(), `
-		INSERT INTO settings_bng_collection (id, metrics, updated_at)
-		VALUES (1, $1::jsonb, now())
-		ON CONFLICT (id) DO UPDATE SET metrics = EXCLUDED.metrics, updated_at = now()
-	`, mb)
+		INSERT INTO settings_bng_collection (id, metrics, options, updated_at)
+		VALUES (1, $1::jsonb, $2::jsonb, now())
+		ON CONFLICT (id) DO UPDATE SET metrics = EXCLUDED.metrics, options = EXCLUDED.options, updated_at = now()
+	`, mb, ob)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -69,6 +74,7 @@ func (s *Server) patchBngCollection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,
 		"metrics":     clean,
+		"options":     options,
 		"has_enabled": bngcollect.HasEnabledMetrics(clean),
 		"message":     patchBngSaveMessage(clean),
 	})

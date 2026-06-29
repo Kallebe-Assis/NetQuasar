@@ -2440,6 +2440,125 @@ h3 .info-hint {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 14px 18px;
 }
+
+/* Ordem de monitoramento — linhas compactas */
+.pipeline-steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pipeline-step-card {
+  padding: 7px 10px;
+  margin: 0;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pipeline-step-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 10px;
+}
+.pipeline-step-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pipeline-step-field__label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.pipeline-step-field .input {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.pipeline-step-field--cycle {
+  max-width: 140px;
+}
+.pipeline-step-field--kind {
+  flex: 1 1 150px;
+  min-width: 130px;
+  max-width: 240px;
+}
+.pipeline-step-field--target {
+  flex: 0 1 108px;
+  min-width: 96px;
+}
+.pipeline-step-field--category {
+  flex: 0 1 96px;
+  min-width: 84px;
+}
+.pipeline-step-field--mode {
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 200px;
+}
+.pipeline-step-field--devices {
+  margin-top: 6px;
+  width: 100%;
+}
+.pipeline-step-index {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 30px;
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  color: var(--muted);
+}
+.pipeline-step-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  min-height: 30px;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.pipeline-step-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.pipeline-step-actions .btn--sm {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 4px;
+}
+.pipeline-step-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.pipeline-step-metric-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.pipeline-step-metrics-hint {
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: auto;
+}
 .settings-field {
   display: flex;
   flex-direction: column;
