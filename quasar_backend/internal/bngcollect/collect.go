@@ -457,8 +457,7 @@ func CollectAndStorePeriodicMode(ctx context.Context, pool *pgxpool.Pool, device
 	}
 	mode = strings.TrimSpace(mode)
 	if mode == "" || mode == "full" {
-		infra := CollectInfrastructure(ctx, host, community, timeout)
-		_ = StoreInfrastructureSnapshot(ctx, pool, deviceID, infra)
+		_ = CollectAndStoreInfrastructure(ctx, pool, deviceID, host, community, timeout, profile.Options)
 	}
 	b, _ := json.Marshal(metrics)
 	_, err := pool.Exec(ctx, `

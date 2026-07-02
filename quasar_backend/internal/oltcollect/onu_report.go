@@ -23,8 +23,9 @@ type OnuReportConfig struct {
 	PreCommands          []string `json:"pre_commands"`
 	Command              string   `json:"command"`
 	Commands             []string `json:"commands"`
-	SerialSearchCommand  string   `json:"serial_search_command"`
-	OnuAuthorizeCommand  string   `json:"onu_authorize_command"`
+	SerialSearchCommand      string   `json:"serial_search_command"`
+	SerialListSearchCommand  string   `json:"serial_list_search_command"`
+	OnuAuthorizeCommand      string   `json:"onu_authorize_command"`
 	OnuDeauthorizeCommand string  `json:"onu_deauthorize_command"`
 	UnauthorizedOnuQueryCommand string `json:"unauthorized_onu_query_command"`
 }
@@ -66,6 +67,7 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 	}
 	cfg.Command = strings.TrimSpace(cfg.Command)
 	cfg.SerialSearchCommand = strings.TrimSpace(cfg.SerialSearchCommand)
+	cfg.SerialListSearchCommand = strings.TrimSpace(cfg.SerialListSearchCommand)
 	cfg.OnuAuthorizeCommand = strings.TrimSpace(cfg.OnuAuthorizeCommand)
 	cfg.OnuDeauthorizeCommand = strings.TrimSpace(cfg.OnuDeauthorizeCommand)
 	cfg.UnauthorizedOnuQueryCommand = strings.TrimSpace(cfg.UnauthorizedOnuQueryCommand)
@@ -187,6 +189,27 @@ func (c OnuReportConfig) DefaultSerialSearchCommand() string {
 		return tpl
 	}
 	return "show gpon onu by sn {serial}"
+}
+
+// ListSerialSearchCommand devolve o template de listagem por PON (quando existir).
+func (c OnuReportConfig) ListSerialSearchCommand() string {
+	if tpl := strings.TrimSpace(c.SerialListSearchCommand); tpl != "" {
+		return tpl
+	}
+	if c.SerialSearchUsesPonPlaceholder() {
+		return c.DefaultSerialSearchCommand()
+	}
+	return ""
+}
+
+func (c OnuReportConfig) RenderListSerialSearchCommand(t OnuReportTarget, sec TelnetSecrets) string {
+	tpl := c.ListSerialSearchCommand()
+	if tpl == "" {
+		return ""
+	}
+	tmp := c
+	tmp.SerialSearchCommand = tpl
+	return tmp.RenderSerialSearchCommand(t, sec)
 }
 
 func (c OnuReportConfig) RenderSerialSearchCommand(t OnuReportTarget, sec TelnetSecrets) string {

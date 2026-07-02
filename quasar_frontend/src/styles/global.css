@@ -127,6 +127,16 @@ h2 {
   gap: 5px;
 }
 
+.sidebar__nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+
 .sidebar a {
   display: flex;
   align-items: center;
@@ -1383,6 +1393,10 @@ h3 .info-hint {
 .info-hint--align-end .info-hint__popover {
   left: auto;
   right: 0;
+}
+
+.report-list-card .info-hint__popover {
+  z-index: 300;
 }
 .alerts-panel__head .info-hint {
   margin-left: auto;
@@ -3268,6 +3282,18 @@ h3 .info-hint {
   }
 }
 
+/* Documento de impressão dos relatórios do sistema (oculto no ecrã) */
+#system-report-print-root {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 @media print {
   body.print-device-report .runtime-indicator,
   body.print-device-report .sidebar,
@@ -3309,47 +3335,84 @@ h3 .info-hint {
     display: none !important;
   }
 
-  body.print-system-report .runtime-indicator,
-  body.print-system-report .sidebar,
-  body.print-system-report .page-heading,
-  body.print-system-report .card:not(.system-report-modal) {
-    display: none !important;
+  /* Relatórios do sistema — documento dedicado fora do modal */
+  @page {
+    margin: 12mm;
+    size: A4;
   }
-  body.print-system-report .layout {
-    display: block !important;
-  }
-  body.print-system-report .main {
-    margin: 0 !important;
-    padding: 0 !important;
-    max-width: none !important;
-  }
+
   body.print-system-report {
     background: #fff !important;
   }
-  body.print-system-report .modal-backdrop {
-    position: static !important;
-    background: transparent !important;
-    padding: 0 !important;
-    display: block !important;
+
+  body.print-system-report > *:not(#system-report-print-root) {
+    display: none !important;
   }
-  body.print-system-report .system-report-modal {
-    box-shadow: none !important;
-    border: none !important;
+
+  #system-report-print-root {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: #111 !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  #system-report-print-root .system-report-print {
+    color: #111 !important;
+    background: #fff !important;
+  }
+
+  #system-report-print-root .table-wrap,
+  #system-report-print-root .system-report-print-table {
     max-height: none !important;
     overflow: visible !important;
-    width: 100% !important;
+  }
+
+  #system-report-print-root table {
+    font-size: 9px;
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  #system-report-print-root th,
+  #system-report-print-root td {
+    border: 1px solid #ccc;
+    padding: 3px 5px;
     color: #111 !important;
     background: #fff !important;
   }
-  body.print-system-report .system-report-print {
+
+  #system-report-print-root thead th {
+    background: #f3f4f6 !important;
+  }
+
+  #system-report-print-root .card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    break-inside: avoid;
     color: #111 !important;
     background: #fff !important;
   }
-  body.print-system-report .system-report-print table {
-    font-size: 10px;
+
+  #system-report-print-root h2,
+  #system-report-print-root h3,
+  #system-report-print-root h4,
+  #system-report-print-root p,
+  #system-report-print-root li {
+    color: #111 !important;
   }
-  body.print-system-report .no-print {
-    display: none !important;
+
+  #system-report-print-root tr {
+    break-inside: avoid;
   }
 }
 

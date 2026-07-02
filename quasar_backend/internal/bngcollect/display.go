@@ -87,8 +87,51 @@ func parseInt64Metric(v string) (int64, bool) {
 	return n, true
 }
 
+// sanitizeSNMPDisplay normaliza valores SNMP vazios ou «<nil>» para string vazia.
+func sanitizeSNMPDisplay(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "<nil>" || strings.EqualFold(s, "null") || strings.EqualFold(s, "nil") {
+		return ""
+	}
+	return s
+}
+
+func sanitizeSessionRowFields(row *SessionRow) {
+	if row == nil {
+		return
+	}
+	row.Index = sanitizeSNMPDisplay(row.Index)
+	row.Login = sanitizeSNMPDisplay(row.Login)
+	row.IPv4 = sanitizeSNMPDisplay(row.IPv4)
+	row.MAC = sanitizeSNMPDisplay(row.MAC)
+	row.IPv6 = sanitizeSNMPDisplay(row.IPv6)
+	row.IPv6PD = sanitizeSNMPDisplay(row.IPv6PD)
+	row.IPType = sanitizeSNMPDisplay(row.IPType)
+	row.IPTypeRaw = sanitizeSNMPDisplay(row.IPTypeRaw)
+	row.OnlineTimeSec = sanitizeSNMPDisplay(row.OnlineTimeSec)
+	row.OnlineTime = sanitizeSNMPDisplay(row.OnlineTime)
+	row.PortType = sanitizeSNMPDisplay(row.PortType)
+	row.PortTypeRaw = sanitizeSNMPDisplay(row.PortTypeRaw)
+	row.AuthState = sanitizeSNMPDisplay(row.AuthState)
+	row.AuthStateRaw = sanitizeSNMPDisplay(row.AuthStateRaw)
+	row.AuthorState = sanitizeSNMPDisplay(row.AuthorState)
+	row.AuthorStateRaw = sanitizeSNMPDisplay(row.AuthorStateRaw)
+	row.AcctState = sanitizeSNMPDisplay(row.AcctState)
+	row.AcctStateRaw = sanitizeSNMPDisplay(row.AcctStateRaw)
+	row.VLAN = sanitizeSNMPDisplay(row.VLAN)
+	row.Interface = sanitizeSNMPDisplay(row.Interface)
+	row.Domain = sanitizeSNMPDisplay(row.Domain)
+	row.UpFlowBytes = sanitizeSNMPDisplay(row.UpFlowBytes)
+	row.DnFlowBytes = sanitizeSNMPDisplay(row.DnFlowBytes)
+	row.CarUpCIRKbps = sanitizeSNMPDisplay(row.CarUpCIRKbps)
+	row.CarDnCIRKbps = sanitizeSNMPDisplay(row.CarDnCIRKbps)
+	row.QoSProfile = sanitizeSNMPDisplay(row.QoSProfile)
+	row.Status = sanitizeSNMPDisplay(row.Status)
+}
+
 // EnrichSessionRow adiciona campos formatados para API/UI.
 func EnrichSessionRow(row SessionRow) map[string]any {
+	sanitizeSessionRowFields(&row)
 	finalizeSessionRow(&row)
 	onlineSec, _ := parseIntMetric(row.OnlineTimeSec)
 	upCIR, _ := parseIntMetric(row.CarUpCIRKbps)
@@ -158,27 +201,20 @@ func EnrichSessionMap(m map[string]any) map[string]any {
 		return m
 	}
 	row := SessionRow{
-		Index:          fmt.Sprint(m["index"]),
-		Login:          fmt.Sprint(m["login"]),
-		IPv4:           fmt.Sprint(m["ipv4"]),
-		MAC:            fmt.Sprint(m["mac"]),
-		IPv6:           fmt.Sprint(m["ipv6"]),
-		IPv6PD:         fmt.Sprint(m["ipv6_pd"]),
-		IPType:         fmt.Sprint(m["ip_type"]),
-		IPTypeRaw:      fmt.Sprint(m["ip_type_raw"]),
-		OnlineTimeSec:  fmt.Sprint(m["online_time_sec"]),
-		OnlineTime:     fmt.Sprint(m["online_time"]),
-		CarUpCIRKbps:   fmt.Sprint(m["car_up_cir_kbps"]),
-		CarDnCIRKbps:   fmt.Sprint(m["car_dn_cir_kbps"]),
+		Index:          sanitizeSNMPDisplay(fmt.Sprint(m["index"])),
+		Login:          sanitizeSNMPDisplay(fmt.Sprint(m["login"])),
+		IPv4:           sanitizeSNMPDisplay(fmt.Sprint(m["ipv4"])),
+		MAC:            sanitizeSNMPDisplay(fmt.Sprint(m["mac"])),
+		IPv6:           sanitizeSNMPDisplay(fmt.Sprint(m["ipv6"])),
+		IPv6PD:         sanitizeSNMPDisplay(fmt.Sprint(m["ipv6_pd"])),
+		IPType:         sanitizeSNMPDisplay(fmt.Sprint(m["ip_type"])),
+		IPTypeRaw:      sanitizeSNMPDisplay(fmt.Sprint(m["ip_type_raw"])),
+		OnlineTimeSec:  sanitizeSNMPDisplay(fmt.Sprint(m["online_time_sec"])),
+		OnlineTime:     sanitizeSNMPDisplay(fmt.Sprint(m["online_time"])),
+		CarUpCIRKbps:   sanitizeSNMPDisplay(fmt.Sprint(m["car_up_cir_kbps"])),
+		CarDnCIRKbps:   sanitizeSNMPDisplay(fmt.Sprint(m["car_dn_cir_kbps"])),
 	}
-	if row.Index == "<nil>" {
-		row.Index = ""
-	}
-	for _, p := range []*string{&row.Login, &row.IPv4, &row.MAC, &row.IPv6, &row.IPv6PD, &row.IPType, &row.IPTypeRaw, &row.OnlineTimeSec, &row.OnlineTime, &row.CarUpCIRKbps, &row.CarDnCIRKbps} {
-		if *p == "<nil>" {
-			*p = ""
-		}
-	}
+	sanitizeSessionRowFields(&row)
 	finalizeSessionRow(&row)
 	m["ipv4"] = row.IPv4
 	m["mac"] = row.MAC

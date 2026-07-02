@@ -426,6 +426,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}/sessions/lookup", s.bngDeviceSessionLookup)
 			r.Get("/devices/{id}/sessions/lookup/auth", s.bngDeviceSessionAuthLogs)
 			r.Get("/devices/{id}/sessions/traffic-rate", s.bngDeviceSessionTrafficRate)
+			r.Post("/devices/{id}/sessions/live-batch", s.bngDeviceSessionsLiveBatch)
 			r.Get("/devices/{id}/auth-records", s.bngDeviceAuthRecords)
 			r.Get("/devices/{id}/sessions/collect/status", s.bngDeviceSessionsCollectStatus)
 			r.Get("/stats/history", s.bngStatsHistory)

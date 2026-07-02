@@ -60,6 +60,7 @@ func LoadOLTPonIndexesFromSnapshot(ctx context.Context, pool *pgxpool.Pool, devi
 }
 
 // RunSerialSearchTelnet executa pesquisa directa ou por listagem conforme o perfil.
+// Com PON informada, prioriza listagem na porta e comparação parcial de serial localmente.
 func RunSerialSearchTelnet(
 	ctx context.Context,
 	host, user, password, enable string,
@@ -79,25 +80,79 @@ func RunSerialSearchTelnet(
 		timeout = 45 * time.Second
 	}
 	target := OnuReportTarget{Serial: serial, Pon: opts.Pon}
+	listCmd := cfg.ListSerialSearchCommand()
+
+	// PON específica + comando de listagem → percorre ONUs da porta e filtra serial parcial.
+	if opts.Pon > 0 && listCmd != "" {
+		listRes := runListSerialSearch(ctx, host, user, password, enable, cfg, secrets, target, []int{opts.Pon}, ponIndexes, timeout)
+		listRes.Mode = "list"
+		return listRes
+	}
 
 	if cfg.SerialSearchUsesSerialPlaceholder() {
-		return runDirectSerialSearch(ctx, host, user, password, enable, cfg, secrets, target, timeout)
+		directRes := runDirectSerialSearch(ctx, host, user, password, enable, cfg, secrets, target, timeout)
+		directRes.Matches = filterDirectSerialMatches(directRes.Matches, serial)
+		directRes.OK = len(directRes.Matches) > 0
+		if directRes.OK {
+			return directRes
+		}
+		if listCmd != "" {
+			pons := resolvePonsForSerialSearch(opts.Pon, ponIndexes)
+			listRes := runListSerialSearch(ctx, host, user, password, enable, cfg, secrets, target, pons, ponIndexes, timeout)
+			listRes.Mode = "list"
+			if listRes.OK {
+				return listRes
+			}
+			if directRes.Error == "" && listRes.Error != "" {
+				directRes.Error = listRes.Error
+			}
+		}
+		return directRes
 	}
 
-	res.Mode = "list"
-	cmdTpl := cfg.DefaultSerialSearchCommand()
+	listRes := runListSerialSearch(ctx, host, user, password, enable, cfg, secrets, target, nil, ponIndexes, timeout)
+	listRes.Mode = "list"
+	return listRes
+}
+
+func filterDirectSerialMatches(entries []SerialSearchOnuEntry, serial string) []SerialSearchOnuEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+	var out []SerialSearchOnuEntry
+	for _, e := range entries {
+		if e.Serial == "" || serialPartialMatch(e.Serial, serial) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func runListSerialSearch(
+	ctx context.Context,
+	host, user, password, enable string,
+	cfg OnuReportConfig,
+	secrets TelnetSecrets,
+	target OnuReportTarget,
+	ponsOverride []int,
+	ponIndexes []int,
+	timeout time.Duration,
+) SerialSearchRunResult {
+	res := SerialSearchRunResult{Mode: "list"}
+	cmdTpl := cfg.ListSerialSearchCommand()
 	if cmdTpl == "" {
-		res.Error = "comando de pesquisa por série não configurado"
+		res.Error = "comando de listagem por PON não configurado"
 		return res
 	}
+	res.Command = cmdTpl
 
-	ponsToQuery := resolvePonsForSerialSearch(opts.Pon, ponIndexes)
-	if cfg.SerialSearchUsesPonPlaceholder() && len(ponsToQuery) == 0 {
+	ponsToQuery := ponsOverride
+	if len(ponsToQuery) == 0 {
+		ponsToQuery = resolvePonsForSerialSearch(target.Pon, ponIndexes)
+	}
+	if len(ponsToQuery) == 0 {
 		res.Error = "informe a porta PON ou actualize o snapshot da OLT para listar portas"
 		return res
-	}
-	if !cfg.SerialSearchUsesPonPlaceholder() {
-		ponsToQuery = []int{0}
 	}
 
 	preRendered := cfg.RenderPreCommands(target, secrets)
@@ -129,7 +184,7 @@ func RunSerialSearchTelnet(
 		}
 		t := target
 		t.Pon = pon
-		cmd := cfg.RenderSerialSearchCommand(t, secrets)
+		cmd := cfg.RenderListSerialSearchCommand(t, secrets)
 		if cmd == "" {
 			continue
 		}
@@ -150,14 +205,13 @@ func RunSerialSearchTelnet(
 	}
 
 	res.Output = strings.TrimSpace(strings.Join(outputs, "\n\n"))
-	res.Matches = FilterSerialSearchEntries(allEntries, serial, opts.Pon)
-	res.Command = cmdTpl
+	res.Matches = FilterSerialSearchEntries(allEntries, target.Serial, target.Pon)
 	res.OK = len(res.Matches) > 0
 	if !res.OK && res.Error == "" {
 		if len(allEntries) == 0 {
 			res.Error = "nenhuma ONU encontrada na listagem telnet"
 		} else {
-			res.Error = fmt.Sprintf("serial %q não encontrado na listagem (%d ONUs)", serial, len(allEntries))
+			res.Error = fmt.Sprintf("serial %q não encontrado na listagem (%d ONUs analisadas)", target.Serial, len(allEntries))
 		}
 	}
 	return res
@@ -212,6 +266,11 @@ func runDirectSerialSearch(
 	}
 	if v := parsed["Modelo"]; v != "" {
 		entry.Model = v
+	}
+	if target.Pon > 0 && entry.Pon > 0 && entry.Pon != target.Pon {
+		res.OK = false
+		res.Error = fmt.Sprintf("ONU encontrada na PON %d, não na PON %d filtrada", entry.Pon, target.Pon)
+		return res
 	}
 	if entry.Pon > 0 || entry.Onu > 0 || entry.Serial != "" {
 		res.Matches = []SerialSearchOnuEntry{entry}

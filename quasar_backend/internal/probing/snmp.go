@@ -218,6 +218,11 @@ func octetStringToUTF8(b []byte) string {
 	if dt, ok := formatSNMPDateAndTime(b); ok {
 		return dt
 	}
+	// Nomes curtos MikroTik (ex.: «sfp1», «vlan») têm 4–6 octetos ASCII com letras —
+	// não interpretar como IPv4 (115.102.112.49 = «sfp1»).
+	if len(b) >= 4 && len(b) <= 6 && isPrintableASCII(b) && octetStringHasASCIILetter(b) {
+		return string(b)
+	}
 	if ip, ok := bytesAsIPv4(b); ok {
 		return ip
 	}
@@ -282,6 +287,15 @@ func bytesAsIPv6(b []byte) (string, bool) {
 	return ip.String(), true
 }
 
+func octetStringHasASCIILetter(b []byte) bool {
+	for _, c := range b {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
 func isPrintableASCII(b []byte) bool {
 	if len(b) == 0 {
 		return false
@@ -342,7 +356,31 @@ func NormalizeIFLabel(s string) string {
 	if decoded, ok := TryDecodeColonHexASCII(s); ok {
 		return decoded
 	}
+	if decoded, ok := TryDecodeFakeIPv4InterfaceName(s); ok {
+		return decoded
+	}
 	return s
+}
+
+// TryDecodeFakeIPv4InterfaceName reverte rótulos gravados como IPv4 falso (ex.: 115.102.112.49 → sfp1).
+func TryDecodeFakeIPv4InterfaceName(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	parts := strings.Split(s, ".")
+	if len(parts) != 4 {
+		return "", false
+	}
+	b := make([]byte, 0, 4)
+	for _, p := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil || n < 32 || n > 126 {
+			return "", false
+		}
+		b = append(b, byte(n))
+	}
+	if !isPrintableASCII(b) || !octetStringHasASCIILetter(b) {
+		return "", false
+	}
+	return string(b), true
 }
 
 // TryDecodeColonHexASCII converte «63:6f:6d:62:6f:31» em texto quando todos os octetos são ASCII imprimível.

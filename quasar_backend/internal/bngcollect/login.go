@@ -67,7 +67,8 @@ func NormalizeSNMPLoginValue(raw, stripSuffix string) string {
 
 // CollectionOptions opções globais da coleta BNG (não-OID).
 type CollectionOptions struct {
-	PPPoELoginStripSuffix string `json:"pppoe_login_strip_suffix,omitempty"`
+	PPPoELoginStripSuffix string   `json:"pppoe_login_strip_suffix,omitempty"`
+	UplinkInterfaces      []string `json:"uplink_interfaces,omitempty"`
 }
 
 func normalizeStripSuffix(suffix string) string {

@@ -2,6 +2,49 @@ package reporttelegram
 
 import "testing"
 
+func TestComposeSystemReportEquipmentByPop(t *testing.T) {
+	text := ComposeSystemReport("Equipamentos por POP", map[string]any{
+		"generated_at": "2026-06-05T12:30:00Z",
+		"summary": map[string]any{
+			"POPs":                 int64(2),
+			"Equipamentos (total)": int64(3),
+		},
+		"groups": []map[string]any{
+			{
+				"pop": "Central",
+				"coordinates": "-23.550520, -46.633308",
+				"devices": []map[string]any{
+					{"name": "OLT-01", "category": "OLT", "label": "OLT-01 [OLT]"},
+				},
+			},
+			{
+				"pop": "Norte",
+				"devices": []map[string]any{
+					{"name": "MK-01", "category": "Mikrotik", "label": "MK-01 [Mikrotik]"},
+				},
+			},
+		},
+		"columns": []string{"POP", "Equipamento"},
+		"rows": [][]string{
+			{"Central", "OLT-01 [OLT]"},
+			{"Central", "BNG-01 [BNG]"},
+			{"Norte", "MK-01 [Mikrotik]"},
+		},
+	})
+	if indexOf(text, "Central") < 0 || indexOf(text, "OLT-01 [OLT]") < 0 {
+		t.Fatalf("missing grouped content: %q", text)
+	}
+	if indexOf(text, "-23.550520") < 0 {
+		t.Fatalf("missing coordinates: %q", text)
+	}
+	if indexOf(text, "Detalhes (") >= 0 {
+		t.Fatalf("should not use flat details table when groups present: %q", text)
+	}
+	if indexOf(text, "Quantidade") >= 0 {
+		t.Fatalf("should not mention quantity: %q", text)
+	}
+}
+
 func TestComposeSystemReportPlainText(t *testing.T) {
 	text := ComposeSystemReport("Alertas ativos", map[string]any{
 		"generated_at": "2026-06-05T12:30:00Z",

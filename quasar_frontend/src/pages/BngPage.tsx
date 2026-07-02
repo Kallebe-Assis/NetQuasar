@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Eye, Filter, Loader2, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Filter, Loader2, RefreshCw } from "lucide-react";
 import {
   CartesianGrid,
   Line,
@@ -17,6 +17,8 @@ import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import {
   BNG_SESSION_DISPLAY_LIMITS,
+  BNG_SESSION_REFRESH_MODE_KEY,
+  bngCellDisplay,
   formatBngDateTime,
   formatBngIpv6Display,
   formatBngIpType,
@@ -28,6 +30,7 @@ import {
   OVERVIEW_FIELD_LABELS,
   STATS_SERIES,
   type BngSessionDisplayLimit,
+  type BngSessionRefreshMode,
   type OverviewFieldKey,
   type StatsSeriesKey,
 } from "../lib/bngDisplay";
@@ -41,6 +44,7 @@ import {
   type BngSessionSearchField,
 } from "../lib/bngSessionFilters";
 import { toastErr, toastOk } from "../lib/operationToast";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { APP_ROUTES } from "../app/routes";
 
 type BngDevice = {
@@ -185,6 +189,66 @@ type BngCGN = {
   dslite_tunnels?: string;
 };
 
+type BngBGPPeer = {
+  remote_addr?: string;
+  state?: string;
+  local_iface?: string;
+};
+
+type BngBGP = {
+  total_peers?: number;
+  established?: number;
+  peers?: BngBGPPeer[];
+};
+
+type BngPowerSupply = {
+  index?: string;
+  name?: string;
+  description?: string;
+  status?: string;
+};
+
+type BngPhysicalIface = {
+  if_index?: number;
+  name?: string;
+  oper_status?: string;
+  admin_status?: string;
+};
+
+type BngPhysicalIfaceSummary = {
+  up_count?: number;
+  down_count?: number;
+  total?: number;
+  interfaces?: BngPhysicalIface[];
+};
+
+type BngLinkTraffic = {
+  if_index?: number;
+  name?: string;
+  oper_status?: string;
+  in_display?: string;
+  out_display?: string;
+  in_bps?: number;
+  out_bps?: number;
+};
+
+type BngCGNPublicPool = {
+  index?: string;
+  instance?: string;
+  pool_name?: string;
+  start_addr?: string;
+  end_addr?: string;
+  usage_percent?: number;
+};
+
+type BngCGNATMapping = {
+  private_ip?: string;
+  public_hint?: string;
+  pool_name?: string;
+  cgnat?: boolean;
+  session_count?: number;
+};
+
 type BngInfrastructure = {
   collected_at?: string;
   aaa_scalars?: BngAAAScalars;
@@ -193,6 +257,11 @@ type BngInfrastructure = {
   ipv6_pools?: BngIPv6PoolRow[];
   radius_servers?: BngRadiusRow[];
   cgn?: BngCGN;
+  bgp?: BngBGP;
+  power_supplies?: BngPowerSupply[];
+  physical_interfaces?: BngPhysicalIfaceSummary;
+  link_traffic?: BngLinkTraffic[];
+  cgn_public_pools?: BngCGNPublicPool[];
 };
 
 type SessionReportResponse = {
@@ -203,6 +272,7 @@ type SessionReportResponse = {
   infrastructure?: BngInfrastructure;
   infrastructure_captured_at?: string;
   infrastructure_note?: string;
+  cgnat_summary?: BngCGNATMapping[];
 };
 
 type AuthAttemptLog = {
@@ -226,6 +296,29 @@ type TrafficRateSnapshot = {
 };
 
 type BngTab = "overview" | "relatorio" | "auth" | "sessions";
+
+function mergeLivePppoeSession(cached: PppoeSession, live: PppoeSession): PppoeSession {
+  const merged: PppoeSession = { ...cached, ...live };
+  const keep = (next?: string, prev?: string) => {
+    const n = String(next ?? "").trim();
+    if (!n || n === "<nil>" || n.toLowerCase() === "null") return prev;
+    return next;
+  };
+  merged.login = keep(live.login, cached.login);
+  merged.index = keep(live.index, cached.index);
+  merged.ipv4 = keep(live.ipv4, cached.ipv4);
+  merged.mac = keep(live.mac, cached.mac);
+  merged.vlan = keep(live.vlan, cached.vlan);
+  merged.auth_state = keep(live.auth_state, cached.auth_state);
+  return merged;
+}
+
+function sessionRangeLabel(page: number, pageSize: number, total: number): string {
+  if (total <= 0) return "0/0";
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  return `${start}-${end}/${total}`;
+}
 
 type BngCollectProgress = {
   status: string;
@@ -573,6 +666,177 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
           </div>
         </div>
       )}
+
+      {infra.bgp && (infra.bgp.total_peers ?? 0) > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>BGP</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>Total de peers</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{infra.bgp.total_peers ?? "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>Established</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "#3fb950" }}>{infra.bgp.established ?? "—"}</div>
+            </div>
+          </div>
+          {(infra.bgp.peers ?? []).length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Peer remoto</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {infra.bgp.peers!.map((p) => (
+                    <tr key={p.remote_addr}>
+                      <td className="mono">{p.remote_addr || "—"}</td>
+                      <td style={{ color: p.state === "Established" ? "#3fb950" : undefined }}>{p.state || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(infra.power_supplies ?? []).length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Fontes de energia</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Descrição</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {infra.power_supplies!.map((ps) => (
+                  <tr key={ps.index ?? ps.name}>
+                    <td className="mono">{ps.name || "—"}</td>
+                    <td>{ps.description || "—"}</td>
+                    <td style={{ color: ps.status === "UP" || ps.status === "Enabled" ? "#3fb950" : ps.status === "DOWN" ? "#f85149" : undefined }}>
+                      {ps.status || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {infra.physical_interfaces && (infra.physical_interfaces.total ?? 0) > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Interfaces físicas</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>UP</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "#3fb950" }}>{infra.physical_interfaces.up_count ?? 0}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>DOWN</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "#f85149" }}>{infra.physical_interfaces.down_count ?? 0}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>Total</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{infra.physical_interfaces.total ?? 0}</div>
+            </div>
+          </div>
+          {(infra.physical_interfaces.interfaces ?? []).length > 0 && (
+            <div className="table-wrap" style={{ maxHeight: 280, overflow: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Interface</th>
+                    <th>Oper</th>
+                    <th>Admin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {infra.physical_interfaces.interfaces!.map((iface) => (
+                    <tr key={`${iface.if_index}-${iface.name}`}>
+                      <td className="mono">{iface.name || "—"}</td>
+                      <td style={{ color: iface.oper_status === "UP" ? "#3fb950" : iface.oper_status === "DOWN" ? "#f85149" : undefined }}>
+                        {iface.oper_status || "—"}
+                      </td>
+                      <td>{iface.admin_status || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(infra.link_traffic ?? []).length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Tráfego por link (uplink BGP)</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Interface</th>
+                  <th>Estado</th>
+                  <th>Download</th>
+                  <th>Upload</th>
+                </tr>
+              </thead>
+              <tbody>
+                {infra.link_traffic!.map((l) => (
+                  <tr key={l.name ?? l.if_index}>
+                    <td className="mono">{l.name || "—"}</td>
+                    <td style={{ color: l.oper_status === "UP" ? "#3fb950" : undefined }}>{l.oper_status || "—"}</td>
+                    <td className="mono">{l.in_display || (l.in_bps != null ? `${l.in_bps} bps` : "—")}</td>
+                    <td className="mono">{l.out_display || (l.out_bps != null ? `${l.out_bps} bps` : "—")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
+            Download = tráfego recebido no BNG (in). Upload = tráfego enviado (out). Taxa calculada entre coletas ou amostra de 2 s.
+          </p>
+        </div>
+      )}
+
+      {(infra.cgn_public_pools ?? []).length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Pools públicos CGNAT</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pool</th>
+                  <th>Instância</th>
+                  <th>Range público</th>
+                  <th>% uso</th>
+                </tr>
+              </thead>
+              <tbody>
+                {infra.cgn_public_pools!.map((p) => (
+                  <tr key={p.index ?? `${p.pool_name}-${p.start_addr}`}>
+                    <td className="mono">{p.pool_name || "—"}</td>
+                    <td>{p.instance || "—"}</td>
+                    <td className="mono">
+                      {p.start_addr && p.end_addr && p.start_addr !== p.end_addr
+                        ? `${p.start_addr} – ${p.end_addr}`
+                        : p.start_addr || p.end_addr || "—"}
+                    </td>
+                    <td>{p.usage_percent != null ? `${p.usage_percent}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -677,6 +941,39 @@ function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse
         capturedAt={data?.infrastructure_captured_at}
         note={data?.infrastructure_note}
       />
+
+      {(data?.cgnat_summary ?? []).length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 6px", fontSize: 15 }}>CGNAT — IP privado × pool público</h3>
+          <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+            O IP por sessão em hwAccessIPAddress é o endereço WAN do cliente (privado em CGNAT). O mapeamento exacto
+            privado→público por sessão não existe na HUAWEI-AAA-MIB; abaixo são listados os pools públicos CGNAT
+            (HUAWEI-CGN-MIB) associados a cada faixa privada.
+          </p>
+          <div className="table-wrap" style={{ maxHeight: 360, overflow: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>IP privado / WAN</th>
+                  <th>Pool / IP público</th>
+                  <th>Pool</th>
+                  <th>Sessões</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data!.cgnat_summary!.map((row) => (
+                  <tr key={row.private_ip}>
+                    <td className="mono">{row.private_ip || "—"}</td>
+                    <td className="mono">{row.public_hint || "—"}</td>
+                    <td>{row.pool_name || (row.cgnat ? "CGNAT" : "—")}</td>
+                    <td>{row.session_count?.toLocaleString("pt-PT") ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1050,7 +1347,20 @@ export function BngPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [advancedFilters, setAdvancedFilters] = useState<BngSessionAdvancedFilters>(EMPTY_BNG_SESSION_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [displayLimit, setDisplayLimit] = useState<BngSessionDisplayLimit>(100);
+  const [displayLimit, setDisplayLimit] = useState<BngSessionDisplayLimit>(10);
+  const [sessionPage, setSessionPage] = useState(1);
+  const [sessionRefreshMode, setSessionRefreshMode] = useState<BngSessionRefreshMode>(() => {
+    try {
+      const v = localStorage.getItem(BNG_SESSION_REFRESH_MODE_KEY);
+      return v === "auto" ? "auto" : "manual";
+    } catch {
+      return "manual";
+    }
+  });
+  const [livePageSessions, setLivePageSessions] = useState<PppoeSession[] | null>(null);
+  const [livePageLoading, setLivePageLoading] = useState(false);
+  const [liveRefreshToken, setLiveRefreshToken] = useState(0);
+  const livePageRequestRef = useRef(0);
   const [confirmCollectOpen, setConfirmCollectOpen] = useState(false);
   const [detailLogin, setDetailLogin] = useState<string | null>(null);
   const [collectProgress, setCollectProgress] = useState<BngCollectProgress | null>(null);
@@ -1150,17 +1460,133 @@ export function BngPage() {
     },
   });
 
-  const filteredSessions = useMemo(
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 450);
+  const loginSearchActive = searchField === "login" && debouncedSearchQuery.trim().length >= 2;
+
+  const loginSearch = useQuery({
+    queryKey: ["bng-session-login-search", selectedId, debouncedSearchQuery.trim()],
+    enabled: !!selectedId && tab === "sessions" && loginSearchActive,
+    queryFn: () =>
+      apiFetch<{
+        found: boolean;
+        source: string;
+        session?: PppoeSession;
+        note?: string;
+        query: string;
+      }>(`/api/v1/bng/devices/${selectedId}/sessions/lookup?q=${encodeURIComponent(debouncedSearchQuery.trim())}`, {
+        timeoutMs: 45_000,
+      }),
+    staleTime: 0,
+    retry: false,
+  });
+
+  const cacheFilteredSessions = useMemo(
     () => filterBngSessions(sessions.data?.sessions ?? [], searchField, searchQuery, advancedFilters),
     [sessions.data?.sessions, searchField, searchQuery, advancedFilters],
   );
 
+  const filteredSessions = useMemo(() => {
+    if (loginSearchActive) {
+      if (loginSearch.data?.found && loginSearch.data.session) {
+        return [loginSearch.data.session];
+      }
+      return [];
+    }
+    return cacheFilteredSessions;
+  }, [loginSearchActive, loginSearch.data, cacheFilteredSessions]);
+
   const activeFilterCount = countActiveBngSessionFilters(advancedFilters);
 
-  const displayedSessions = useMemo(
-    () => filteredSessions.slice(0, displayLimit),
-    [filteredSessions, displayLimit],
+  const sessionTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredSessions.length / displayLimit)),
+    [filteredSessions.length, displayLimit],
   );
+
+  const safeSessionPage = Math.min(sessionPage, sessionTotalPages);
+
+  const pageSlice = useMemo(
+    () => filteredSessions.slice((safeSessionPage - 1) * displayLimit, safeSessionPage * displayLimit),
+    [filteredSessions, safeSessionPage, displayLimit],
+  );
+
+  const pageSliceKey = useMemo(
+    () => pageSlice.map((s) => String(s.index ?? s.login ?? "")).join("|"),
+    [pageSlice],
+  );
+
+  useEffect(() => {
+    setSessionPage(1);
+  }, [selectedId, searchField, searchQuery, advancedFilters, displayLimit]);
+
+  useEffect(() => {
+    if (sessionPage > sessionTotalPages) {
+      setSessionPage(sessionTotalPages);
+    }
+  }, [sessionPage, sessionTotalPages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BNG_SESSION_REFRESH_MODE_KEY, sessionRefreshMode);
+    } catch {
+      /* ignore */
+    }
+  }, [sessionRefreshMode]);
+
+  useEffect(() => {
+    if (loginSearchActive || sessionRefreshMode !== "auto" || !selectedId || pageSlice.length === 0) {
+      setLivePageSessions(null);
+      setLivePageLoading(false);
+      return;
+    }
+    const indices = pageSlice.map((s) => String(s.index ?? "").trim()).filter(Boolean);
+    if (indices.length === 0) {
+      setLivePageSessions(null);
+      return;
+    }
+    const reqId = ++livePageRequestRef.current;
+    setLivePageLoading(true);
+    void (async () => {
+      try {
+        const resp = await apiFetch<{ sessions: PppoeSession[] }>(
+          `/api/v1/bng/devices/${selectedId}/sessions/live-batch`,
+          {
+            method: "POST",
+            body: JSON.stringify({ indices }),
+            timeoutMs: 90_000,
+          },
+        );
+        if (reqId !== livePageRequestRef.current) return;
+        setLivePageSessions(resp.sessions ?? []);
+      } catch (err) {
+        if (reqId !== livePageRequestRef.current) return;
+        setLivePageSessions(null);
+        toastErr(pushToast, err, "Falha ao consultar sessões no BNG");
+      } finally {
+        if (reqId === livePageRequestRef.current) {
+          setLivePageLoading(false);
+        }
+      }
+    })();
+  }, [loginSearchActive, sessionRefreshMode, selectedId, safeSessionPage, displayLimit, pageSliceKey, liveRefreshToken, pushToast]);
+
+  const displayedSessions = useMemo(() => {
+    if (loginSearchActive) {
+      if (loginSearch.isFetching) return [];
+      return filteredSessions;
+    }
+    if (sessionRefreshMode === "auto" && livePageSessions && livePageSessions.length > 0) {
+      const byIndex = new Map(livePageSessions.map((s) => [String(s.index ?? ""), s]));
+      return pageSlice.map((row) => {
+        const key = String(row.index ?? "");
+        const live = byIndex.get(key);
+        return live ? mergeLivePppoeSession(row, live) : row;
+      });
+    }
+    return pageSlice;
+  }, [loginSearchActive, loginSearch.isFetching, filteredSessions, sessionRefreshMode, livePageSessions, pageSlice]);
+
+  const sessionTableLoading =
+    sessions.isLoading || (loginSearchActive ? loginSearch.isFetching : sessionRefreshMode === "auto" && livePageLoading);
 
   const stats = overview.data?.latest_stats;
   const fields = overview.data?.fields ?? {};
@@ -1173,12 +1599,8 @@ export function BngPage() {
     <>
       <div className="page-heading">
         <h1>BNG</h1>
-        {tab === "sessions" && <PageCountPill label="Sessões" count={displayedSessions.length} />}
+        {tab === "sessions" && <PageCountPill label="Sessões" count={filteredSessions.length} />}
       </div>
-      <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Concentradores com switch BNG activo.{" "}
-        <Link to={APP_ROUTES.settings}>Configurações → BNG</Link> para OIDs e métricas.
-      </p>
 
       {rows.length === 0 ? (
         <div className="msg msg--warn">
@@ -1231,60 +1653,49 @@ export function BngPage() {
 
           {tab === "overview" && (
             <>
-              {stats?.collected_at && (
-                <div
-                  style={{
-                    marginBottom: 12,
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    background: "var(--surface-2, rgba(255,255,255,0.04))",
-                    border: "1px solid var(--border)",
-                    display: "inline-flex",
-                    flexDirection: "column",
-                    gap: 2,
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>Última coleta</span>
-                  <span style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                    {formatBngDateTime(stats.collected_at)}
-                  </span>
+              <div
+                className="row"
+                style={{ gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "stretch", justifyContent: "space-between" }}
+              >
+                <div className="row" style={{ gap: 12, flexWrap: "wrap", flex: 1 }}>
+                  {[
+                    { label: "PPPoE online", value: stats?.pppoe_online },
+                    { label: "IPv4 online", value: stats?.ipv4_online },
+                    { label: "IPv6 online", value: stats?.ipv6_online },
+                    { label: "Dual-stack", value: stats?.dual_stack_online },
+                    { label: "Total online", value: stats?.total_online },
+                  ].map((c) => (
+                    <div key={c.label} className="card" style={{ padding: "10px 14px", minWidth: 120 }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{c.label}</div>
+                      <strong style={{ fontSize: 20 }}>{c.value ?? "—"}</strong>
+                    </div>
+                  ))}
                 </div>
-              )}
-
-              <div className="row" style={{ gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                {[
-                  { label: "PPPoE online", value: stats?.pppoe_online },
-                  { label: "IPv4 online", value: stats?.ipv4_online },
-                  { label: "IPv6 online", value: stats?.ipv6_online },
-                  { label: "Dual-stack", value: stats?.dual_stack_online },
-                  { label: "Total online", value: stats?.total_online },
-                ].map((c) => (
-                  <div key={c.label} className="card" style={{ padding: "10px 14px", minWidth: 120 }}>
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{c.label}</div>
-                    <strong style={{ fontSize: 20 }}>{c.value ?? "—"}</strong>
+                {stats?.collected_at && (
+                  <div
+                    style={{
+                      alignSelf: "center",
+                      textAlign: "right",
+                      fontSize: 11,
+                      color: "var(--muted)",
+                      lineHeight: 1.45,
+                      paddingLeft: 8,
+                    }}
+                  >
+                    <div>Última coleta</div>
+                    <div style={{ fontVariantNumeric: "tabular-nums" }}>{formatBngDateTime(stats.collected_at)}</div>
+                    {overview.data?.telemetry_collected_at && (
+                      <div style={{ marginTop: 2, fontSize: 10 }}>
+                        Telemetria: {formatBngDateTime(overview.data.telemetry_collected_at)}
+                      </div>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
 
               <div className="card" style={{ padding: 14 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "baseline",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    marginBottom: 10,
-                  }}
-                >
+                <div style={{ marginBottom: 10 }}>
                   <h3 style={{ margin: 0, fontSize: 15 }}>Saúde do equipamento</h3>
-                  {stats?.collected_at && (
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                      Actualizado: {formatBngDateTime(stats.collected_at)}
-                      {overview.data?.telemetry_collected_at &&
-                        ` · Telemetria: ${formatBngDateTime(overview.data.telemetry_collected_at)}`}
-                    </span>
-                  )}
                 </div>
                 <div
                   style={{
@@ -1340,45 +1751,6 @@ export function BngPage() {
                 ))}
               </div>
 
-              <div className="card" style={{ padding: 14 }}>
-                <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Histórico de coletas</h3>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Data/hora</th>
-                        <th>PPPoE</th>
-                        <th>IPv4</th>
-                        <th>IPv6</th>
-                        <th>Dual-stack</th>
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historySamples.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} style={{ color: "var(--muted)" }}>
-                            Sem amostras ainda. Active totais em Configurações → BNG e aguarde o monitoramento.
-                          </td>
-                        </tr>
-                      ) : (
-                        [...historySamples].reverse().map((s) => (
-                          <tr key={s.collected_at}>
-                            <td style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                              {formatBngDateTime(s.collected_at)}
-                            </td>
-                            <td>{s.pppoe_online ?? "—"}</td>
-                            <td>{s.ipv4_online ?? "—"}</td>
-                            <td>{s.ipv6_online ?? "—"}</td>
-                            <td>{s.dual_stack_online ?? "—"}</td>
-                            <td>{s.total_online ?? "—"}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </>
           )}
 
@@ -1403,7 +1775,6 @@ export function BngPage() {
                   setTab("sessions");
                   setSearchField("login");
                   setSearchQuery(login);
-                  setDetailLogin(login);
                 }}
               />
             </>
@@ -1411,14 +1782,6 @@ export function BngPage() {
 
           {tab === "sessions" && (
             <>
-              <div className="msg msg--warn" style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
-                <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-                  <strong>Consulta completa via SNMP walk</strong> — percorre milhares de OIDs para listar sessões. A
-                  consulta de um login específico vai sempre directo ao equipamento via SNMP (não usa a lista em cache).
-                </div>
-              </div>
-
               <div className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 {canMutate && (
                   <button
@@ -1477,7 +1840,7 @@ export function BngPage() {
                     />
                   </div>
                   <div className="field" style={{ flex: "0 0 auto", minWidth: 100, margin: 0 }}>
-                    <label style={{ fontSize: 11 }}>Mostrar</label>
+                    <label style={{ fontSize: 11 }}>Por página</label>
                     <select
                       className="input"
                       value={displayLimit}
@@ -1490,29 +1853,82 @@ export function BngPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="field" style={{ flex: "0 0 auto", minWidth: 140, margin: 0 }}>
+                    <label style={{ fontSize: 11 }}>Dados na tabela</label>
+                    <select
+                      className="input"
+                      value={sessionRefreshMode}
+                      onChange={(e) => setSessionRefreshMode(e.target.value as BngSessionRefreshMode)}
+                    >
+                      <option value="manual">Manual (cache)</option>
+                      <option value="auto">Auto-refresh (SNMP live)</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
-                    className={filtersOpen || activeFilterCount > 0 ? "btn btn--primary" : "btn"}
+                    className={`btn btn--icon-menu${filtersOpen || activeFilterCount > 0 ? " btn--primary" : ""}`}
                     style={{ flexShrink: 0 }}
+                    title={activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
+                    aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
                     onClick={() => setFiltersOpen((v) => !v)}
                   >
-                    <Filter size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-                    Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-                  </button>
-                  <button type="button" className="btn" style={{ flexShrink: 0 }} onClick={() => sessions.refetch()}>
-                    <Search size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-                    Actualizar lista
+                    <Filter size={16} />
                   </button>
                   <button
                     type="button"
-                    className="btn btn--primary"
+                    className="btn btn--icon-menu"
                     style={{ flexShrink: 0 }}
-                    disabled={!searchQuery.trim() || !selectedId || searchField !== "login"}
-                    title="Consulta SNMP pontual no equipamento (seleccione Login como campo)"
-                    onClick={() => setDetailLogin(searchQuery.trim())}
+                    title="Actualizar lista"
+                    aria-label="Actualizar lista"
+                    disabled={sessionTableLoading}
+                    onClick={() => {
+                      if (loginSearchActive) {
+                        void loginSearch.refetch();
+                        return;
+                      }
+                      if (sessionRefreshMode === "manual") {
+                        void sessions.refetch();
+                      } else {
+                        setLiveRefreshToken((t) => t + 1);
+                      }
+                    }}
                   >
-                    Consultar login no BNG
+                    <RefreshCw size={16} className={sessionTableLoading ? "map-refresh-spin" : undefined} />
                   </button>
+                  {!loginSearchActive && filteredSessions.length > 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn--icon-menu"
+                        disabled={safeSessionPage <= 1 || sessionTableLoading}
+                        title="Página anterior"
+                        aria-label="Página anterior"
+                        onClick={() => setSessionPage((p) => Math.max(1, p - 1))}
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <span
+                        className="mono"
+                        style={{ fontSize: 11, color: "var(--muted)", minWidth: 52, textAlign: "center" }}
+                      >
+                        {sessionRangeLabel(safeSessionPage, displayLimit, filteredSessions.length)}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn--icon-menu"
+                        disabled={safeSessionPage >= sessionTotalPages || sessionTableLoading}
+                        title="Página seguinte"
+                        aria-label="Página seguinte"
+                        onClick={() => setSessionPage((p) => Math.min(sessionTotalPages, p + 1))}
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </>
+                  ) : loginSearchActive && filteredSessions.length > 0 ? (
+                    <span className="mono" style={{ fontSize: 11, color: "var(--muted)", minWidth: 52, textAlign: "center" }}>
+                      {sessionRangeLabel(1, 1, filteredSessions.length)}
+                    </span>
+                  ) : null}
                 </div>
 
                 {filtersOpen && (
@@ -1595,14 +2011,24 @@ export function BngPage() {
                   </div>
                 )}
 
-                {filteredSessions.length > displayLimit && (
-                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
-                    A mostrar {displayLimit} de {filteredSessions.length} sessão(ões) filtrada(s).
-                  </p>
-                )}
               </div>
 
-              <div className="table-wrap">
+              <div className="table-wrap" style={{ position: "relative", minHeight: 220 }}>
+                {sessionTableLoading ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      zIndex: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "color-mix(in srgb, var(--panel) 82%, transparent)",
+                    }}
+                  >
+                    <Loader2 size={42} className="map-refresh-spin" aria-label="A carregar sessões" />
+                  </div>
+                ) : null}
                 <table>
                   <thead>
                     <tr>
@@ -1622,11 +2048,13 @@ export function BngPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedSessions.length === 0 ? (
+                    {displayedSessions.length === 0 && !sessionTableLoading ? (
                       <tr>
                         <td colSpan={13} style={{ color: "var(--muted)" }}>
-                          {sessions.isLoading
-                            ? "A carregar…"
+                          {loginSearchActive
+                            ? loginSearch.data?.found === false
+                              ? "Login não encontrado online no BNG."
+                              : "Pesquise um login PPPoE (mín. 2 caracteres)."
                             : "Nenhuma sessão. Execute a consulta completa SNMP."}
                         </td>
                       </tr>
@@ -1640,8 +2068,8 @@ export function BngPage() {
                               {st.label}
                             </span>
                           </td>
-                          <td className="mono">{s.login || "—"}</td>
-                          <td className="mono">{s.ipv4 || "—"}</td>
+                          <td className="mono">{bngCellDisplay(s.login)}</td>
+                          <td className="mono">{bngCellDisplay(s.ipv4)}</td>
                           <td>{formatBngIpType(s.ip_type, s.ip_type_raw, s)}</td>
                           <td className="mono" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }} title={formatBngIpv6Display(s.ipv6)}>
                             {formatBngIpv6Display(s.ipv6)}
@@ -1649,12 +2077,12 @@ export function BngPage() {
                           <td className="mono" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }} title={formatBngIpv6Display(s.ipv6_pd)}>
                             {formatBngIpv6Display(s.ipv6_pd)}
                           </td>
-                          <td className="mono">{s.mac || "—"}</td>
-                          <td className="mono">{s.vlan || "—"}</td>
+                          <td className="mono">{bngCellDisplay(s.mac)}</td>
+                          <td className="mono">{bngCellDisplay(s.vlan)}</td>
                           <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{sessionDisplayOnline(s)}</td>
                           <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{sessionDisplayUpLimit(s)}</td>
                           <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{sessionDisplayDnLimit(s)}</td>
-                          <td>{s.auth_state || "—"}</td>
+                          <td>{bngCellDisplay(s.auth_state)}</td>
                           <td>
                             {s.login && (
                               <button

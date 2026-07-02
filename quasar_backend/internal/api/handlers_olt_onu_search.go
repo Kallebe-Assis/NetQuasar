@@ -451,26 +451,21 @@ func nilIfBlankStr(s string) any {
 }
 
 func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ, modelQ string) bool {
-	serial := strings.ToLower(strings.TrimSpace(stringFromAny(row["serial"])))
+	serial := strings.TrimSpace(stringFromAny(row["serial"]))
 	model := strings.ToLower(strings.TrimSpace(stringFromAny(row["model"])))
-	if serialQ != "" && !strings.Contains(serial, serialQ) && !strings.Contains(model, serialQ) {
-		if strings.TrimSpace(f.Serial) != "" {
+	if serialQ != "" {
+		if !oltcollect.SerialPartialMatch(serial, serialQ) && !strings.Contains(model, strings.ToLower(serialQ)) {
 			return false
 		}
 	}
 	if strings.TrimSpace(f.Serial) != "" {
-		sq := strings.ToLower(strings.TrimSpace(f.Serial))
-		if !strings.Contains(serial, sq) {
+		if !oltcollect.SerialPartialMatch(serial, f.Serial) {
 			return false
 		}
 	}
 	if strings.TrimSpace(f.Model) != "" {
 		mq := strings.ToLower(strings.TrimSpace(f.Model))
 		if !strings.Contains(model, mq) {
-			return false
-		}
-	} else if modelQ != "" && serialQ == modelQ {
-		if !strings.Contains(serial, modelQ) && !strings.Contains(model, modelQ) {
 			return false
 		}
 	}

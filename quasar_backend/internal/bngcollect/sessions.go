@@ -54,6 +54,7 @@ func extractIndexFromOID(oid, base string) string {
 }
 
 func mapAuthStateLabel(v string) string {
+	v = sanitizeSNMPDisplay(v)
 	switch strings.TrimSpace(v) {
 	case "1":
 		return "Inicial"
@@ -72,6 +73,7 @@ func mapAuthStateLabel(v string) string {
 }
 
 func mapAuthorStateLabel(v string) string {
+	v = sanitizeSNMPDisplay(v)
 	switch strings.TrimSpace(v) {
 	case "1":
 		return "Inicial"
@@ -98,6 +100,7 @@ func formatOnlineTimeSeconds(v string) string {
 }
 
 func mapAcctStateLabel(v string) string {
+	v = sanitizeSNMPDisplay(v)
 	switch strings.TrimSpace(v) {
 	case "1":
 		return "Inicial"
@@ -149,71 +152,71 @@ func mergeSessionMaps(maps map[string]map[string]string, skipPortTypeFilter ...b
 			Status: "Up",
 		}
 		if v, ok := maps["access_login"][idx]; ok {
-			row.Login = v
+			row.Login = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_ipv4"][idx]; ok {
-			row.IPv4 = v
+			row.IPv4 = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_mac"][idx]; ok {
-			row.MAC = v
+			row.MAC = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_ipv6"][idx]; ok {
-			row.IPv6 = v
+			row.IPv6 = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_ipv6_pd"][idx]; ok {
-			row.IPv6PD = v
+			row.IPv6PD = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_ip_type"][idx]; ok {
-			row.IPTypeRaw = v
-			row.IPType = mapIPTypeLabel(v)
+			row.IPTypeRaw = sanitizeSNMPDisplay(v)
+			row.IPType = mapIPTypeLabel(row.IPTypeRaw)
 		}
 		if v, ok := maps["access_online_time"][idx]; ok {
-			row.OnlineTimeSec = v
-			row.OnlineTime = formatOnlineTimeSeconds(v)
+			row.OnlineTimeSec = sanitizeSNMPDisplay(v)
+			row.OnlineTime = formatOnlineTimeSeconds(row.OnlineTimeSec)
 		}
 		if v, ok := maps["access_port_type"][idx]; ok {
-			row.PortTypeRaw = v
+			row.PortTypeRaw = sanitizeSNMPDisplay(v)
 			if isPPPoEPortType(v) {
 				row.PortType = "PPPoE"
-			} else if v != "" {
-				row.PortType = "Tipo " + v
+			} else if row.PortTypeRaw != "" {
+				row.PortType = "Tipo " + row.PortTypeRaw
 			}
 		}
 		if v, ok := maps["auth_state"][idx]; ok {
-			row.AuthStateRaw = v
-			row.AuthState = mapAuthStateLabel(v)
+			row.AuthStateRaw = sanitizeSNMPDisplay(v)
+			row.AuthState = mapAuthStateLabel(row.AuthStateRaw)
 		}
 		if v, ok := maps["author_state"][idx]; ok {
-			row.AuthorStateRaw = v
-			row.AuthorState = mapAuthorStateLabel(v)
+			row.AuthorStateRaw = sanitizeSNMPDisplay(v)
+			row.AuthorState = mapAuthorStateLabel(row.AuthorStateRaw)
 		}
 		if v, ok := maps["acct_state"][idx]; ok {
-			row.AcctStateRaw = v
-			row.AcctState = mapAcctStateLabel(v)
+			row.AcctStateRaw = sanitizeSNMPDisplay(v)
+			row.AcctState = mapAcctStateLabel(row.AcctStateRaw)
 		}
 		if v, ok := maps["access_vlan"][idx]; ok {
-			row.VLAN = v
+			row.VLAN = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_interface"][idx]; ok {
-			row.Interface = v
+			row.Interface = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_domain"][idx]; ok {
-			row.Domain = v
+			row.Domain = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_up_flow"][idx]; ok {
-			row.UpFlowBytes = v
+			row.UpFlowBytes = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_dn_flow"][idx]; ok {
-			row.DnFlowBytes = v
+			row.DnFlowBytes = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_car_up_cir"][idx]; ok {
-			row.CarUpCIRKbps = v
+			row.CarUpCIRKbps = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_car_dn_cir"][idx]; ok {
-			row.CarDnCIRKbps = v
+			row.CarDnCIRKbps = sanitizeSNMPDisplay(v)
 		}
 		if v, ok := maps["access_qos_profile"][idx]; ok {
-			row.QoSProfile = v
+			row.QoSProfile = sanitizeSNMPDisplay(v)
 		}
 		if !skipPortFilter && row.PortTypeRaw != "" && !isPPPoEPortType(row.PortTypeRaw) {
 			continue

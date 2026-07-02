@@ -34,6 +34,16 @@ func TestFilterSerialSearchEntries(t *testing.T) {
 	if len(pon1) != 1 || pon1[0].Onu != 29 {
 		t.Fatalf("pon1=%+v", pon1)
 	}
+	partial := FilterSerialSearchEntries(entries, "101349", 0)
+	if len(partial) != 2 {
+		t.Fatalf("partial=%d", len(partial))
+	}
+	colon := FilterSerialSearchEntries([]SerialSearchOnuEntry{
+		{Pon: 1, Onu: 1, Serial: "ITBS:CF8F:197A"},
+	}, "cf8f197a", 0)
+	if len(colon) != 1 {
+		t.Fatalf("colon=%+v", colon)
+	}
 }
 
 func TestSerialSearchModeDetection(t *testing.T) {

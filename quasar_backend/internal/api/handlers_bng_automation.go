@@ -87,7 +87,7 @@ func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string
 	_ = pool.QueryRow(ctx, `SELECT channel_telegram, channel_email, email_to FROM automation_bng_stats_report WHERE id = 1`).
 		Scan(&tg, &em, &emailTo)
 
-	payload, err := s.buildSystemReport(ctx, "bng-subscribers")
+	payload, err := s.buildSystemReport(ctx, "bng-subscribers", systemReportOptions{})
 	if err != nil {
 		s.setBngStatsReportStatus(ctx, "failed", strPtr(err.Error()), runKey)
 		sum := s.bngStatsReportSummary(ctx)

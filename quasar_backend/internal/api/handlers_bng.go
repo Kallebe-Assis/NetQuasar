@@ -597,6 +597,52 @@ func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) bngDeviceSessionsLiveBatch(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+	var body struct {
+		Indices []string `json:"indices"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", "corpo inválido", nil)
+		return
+	}
+	if len(body.Indices) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"sessions": []any{}, "source": "snmp_live", "count": 0})
+		return
+	}
+	if len(body.Indices) > 100 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "máximo 100 sessões por consulta", nil)
+		return
+	}
+	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	rows := bngcollect.FetchSessionsByIndices(ctx, strings.TrimSpace(dev.IP), comm, profile, body.Indices, 15*time.Second)
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, sessionRowToJSON(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id": id,
+		"sessions":  out,
+		"source":    "snmp_live",
+		"count":     len(out),
+	})
+}
+
 func (s *Server) loadCachedBngSessions(ctx context.Context, deviceID uuid.UUID) ([]map[string]any, *time.Time, string, string) {
 	var capturedAt time.Time
 	var label string
@@ -705,8 +751,7 @@ func (s *Server) runBngSessionsCollect(deviceID uuid.UUID, host, comm string) {
 		s.bngCollectProgress.finish(deviceID, 0, err.Error())
 		return
 	}
-	infra := bngcollect.CollectInfrastructure(ctx, host, comm, 2*time.Minute)
-	_ = bngcollect.StoreInfrastructureSnapshot(ctx, s.DB(), deviceID, infra)
+	_ = bngcollect.CollectAndStoreInfrastructure(ctx, s.DB(), deviceID, host, comm, 2*time.Minute, profile.Options)
 	_ = out
 	s.bngCollectProgress.finish(deviceID, len(sessions), "")
 }
@@ -772,7 +817,10 @@ func (s *Server) bngDeviceSessionReport(w http.ResponseWriter, r *http.Request) 
 		resp["infrastructure"] = infra
 		resp["infrastructure_captured_at"] = infraAt
 	} else {
-		resp["infrastructure_note"] = "Execute a coleta completa SNMP ou «Coletar totais agora» para obter pools, RADIUS, CGN e energia."
+		resp["infrastructure_note"] = "Execute a coleta completa SNMP ou «Coletar totais agora» para obter pools, RADIUS, CGN, BGP, energia e interfaces."
+	}
+	if len(sessions) > 0 {
+		resp["cgnat_summary"] = bngcollect.BuildCGNATSummary(sessions, infra.CGNPublicPools)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -80,14 +80,19 @@ type AAAScalars struct {
 
 // InfrastructureSnapshot pools, RADIUS, CGN, energia e escalares.
 type InfrastructureSnapshot struct {
-	CollectedAt       time.Time              `json:"collected_at"`
-	AAA               AAAScalars             `json:"aaa_scalars"`
-	PowerConsumption  string                 `json:"power_consumption,omitempty"`
-	IPv4Pools         []IPPoolSnapshot       `json:"ipv4_pools"`
-	IPv6Pools         []IPv6PoolSnapshot     `json:"ipv6_pools"`
-	RadiusServers     []RadiusServerSnapshot `json:"radius_servers"`
-	CGN               CGNSnapshot            `json:"cgn"`
-	Errors            []string               `json:"errors,omitempty"`
+	CollectedAt          time.Time                `json:"collected_at"`
+	AAA                  AAAScalars               `json:"aaa_scalars"`
+	PowerConsumption     string                   `json:"power_consumption,omitempty"`
+	IPv4Pools            []IPPoolSnapshot         `json:"ipv4_pools"`
+	IPv6Pools            []IPv6PoolSnapshot       `json:"ipv6_pools"`
+	RadiusServers        []RadiusServerSnapshot   `json:"radius_servers"`
+	CGN                  CGNSnapshot              `json:"cgn"`
+	BGP                  BGPSnapshot              `json:"bgp"`
+	PowerSupplies        []PowerSupplySnapshot    `json:"power_supplies"`
+	PhysicalInterfaces   PhysicalInterfaceSummary `json:"physical_interfaces"`
+	LinkTraffic          []LinkTrafficSnapshot    `json:"link_traffic"`
+	CGNPublicPools       []CGNPublicPoolSnapshot  `json:"cgn_public_pools"`
+	Errors               []string                 `json:"errors,omitempty"`
 }
 
 var infraScalarOIDs = map[string]string{
@@ -115,13 +120,18 @@ var infraScalarOIDs = map[string]string{
 	"cgn_dslite_tunnels":  "1.3.6.1.4.1.2011.5.25.306.1.13.10.0",
 }
 
-// CollectInfrastructure coleta escalares, pools IPv4/v6, RADIUS e CGN.
-func CollectInfrastructure(ctx context.Context, host, community string, timeout time.Duration) InfrastructureSnapshot {
+// CollectInfrastructure coleta escalares, pools IPv4/v6, RADIUS, CGN e operações de rede.
+func CollectInfrastructure(ctx context.Context, host, community string, timeout time.Duration, opts CollectionOptions) InfrastructureSnapshot {
 	snap := InfrastructureSnapshot{
-		CollectedAt: time.Now().UTC(),
-		IPv4Pools:   []IPPoolSnapshot{},
-		IPv6Pools:   []IPv6PoolSnapshot{},
+		CollectedAt:   time.Now().UTC(),
+		IPv4Pools:     []IPPoolSnapshot{},
+		IPv6Pools:     []IPv6PoolSnapshot{},
 		RadiusServers: []RadiusServerSnapshot{},
+		PowerSupplies: []PowerSupplySnapshot{},
+		LinkTraffic:   []LinkTrafficSnapshot{},
+		CGNPublicPools: []CGNPublicPoolSnapshot{},
+		BGP: BGPSnapshot{Peers: []BGPPeerSnapshot{}},
+		PhysicalInterfaces: PhysicalInterfaceSummary{Interfaces: []PhysicalInterfaceSnapshot{}},
 	}
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
@@ -164,7 +174,25 @@ func CollectInfrastructure(ctx context.Context, host, community string, timeout 
 	snap.IPv4Pools = collectIPv4Pools(ctx, host, community, timeout)
 	snap.IPv6Pools = collectIPv6Pools(ctx, host, community, timeout)
 	snap.RadiusServers = collectRadiusServers(ctx, host, community, timeout)
+	snap.BGP = collectBGPSnapshot(ctx, host, community, timeout)
+	snap.PowerSupplies = collectPowerSupplies(ctx, host, community, timeout)
+	snap.PhysicalInterfaces = collectPhysicalInterfaces(ctx, host, community, timeout)
+	snap.LinkTraffic = collectLinkTraffic(ctx, host, community, timeout, opts.UplinkInterfaces)
+	snap.CGNPublicPools = collectCGNPublicPools(ctx, host, community, timeout)
 	return snap
+}
+
+// CollectAndStoreInfrastructure coleta infra, calcula taxas de uplink e persiste.
+func CollectAndStoreInfrastructure(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration, opts CollectionOptions) error {
+	prev, prevAt, hasPrev := LoadLatestInfrastructureSnapshot(ctx, pool, deviceID)
+	snap := CollectInfrastructure(ctx, host, community, timeout, opts)
+	if hasPrev && prevAt != nil {
+		enrichLinkTrafficRatesFromPrevious(&snap, prev, *prevAt)
+	}
+	if linkTrafficNeedsInstantRates(snap.LinkTraffic) {
+		snap.LinkTraffic = measureInstantLinkRates(ctx, host, community, timeout, snap.LinkTraffic)
+	}
+	return StoreInfrastructureSnapshot(ctx, pool, deviceID, snap)
 }
 
 func snmpGetScalars(ctx context.Context, host, community string, timeout time.Duration, oids map[string]string) map[string]string {

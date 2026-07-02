@@ -45,11 +45,13 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 	}
 
 	var idx string
+	var matchedLogin string
 	matched, ok, walkErr := probing.SNMPWalkUntil(ctx, probing.SNMPWalkParams{
 		Host: host, Community: community, RootOID: baseOID, Version: "2c",
 		Timeout: timeout, MaxRows: maxSessionWalkRows,
 	}, func(v probing.SNMPVar) bool {
-		if !matchFn(strings.TrimSpace(v.Value)) {
+		val := strings.TrimSpace(v.Value)
+		if !matchFn(val) {
 			return false
 		}
 		candidate := extractIndexFromOID(v.OID, baseOID)
@@ -57,6 +59,7 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 			return false
 		}
 		idx = candidate
+		matchedLogin = NormalizeSNMPLoginValue(val, stripSuffix)
 		return true
 	})
 	if walkErr != "" {
@@ -66,9 +69,12 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 		_ = matched
 		return SessionRow{Status: "Down", Login: displayLogin}, false, nil
 	}
+	if matchedLogin == "" {
+		matchedLogin = displayLogin
+	}
 
 	columnMaps := map[string]map[string]string{
-		"access_login": {idx: displayLogin},
+		"access_login": {idx: matchedLogin},
 	}
 	for key, m := range FetchSessionDetailMaps(ctx, host, community, profile, idx, 12*time.Second) {
 		columnMaps[key] = m

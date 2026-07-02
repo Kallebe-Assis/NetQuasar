@@ -125,8 +125,23 @@ export function formatOverviewField(key: OverviewFieldKey, raw: unknown): string
   }
 }
 
-export const BNG_SESSION_DISPLAY_LIMITS = [50, 100, 200, 500, 1000] as const;
+export const BNG_SESSION_DISPLAY_LIMITS = [10, 25, 50, 100] as const;
 export type BngSessionDisplayLimit = (typeof BNG_SESSION_DISPLAY_LIMITS)[number];
+
+export type BngSessionRefreshMode = "manual" | "auto";
+
+export const BNG_SESSION_REFRESH_MODE_KEY = "netquasar.bng.sessions.refreshMode";
+
+const EMPTY_SNMP_DISPLAY = new Set(["", "<nil>", "null", "nil", "undefined"]);
+
+/** Valor de célula PPPoE — oculta «<nil>» e vazios. */
+export function bngCellDisplay(raw?: string | null): string {
+  if (raw == null) return "—";
+  const s = String(raw).trim();
+  if (!s || EMPTY_SNMP_DISPLAY.has(s.toLowerCase())) return "—";
+  if (s.toLowerCase().startsWith("estado <nil>")) return "—";
+  return s;
+}
 
 export function formatBngSessionStatus(raw?: string): { label: string; online: boolean } {
   const s = String(raw ?? "Up").trim().toLowerCase();

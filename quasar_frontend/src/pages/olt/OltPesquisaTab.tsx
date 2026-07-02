@@ -112,6 +112,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const debouncedQ = useDebouncedValue(q, 320);
   const [selectedOltId, setSelectedOltId] = useState("");
   const [selectedPon, setSelectedPon] = useState(0);
+  const [ponManual, setPonManual] = useState("");
   const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [draftFilters, setDraftFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -151,7 +152,14 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     return [...new Set(nums)].sort((a, b) => a - b);
   }, [oltDetailQ.data?.pons_table]);
 
-  const selectedPonLabel = selectedPon > 0 ? `PON ${selectedPon}` : "Todas as PONs";
+  const effectivePon = useMemo(() => {
+    const manual = Number.parseInt(ponManual.trim(), 10);
+    if (Number.isFinite(manual) && manual > 0) return manual;
+    return selectedPon;
+  }, [ponManual, selectedPon]);
+
+  const selectedPonLabel =
+    effectivePon > 0 ? `PON ${effectivePon}` : ponManual.trim() ? `PON ${ponManual.trim()}` : "Todas as PONs";
 
   function openErrorModal(e: unknown, title: string) {
     setErrorModal(parseApiErrorForModal(e, title));
@@ -178,7 +186,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     const body: Record<string, unknown> = { q: debouncedQ.trim() };
     if (filters.model.trim()) body.model = filters.model.trim();
     if (selectedOltId) body.olt_id = selectedOltId;
-    if (selectedPon > 0) body.pon = selectedPon;
+    if (effectivePon > 0) body.pon = effectivePon;
     if (filters.online === "true") body.online = true;
     if (filters.online === "false") body.online = false;
     const rxMin = parseOptFloat(filters.rx_dbm_min);
@@ -198,7 +206,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (voltMin != null) body.voltage_min = voltMin;
     if (voltMax != null) body.voltage_max = voltMax;
     return body;
-  }, [debouncedQ, filters, selectedOltId, selectedPon]);
+  }, [debouncedQ, filters, selectedOltId, effectivePon]);
 
   const payloadKey = JSON.stringify(payload);
   useEffect(() => {
@@ -224,16 +232,16 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     }
   }, []);
 
-  const telnetKey = `${selectedOltId}|${selectedPon}|${debouncedQ.trim()}`;
+  const telnetKey = `${selectedOltId}|${effectivePon}|${debouncedQ.trim()}`;
   useEffect(() => {
     const serial = debouncedQ.trim();
-    if (!canMutate || !selectedOltId || serial.length < 3) {
+    if (!canMutate || !selectedOltId || serial.length < 2) {
       setTelnetResult(null);
       setTelnetLoading(false);
       return;
     }
-    void runTelnetSerialSearch(selectedOltId, serial, selectedPon);
-  }, [canMutate, telnetKey, runTelnetSerialSearch, selectedOltId, selectedPon, debouncedQ]);
+    void runTelnetSerialSearch(selectedOltId, serial, effectivePon);
+  }, [canMutate, telnetKey, runTelnetSerialSearch, selectedOltId, effectivePon, debouncedQ]);
 
   const snapshotResults = searchMut.data?.results ?? [];
 
@@ -327,7 +335,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           <input
             className="input"
             type="search"
-            placeholder="Número de série ou modelo…"
+            placeholder="Número de série (parcial) ou modelo…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             autoComplete="off"
@@ -350,11 +358,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               <button
                 type="button"
                 className="action-menu__item"
-                onClick={() => {
-                  setSelectedOltId("");
-                  setSelectedPon(0);
-                  close();
-                }}
+                  onClick={() => {
+                    setSelectedOltId("");
+                    setSelectedPon(0);
+                    setPonManual("");
+                    close();
+                  }}
               >
                 Todas as OLTs
               </button>
@@ -366,6 +375,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                   onClick={() => {
                     setSelectedOltId(o.id);
                     setSelectedPon(0);
+                    setPonManual("");
                     close();
                   }}
                 >
@@ -377,49 +387,67 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         </DropdownMenu>
 
         {selectedOltId ? (
-          <DropdownMenu
-            align="start"
-            minWidth={160}
-            trigger={({ toggle }) => (
-              <button type="button" className="btn olt-pesquisa-toolbar__olt-btn" onClick={toggle} title="Filtrar porta PON na consulta telnet">
-                <span className="olt-pesquisa-toolbar__olt-label">{selectedPonLabel}</span>
-                <ChevronDown size={14} aria-hidden />
-              </button>
-            )}
-          >
-            {({ close }) => (
-              <div>
-                <button
-                  type="button"
-                  className="action-menu__item"
-                  onClick={() => {
-                    setSelectedPon(0);
-                    close();
-                  }}
-                >
-                  Todas as PONs
+          <>
+            <DropdownMenu
+              align="start"
+              minWidth={160}
+              trigger={({ toggle }) => (
+                <button type="button" className="btn olt-pesquisa-toolbar__olt-btn" onClick={toggle} title="Filtrar porta PON">
+                  <span className="olt-pesquisa-toolbar__olt-label">{selectedPonLabel}</span>
+                  <ChevronDown size={14} aria-hidden />
                 </button>
-                {ponOptions.map((p) => (
+              )}
+            >
+              {({ close }) => (
+                <div>
                   <button
-                    key={p}
                     type="button"
                     className="action-menu__item"
                     onClick={() => {
-                      setSelectedPon(p);
+                      setSelectedPon(0);
+                      setPonManual("");
                       close();
                     }}
                   >
-                    PON {p}
+                    Todas as PONs
                   </button>
-                ))}
-                {ponOptions.length === 0 ? (
-                  <p style={{ padding: "8px 12px", margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                    Sem snapshot PON — use Todas ou actualize a OLT.
-                  </p>
-                ) : null}
-              </div>
-            )}
-          </DropdownMenu>
+                  {ponOptions.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="action-menu__item"
+                      onClick={() => {
+                        setSelectedPon(p);
+                        setPonManual(String(p));
+                        close();
+                      }}
+                    >
+                      PON {p}
+                    </button>
+                  ))}
+                  {ponOptions.length === 0 ? (
+                    <p style={{ padding: "8px 12px", margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                      Sem snapshot PON — informe o número ao lado ou actualize a OLT.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </DropdownMenu>
+            <input
+              className="input mono"
+              type="text"
+              inputMode="numeric"
+              placeholder="PON nº"
+              title="Número da porta PON (opcional). Com PON definida, a OLT lista as ONUs dessa porta e compara o serial parcialmente."
+              value={ponManual}
+              onChange={(e) => {
+                setPonManual(e.target.value.replace(/[^\d]/g, ""));
+                const n = Number.parseInt(e.target.value.replace(/[^\d]/g, ""), 10);
+                setSelectedPon(Number.isFinite(n) && n > 0 ? n : 0);
+              }}
+              style={{ width: 72, minWidth: 72, padding: "6px 8px", fontSize: 12 }}
+            />
+          </>
         ) : null}
 
         <button
@@ -440,16 +468,18 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         <PageCountPill label="ONUs encontradas" count={displayResults.length} />
       </div>
 
-      {canMutate && selectedOltId && debouncedQ.trim().length >= 3 ? (
+      {canMutate && selectedOltId && debouncedQ.trim().length >= 2 ? (
         <div className="card" style={{ padding: "10px 12px", marginBottom: 12, fontSize: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div>
               <strong>Consulta telnet na OLT</strong>
               <span style={{ color: "var(--muted)", marginLeft: 8 }}>{selectedOltLabel}</span>
-              {selectedPon > 0 ? (
-                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· PON {selectedPon}</span>
+              {effectivePon > 0 ? (
+                <span style={{ color: "var(--muted)", marginLeft: 8 }}>
+                  · PON {effectivePon} — lista ONUs e compara serial parcial
+                </span>
               ) : (
-                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· todas as PONs</span>
+                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· todas as PONs (ou pesquisa directa por serial)</span>
               )}
             </div>
             <button
@@ -457,7 +487,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               className="btn btn--icon"
               title="Repetir consulta telnet"
               disabled={telnetLoading}
-              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim(), selectedPon)}
+              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim(), effectivePon)}
             >
               <RefreshCw size={15} className={telnetLoading ? "map-refresh-spin" : undefined} />
             </button>
@@ -556,9 +586,11 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             </div>
           ) : null}
         </div>
-      ) : canMutate && debouncedQ.trim().length >= 3 && !selectedOltId ? (
+      ) : canMutate && debouncedQ.trim().length >= 2 && !selectedOltId ? (
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px" }}>
-          Seleccione uma OLT para consultar o número de série via telnet (comando configurado em Definições → Perfis OLT).
+          Seleccione uma OLT para consultar o número de série via telnet. Com uma PON definida, o sistema lista as ONUs
+          dessa porta e compara o serial digitado (mesmo parcial, ex. <span className="mono">CF8F197A</span> em{" "}
+          <span className="mono">ITBS:CF8F:197A</span>).
         </p>
       ) : null}
 
@@ -663,8 +695,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         {!searchMut.isPending && displayResults.length === 0 ? (
           <p style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
             Nenhuma ONU encontrada nos snapshots.
-            {canMutate && debouncedQ.trim().length >= 3 && !selectedOltId
-              ? " Seleccione uma OLT para pesquisar o serial via telnet."
+            {canMutate && debouncedQ.trim().length >= 2 && !selectedOltId
+              ? " Seleccione uma OLT para pesquisar o serial via telnet (com PON opcional)."
               : " Actualize as OLTs em Equipamentos ou ajuste os filtros."}
           </p>
         ) : null}

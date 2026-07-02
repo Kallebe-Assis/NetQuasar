@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 )
@@ -20,7 +22,7 @@ import (
 var systemReportCatalog = []map[string]string{
 	{"id": "active-alerts", "title": "Alertas ativos", "description": "Lista detalhada de todos os alertas em aberto."},
 	{"id": "connections", "title": "Conexões de clientes", "description": "Quantidade e detalhes das conexões cadastradas."},
-	{"id": "equipment-by-pop", "title": "Equipamentos por POP", "description": "Distribuição de equipamentos por ponto de presença e categoria."},
+	{"id": "equipment-by-pop", "title": "Equipamentos por POP", "description": "Lista de equipamentos agrupados por ponto de presença."},
 	{"id": "olt-overview", "title": "OLTs — informações e gráfico", "description": "Frota OLT, ONUs e evolução recente (últimos 7 dias)."},
 	{"id": "system-general", "title": "Visão geral do sistema", "description": "Métricas consolidadas de equipamentos, localidades, clientes, PONs, Mikrotik e mais."},
 	{"id": "integrations", "title": "Integrações", "description": "Integrações configuradas e estado de cada uma."},
@@ -49,7 +51,8 @@ func (s *Server) systemReportData(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "relatório desconhecido", nil)
 		return
 	}
-	payload, err := s.buildSystemReport(r.Context(), id)
+	opts := parseSystemReportOptions(r, id)
+	payload, err := s.buildSystemReport(r.Context(), id, opts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -63,7 +66,8 @@ func (s *Server) systemReportCSV(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "relatório desconhecido", nil)
 		return
 	}
-	payload, err := s.buildSystemReport(r.Context(), id)
+	opts := parseSystemReportOptions(r, id)
+	payload, err := s.buildSystemReport(r.Context(), id, opts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -102,7 +106,8 @@ func (s *Server) systemReportTelegram(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "Telegram de relatórios não configurado (bot_token/chat_id).", nil)
 		return
 	}
-	payload, err := s.buildSystemReport(r.Context(), id)
+	opts := parseSystemReportOptions(r, id)
+	payload, err := s.buildSystemReport(r.Context(), id, opts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -117,7 +122,7 @@ func (s *Server) systemReportTelegram(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report_id": id})
 }
 
-func (s *Server) buildSystemReport(ctx context.Context, id string) (map[string]any, error) {
+func (s *Server) buildSystemReport(ctx context.Context, id string, opts systemReportOptions) (map[string]any, error) {
 	pool := s.DB()
 	if pool == nil {
 		return nil, fmt.Errorf("base indisponível")
@@ -131,11 +136,11 @@ func (s *Server) buildSystemReport(ctx context.Context, id string) (map[string]a
 	case "active-alerts":
 		return s.reportActiveAlerts(ctx, pool, base)
 	case "connections":
-		return s.reportConnections(ctx, pool, base)
+		return s.reportConnections(ctx, pool, base, opts.Connections)
 	case "equipment-by-pop":
-		return s.reportEquipmentByPop(ctx, pool, base)
+		return s.reportEquipmentByPop(ctx, pool, base, opts.EquipmentByPop)
 	case "olt-overview":
-		return s.reportOltOverview(ctx, pool, base)
+		return s.reportOltOverview(ctx, pool, base, opts.OltOverview)
 	case "system-general":
 		return s.reportSystemGeneral(ctx, pool, base)
 	case "integrations":
@@ -150,6 +155,53 @@ func (s *Server) buildSystemReport(ctx context.Context, id string) (map[string]a
 		return s.reportBngSubscribers(ctx, pool, base)
 	default:
 		return nil, fmt.Errorf("relatório desconhecido")
+	}
+}
+
+func alertTypeLabelGo(alertType string) string {
+	switch strings.TrimSpace(alertType) {
+	case "ping_unreachable":
+		return "Equipamento offline"
+	case "latency_high":
+		return "Latência elevada"
+	case "latency_degraded":
+		return "Latência degradada"
+	case "cpu_high":
+		return "CPU elevada"
+	case "memory_high":
+		return "Memória elevada"
+	case "temperature_high":
+		return "Temperatura elevada"
+	case "temperature_low":
+		return "Temperatura baixa"
+	case "snmp_failure":
+		return "Falha SNMP"
+	case "uptime_restart_low":
+		return "Possível reinício (uptime baixo)"
+	case "interface_down":
+		return "Interface inativa"
+	case "interface_down_transition":
+		return "Interface mudou para DOWN"
+	case "pon_down":
+		return "PON inativa"
+	case "mikrotik_sfp_tx":
+		return "SFP — potência TX"
+	case "mikrotik_sfp_rx":
+		return "SFP — potência RX"
+	case "telemetry_threshold":
+		return "Telemetria — limiar global"
+	case "olt_onu_drop":
+		return "Queda de ONUs online (OLT)"
+	case "olt_onu_rise":
+		return "Subida de ONUs online (OLT)"
+	case "bng_subscriber_drop":
+		return "Queda de logins (BNG)"
+	default:
+		t := strings.TrimSpace(alertType)
+		if t == "" {
+			return "—"
+		}
+		return strings.ReplaceAll(t, "_", " ")
 	}
 }
 
@@ -221,7 +273,7 @@ func (s *Server) reportActiveAlerts(ctx context.Context, pool *pgxpool.Pool, bas
 		return nil, err
 	}
 	defer rows.Close()
-	cols := []string{"ID", "Equipamento", "IP", "Severidade", "Tipo", "Categoria", "POP", "Desde", "Mensagem"}
+	cols := []string{"Equipamento", "IP", "Severidade", "Tipo", "Categoria", "POP", "Desde", "Mensagem"}
 	var dataRows [][]string
 	var crit, warn, info int
 	for rows.Next() {
@@ -231,6 +283,8 @@ func (s *Server) reportActiveAlerts(ctx context.Context, pool *pgxpool.Pool, bas
 		if err := rows.Scan(&id, &dev, &ip, &sev, &typ, &msg, &since, &meta, &cat, &pop); err != nil {
 			return nil, err
 		}
+		_ = id
+		_ = meta
 		switch sev {
 		case "critical":
 			crit++
@@ -241,7 +295,7 @@ func (s *Server) reportActiveAlerts(ctx context.Context, pool *pgxpool.Pool, bas
 		}
 		catLbl := alertCategoryLabelGo(typ)
 		dataRows = append(dataRows, []string{
-			id, dev, ip, severityLabelGo(sev), typ, catLbl, pop,
+			dev, ip, severityLabelGo(sev), alertTypeLabelGo(typ), catLbl, pop,
 			since.UTC().Format(time.RFC3339), strings.TrimSpace(msg),
 		})
 	}
@@ -258,9 +312,14 @@ func (s *Server) reportActiveAlerts(ctx context.Context, pool *pgxpool.Pool, bas
 	return base, nil
 }
 
-func (s *Server) reportConnections(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
-	var total int64
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM client_connections`).Scan(&total)
+func (s *Server) reportConnections(ctx context.Context, pool *pgxpool.Pool, base map[string]any, opts connectionsReportOptions) (map[string]any, error) {
+	opts = normalizeConnectionsReportOptions(opts)
+	if opts.Source == "bng_cache" {
+		return s.reportConnectionsFromBngCache(ctx, pool, base, opts)
+	}
+	if opts.Mode == "summary" {
+		return s.reportConnectionsSummary(ctx, pool, base)
+	}
 	rows, err := pool.Query(ctx, `
 		SELECT COALESCE(display_number::text, ''), client_name, login, COALESCE(ip_address, ''),
 			connection_kind, COALESCE(medium_type, ''), COALESCE(sales_plan, ''), created_at
@@ -275,12 +334,14 @@ func (s *Server) reportConnections(ctx context.Context, pool *pgxpool.Pool, base
 	var dataRows [][]string
 	byKind := map[string]int{}
 	byMedium := map[string]int{}
+	var total int64
 	for rows.Next() {
 		var num, name, login, ip, kind, medium, plan string
 		var created time.Time
 		if err := rows.Scan(&num, &name, &login, &ip, &kind, &medium, &plan, &created); err != nil {
 			return nil, err
 		}
+		total++
 		byKind[kind]++
 		if medium != "" {
 			byMedium[medium]++
@@ -290,7 +351,8 @@ func (s *Server) reportConnections(ctx context.Context, pool *pgxpool.Pool, base
 		})
 	}
 	base["title"] = "Conexões de clientes"
-	base["description"] = "Inventário de conexões cadastradas."
+	base["description"] = "Inventário detalhado de conexões cadastradas."
+	base["options"] = opts
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
@@ -301,46 +363,475 @@ func (s *Server) reportConnections(ctx context.Context, pool *pgxpool.Pool, base
 	return base, nil
 }
 
-func (s *Server) reportEquipmentByPop(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
-	rows, err := pool.Query(ctx, `
-		SELECT COALESCE(p.description, '(sem POP)'), COALESCE(NULLIF(trim(d.category), ''), '(sem categoria)'), COUNT(*)::bigint
-		FROM devices d
-		LEFT JOIN pops p ON p.id = d.pop_id
-		GROUP BY 1, 2
-		ORDER BY 1, 3 DESC, 2
+func (s *Server) reportConnectionsSummary(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
+	var total int64
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM client_connections`).Scan(&total)
+
+	byKind := map[string]int{}
+	kindRows, err := pool.Query(ctx, `
+		SELECT connection_kind, COUNT(*)::bigint FROM client_connections GROUP BY 1 ORDER BY 2 DESC, 1
 	`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	cols := []string{"POP", "Categoria", "Quantidade"}
-	var dataRows [][]string
-	popTotals := map[string]int64{}
-	for rows.Next() {
-		var pop, cat string
+	defer kindRows.Close()
+	for kindRows.Next() {
+		var kind string
 		var n int64
-		if err := rows.Scan(&pop, &cat, &n); err != nil {
-			return nil, err
+		if kindRows.Scan(&kind, &n) == nil {
+			byKind[kind] = int(n)
 		}
-		popTotals[pop] += n
-		dataRows = append(dataRows, []string{pop, cat, strconv.FormatInt(n, 10)})
 	}
-	var popCount, devCount int64
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM pops`).Scan(&popCount)
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM devices`).Scan(&devCount)
-	base["title"] = "Equipamentos por POP"
-	base["description"] = "Distribuição por ponto de presença e categoria."
+
+	byMedium := map[string]int{}
+	mediumRows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(trim(medium_type), ''), '(sem meio)'), COUNT(*)::bigint
+		FROM client_connections GROUP BY 1 ORDER BY 2 DESC, 1
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer mediumRows.Close()
+	for mediumRows.Next() {
+		var medium string
+		var n int64
+		if mediumRows.Scan(&medium, &n) == nil {
+			byMedium[medium] = int(n)
+		}
+	}
+
+	byPlan := map[string]int{}
+	planRows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(trim(sales_plan), ''), '(sem plano)'), COUNT(*)::bigint
+		FROM client_connections GROUP BY 1 ORDER BY 2 DESC, 1
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer planRows.Close()
+	for planRows.Next() {
+		var plan string
+		var n int64
+		if planRows.Scan(&plan, &n) == nil {
+			byPlan[plan] = int(n)
+		}
+	}
+
+	cols := []string{"Métrica", "Valor"}
+	dataRows := [][]string{{"Total conexões", strconv.FormatInt(total, 10)}}
+	for kind, n := range byKind {
+		dataRows = append(dataRows, []string{"Tipo — " + kind, strconv.Itoa(n)})
+	}
+	for medium, n := range byMedium {
+		dataRows = append(dataRows, []string{"Meio — " + medium, strconv.Itoa(n)})
+	}
+	for plan, n := range byPlan {
+		dataRows = append(dataRows, []string{"Plano — " + plan, strconv.Itoa(n)})
+	}
+	sort.Slice(dataRows[1:], func(i, j int) bool {
+		return dataRows[i+1][0] < dataRows[j+1][0]
+	})
+
+	base["title"] = "Conexões de clientes — resumo"
+	base["description"] = "Totais por tipo, meio de acesso e plano comercial (cadastro de conexões)."
+	base["options"] = connectionsReportOptions{Mode: "summary", Source: "connections"}
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
-		"POPs":                 popCount,
-		"Equipamentos (total)": devCount,
-		"Por POP":              popTotals,
+		"Total conexões": total,
+		"Por tipo":       byKind,
+		"Por meio":       byMedium,
+		"Por plano":      byPlan,
 	}
 	return base, nil
 }
 
-func (s *Server) reportOltOverview(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
+func (s *Server) reportConnectionsFromBngCache(ctx context.Context, pool *pgxpool.Pool, base map[string]any, opts connectionsReportOptions) (map[string]any, error) {
+	deviceID, err := uuid.Parse(strings.TrimSpace(opts.BngDeviceID))
+	if err != nil {
+		return nil, fmt.Errorf("BNG inválido")
+	}
+	var bngName, bngIP string
+	err = pool.QueryRow(ctx, `
+		SELECT description, host(ip)::text FROM devices
+		WHERE id=$1 AND coalesce(bng_enabled, false)=true
+	`, deviceID).Scan(&bngName, &bngIP)
+	if err != nil {
+		return nil, fmt.Errorf("BNG não encontrado ou BNG não activo")
+	}
+
+	sessions, capturedAt, _, note := s.loadCachedBngSessions(ctx, deviceID)
+	if len(sessions) == 0 {
+		if note == "" {
+			note = "Nenhuma consulta completa guardada para este BNG."
+		}
+		return nil, fmt.Errorf("%s", note)
+	}
+
+	profile := bngcollect.LoadGlobalProfile(ctx, pool)
+	sessions = normalizeCachedSessionLogins(sessions, profile.Options.PPPoELoginStripSuffix)
+
+	if opts.Mode == "summary" {
+		byIPType := map[string]int{}
+		byDomain := map[string]int{}
+		byVLAN := map[string]int{}
+		ipv4, ipv6, dual := 0, 0, 0
+		for _, sm := range sessions {
+			ipType := strings.TrimSpace(fmt.Sprint(sm["ip_type"]))
+			if ipType == "" {
+				ipType = "(desconhecido)"
+			}
+			byIPType[ipType]++
+			domain := strings.TrimSpace(fmt.Sprint(sm["domain"]))
+			if domain == "" {
+				domain = "(sem domínio)"
+			}
+			byDomain[domain]++
+			vlan := strings.TrimSpace(fmt.Sprint(sm["vlan"]))
+			if vlan == "" {
+				vlan = "(sem VLAN)"
+			}
+			byVLAN[vlan]++
+			has4 := strings.TrimSpace(fmt.Sprint(sm["ipv4"])) != "" && strings.TrimSpace(fmt.Sprint(sm["ipv4"])) != "0.0.0.0"
+			has6 := strings.TrimSpace(fmt.Sprint(sm["ipv6"])) != "" || strings.TrimSpace(fmt.Sprint(sm["ipv6_pd"])) != ""
+			if has4 && has6 {
+				dual++
+			} else if has6 {
+				ipv6++
+			} else if has4 {
+				ipv4++
+			}
+		}
+		cols := []string{"Métrica", "Valor"}
+		dataRows := [][]string{
+			{"BNG", bngName},
+			{"IP gestão", bngIP},
+			{"Total sessões PPPoE", strconv.Itoa(len(sessions))},
+			{"Com IPv4", strconv.Itoa(ipv4)},
+			{"Com IPv6", strconv.Itoa(ipv6)},
+			{"Dual-stack", strconv.Itoa(dual)},
+		}
+		for k, n := range byIPType {
+			dataRows = append(dataRows, []string{"Tipo IP — " + k, strconv.Itoa(n)})
+		}
+		for k, n := range byDomain {
+			dataRows = append(dataRows, []string{"Domínio — " + k, strconv.Itoa(n)})
+		}
+		for k, n := range byVLAN {
+			dataRows = append(dataRows, []string{"VLAN — " + k, strconv.Itoa(n)})
+		}
+		snapAt := "—"
+		if capturedAt != nil {
+			snapAt = capturedAt.UTC().Format(time.RFC3339)
+		}
+		base["title"] = "Conexões — resumo cache PPPoE (BNG)"
+		base["description"] = fmt.Sprintf("Totais da última consulta SNMP guardada no BNG %s.", bngName)
+		base["options"] = opts
+		base["columns"] = cols
+		base["rows"] = dataRows
+		base["summary"] = map[string]any{
+			"BNG":              bngName,
+			"Snapshot":         snapAt,
+			"Total sessões":    len(sessions),
+			"Por tipo IP":      byIPType,
+			"Por domínio AAA":  byDomain,
+			"Por VLAN":         byVLAN,
+			"IPv4":             ipv4,
+			"IPv6":             ipv6,
+			"Dual-stack":       dual,
+		}
+		return base, nil
+	}
+
+	cols := []string{"Login", "IPv4", "MAC", "IPv6", "Tipo IP", "Domínio", "VLAN", "Tempo online"}
+	var dataRows [][]string
+	for _, sm := range sessions {
+		dataRows = append(dataRows, []string{
+			strings.TrimSpace(fmt.Sprint(sm["login"])),
+			strings.TrimSpace(fmt.Sprint(sm["ipv4"])),
+			strings.TrimSpace(fmt.Sprint(sm["mac"])),
+			strings.TrimSpace(fmt.Sprint(sm["ipv6"])),
+			strings.TrimSpace(fmt.Sprint(sm["ip_type"])),
+			strings.TrimSpace(fmt.Sprint(sm["domain"])),
+			strings.TrimSpace(fmt.Sprint(sm["vlan"])),
+			firstNonEmptyString(fmt.Sprint(sm["online_time"]), fmt.Sprint(sm["online_time_sec"])),
+		})
+	}
+	sort.Slice(dataRows, func(i, j int) bool {
+		return strings.ToLower(dataRows[i][0]) < strings.ToLower(dataRows[j][0])
+	})
+	snapAt := "—"
+	if capturedAt != nil {
+		snapAt = capturedAt.UTC().Format(time.RFC3339)
+	}
+	base["title"] = "Conexões — detalhe cache PPPoE (BNG)"
+	base["description"] = fmt.Sprintf("Logins online na última consulta SNMP do BNG %s.", bngName)
+	base["options"] = opts
+	base["columns"] = cols
+	base["rows"] = dataRows
+	base["summary"] = map[string]any{
+		"BNG":           bngName,
+		"Snapshot":      snapAt,
+		"Total sessões": len(sessions),
+	}
+	return base, nil
+}
+
+const equipmentByPopNoPopLabel = "(sem POP)"
+
+type equipmentByPopReportOptions struct {
+	IncludeWithoutPop     bool `json:"include_without_pop"`
+	IncludePopCoordinates bool `json:"include_pop_coordinates"`
+}
+
+type connectionsReportOptions struct {
+	Mode         string `json:"mode"`          // summary | detailed
+	Source       string `json:"source"`        // connections | bng_cache
+	BngDeviceID  string `json:"bng_device_id"` // obrigatório se source=bng_cache
+}
+
+type oltOverviewReportOptions struct {
+	Period string `json:"period"` // today | 3d | 7d | 30d
+}
+
+type systemReportOptions struct {
+	EquipmentByPop equipmentByPopReportOptions
+	Connections    connectionsReportOptions
+	OltOverview    oltOverviewReportOptions
+}
+
+func parseSystemReportOptions(r *http.Request, reportID string) systemReportOptions {
+	opts := systemReportOptions{
+		Connections: connectionsReportOptions{Mode: "detailed", Source: "connections"},
+		OltOverview: oltOverviewReportOptions{Period: "7d"},
+	}
+	q := r.URL.Query()
+	switch reportID {
+	case "equipment-by-pop":
+		opts.EquipmentByPop.IncludeWithoutPop = queryBool(q.Get("include_without_pop"))
+		opts.EquipmentByPop.IncludePopCoordinates = queryBool(q.Get("include_pop_coordinates"))
+	case "connections":
+		if v := strings.TrimSpace(q.Get("mode")); v != "" {
+			opts.Connections.Mode = v
+		}
+		if v := strings.TrimSpace(q.Get("source")); v != "" {
+			opts.Connections.Source = v
+		}
+		if v := strings.TrimSpace(q.Get("bng_device_id")); v != "" {
+			opts.Connections.BngDeviceID = v
+		}
+	case "olt-overview":
+		if v := strings.TrimSpace(q.Get("period")); v != "" {
+			opts.OltOverview.Period = v
+		}
+	}
+	if r.Method == http.MethodPost && r.Body != nil {
+		switch reportID {
+		case "equipment-by-pop":
+			var body equipmentByPopReportOptions
+			if json.NewDecoder(r.Body).Decode(&body) == nil {
+				opts.EquipmentByPop = body
+			}
+		case "connections":
+			var body connectionsReportOptions
+			if json.NewDecoder(r.Body).Decode(&body) == nil {
+				opts.Connections = normalizeConnectionsReportOptions(body)
+			}
+		case "olt-overview":
+			var body oltOverviewReportOptions
+			if json.NewDecoder(r.Body).Decode(&body) == nil {
+				opts.OltOverview = normalizeOltOverviewReportOptions(body)
+			}
+		}
+	}
+	return opts
+}
+
+func normalizeConnectionsReportOptions(o connectionsReportOptions) connectionsReportOptions {
+	mode := strings.ToLower(strings.TrimSpace(o.Mode))
+	if mode != "summary" {
+		mode = "detailed"
+	}
+	source := strings.ToLower(strings.TrimSpace(o.Source))
+	if source != "bng_cache" {
+		source = "connections"
+	}
+	return connectionsReportOptions{
+		Mode:        mode,
+		Source:      source,
+		BngDeviceID: strings.TrimSpace(o.BngDeviceID),
+	}
+}
+
+func normalizeOltOverviewReportOptions(o oltOverviewReportOptions) oltOverviewReportOptions {
+	p := strings.ToLower(strings.TrimSpace(o.Period))
+	switch p {
+	case "today", "1d", "1":
+		p = "today"
+	case "3d", "3":
+		p = "3d"
+	case "30d", "30":
+		p = "30d"
+	default:
+		p = "7d"
+	}
+	return oltOverviewReportOptions{Period: p}
+}
+
+func oltOverviewPeriodDays(period string) int {
+	switch normalizeOltOverviewReportOptions(oltOverviewReportOptions{Period: period}).Period {
+	case "today":
+		return 1
+	case "3d":
+		return 3
+	case "30d":
+		return 30
+	default:
+		return 7
+	}
+}
+
+func queryBool(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func formatPopCoordinates(lat, lng *float64) string {
+	if lat == nil || lng == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.6f, %.6f", *lat, *lng)
+}
+
+func (s *Server) reportEquipmentByPop(ctx context.Context, pool *pgxpool.Pool, base map[string]any, opts equipmentByPopReportOptions) (map[string]any, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT COALESCE(p.description, $1), d.description,
+			COALESCE(NULLIF(trim(d.category), ''), '(sem categoria)'),
+			p.latitude, p.longitude, (d.pop_id IS NULL) AS no_pop
+		FROM devices d
+		LEFT JOIN pops p ON p.id = d.pop_id
+		WHERE ($2::boolean OR d.pop_id IS NOT NULL)
+		ORDER BY lower(trim(COALESCE(p.description, $1))), lower(trim(d.description))
+	`, equipmentByPopNoPopLabel, opts.IncludeWithoutPop)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type deviceRow struct {
+		Name     string
+		Category string
+		Label    string
+	}
+
+	type popBucket struct {
+		devices []deviceRow
+		lat     *float64
+		lng     *float64
+	}
+
+	groupByPop := map[string]*popBucket{}
+	popOrder := []string{}
+	var devCount int64
+
+	for rows.Next() {
+		var pop, name, cat string
+		var lat, lng *float64
+		var noPop bool
+		if err := rows.Scan(&pop, &name, &cat, &lat, &lng, &noPop); err != nil {
+			return nil, err
+		}
+		if noPop || pop == equipmentByPopNoPopLabel {
+			pop = equipmentByPopNoPopLabel
+		}
+		devCount++
+		b := groupByPop[pop]
+		if b == nil {
+			b = &popBucket{devices: []deviceRow{}}
+			groupByPop[pop] = b
+			popOrder = append(popOrder, pop)
+		}
+		if lat != nil && lng != nil && b.lat == nil {
+			b.lat = lat
+			b.lng = lng
+		}
+		b.devices = append(b.devices, deviceRow{
+			Name:     name,
+			Category: cat,
+			Label:    fmt.Sprintf("%s [%s]", name, cat),
+		})
+	}
+
+	groups := make([]map[string]any, 0, len(popOrder))
+	csvCols := []string{"POP", "Equipamento"}
+	if opts.IncludePopCoordinates {
+		csvCols = []string{"POP", "Latitude", "Longitude", "Equipamento"}
+	}
+	csvRows := [][]string{}
+	for _, pop := range popOrder {
+		b := groupByPop[pop]
+		deviceMaps := make([]map[string]any, 0, len(b.devices))
+		group := map[string]any{"pop": pop, "devices": deviceMaps}
+		coords := ""
+		if opts.IncludePopCoordinates {
+			coords = formatPopCoordinates(b.lat, b.lng)
+			if coords != "" {
+				group["latitude"] = *b.lat
+				group["longitude"] = *b.lng
+				group["coordinates"] = coords
+			}
+		}
+		for _, d := range b.devices {
+			deviceMaps = append(deviceMaps, map[string]any{
+				"name": d.Name, "category": d.Category, "label": d.Label,
+			})
+			if opts.IncludePopCoordinates {
+				csvRows = append(csvRows, []string{pop, formatCoordCell(b.lat), formatCoordCell(b.lng), d.Label})
+			} else {
+				csvRows = append(csvRows, []string{pop, d.Label})
+			}
+		}
+		group["devices"] = deviceMaps
+		groups = append(groups, group)
+	}
+
+	var popCount int64
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM pops`).Scan(&popCount)
+
+	base["title"] = "Equipamentos por POP"
+	base["description"] = "Equipamentos agrupados por ponto de presença."
+	base["options"] = map[string]any{
+		"include_without_pop":     opts.IncludeWithoutPop,
+		"include_pop_coordinates": opts.IncludePopCoordinates,
+	}
+	base["columns"] = csvCols
+	base["rows"] = csvRows
+	base["groups"] = groups
+	base["summary"] = map[string]any{
+		"POPs":                 popCount,
+		"Equipamentos (total)": devCount,
+	}
+	return base, nil
+}
+
+func formatCoordCell(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', 6, 64)
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, v := range vals {
+		v = strings.TrimSpace(v)
+		if v != "" && v != "<nil>" {
+			return v
+		}
+	}
+	return "—"
+}
+
+func (s *Server) reportOltOverview(ctx context.Context, pool *pgxpool.Pool, base map[string]any, opts oltOverviewReportOptions) (map[string]any, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT d.id::text, d.description, COALESCE(d.brand, ''), o.updated_at,
 			COALESCE((
@@ -387,51 +878,101 @@ func (s *Server) reportOltOverview(ctx context.Context, pool *pgxpool.Pool, base
 		})
 	}
 
-	since := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	period := normalizeOltOverviewReportOptions(opts).Period
+	periodDays := oltOverviewPeriodDays(period)
+	since := time.Now().UTC().Add(-time.Duration(periodDays) * 24 * time.Hour)
+	if period == "today" {
+		now := time.Now().UTC()
+		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
 	chartPts := []map[string]any{}
-	dayRows, err := pool.Query(ctx, `
-		SELECT (updated_at AT TIME ZONE 'UTC')::date::text AS day,
-			COALESCE(SUM((
-				SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_total'),''))::bigint,0))
-				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
-			)),0)::bigint AS onu_total,
-			COALESCE(SUM((
-				SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_online'),''))::bigint,0))
-				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
-			)),0)::bigint AS onu_online,
-			COALESCE(SUM((
-				SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_offline'),''))::bigint,0))
-				FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
-			)),0)::bigint AS onu_offline
-		FROM olt_snapshots
-		WHERE updated_at >= $1
-		GROUP BY 1 ORDER BY 1
-	`, since)
-	if err == nil {
-		defer dayRows.Close()
-		for dayRows.Next() {
-			var day string
-			var t, on, off int64
-			if dayRows.Scan(&day, &t, &on, &off) == nil {
-				chartPts = append(chartPts, map[string]any{
-					"t": day, "total": t, "online": on, "offline": off,
-				})
+	if period == "today" {
+		hourRows, err := pool.Query(ctx, `
+			SELECT to_char(date_trunc('hour', updated_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') AS bucket,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_total'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_total,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_online'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_online,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_offline'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_offline
+			FROM olt_snapshots
+			WHERE updated_at >= $1
+			GROUP BY 1 ORDER BY 1
+		`, since)
+		if err == nil {
+			defer hourRows.Close()
+			for hourRows.Next() {
+				var bucket string
+				var t, on, off int64
+				if hourRows.Scan(&bucket, &t, &on, &off) == nil {
+					chartPts = append(chartPts, map[string]any{
+						"t": bucket, "total": t, "online": on, "offline": off,
+					})
+				}
+			}
+		}
+	} else {
+		dayRows, err := pool.Query(ctx, `
+			SELECT (updated_at AT TIME ZONE 'UTC')::date::text AS day,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_total'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_total,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_online'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_online,
+				COALESCE(SUM((
+					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_offline'),''))::bigint,0))
+					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pons)='array' THEN pons ELSE '[]'::jsonb END) e
+				)),0)::bigint AS onu_offline
+			FROM olt_snapshots
+			WHERE updated_at >= $1
+			GROUP BY 1 ORDER BY 1
+		`, since)
+		if err == nil {
+			defer dayRows.Close()
+			for dayRows.Next() {
+				var day string
+				var t, on, off int64
+				if dayRows.Scan(&day, &t, &on, &off) == nil {
+					chartPts = append(chartPts, map[string]any{
+						"t": day, "total": t, "online": on, "offline": off,
+					})
+				}
 			}
 		}
 	}
 
+	periodLabel := map[string]string{"today": "Hoje", "3d": "3 dias", "7d": "7 dias", "30d": "30 dias"}[period]
+	if periodLabel == "" {
+		periodLabel = "7 dias"
+	}
 	base["title"] = "OLTs — informações e gráfico"
-	base["description"] = "Estado actual da frota OLT e tendência de snapshots (7 dias)."
+	base["description"] = fmt.Sprintf("Estado actual da frota OLT e tendência de snapshots (%s).", periodLabel)
+	base["options"] = normalizeOltOverviewReportOptions(opts)
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
+		"Período":           periodLabel,
 		"OLTs com snapshot": len(dataRows),
 		"Portas PON":        ponPorts,
 		"ONUs (frota)":      fleetTotal,
 		"Online":            fleetOn,
 		"Offline":           fleetOff,
 	}
-	base["chart"] = map[string]any{"points": chartPts, "label": "ONUs por dia (snapshots)"}
+	chartLabel := "ONUs por dia (snapshots)"
+	if period == "today" {
+		chartLabel = "ONUs por hora (hoje)"
+	}
+	base["chart"] = map[string]any{"points": chartPts, "label": chartLabel}
 	return base, nil
 }
 
@@ -649,7 +1190,7 @@ func (s *Server) reportAttentionDevices(ctx context.Context, pool *pgxpool.Pool,
 	}
 
 	alertRows, err := pool.Query(ctx, `
-		SELECT DISTINCT d.id::text, COALESCE(NULLIF(trim(d.description), ''), '—'),
+		SELECT d.id::text, COALESCE(NULLIF(trim(d.description), ''), '—'),
 			COALESCE(NULLIF(trim(d.category), ''), '—'),
 			COALESCE(host(d.ip)::text, '—'),
 			a.severity, COUNT(*)::bigint
@@ -658,7 +1199,7 @@ func (s *Server) reportAttentionDevices(ctx context.Context, pool *pgxpool.Pool,
 		WHERE a.closed_at IS NULL
 		GROUP BY d.id, d.description, d.category, d.ip, a.severity
 		ORDER BY
-			CASE a.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+			MIN(CASE a.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END),
 			d.description
 	`)
 	if err != nil {

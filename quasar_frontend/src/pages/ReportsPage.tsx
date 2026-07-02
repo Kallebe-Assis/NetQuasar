@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -11,8 +11,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { FileDown, FileText, RefreshCw, Search, Send, X } from "lucide-react";
+import { FileDown, FileText, Eye, Send, X } from "lucide-react";
 import { PageCountPill } from "../components/PageCountPill";
+import { InfoHint } from "../components/InfoHint";
 import { formatBngDateTime } from "../lib/bngDisplay";
 import { isAdminUser } from "../lib/auth";
 import { useAppToast } from "../lib/appToast";
@@ -23,9 +24,219 @@ import {
   fetchSystemReportCatalog,
   sendSystemReportTelegram,
   summaryEntries,
+  type ConnectionsReportOptions,
+  type EquipmentByPopReportOptions,
+  type OltOverviewReportOptions,
   type SystemReportId,
   type SystemReportPayload,
 } from "../lib/systemReports";
+import { apiFetch } from "../lib/api";
+import { SystemReportInfoTooltip } from "../lib/systemReportInfo";
+
+const DEFAULT_EQUIP_POP_OPTS: EquipmentByPopReportOptions = {
+  include_without_pop: false,
+  include_pop_coordinates: false,
+};
+
+const DEFAULT_CONNECTIONS_OPTS: ConnectionsReportOptions = {
+  mode: "detailed",
+  source: "connections",
+};
+
+const DEFAULT_OLT_OPTS: OltOverviewReportOptions = {
+  period: "7d",
+};
+
+type ReportVariant = "screen" | "print";
+
+function ChartDataTable({
+  title,
+  columns,
+  rows,
+}: {
+  title: string;
+  columns: string[];
+  rows: (string | number | null)[][];
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="card system-report-chart-table" style={{ padding: 12, marginTop: 12 }}>
+      <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h3>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {columns.map((c) => (
+                <th key={c}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                {row.map((cell, j) => (
+                  <td key={j}>{cell ?? "—"}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ConnectionsOptionsPanel({
+  value,
+  onChange,
+  bngDevices,
+}: {
+  value: ConnectionsReportOptions;
+  onChange: (next: ConnectionsReportOptions) => void;
+  bngDevices: Array<{ id: string; description: string }>;
+}) {
+  const source = value.source ?? "connections";
+  const mode = value.mode ?? "detailed";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13 }}>
+      <fieldset style={{ border: "none", margin: 0, padding: 0 }}>
+        <legend style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Formato</legend>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 6 }}>
+          <input
+            type="radio"
+            name="conn-mode"
+            checked={mode === "summary"}
+            onChange={() => onChange({ ...value, mode: "summary" })}
+          />
+          Resumido (totais por tipo, meio, plano…)
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="conn-mode"
+            checked={mode === "detailed"}
+            onChange={() => onChange({ ...value, mode: "detailed" })}
+          />
+          Detalhado (cada login)
+        </label>
+      </fieldset>
+      <fieldset style={{ border: "none", margin: 0, padding: 0 }}>
+        <legend style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Fonte de dados</legend>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 6 }}>
+          <input
+            type="radio"
+            name="conn-source"
+            checked={source === "connections"}
+            onChange={() => onChange({ ...value, source: "connections", bng_device_id: undefined })}
+          />
+          Cadastro de conexões
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="conn-source"
+            checked={source === "bng_cache"}
+            onChange={() =>
+              onChange({
+                ...value,
+                source: "bng_cache",
+                bng_device_id: value.bng_device_id || bngDevices[0]?.id,
+              })
+            }
+          />
+          Cache PPPoE do BNG (última consulta SNMP)
+        </label>
+      </fieldset>
+      {source === "bng_cache" && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>BNG</span>
+          <select
+            className="input"
+            value={value.bng_device_id ?? ""}
+            onChange={(e) => onChange({ ...value, bng_device_id: e.target.value })}
+          >
+            <option value="">Selecione o BNG…</option>
+            {bngDevices.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.description}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
+function OltPeriodPanel({
+  value,
+  onChange,
+}: {
+  value: OltOverviewReportOptions;
+  onChange: (next: OltOverviewReportOptions) => void;
+}) {
+  const period = value.period ?? "7d";
+  const options: Array<{ id: OltOverviewReportOptions["period"]; label: string }> = [
+    { id: "today", label: "Hoje (gráfico por hora)" },
+    { id: "3d", label: "Últimos 3 dias" },
+    { id: "7d", label: "Últimos 7 dias" },
+    { id: "30d", label: "Últimos 30 dias" },
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+      {options.map((opt) => (
+        <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="olt-period"
+            checked={period === opt.id}
+            onChange={() => onChange({ period: opt.id })}
+          />
+          {opt.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function EquipmentByPopOptionsPanel({
+  value,
+  onChange,
+  compact,
+}: {
+  value: EquipmentByPopReportOptions;
+  onChange: (next: EquipmentByPopReportOptions) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: compact ? "column" : "row",
+        flexWrap: "wrap",
+        gap: compact ? 10 : 16,
+        fontSize: 12,
+      }}
+    >
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", margin: 0 }}>
+        <input
+          type="checkbox"
+          checked={value.include_without_pop === true}
+          onChange={(e) => onChange({ ...value, include_without_pop: e.target.checked })}
+        />
+        Incluir equipamentos sem POP
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", margin: 0 }}>
+        <input
+          type="checkbox"
+          checked={value.include_pop_coordinates === true}
+          onChange={(e) => onChange({ ...value, include_pop_coordinates: e.target.checked })}
+        />
+        Incluir coordenadas do POP
+      </label>
+    </div>
+  );
+}
 
 function bngChartLabel(iso: string) {
   const d = new Date(iso);
@@ -33,7 +244,17 @@ function bngChartLabel(iso: string) {
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function BngDeviceChart({ device, points, title }: { device?: string; points: NonNullable<SystemReportPayload["chart"]>["points"]; title?: string }) {
+function BngDeviceChart({
+  device,
+  points,
+  title,
+  variant = "screen",
+}: {
+  device?: string;
+  points: NonNullable<SystemReportPayload["chart"]>["points"];
+  title?: string;
+  variant?: ReportVariant;
+}) {
   const data = useMemo(
     () =>
       (points ?? []).map((p) => {
@@ -68,6 +289,25 @@ function BngDeviceChart({ device, points, title }: { device?: string; points: No
   }, [data]);
 
   if (data.length === 0) return null;
+
+  const chartTitle = `${title ?? "Gráfico BNG"}${device ? ` — ${device}` : ""}`;
+
+  if (variant === "print") {
+    return (
+      <ChartDataTable
+        title={chartTitle}
+        columns={["Data", "Total", "PPPoE", "IPv4", "IPv6", "Dual-stack"]}
+        rows={data.map((row) => [
+          row.iso ? new Date(String(row.iso)).toLocaleString("pt-BR") : row.label,
+          row.Total,
+          row.PPPoE,
+          row.IPv4,
+          row.IPv6,
+          row["Dual-stack"],
+        ])}
+      />
+    );
+  }
 
   return (
     <div className="card" style={{ padding: 12, marginTop: 12 }}>
@@ -139,7 +379,7 @@ function BngReportAverages({ payload }: { payload: SystemReportPayload }) {
   );
 }
 
-function BngReportChart({ payload }: { payload: SystemReportPayload }) {
+function BngReportChart({ payload, variant = "screen" }: { payload: SystemReportPayload; variant?: ReportVariant }) {
   const pts = payload.chart?.points ?? [];
   const byDevice = useMemo(() => {
     const map = new Map<string, typeof pts>();
@@ -156,19 +396,19 @@ function BngReportChart({ payload }: { payload: SystemReportPayload }) {
 
   if (byDevice.size <= 1) {
     const only = [...byDevice.values()][0] ?? pts;
-    return <BngDeviceChart points={only} title={payload.chart?.label} />;
+    return <BngDeviceChart points={only} title={payload.chart?.label} variant={variant} />;
   }
 
   return (
     <>
       {[...byDevice.entries()].map(([device, devicePts]) => (
-        <BngDeviceChart key={device} device={device} points={devicePts} title={payload.chart?.label} />
+        <BngDeviceChart key={device} device={device} points={devicePts} title={payload.chart?.label} variant={variant} />
       ))}
     </>
   );
 }
 
-function ReportChart({ payload }: { payload: SystemReportPayload }) {
+function ReportChart({ payload, variant = "screen" }: { payload: SystemReportPayload; variant?: ReportVariant }) {
   const pts = payload.chart?.points ?? [];
   if (pts.length === 0) return null;
   const data = pts.map((p) => ({
@@ -177,6 +417,17 @@ function ReportChart({ payload }: { payload: SystemReportPayload }) {
     Online: Number(p.online ?? 0),
     Offline: Number(p.offline ?? 0),
   }));
+
+  if (variant === "print") {
+    return (
+      <ChartDataTable
+        title={payload.chart?.label ?? "Gráfico"}
+        columns={["Período", "Total", "Online", "Offline"]}
+        rows={data.map((row) => [row.label, row.Total, row.Online, row.Offline])}
+      />
+    );
+  }
+
   return (
     <div className="card" style={{ padding: 12, marginTop: 12 }}>
       <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>{payload.chart?.label ?? "Gráfico"}</h3>
@@ -196,10 +447,45 @@ function ReportChart({ payload }: { payload: SystemReportPayload }) {
   );
 }
 
-function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
+function EquipmentByPopReport({ payload }: { payload: SystemReportPayload }) {
+  const groups = payload.groups ?? [];
+  if (groups.length === 0) return null;
+  return (
+    <section>
+      <h3 style={{ fontSize: 14, margin: "0 0 10px" }}>Equipamentos por POP</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {groups.map((g) => (
+          <div key={g.pop ?? "sem-pop"} className="card" style={{ padding: "12px 14px", margin: 0 }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>{g.pop || "(sem POP)"}</h4>
+            {g.coordinates ? (
+              <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--muted)" }} className="mono">
+                {g.coordinates}
+              </p>
+            ) : null}
+            {(g.devices ?? []).length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Sem equipamentos.</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.55 }}>
+                {(g.devices ?? []).map((d) => (
+                  <li key={`${g.pop}-${d.label ?? d.name}`}>
+                    {d.label || (d.name && d.category ? `${d.name} [${d.category}]` : d.name || "—")}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportPreviewBody({ payload, variant = "screen" }: { payload: SystemReportPayload; variant?: ReportVariant }) {
   const summary = summaryEntries(payload.summary);
   const cols = payload.columns ?? [];
   const rows = payload.rows ?? [];
+  const isPrint = variant === "print";
+  const visibleRows = isPrint ? rows : rows.slice(0, 500);
   return (
     <div className="system-report-print">
       <header style={{ marginBottom: 16 }}>
@@ -230,16 +516,20 @@ function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
         </section>
       )}
 
-      {payload.report_id === "olt-overview" && <ReportChart payload={payload} />}
+      {payload.report_id === "olt-overview" && <ReportChart payload={payload} variant={variant} />}
       {payload.report_id === "bng-subscribers" && <BngReportAverages payload={payload} />}
-      {payload.report_id === "bng-subscribers" && <BngReportChart payload={payload} />}
+      {payload.report_id === "bng-subscribers" && <BngReportChart payload={payload} variant={variant} />}
 
-      {rows.length > 0 && (
+      {payload.report_id === "equipment-by-pop" && (payload.groups?.length ?? 0) > 0 ? (
+        <EquipmentByPopReport payload={payload} />
+      ) : null}
+
+      {payload.report_id !== "equipment-by-pop" && rows.length > 0 && (
         <section>
           <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>
             Detalhes <span style={{ color: "var(--muted)", fontWeight: 400 }}>({rows.length} linhas)</span>
           </h3>
-          <div className="table-wrap" style={{ maxHeight: 420, overflow: "auto" }}>
+          <div className={`table-wrap${isPrint ? " system-report-print-table" : ""}`} style={isPrint ? undefined : { maxHeight: 420, overflow: "auto" }}>
             <table>
               <thead>
                 <tr>
@@ -249,14 +539,18 @@ function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 500).map((row, i) => (
+                {visibleRows.map((row, i) => (
                   <tr key={i}>
                     {row.map((cell, j) => {
                       const col = cols[j] ?? "";
                       const display =
                         col === "Última coleta" && cell ? formatBngDateTime(cell) : cell || "—";
                       return (
-                        <td key={j} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }} title={display}>
+                        <td
+                          key={j}
+                          style={isPrint ? undefined : { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}
+                          title={isPrint ? undefined : display}
+                        >
                           {display}
                         </td>
                       );
@@ -266,12 +560,39 @@ function ReportPreviewBody({ payload }: { payload: SystemReportPayload }) {
               </tbody>
             </table>
           </div>
-          {rows.length > 500 && (
+          {!isPrint && rows.length > 500 && (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>Pré-visualização limitada a 500 linhas. Exporte CSV para o conjunto completo.</p>
           )}
         </section>
       )}
     </div>
+  );
+}
+
+type EquipPopAction = "preview" | "csv" | "pdf" | "telegram";
+
+function ReportIconButton({
+  title,
+  onClick,
+  disabled,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="btn btn--icon-menu"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -281,97 +602,305 @@ function ReportCard({
   description,
   onOpen,
   onPrint,
+  onCsv,
+  onTelegram,
+  printPending,
+  csvPending,
+  tgPending,
+  onEquipPopRequest,
+  onConnectionsRequest,
+  onOltRequest,
 }: {
   id: SystemReportId;
   title: string;
   description: string;
   onOpen: (id: SystemReportId) => void;
   onPrint: (id: SystemReportId) => void;
+  onCsv: (id: SystemReportId) => void;
+  onTelegram: (id: SystemReportId) => void;
+  printPending: boolean;
+  csvPending: boolean;
+  tgPending: boolean;
+  onEquipPopRequest: (action: EquipPopAction) => void;
+  onConnectionsRequest: (action: EquipPopAction) => void;
+  onOltRequest: (action: EquipPopAction) => void;
 }) {
   const admin = isAdminUser();
-  const { push: pushToast } = useAppToast();
 
-  const csvMut = useMutation({
-    mutationFn: () => downloadSystemReportCsv(id),
-    onSuccess: () => pushToast({ tone: "ok", text: "CSV descarregado." }),
-    onError: (e) => toastErr(pushToast, e, "Falha ao exportar CSV"),
-  });
-
-  const tgMut = useMutation({
-    mutationFn: () => sendSystemReportTelegram(id),
-    onSuccess: () => toastOk(pushToast, "Relatório enviado ao Telegram."),
-    onError: (e) => toastErr(pushToast, e, "Falha ao enviar Telegram"),
-  });
+  const runOrModal = (action: EquipPopAction, fn: () => void) => {
+    if (id === "equipment-by-pop") {
+      onEquipPopRequest(action);
+      return;
+    }
+    if (id === "connections") {
+      onConnectionsRequest(action);
+      return;
+    }
+    if (id === "olt-overview") {
+      onOltRequest(action);
+      return;
+    }
+    fn();
+  };
 
   return (
-    <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div>
-        <h3 style={{ margin: "0 0 6px", fontSize: 15 }}>{title}</h3>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.45 }}>{description}</p>
+    <div
+      className="card report-list-card"
+      style={{
+        padding: "10px 12px",
+        margin: 0,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minHeight: 0,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 14,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {title}
+        </h3>
+        <p
+          style={{
+            margin: "2px 0 0",
+            fontSize: 12,
+            color: "var(--muted)",
+            lineHeight: 1.35,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {description}
+        </p>
       </div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: "auto" }}>
-        <button type="button" className="btn btn--primary" onClick={() => onOpen(id)}>
-          Ver relatório
-        </button>
-        <button type="button" className="btn" disabled={csvMut.isPending} onClick={() => csvMut.mutate()}>
-          <FileDown size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-          CSV
-        </button>
-        <button type="button" className="btn" onClick={() => onPrint(id)}>
-          <FileText size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-          PDF
-        </button>
-        {admin && (
-          <button type="button" className="btn" disabled={tgMut.isPending} onClick={() => tgMut.mutate()}>
-            <Send size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            Telegram
-          </button>
-        )}
+
+      <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+        <ReportIconButton title="Ver relatório" onClick={() => runOrModal("preview", () => onOpen(id))}>
+          <Eye size={16} />
+        </ReportIconButton>
+        <ReportIconButton title="Exportar CSV" disabled={csvPending} onClick={() => runOrModal("csv", () => onCsv(id))}>
+          <FileDown size={16} />
+        </ReportIconButton>
+        <ReportIconButton title="PDF / Imprimir" disabled={printPending} onClick={() => runOrModal("pdf", () => onPrint(id))}>
+          <FileText size={16} />
+        </ReportIconButton>
+        {admin ? (
+          <ReportIconButton title="Enviar Telegram" disabled={tgPending} onClick={() => runOrModal("telegram", () => onTelegram(id))}>
+            <Send size={16} />
+          </ReportIconButton>
+        ) : null}
       </div>
+
+      <InfoHint label={`Informação: ${title}`} className="info-hint--align-end">
+        <SystemReportInfoTooltip id={id} />
+      </InfoHint>
     </div>
   );
 }
 
 export function ReportsPage() {
   const [previewId, setPreviewId] = useState<SystemReportId | null>(null);
-  const [printOnLoad, setPrintOnLoad] = useState(false);
+  const [printPayload, setPrintPayload] = useState<SystemReportPayload | null>(null);
   const [search, setSearch] = useState("");
-  const printRef = useRef<HTMLDivElement>(null);
+  const [equipPopOpts, setEquipPopOpts] = useState<EquipmentByPopReportOptions>(DEFAULT_EQUIP_POP_OPTS);
+  const [connectionsOpts, setConnectionsOpts] = useState<ConnectionsReportOptions>(DEFAULT_CONNECTIONS_OPTS);
+  const [oltOpts, setOltOpts] = useState<OltOverviewReportOptions>(DEFAULT_OLT_OPTS);
+  const [previewEquipPopOpts, setPreviewEquipPopOpts] = useState<EquipmentByPopReportOptions | null>(null);
+  const [previewConnectionsOpts, setPreviewConnectionsOpts] = useState<ConnectionsReportOptions | null>(null);
+  const [previewOltOpts, setPreviewOltOpts] = useState<OltOverviewReportOptions | null>(null);
+  const [equipPopModal, setEquipPopModal] = useState<{
+    draft: EquipmentByPopReportOptions;
+    action: EquipPopAction;
+  } | null>(null);
+  const [connectionsModal, setConnectionsModal] = useState<{
+    draft: ConnectionsReportOptions;
+    action: EquipPopAction;
+  } | null>(null);
+  const [oltModal, setOltModal] = useState<{
+    draft: OltOverviewReportOptions;
+    action: EquipPopAction;
+  } | null>(null);
   const admin = isAdminUser();
   const { push: pushToast } = useAppToast();
+
+  const triggerPrint = useCallback((payload: SystemReportPayload) => {
+    setPrintPayload(payload);
+  }, []);
+
+  useEffect(() => {
+    if (!printPayload) return;
+
+    const cleanup = () => {
+      document.body.classList.remove("print-system-report");
+      setPrintPayload(null);
+    };
+
+    const onAfterPrint = () => cleanup();
+    window.addEventListener("afterprint", onAfterPrint);
+
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.body.classList.add("print-system-report");
+        window.print();
+      });
+    });
+
+    const fallback = window.setTimeout(cleanup, 3000);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(fallback);
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+  }, [printPayload]);
 
   const catalog = useQuery({
     queryKey: ["system-reports-catalog"],
     queryFn: fetchSystemReportCatalog,
   });
 
+  const bngDevices = useQuery({
+    queryKey: ["bng-devices-report-modal"],
+    queryFn: () => apiFetch<{ devices: Array<{ id: string; description: string }> }>("/api/v1/bng/devices"),
+    enabled: connectionsModal != null,
+  });
+
+  const previewReportOpts = useMemo(() => {
+    if (previewId === "equipment-by-pop") return previewEquipPopOpts ?? equipPopOpts;
+    if (previewId === "connections") return previewConnectionsOpts ?? connectionsOpts;
+    if (previewId === "olt-overview") return previewOltOpts ?? oltOpts;
+    return undefined;
+  }, [previewId, previewEquipPopOpts, equipPopOpts, previewConnectionsOpts, connectionsOpts, previewOltOpts, oltOpts]);
+
   const preview = useQuery({
-    queryKey: ["system-report", previewId],
-    queryFn: () => fetchSystemReport(previewId!),
+    queryKey: ["system-report", previewId, previewReportOpts],
+    queryFn: () => fetchSystemReport(previewId!, previewReportOpts as never),
     enabled: previewId != null,
   });
 
-  const openReport = useCallback((id: SystemReportId, print = false) => {
-    setPrintOnLoad(print);
+  const openReport = useCallback((id: SystemReportId) => {
+    setPreviewEquipPopOpts(null);
+    setPreviewConnectionsOpts(null);
+    setPreviewOltOpts(null);
     setPreviewId(id);
   }, []);
 
-  const handlePrint = useCallback(() => {
-    document.body.classList.add("print-system-report");
-    window.print();
-    window.setTimeout(() => document.body.classList.remove("print-system-report"), 800);
-  }, []);
+  const runEquipPopAction = useCallback(
+    (opts: EquipmentByPopReportOptions, action: EquipPopAction) => {
+      setEquipPopOpts(opts);
+      setPreviewEquipPopOpts(opts);
+      if (action === "preview") {
+        setPreviewId("equipment-by-pop");
+        return;
+      }
+      if (action === "csv") {
+        void downloadSystemReportCsv("equipment-by-pop", opts)
+          .then(() => pushToast({ tone: "ok", text: "CSV descarregado." }))
+          .catch((e) => toastErr(pushToast, e, "Falha ao exportar CSV"));
+        return;
+      }
+      if (action === "pdf") {
+        void fetchSystemReport("equipment-by-pop", opts)
+          .then((data) => triggerPrint(data))
+          .catch((e) => toastErr(pushToast, e, "Falha ao preparar PDF"));
+        return;
+      }
+      if (action === "telegram") {
+        void sendSystemReportTelegram("equipment-by-pop", opts)
+          .then(() => toastOk(pushToast, "Relatório enviado ao Telegram."))
+          .catch((e) => toastErr(pushToast, e, "Falha ao enviar Telegram"));
+      }
+    },
+    [pushToast, triggerPrint],
+  );
 
-  const tgMut = useMutation({
-    mutationFn: (id: SystemReportId) => sendSystemReportTelegram(id),
-    onSuccess: () => toastOk(pushToast, "Relatório enviado ao Telegram."),
-    onError: (e) => toastErr(pushToast, e, "Falha ao enviar Telegram"),
+  const runConnectionsAction = useCallback(
+    (opts: ConnectionsReportOptions, action: EquipPopAction) => {
+      if (opts.source === "bng_cache" && !opts.bng_device_id) {
+        pushToast({ tone: "err", text: "Selecione o BNG para o cache PPPoE." });
+        return;
+      }
+      setConnectionsOpts(opts);
+      setPreviewConnectionsOpts(opts);
+      if (action === "preview") {
+        setPreviewId("connections");
+        return;
+      }
+      if (action === "csv") {
+        void downloadSystemReportCsv("connections", opts)
+          .then(() => pushToast({ tone: "ok", text: "CSV descarregado." }))
+          .catch((e) => toastErr(pushToast, e, "Falha ao exportar CSV"));
+        return;
+      }
+      if (action === "pdf") {
+        void fetchSystemReport("connections", opts)
+          .then((data) => triggerPrint(data))
+          .catch((e) => toastErr(pushToast, e, "Falha ao preparar PDF"));
+        return;
+      }
+      if (action === "telegram") {
+        void sendSystemReportTelegram("connections", opts)
+          .then(() => toastOk(pushToast, "Relatório enviado ao Telegram."))
+          .catch((e) => toastErr(pushToast, e, "Falha ao enviar Telegram"));
+      }
+    },
+    [pushToast, triggerPrint],
+  );
+
+  const runOltAction = useCallback(
+    (opts: OltOverviewReportOptions, action: EquipPopAction) => {
+      setOltOpts(opts);
+      setPreviewOltOpts(opts);
+      if (action === "preview") {
+        setPreviewId("olt-overview");
+        return;
+      }
+      if (action === "csv") {
+        void downloadSystemReportCsv("olt-overview", opts)
+          .then(() => pushToast({ tone: "ok", text: "CSV descarregado." }))
+          .catch((e) => toastErr(pushToast, e, "Falha ao exportar CSV"));
+        return;
+      }
+      if (action === "pdf") {
+        void fetchSystemReport("olt-overview", opts)
+          .then((data) => triggerPrint(data))
+          .catch((e) => toastErr(pushToast, e, "Falha ao preparar PDF"));
+        return;
+      }
+      if (action === "telegram") {
+        void sendSystemReportTelegram("olt-overview", opts)
+          .then(() => toastOk(pushToast, "Relatório enviado ao Telegram."))
+          .catch((e) => toastErr(pushToast, e, "Falha ao enviar Telegram"));
+      }
+    },
+    [pushToast, triggerPrint],
+  );
+
+  const printMut = useMutation({
+    mutationFn: (id: SystemReportId) => fetchSystemReport(id),
+    onSuccess: (data) => triggerPrint(data),
+    onError: (e) => toastErr(pushToast, e, "Falha ao preparar PDF"),
   });
 
   const csvMut = useMutation({
     mutationFn: (id: SystemReportId) => downloadSystemReportCsv(id),
     onSuccess: () => pushToast({ tone: "ok", text: "CSV descarregado." }),
     onError: (e) => toastErr(pushToast, e, "Falha ao exportar CSV"),
+  });
+
+  const tgMut = useMutation({
+    mutationFn: (id: SystemReportId) => sendSystemReportTelegram(id),
+    onSuccess: () => toastOk(pushToast, "Relatório enviado ao Telegram."),
+    onError: (e) => toastErr(pushToast, e, "Falha ao enviar Telegram"),
   });
 
   const items = useMemo(() => {
@@ -392,50 +921,171 @@ export function ReportsPage() {
         <h1>Relatórios</h1>
         <PageCountPill label="Relatórios" count={items.length} />
       </div>
-      <p style={{ color: "var(--muted)", marginTop: 0, maxWidth: 720 }}>
-        Relatórios operacionais com exportação CSV, impressão em PDF e envio em texto simples ao canal Telegram de relatórios
-        {admin ? "" : " (Telegram requer perfil administrador)"}.
-      </p>
-      <div className="row" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <label className="row" style={{ gap: 8, alignItems: "center", flex: "1 1 280px", minWidth: 220 }}>
-          <Search size={16} style={{ color: "var(--muted)", flexShrink: 0 }} aria-hidden />
-          <input
-            className="input"
-            type="search"
-            placeholder="Pesquisar relatório…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%" }}
-          />
-        </label>
-        <button type="button" className="btn" onClick={() => catalog.refetch()}>
-          <RefreshCw size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-          Actualizar lista
-        </button>
+
+      <div style={{ marginBottom: 12, maxWidth: 360 }}>
+        <input
+          className="input"
+          type="search"
+          placeholder="Pesquisar relatório…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: "100%" }}
+        />
       </div>
 
       {items.length === 0 ? (
         <p style={{ color: "var(--muted)" }}>Nenhum relatório corresponde à pesquisa.</p>
       ) : (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {items.map((r) => (
           <ReportCard
             key={r.id}
             id={r.id as SystemReportId}
             title={r.title}
             description={r.description}
-            onOpen={(id) => openReport(id, false)}
-            onPrint={(id) => openReport(id, true)}
+            onOpen={openReport}
+            onPrint={(id) => printMut.mutate(id)}
+            onCsv={(id) => csvMut.mutate(id)}
+            onTelegram={(id) => tgMut.mutate(id)}
+            printPending={printMut.isPending}
+            csvPending={csvMut.isPending}
+            tgPending={tgMut.isPending}
+            onEquipPopRequest={(action) =>
+              setEquipPopModal({ draft: { ...equipPopOpts }, action })
+            }
+            onConnectionsRequest={(action) =>
+              setConnectionsModal({ draft: { ...connectionsOpts }, action })
+            }
+            onOltRequest={(action) => setOltModal({ draft: { ...oltOpts }, action })}
           />
         ))}
       </div>
       )}
+
+      {equipPopModal &&
+        createPortal(
+          <div className="modal-backdrop" role="presentation" onClick={() => setEquipPopModal(null)}>
+            <div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="equip-pop-modal-title"
+              style={{ width: "min(420px, 94vw)", padding: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <h2 id="equip-pop-modal-title" style={{ margin: 0, fontSize: 17 }}>
+                  Equipamentos por POP
+                </h2>
+                <button type="button" className="btn btn--icon-menu" aria-label="Fechar" onClick={() => setEquipPopModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <EquipmentByPopOptionsPanel
+                compact
+                value={equipPopModal.draft}
+                onChange={(next) => setEquipPopModal((m) => (m ? { ...m, draft: next } : m))}
+              />
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    const { draft, action } = equipPopModal;
+                    setEquipPopModal(null);
+                    runEquipPopAction(draft, action);
+                  }}
+                >
+                  Gerar relatório
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {connectionsModal &&
+        createPortal(
+          <div className="modal-backdrop" role="presentation" onClick={() => setConnectionsModal(null)}>
+            <div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="connections-modal-title"
+              style={{ width: "min(460px, 94vw)", padding: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <h2 id="connections-modal-title" style={{ margin: 0, fontSize: 17 }}>
+                  Conexões de clientes
+                </h2>
+                <button type="button" className="btn btn--icon-menu" aria-label="Fechar" onClick={() => setConnectionsModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <ConnectionsOptionsPanel
+                value={connectionsModal.draft}
+                onChange={(next) => setConnectionsModal((m) => (m ? { ...m, draft: next } : m))}
+                bngDevices={bngDevices.data?.devices ?? []}
+              />
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    const { draft, action } = connectionsModal;
+                    setConnectionsModal(null);
+                    runConnectionsAction(draft, action);
+                  }}
+                >
+                  Gerar relatório
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {oltModal &&
+        createPortal(
+          <div className="modal-backdrop" role="presentation" onClick={() => setOltModal(null)}>
+            <div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="olt-modal-title"
+              style={{ width: "min(420px, 94vw)", padding: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <h2 id="olt-modal-title" style={{ margin: 0, fontSize: 17 }}>
+                  OLTs — período
+                </h2>
+                <button type="button" className="btn btn--icon-menu" aria-label="Fechar" onClick={() => setOltModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <OltPeriodPanel
+                value={oltModal.draft}
+                onChange={(next) => setOltModal((m) => (m ? { ...m, draft: next } : m))}
+              />
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    const { draft, action } = oltModal;
+                    setOltModal(null);
+                    runOltAction(draft, action);
+                  }}
+                >
+                  Gerar relatório
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {previewId != null &&
         createPortal(
@@ -458,11 +1108,13 @@ export function ReportsPage() {
               {preview.isError && <div className="msg msg--err">{(preview.error as Error).message}</div>}
               {preview.data && (
                 <>
-                  <div ref={printRef}>
-                    <ReportPreviewBody payload={preview.data} />
-                  </div>
+                  <ReportPreviewBody payload={preview.data} />
                   <div className="row no-print" style={{ gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-                    <button type="button" className="btn btn--primary" onClick={handlePrint}>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => triggerPrint(preview.data!)}
+                    >
                       <FileText size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
                       PDF / Imprimir
                     </button>
@@ -470,7 +1122,17 @@ export function ReportsPage() {
                       type="button"
                       className="btn"
                       disabled={csvMut.isPending}
-                      onClick={() => csvMut.mutate(previewId)}
+                      onClick={() => {
+                        if (previewId === "equipment-by-pop") {
+                          runEquipPopAction(previewEquipPopOpts ?? equipPopOpts, "csv");
+                        } else if (previewId === "connections") {
+                          runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "csv");
+                        } else if (previewId === "olt-overview") {
+                          runOltAction(previewOltOpts ?? oltOpts, "csv");
+                        } else {
+                          csvMut.mutate(previewId);
+                        }
+                      }}
                     >
                       <FileDown size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
                       CSV
@@ -480,7 +1142,17 @@ export function ReportsPage() {
                         type="button"
                         className="btn"
                         disabled={tgMut.isPending}
-                        onClick={() => tgMut.mutate(previewId)}
+                        onClick={() => {
+                          if (previewId === "equipment-by-pop") {
+                            runEquipPopAction(previewEquipPopOpts ?? equipPopOpts, "telegram");
+                          } else if (previewId === "connections") {
+                            runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "telegram");
+                          } else if (previewId === "olt-overview") {
+                            runOltAction(previewOltOpts ?? oltOpts, "telegram");
+                          } else {
+                            tgMut.mutate(previewId);
+                          }
+                        }}
                       >
                         <Send size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
                         Telegram
@@ -494,20 +1166,13 @@ export function ReportsPage() {
           document.body,
         )}
 
-      {preview.data && printOnLoad && !preview.isLoading && (
-        <AutoPrint onReady={handlePrint} onDone={() => setPrintOnLoad(false)} />
-      )}
+      {printPayload &&
+        createPortal(
+          <div id="system-report-print-root" className="system-report-print-document" aria-hidden="true">
+            <ReportPreviewBody payload={printPayload} variant="print" />
+          </div>,
+          document.body,
+        )}
     </>
   );
-}
-
-function AutoPrint({ onReady, onDone }: { onReady: () => void; onDone: () => void }) {
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      onReady();
-      onDone();
-    }, 500);
-    return () => window.clearTimeout(t);
-  }, [onReady, onDone]);
-  return null;
 }

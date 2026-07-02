@@ -91,6 +91,57 @@ func FetchSessionDetailMaps(ctx context.Context, host, community string, profile
 	return out
 }
 
+// FetchSessionsByIndices obtém detalhes SNMP em tempo real para índices hwAccess específicos.
+func FetchSessionsByIndices(ctx context.Context, host, community string, profile Profile, indices []string, timeout time.Duration) []SessionRow {
+	host = strings.TrimSpace(host)
+	community = strings.TrimSpace(community)
+	if host == "" || community == "" || len(indices) == 0 {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = 12 * time.Second
+	}
+	profile = profileWithSessionWalksEnabled(profile)
+	stripSuffix := profile.Options.PPPoELoginStripSuffix
+	out := make([]SessionRow, 0, len(indices))
+	for _, idx := range indices {
+		idx = strings.TrimSpace(idx)
+		if idx == "" {
+			continue
+		}
+		columnMaps := map[string]map[string]string{}
+		loginBase := metricBaseOID(profile, "access_login")
+		vars, _ := probing.SNMPGetMany(ctx, host, community, "2c", 8*time.Second, 1, []string{loginBase + "." + idx}, 1)
+		loginVal := ""
+		for _, v := range vars {
+			if strings.TrimSpace(v.Value) != "" {
+				loginVal = strings.TrimSpace(v.Value)
+				break
+			}
+		}
+		if loginVal != "" {
+			columnMaps["access_login"] = map[string]string{idx: NormalizeSNMPLoginValue(loginVal, stripSuffix)}
+		}
+		for key, m := range FetchSessionDetailMaps(ctx, host, community, profile, idx, timeout) {
+			columnMaps[key] = m
+		}
+		merged := mergeSessionMaps(columnMaps, true)
+		if len(merged) > 0 {
+			rows := ApplyLoginStripToSessions(merged, stripSuffix)
+			out = append(out, rows[0])
+			continue
+		}
+		if loginVal != "" {
+			out = append(out, SessionRow{
+				Index:  idx,
+				Login:  NormalizeSNMPLoginValue(loginVal, stripSuffix),
+				Status: "Up",
+			})
+		}
+	}
+	return out
+}
+
 func metricBaseOID(profile Profile, key string) string {
 	def := profile.Metrics[key]
 	base := strings.TrimSpace(def.OID)

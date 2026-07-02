@@ -54,6 +54,7 @@ const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
 ];
 
 const ICON_SZ = 16;
+const ICON_SZ_MOBILE = 14;
 const ICON_STROKE = 2;
 
 function useIsMobileNav() {
@@ -227,28 +228,35 @@ export function ShellLayout() {
             </button>
           ) : null}
         </div>
-        <nav>
-          {navItems.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.to === APP_ROUTES.integrations}
-              className={({ isActive }) => (isActive ? "active" : "")}
-              title={n.label}
-              onClick={closeMobileNav}
-            >
-              <span
-                className={`sidebar__nav-icon${n.icons.length > 1 ? " sidebar__nav-icon--pair" : ""}`}
-                aria-hidden
+        <div className="sidebar__nav-scroll">
+          <nav>
+            {navItems.map((n) => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                end={n.to === APP_ROUTES.integrations}
+                className={({ isActive }) => (isActive ? "active" : "")}
+                title={n.label}
+                onClick={closeMobileNav}
               >
-                {n.icons.map((Icon, i) => (
-                  <Icon key={i} size={ICON_SZ} strokeWidth={ICON_STROKE} className="sidebar__nav-icon__svg" />
-                ))}
-              </span>
-              <span className="sidebar__nav-label">{n.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+                <span
+                  className={`sidebar__nav-icon${n.icons.length > 1 ? " sidebar__nav-icon--pair" : ""}`}
+                  aria-hidden
+                >
+                  {n.icons.map((Icon, i) => (
+                    <Icon
+                      key={i}
+                      size={isMobileNav ? ICON_SZ_MOBILE : ICON_SZ}
+                      strokeWidth={ICON_STROKE}
+                      className="sidebar__nav-icon__svg"
+                    />
+                  ))}
+                </span>
+                <span className="sidebar__nav-label">{n.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </div>
         <div className="sidebar__foot">
           <div className="sidebar__user" title="Sessão actual">
             {getStoredUserDisplayLabel() || "Usuário"}

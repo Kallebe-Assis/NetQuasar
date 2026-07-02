@@ -43,6 +43,7 @@ type BngCollectionResponse = {
 
 type BngCollectionOptions = {
   pppoe_login_strip_suffix?: string;
+  uplink_interfaces?: string[];
 };
 
 const SECTION_ORDER = ["system", "health", "subscribers", "pppoe"];
@@ -241,6 +242,31 @@ export function BngCollectionPanel() {
             placeholder="@g2.com.br"
             value={options.pppoe_login_strip_suffix ?? ""}
             onChange={(e) => setOptions((prev) => ({ ...prev, pppoe_login_strip_suffix: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Links BGP (tráfego uplink)</h3>
+        <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+          Nomes das interfaces de uplink para medir download/upload por rota (ex.:{" "}
+          <span className="mono">WAN-BGP</span>, <span className="mono">VLAN-254-BGP</span>). Um nome por linha ou
+          separados por vírgula. Se vazio, detecta interfaces com «BGP» ou «WAN-BGP» no nome.
+        </p>
+        <div className="field" style={{ maxWidth: 480, margin: 0 }}>
+          <label style={{ fontSize: 11 }}>Interfaces de uplink</label>
+          <textarea
+            className="input mono"
+            rows={3}
+            placeholder={"WAN-BGP\nVLAN-254-BGP"}
+            value={(options.uplink_interfaces ?? []).join("\n")}
+            onChange={(e) => {
+              const parts = e.target.value
+                .split(/[\n,;]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              setOptions((prev) => ({ ...prev, uplink_interfaces: parts.length > 0 ? parts : undefined }));
+            }}
           />
         </div>
       </div>

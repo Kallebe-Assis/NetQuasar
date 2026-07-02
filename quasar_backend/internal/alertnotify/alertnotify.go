@@ -169,6 +169,23 @@ func ResolutionStatusLine(alertType, originalMessage string) string {
 	}
 }
 
+func alertTelegramContextFromRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (alertType string, meta map[string]any) {
+	if pool == nil {
+		return "", nil
+	}
+	var metaRaw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(alert_type, ''), COALESCE(meta::text, '{}')
+		FROM alert_instances WHERE id = $1
+	`, alertID).Scan(&alertType, &metaRaw)
+	if err != nil {
+		return "", nil
+	}
+	meta = map[string]any{}
+	_ = json.Unmarshal(metaRaw, &meta)
+	return strings.TrimSpace(alertType), meta
+}
+
 func equipIPFromAlertRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (equip string, ip string) {
 	if pool == nil {
 		return "", ""
@@ -331,7 +348,152 @@ func formatDurationPT(d time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
+func metaFloat(meta map[string]any, keys ...string) float64 {
+	if meta == nil {
+		return 0
+	}
+	for _, key := range keys {
+		v, ok := meta[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch n := v.(type) {
+		case float64:
+			if n != 0 {
+				return n
+			}
+		case int:
+			if n != 0 {
+				return float64(n)
+			}
+		case int64:
+			if n != 0 {
+				return float64(n)
+			}
+		default:
+			s := strings.TrimSpace(fmt.Sprint(v))
+			if s == "" || s == "0" {
+				continue
+			}
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64); err == nil && f != 0 {
+				return f
+			}
+		}
+	}
+	return 0
+}
+
+func metaInt(meta map[string]any, keys ...string) int {
+	f := metaFloat(meta, keys...)
+	if f <= 0 {
+		return 0
+	}
+	return int(f)
+}
+
+func metaString(meta map[string]any, keys ...string) string {
+	if meta == nil {
+		return ""
+	}
+	for _, key := range keys {
+		v, ok := meta[key]
+		if !ok || v == nil {
+			continue
+		}
+		if s := strings.TrimSpace(fmt.Sprint(v)); s != "" && s != "<nil>" {
+			return s
+		}
+	}
+	return ""
+}
+
+func appendUptimeTelegramLines(parts []string, meta map[string]any, title, inc string) []string {
+	parts = append(parts, "• Possível reinício — uptime abaixo do limiar")
+	observed := metaFloat(meta, "observed_uptime_minutes", "uptime_minutes", "value")
+	threshold := metaInt(meta, "threshold_minutes")
+	if observed <= 0 {
+		if m := regexp.MustCompile(`(-?\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?)?`).FindStringSubmatch(inc); len(m) >= 2 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+				observed = f
+			}
+		}
+	}
+	if observed > 0 {
+		line := fmt.Sprintf("• Uptime = %.0f min", observed)
+		if threshold > 0 {
+			line += fmt.Sprintf(" (limite %d min)", threshold)
+		}
+		parts = append(parts, line)
+		return parts
+	}
+	if vt := metaString(meta, "value_text"); vt != "" {
+		parts = append(parts, "• Uptime = "+vt)
+	} else if strings.Contains(strings.ToLower(title+" "+inc), "uptime") {
+		parts = append(parts, "• Uptime abaixo do limiar configurado")
+	}
+	return parts
+}
+
+func appendOltOnuDeltaTelegramLines(parts []string, alertType string, meta map[string]any, inc string) []string {
+	pon := metaString(meta, "pon")
+	if pon == "" {
+		if tgt := incidentTarget(inc); strings.HasPrefix(strings.ToLower(tgt), "pon ") {
+			pon = strings.TrimSpace(strings.TrimPrefix(tgt, "PON"))
+		}
+	}
+	if pon != "" {
+		parts = append(parts, "• PON "+pon)
+	}
+
+	delta := metaFloat(meta, "drop_online_count")
+	pct := metaFloat(meta, "drop_online_pct")
+	verb := "Queda"
+	if alertType == "olt_onu_rise" {
+		delta = metaFloat(meta, "rise_online_count")
+		pct = metaFloat(meta, "rise_online_pct")
+		verb = "Subida"
+	}
+	prev := metaFloat(meta, "prev_online")
+	cur := metaFloat(meta, "curr_online")
+
+	if delta <= 0 && pct <= 0 {
+		if m := regexp.MustCompile(`(?i)(?:queda|subida)\s+de\s+(-?\d+(?:[.,]\d+)?)\s+ONUs`).FindStringSubmatch(inc); len(m) >= 2 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+				delta = f
+			}
+		}
+		if m := regexp.MustCompile(`\((-?\d+(?:[.,]\d+)?)\s*%\s*de`).FindStringSubmatch(inc); len(m) >= 2 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+				pct = f
+			}
+		}
+		if m := regexp.MustCompile(`(?i)(?:de|vs\.?)\s+(-?\d+(?:[.,]\d+)?)\)`).FindStringSubmatch(inc); len(m) >= 2 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil && prev <= 0 {
+				prev = f
+			}
+		}
+	}
+
+	if delta > 0 {
+		line := fmt.Sprintf("• %s de %.0f ONUs", verb, delta)
+		if pct > 0 {
+			line += fmt.Sprintf(" (%.0f%%)", pct)
+		}
+		parts = append(parts, line)
+	} else if pct > 0 {
+		parts = append(parts, fmt.Sprintf("• %s = %.0f%%", verb, pct))
+	}
+	if prev > 0 || cur > 0 {
+		parts = append(parts, fmt.Sprintf("• Online: %.0f → %.0f", prev, cur))
+	}
+	return parts
+}
+
 func telegramMonitoringBlocks(level, title, message string, equipFallback string, ipFallback string) string {
+	return telegramMonitoringBlocksWithContext(level, title, message, equipFallback, ipFallback, "", nil)
+}
+
+func telegramMonitoringBlocksWithContext(level, title, message string, equipFallback string, ipFallback string, alertType string, meta map[string]any) string {
 	header := monitoringHeader(level, title, message)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
 	if strings.TrimSpace(equipFallback) != "" {
@@ -341,12 +503,45 @@ func telegramMonitoringBlocks(level, title, message string, equipFallback string
 		ip = strings.TrimSpace(ipFallback)
 	}
 	parts := []string{header, "", "• " + eq, "• " + ip}
-	if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
-		parts = append(parts, "• "+tgt)
+
+	alertType = strings.TrimSpace(alertType)
+	switch alertType {
+	case "uptime_restart_low":
+		parts = appendUptimeTelegramLines(parts, meta, title, inc)
+	case "telemetry_threshold":
+		metricID := metaString(meta, "metric_id")
+		if metricID == "uptime_minutes" {
+			parts = append(parts, "• Uptime abaixo do limiar configurado")
+			if observed := metaFloat(meta, "value"); observed > 0 {
+				parts = append(parts, fmt.Sprintf("• Uptime = %.0f min", observed))
+			} else if vt := metaString(meta, "value_text"); vt != "" {
+				parts = append(parts, "• Uptime = "+vt)
+			}
+		} else {
+			if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
+				parts = append(parts, "• "+tgt)
+			}
+			cause := strings.TrimSpace(title)
+			if cause != "" {
+				parts = append(parts, "• "+cause)
+			}
+			if val != "-" && !strings.Contains(strings.ToLower(header), "offline") {
+				parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
+			} else if vt := metaString(meta, "value_text"); vt != "" {
+				parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), vt))
+			}
+		}
+	case "olt_onu_drop", "olt_onu_rise":
+		parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
+	default:
+		if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
+			parts = append(parts, "• "+tgt)
+		}
+		if val != "-" && !strings.Contains(strings.ToLower(header), "offline") {
+			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
+		}
 	}
-	if val != "-" && !strings.Contains(strings.ToLower(header), "offline") {
-		parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
-	}
+
 	parts = append(parts, "", "===============")
 	return strings.Join(parts, "\n")
 }
@@ -533,7 +728,8 @@ func SendMonitoringTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 		return
 	}
 	eqName, eqIP := equipIPFromAlertRow(ctx, pool, alertID)
-	text := telegramMonitoringBlocks(level, title, message, eqName, eqIP)
+	alertType, meta := alertTelegramContextFromRow(ctx, pool, alertID)
+	text := telegramMonitoringBlocksWithContext(level, title, message, eqName, eqIP, alertType, meta)
 	sent, sendErr := telegramclient.SendMessageWithResult(ctx, cfg, text, telegramclient.SendOpts{})
 	tg := map[string]any{"attempted_at": attempted, "text": text}
 	if sendErr != nil {

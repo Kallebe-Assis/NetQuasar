@@ -20,11 +20,32 @@ export type SystemReportCatalogItem = {
   description: string;
 };
 
+export type EquipmentByPopReportOptions = {
+  include_without_pop?: boolean;
+  include_pop_coordinates?: boolean;
+};
+
+export type ConnectionsReportOptions = {
+  mode?: "summary" | "detailed";
+  source?: "connections" | "bng_cache";
+  bng_device_id?: string;
+};
+
+export type OltOverviewReportOptions = {
+  period?: "today" | "3d" | "7d" | "30d";
+};
+
+export type SystemReportOptions =
+  | EquipmentByPopReportOptions
+  | ConnectionsReportOptions
+  | OltOverviewReportOptions;
+
 export type SystemReportPayload = {
   report_id: SystemReportId;
   title: string;
   description?: string;
   generated_at: string;
+  options?: SystemReportOptions;
   summary?: Record<string, unknown>;
   columns?: string[];
   rows?: string[][];
@@ -56,6 +77,17 @@ export type SystemReportPayload = {
       dual_stack?: number;
     }>;
   };
+  groups?: Array<{
+    pop?: string;
+    latitude?: number;
+    longitude?: number;
+    coordinates?: string;
+    devices?: Array<{
+      name?: string;
+      category?: string;
+      label?: string;
+    }>;
+  }>;
 };
 
 export const SYSTEM_REPORT_IDS: SystemReportId[] = [
@@ -75,13 +107,53 @@ export function fetchSystemReportCatalog() {
   return apiFetch<{ reports: SystemReportCatalogItem[] }>("/api/v1/reports/system");
 }
 
-export function fetchSystemReport(id: SystemReportId) {
-  return apiFetch<SystemReportPayload>(`/api/v1/reports/system/${id}`);
+function equipmentByPopQuery(opts?: EquipmentByPopReportOptions): string {
+  const p = new URLSearchParams();
+  if (opts?.include_without_pop) p.set("include_without_pop", "1");
+  if (opts?.include_pop_coordinates) p.set("include_pop_coordinates", "1");
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
 }
 
-export function downloadSystemReportCsv(id: SystemReportId) {
+function connectionsQuery(opts?: ConnectionsReportOptions): string {
+  const p = new URLSearchParams();
+  if (opts?.mode) p.set("mode", opts.mode);
+  if (opts?.source) p.set("source", opts.source);
+  if (opts?.bng_device_id) p.set("bng_device_id", opts.bng_device_id);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
+function oltOverviewQuery(opts?: OltOverviewReportOptions): string {
+  const p = new URLSearchParams();
+  if (opts?.period) p.set("period", opts.period);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
+function reportQuery(
+  id: SystemReportId,
+  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
+): string {
+  if (id === "equipment-by-pop") return equipmentByPopQuery(opts as EquipmentByPopReportOptions);
+  if (id === "connections") return connectionsQuery(opts as ConnectionsReportOptions);
+  if (id === "olt-overview") return oltOverviewQuery(opts as OltOverviewReportOptions);
+  return "";
+}
+
+export function fetchSystemReport(
+  id: SystemReportId,
+  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
+) {
+  return apiFetch<SystemReportPayload>(`/api/v1/reports/system/${id}${reportQuery(id, opts)}`);
+}
+
+export function downloadSystemReportCsv(
+  id: SystemReportId,
+  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
+) {
   const token = getAuthToken();
-  const url = `/api/v1/reports/system/${id}/csv`;
+  const url = `/api/v1/reports/system/${id}/csv${reportQuery(id, opts)}`;
   return fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   }).then(async (res) => {
@@ -109,8 +181,16 @@ export function downloadSystemReportCsvClient(payload: SystemReportPayload) {
   URL.revokeObjectURL(a.href);
 }
 
-export function sendSystemReportTelegram(id: SystemReportId) {
-  return apiFetch<{ ok: boolean }>(`/api/v1/reports/system/${id}/telegram`, { method: "POST" });
+export function sendSystemReportTelegram(
+  id: SystemReportId,
+  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
+) {
+  const body =
+    id === "equipment-by-pop" || id === "connections" || id === "olt-overview" ? opts ?? {} : undefined;
+  return apiFetch<{ ok: boolean }>(`/api/v1/reports/system/${id}/telegram`, {
+    method: "POST",
+    json: body,
+  });
 }
 
 export function summaryEntries(summary: Record<string, unknown> | undefined): [string, string][] {

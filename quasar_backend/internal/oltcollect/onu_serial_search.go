@@ -121,9 +121,40 @@ func looksLikeSerial(s string) bool {
 	return true
 }
 
+// normalizeSerialToken remove separadores para comparação parcial (ex.: ITBS:CF8F:197A → itbscf8f197a).
+func normalizeSerialToken(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// SerialPartialMatch compara serial digitado com o da ONU (contém, ignorando : - espaços).
+func SerialPartialMatch(haystack, needle string) bool {
+	return serialPartialMatch(haystack, needle)
+}
+
+// serialPartialMatch compara serial digitado com o da ONU (contém, ignorando : - espaços).
+func serialPartialMatch(haystack, needle string) bool {
+	n := normalizeSerialToken(needle)
+	if n == "" {
+		return false
+	}
+	h := normalizeSerialToken(haystack)
+	if h == "" {
+		return false
+	}
+	return strings.Contains(h, n)
+}
+
 // FilterSerialSearchEntries filtra por serial (contém, case-insensitive) e opcionalmente PON.
 func FilterSerialSearchEntries(entries []SerialSearchOnuEntry, serial string, pon int) []SerialSearchOnuEntry {
-	serialQ := strings.ToLower(strings.TrimSpace(serial))
+	serialQ := strings.TrimSpace(serial)
 	if serialQ == "" {
 		return nil
 	}
@@ -132,7 +163,7 @@ func FilterSerialSearchEntries(entries []SerialSearchOnuEntry, serial string, po
 		if pon > 0 && e.Pon != pon {
 			continue
 		}
-		if strings.Contains(strings.ToLower(e.Serial), serialQ) {
+		if serialPartialMatch(e.Serial, serialQ) {
 			out = append(out, e)
 		}
 	}

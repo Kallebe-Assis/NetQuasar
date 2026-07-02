@@ -38,6 +38,20 @@ func TestOctetStringToUTF8_sixCharInterfaceNameNotMAC(t *testing.T) {
 	}
 }
 
+func TestOctetStringToUTF8_fourCharInterfaceNameNotIPv4(t *testing.T) {
+	got := octetStringToUTF8([]byte("sfp1"))
+	if got != "sfp1" {
+		t.Fatalf("got %q want sfp1", got)
+	}
+}
+
+func TestNormalizeIFLabel_fakeIPv4InterfaceName(t *testing.T) {
+	got := NormalizeIFLabel("115.102.112.49")
+	if got != "sfp1" {
+		t.Fatalf("got %q want sfp1", got)
+	}
+}
+
 func TestOctetStringToUTF8_ipv6Binary(t *testing.T) {
 	// 16 octetos IPv6 — não deve interpretar como texto ASCII
 	b := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}

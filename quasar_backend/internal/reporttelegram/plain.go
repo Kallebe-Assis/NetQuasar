@@ -115,9 +115,11 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 		}
 	}
 
+	wroteGroups := writeEquipmentByPopGroups(&sb, payload)
+
 	cols, _ := payload["columns"].([]string)
 	rows, _ := payload["rows"].([][]string)
-	if len(cols) > 0 && len(rows) > 0 {
+	if !wroteGroups && len(cols) > 0 && len(rows) > 0 {
 		sb.WriteString(fmt.Sprintf("\nDetalhes (%d linha(s))\n", len(rows)))
 		limit := 40
 		for i, row := range rows {
@@ -197,6 +199,98 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 
 	sb.WriteString("\n—\nNetQuasar · relatório")
 	return strings.TrimSpace(sb.String())
+}
+
+func writeEquipmentByPopGroups(sb *strings.Builder, payload map[string]any) bool {
+	groups := coerceAnySlice(payload["groups"])
+	if len(groups) == 0 {
+		return false
+	}
+	sb.WriteString("\n")
+	for gi, item := range groups {
+		g := coerceStringMap(item)
+		if g == nil {
+			continue
+		}
+		pop := strings.TrimSpace(fmt.Sprint(g["pop"]))
+		if pop == "" || pop == "<nil>" {
+			continue
+		}
+		if gi > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(pop)
+		sb.WriteString("\n")
+		if coords := strings.TrimSpace(fmt.Sprint(g["coordinates"])); coords != "" && coords != "<nil>" {
+			sb.WriteString("  ")
+			sb.WriteString(coords)
+			sb.WriteString("\n")
+		}
+		for _, dv := range coerceAnySlice(g["devices"]) {
+			dm := coerceStringMap(dv)
+			if dm == nil {
+				continue
+			}
+			label := deviceLabelFromMap(dm)
+			if label == "" {
+				continue
+			}
+			sb.WriteString("  • ")
+			sb.WriteString(label)
+			sb.WriteString("\n")
+		}
+	}
+	return true
+}
+
+func deviceLabelFromMap(dm map[string]any) string {
+	label := strings.TrimSpace(fmt.Sprint(dm["label"]))
+	if label != "" && label != "<nil>" {
+		return label
+	}
+	name := strings.TrimSpace(fmt.Sprint(dm["name"]))
+	cat := strings.TrimSpace(fmt.Sprint(dm["category"]))
+	if name == "" || name == "<nil>" {
+		return ""
+	}
+	if cat != "" && cat != "<nil>" {
+		return fmt.Sprintf("%s [%s]", name, cat)
+	}
+	return name
+}
+
+func coerceAnySlice(v any) []any {
+	if v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case []any:
+		return x
+	case []map[string]any:
+		out := make([]any, len(x))
+		for i, m := range x {
+			out[i] = m
+		}
+		return out
+	case [][]string:
+		out := make([]any, len(x))
+		for i, row := range x {
+			out[i] = row
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func coerceStringMap(v any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return nil
 }
 
 func writeBngLoginAverages(sb *strings.Builder, av map[string]any) {
