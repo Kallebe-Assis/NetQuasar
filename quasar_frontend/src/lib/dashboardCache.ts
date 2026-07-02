@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import { PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "./pageDataCache";
+import { wrapPageCachedQueryFn } from "./pageDataCache";
 
 export const DASHBOARD_DEFAULT_DAYS = 30;
 /** Cache longo: dados pré-carregados no login e reutilizados na página. */

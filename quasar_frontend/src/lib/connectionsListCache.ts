@@ -12,11 +12,11 @@ type ConnRow = {
 };
 
 /** Filtra lista completa em memória (evita refetch por tecla na pesquisa). */
-export function filterClientConnectionsList(
-  connections: ConnRow[],
+export function filterClientConnectionsList<T extends ConnRow>(
+  connections: T[],
   connectionKind: string,
   query: string,
-): ClientConnection[] {
+): T[] {
   let rows = connections;
   const kind = connectionKind.trim();
   if (kind) {
