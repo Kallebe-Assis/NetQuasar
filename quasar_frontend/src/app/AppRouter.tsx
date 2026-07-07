@@ -47,6 +47,9 @@ const ReportsPage = lazy(() =>
 const EventsPage = lazy(() =>
   import("../pages/EventsPage").then((m) => ({ default: m.EventsPage })),
 );
+const SwitchPage = lazy(() =>
+  import("../pages/SwitchPage").then((m) => ({ default: m.SwitchPage })),
+);
 const BngPage = lazy(() =>
   import("../pages/BngPage").then((m) => ({ default: m.BngPage })),
 );
@@ -122,6 +125,7 @@ export function AppRouter() {
           />
           <Route path="olt" element={withSuspense(<OltPage />)} />
           <Route path="mikrotik" element={withSuspense(<MikrotikPage />)} />
+          <Route path="switch" element={withSuspense(<SwitchPage />)} />
           <Route path="bng" element={withSuspense(<BngPage />)} />
           <Route path="reports" element={withSuspense(<ReportsPage />)} />
           <Route path="events" element={withSuspense(<EventsPage />)} />

@@ -9,6 +9,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
+	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 )
 
 // Limites de linhas SNMP para walks de interface (IF-MIB ~22 colunas × N interfaces).
@@ -40,8 +41,8 @@ func walkShareTimeout(total time.Duration, frac float64, min, cap time.Duration)
 	return w
 }
 
-// collectInterfaceSNMPWalks executa walks IF-MIB (+ Mikrotik opcional) com limites altos para centenas de interfaces.
-func collectInterfaceSNMPWalks(ctx context.Context, pool *pgxpool.Pool, host, community string, total time.Duration, isMikrotik bool) interfaceSNMPWalkResult {
+// collectInterfaceSNMPWalks executa walks IF-MIB (+ perfil MikroTik/Switch opcional) com limites altos para centenas de interfaces.
+func collectInterfaceSNMPWalks(ctx context.Context, pool *pgxpool.Pool, host, community string, total time.Duration, extendedProfile, useSwitchProfile bool) interfaceSNMPWalkResult {
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
 	out := interfaceSNMPWalkResult{}
@@ -49,9 +50,14 @@ func collectInterfaceSNMPWalks(ctx context.Context, pool *pgxpool.Pool, host, co
 		return out
 	}
 
-	if isMikrotik && pool != nil {
-		profile := mikrotikcollect.LoadGlobalProfile(ctx, pool)
-		roots := mikrotikcollect.InterfaceWalkOIDs(profile.Metrics)
+	if extendedProfile && pool != nil {
+		var profile mikrotikcollect.Profile
+		if useSwitchProfile {
+			profile = switchcollect.LoadGlobalProfile(ctx, pool)
+		} else {
+			profile = mikrotikcollect.LoadGlobalProfile(ctx, pool)
+		}
+		roots := mikrotikcollect.InterfaceWalkOIDsForCatalog(profile.Metrics, profile.CatalogEntries())
 		if len(roots) > 0 {
 			var merged []probing.SNMPVar
 			trunc := false
@@ -99,7 +105,7 @@ func collectInterfaceSNMPWalks(ctx context.Context, pool *pgxpool.Pool, host, co
 	var walkMk, walkMkIf []probing.SNMPVar
 	var truncMk, truncMkIf bool
 	var noteMk, noteMkIf string
-	if isMikrotik {
+	if extendedProfile && !useSwitchProfile {
 		walkMk, truncMk, noteMk = probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 			Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
 			Version: "2c", Timeout: walkShareTimeout(total, 0.14, 10*time.Second, 45*time.Second),

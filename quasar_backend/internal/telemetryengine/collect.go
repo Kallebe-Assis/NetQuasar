@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
+	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpprofile"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
@@ -356,8 +357,12 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 		FROM devices WHERE id=$1
 	`, deviceID).Scan(&category, &brand, &model, &description, &bngEnabled)
 
-	if bngEnabled && !mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
+	if bngEnabled && !mikrotikcollect.IsMikrotikDevice(category, brand, model, description) && !switchcollect.IsSwitchDevice(category, brand, model, description) {
 		return collectBngProfile(ctx, pool, deviceID, host, community)
+	}
+
+	if switchcollect.IsSwitchDevice(category, brand, model, description) {
+		return collectSwitchProfile(ctx, pool, deviceID, host, community)
 	}
 
 	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
@@ -415,7 +420,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 }
 
 func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
-	out, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, 12*time.Second)
+	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, 12*time.Second)
 	snmpOK := err == nil && out.Status.Collected > 0
 	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
 		snmpOK = false
@@ -435,11 +440,63 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 		sn.Error = ""
 	}
 	metrics := map[string]any{
-		"mikrotik_collection": out,
-		"oids":                oids,
-		"profile_source":        "settings_mikrotik_collection",
+		"mikrotik_collection":        out,
+		"mikrotik_telnet_collection": telnetOut,
+		"oids":                       oids,
+		"profile_source":             "settings_mikrotik_collection",
 	}
-	return CollectResult{OK: snmpOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
+	if telnetOut.ProfileName != "" {
+		metrics["telnet_profile_name"] = telnetOut.ProfileName
+	}
+	telnetOK := telnetOut.Collected > 0
+	if telnetOut.Failed > 0 && telnetOut.Collected == 0 {
+		telnetOK = false
+	}
+	if snmpOK || telnetOK {
+		sn.OK = true
+		sn.Error = ""
+	}
+	return CollectResult{OK: snmpOK || telnetOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
+}
+
+func collectSwitchProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+	out, telnetOut, err := switchcollect.CollectAndStore(ctx, pool, deviceID, host, community, 12*time.Second)
+	snmpOK := err == nil && out.Status.Collected > 0
+	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
+		snmpOK = false
+	}
+	var oids []string
+	for _, fr := range out.Fields {
+		if fr.OID != "" {
+			oids = append(oids, fr.OID)
+		}
+	}
+	sn := probing.SNMPGetResult{
+		OK:    snmpOK,
+		Note:  out.Status.Message,
+		Error: out.Status.Message,
+	}
+	if snmpOK {
+		sn.Error = ""
+	}
+	metrics := map[string]any{
+		"switch_collection":        out,
+		"switch_telnet_collection": telnetOut,
+		"oids":                     oids,
+		"profile_source":           "settings_switch_collection",
+	}
+	if telnetOut.ProfileName != "" {
+		metrics["telnet_profile_name"] = telnetOut.ProfileName
+	}
+	telnetOK := telnetOut.Collected > 0
+	if telnetOut.Failed > 0 && telnetOut.Collected == 0 {
+		telnetOK = false
+	}
+	if snmpOK || telnetOK {
+		sn.OK = true
+		sn.Error = ""
+	}
+	return CollectResult{OK: snmpOK || telnetOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
 }
 
 func collectBngProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {

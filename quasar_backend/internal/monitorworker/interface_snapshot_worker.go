@@ -13,9 +13,16 @@ import (
 )
 
 func workerLikelyMikrotik(category, brand, model, description string) bool {
+	if strings.EqualFold(strings.TrimSpace(category), "switch") {
+		return false
+	}
 	hay := strings.ToLower(strings.TrimSpace(category) + " " + strings.TrimSpace(brand) + " " +
 		strings.TrimSpace(model) + " " + strings.TrimSpace(description))
 	return strings.Contains(hay, "mikrotik") || strings.Contains(hay, "routeros") || strings.Contains(hay, "chr")
+}
+
+func workerLikelySwitch(category string) bool {
+	return strings.EqualFold(strings.TrimSpace(category), "switch")
 }
 
 // CollectInterfaceSnapshotWorker grava interface_snapshots e avalia alertas SFP / interface DOWN.
@@ -38,7 +45,9 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 		LIMIT 1
 	`, deviceID).Scan(&prevRaw)
 
-	walkRes := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, workerLikelyMikrotik(cat, brand, model, description), pool)
+	isSwitch := workerLikelySwitch(cat)
+	isMk := workerLikelyMikrotik(cat, brand, model, description)
+	walkRes := collectWorkerInterfaceSNMPWalks(ctx, h, c, total, isMk || isSwitch, pool, isSwitch)
 	if len(walkRes.Merged) == 0 {
 		if log != nil {
 			log.Debug().Str("device", deviceID.String()).Str("host", h).Msg("interface snapshot worker: walk vazio")

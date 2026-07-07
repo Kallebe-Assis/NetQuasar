@@ -480,25 +480,31 @@ func (s *Server) bngDeviceOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var telAt *time.Time
-	var telRaw []byte
-	_ = s.DB().QueryRow(r.Context(), `
-		SELECT collected_at, metrics::text FROM telemetry_samples
-		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
-	`, id).Scan(&telAt, &telRaw)
-
 	fields := map[string]any{}
-	if len(telRaw) > 0 {
-		var doc map[string]any
-		if json.Unmarshal(telRaw, &doc) == nil {
-			if bc, ok := doc["bng_collection"].(map[string]any); ok {
-				if f, ok := bc["fields"].(map[string]any); ok {
-					for k, v := range f {
-						if fm, ok := v.(map[string]any); ok && fm["ok"] == true {
-							fields[k] = fm["value"]
-						}
-					}
-				}
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT collected_at, metrics::text FROM telemetry_samples
+		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 48
+	`, id)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			var telRaw []byte
+			if rows.Scan(&ts, &telRaw) != nil {
+				continue
 			}
+			if telAt == nil {
+				t := ts
+				telAt = &t
+			}
+			if len(telRaw) == 0 {
+				continue
+			}
+			var doc map[string]any
+			if json.Unmarshal(telRaw, &doc) != nil {
+				continue
+			}
+			mergeBngOverviewFields(fields, extractBngCollectionFields(doc))
 		}
 	}
 
@@ -538,37 +544,75 @@ func (s *Server) bngStatsHistory(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "device_id inválido", nil)
 		return
 	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	var since *time.Time
+	if days > 0 {
+		t := time.Now().UTC().AddDate(0, 0, -days)
+		if days == 1 {
+			now := time.Now().UTC()
+			t = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		}
+		since = &t
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 120
+	if since == nil {
+		if limit <= 0 || limit > 500 {
+			limit = 120
+		}
 	}
-	rows, err := s.DB().Query(r.Context(), `
-		SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
-		FROM bng_stats_samples
-		WHERE device_id=$1
-		ORDER BY collected_at DESC
-		LIMIT $2
-	`, did, limit)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	defer rows.Close()
 	var samples []map[string]any
-	for rows.Next() {
-		var ts time.Time
-		var total, pppoe, ipv4, ipv6, dual *int
-		if err := rows.Scan(&ts, &total, &pppoe, &ipv4, &ipv6, &dual); err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+	if since != nil {
+		rows, qerr := s.DB().Query(r.Context(), `
+			SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+			FROM bng_stats_samples
+			WHERE device_id=$1 AND collected_at >= $2
+			ORDER BY collected_at ASC
+		`, did, *since)
+		if qerr != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", qerr.Error(), nil)
 			return
 		}
-		samples = append(samples, map[string]any{
-			"collected_at": ts, "total_online": total, "pppoe_online": pppoe,
-			"ipv4_online": ipv4, "ipv6_online": ipv6, "dual_stack_online": dual,
-		})
-	}
-	for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
-		samples[i], samples[j] = samples[j], samples[i]
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			var total, pppoe, ipv4, ipv6, dual *int
+			if err := rows.Scan(&ts, &total, &pppoe, &ipv4, &ipv6, &dual); err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			samples = append(samples, map[string]any{
+				"collected_at": ts, "total_online": total, "pppoe_online": pppoe,
+				"ipv4_online": ipv4, "ipv6_online": ipv6, "dual_stack_online": dual,
+			})
+		}
+	} else {
+		rows, qerr := s.DB().Query(r.Context(), `
+			SELECT collected_at, total_online, pppoe_online, ipv4_online, ipv6_online, dual_stack_online
+			FROM bng_stats_samples
+			WHERE device_id=$1
+			ORDER BY collected_at DESC
+			LIMIT $2
+		`, did, limit)
+		if qerr != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", qerr.Error(), nil)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			var total, pppoe, ipv4, ipv6, dual *int
+			if err := rows.Scan(&ts, &total, &pppoe, &ipv4, &ipv6, &dual); err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			samples = append(samples, map[string]any{
+				"collected_at": ts, "total_online": total, "pppoe_online": pppoe,
+				"ipv4_online": ipv4, "ipv6_online": ipv6, "dual_stack_online": dual,
+			})
+		}
+		for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
+			samples[i], samples[j] = samples[j], samples[i]
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"samples": samples})
 }
@@ -1002,4 +1046,34 @@ func (s *Server) bngDeviceAuthRecords(w http.ResponseWriter, r *http.Request) {
 		"fetched_at": time.Now().UTC().Format(time.RFC3339),
 		"note":       "Log de autenticação em tempo real via SNMP (falhas AAA + novos logins online). Equivalente aproximado ao log RADIUS.",
 	})
+}
+
+func extractBngCollectionFields(doc map[string]any) map[string]any {
+	fields := map[string]any{}
+	bc, ok := doc["bng_collection"].(map[string]any)
+	if !ok {
+		return fields
+	}
+	f, ok := bc["fields"].(map[string]any)
+	if !ok {
+		return fields
+	}
+	for k, v := range f {
+		fm, ok := v.(map[string]any)
+		if !ok || fm["ok"] != true {
+			continue
+		}
+		if fm["value"] != nil {
+			fields[k] = fm["value"]
+		}
+	}
+	return fields
+}
+
+func mergeBngOverviewFields(into, from map[string]any) {
+	for k, v := range from {
+		if into[k] == nil && v != nil {
+			into[k] = v
+		}
+	}
 }

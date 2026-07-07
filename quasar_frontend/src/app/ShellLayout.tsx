@@ -48,6 +48,7 @@ const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
   { to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
   { to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
   { to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
+  { to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
   { to: APP_ROUTES.bng, label: "BNG", icons: [Network] },
   { to: APP_ROUTES.reports, label: "Relatórios", icons: [FileBarChart] },
   { to: APP_ROUTES.settings, label: "Configurações", icons: [Bolt] },

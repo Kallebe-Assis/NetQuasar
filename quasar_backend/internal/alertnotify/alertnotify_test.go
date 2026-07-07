@@ -59,6 +59,35 @@ func TestTelegramMonitoringBlocksOltOnuDrop(t *testing.T) {
 	}
 }
 
+func TestTelegramMonitoringBlocksBngPppoeDrop(t *testing.T) {
+	text := telegramMonitoringBlocksWithContext(
+		"WARNING",
+		"Queda de logins BNG — PPPoE online",
+		"BNG BNG-01 (192.168.1.1) — queda de 52 PPPoE online (1200 → 1148) entre coletas SNMP.",
+		"BNG-01",
+		"192.168.1.1",
+		"bng_subscriber_drop",
+		map[string]any{
+			"subscriber_field": "pppoe_online",
+			"metric_id":        "bng_pppoe_drop_count",
+			"drop_count":       52.0,
+			"prev_online":      1200,
+			"curr_online":      1148,
+		},
+	)
+	for _, want := range []string{
+		"BNG-01",
+		"192.168.1.1",
+		"Queda de logins BNG — PPPoE",
+		"Queda de 52 PPPoEs",
+		"Online: 1200 → 1148",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
 func TestTelegramMonitoringBlocksTelemetryUptime(t *testing.T) {
 	text := telegramMonitoringBlocksWithContext(
 		"WARNING",

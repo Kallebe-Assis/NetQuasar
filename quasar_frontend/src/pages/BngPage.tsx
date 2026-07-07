@@ -1,7 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Eye, Filter, Loader2, RefreshCw } from "lucide-react";
+import {
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Filter,
+  KeyRound,
+  LayoutDashboard,
+  Loader2,
+  RefreshCw,
+  Users,
+} from "lucide-react";
 import {
   CartesianGrid,
   Line,
@@ -13,6 +24,9 @@ import {
 } from "recharts";
 import { PageCountPill } from "../components/PageCountPill";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { BngOverviewPanel } from "../components/BngOverviewPanel";
+import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
+import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import {
@@ -27,11 +41,9 @@ import {
   sessionDisplayDnLimit,
   sessionDisplayOnline,
   sessionDisplayUpLimit,
-  OVERVIEW_FIELD_LABELS,
   STATS_SERIES,
   type BngSessionDisplayLimit,
   type BngSessionRefreshMode,
-  type OverviewFieldKey,
   type StatsSeriesKey,
 } from "../lib/bngDisplay";
 import { useAppToast } from "../lib/appToast";
@@ -44,7 +56,6 @@ import {
   type BngSessionSearchField,
 } from "../lib/bngSessionFilters";
 import { toastErr, toastOk } from "../lib/operationToast";
-import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { APP_ROUTES } from "../app/routes";
 
 type BngDevice = {
@@ -297,6 +308,13 @@ type TrafficRateSnapshot = {
 
 type BngTab = "overview" | "relatorio" | "auth" | "sessions";
 
+const BNG_TABS: Array<{ id: BngTab; label: string; icon: typeof LayoutDashboard }> = [
+  { id: "overview", label: "Visão geral", icon: LayoutDashboard },
+  { id: "relatorio", label: "Relatório", icon: BarChart3 },
+  { id: "auth", label: "Autenticações", icon: KeyRound },
+  { id: "sessions", label: "Sessões PPPoE", icon: Users },
+];
+
 function mergeLivePppoeSession(cached: PppoeSession, live: PppoeSession): PppoeSession {
   const merged: PppoeSession = { ...cached, ...live };
   const keep = (next?: string, prev?: string) => {
@@ -332,7 +350,6 @@ type BngCollectProgress = {
   done?: boolean;
 };
 
-const OVERVIEW_KEYS: OverviewFieldKey[] = ["sys_name", "sys_uptime", "cpu_usage", "memory_usage", "temperature"];
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1345,6 +1362,7 @@ export function BngPage() {
   const [sel, setSel] = useState<string | null>(null);
   const [searchField, setSearchField] = useState<BngSessionSearchField>("login");
   const [searchQuery, setSearchQuery] = useState("");
+  const [submittedLoginQuery, setSubmittedLoginQuery] = useState("");
   const [advancedFilters, setAdvancedFilters] = useState<BngSessionAdvancedFilters>(EMPTY_BNG_SESSION_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [displayLimit, setDisplayLimit] = useState<BngSessionDisplayLimit>(10);
@@ -1373,24 +1391,31 @@ export function BngPage() {
   const rows = devices.data?.devices ?? [];
   const selectedId = sel ?? rows[0]?.id ?? null;
 
+  const [historyDays, setHistoryDays] = useState<1 | 3 | 7 | 30>(7);
+
   const overview = useQuery({
     queryKey: ["bng-overview", selectedId],
     enabled: !!selectedId,
+    placeholderData: keepPreviousData,
     queryFn: () => apiFetch<BngOverview>(`/api/v1/bng/devices/${selectedId}/overview`),
     refetchInterval: 60_000,
   });
 
   const history = useQuery({
-    queryKey: ["bng-stats-history", selectedId],
+    queryKey: ["bng-stats-history", selectedId, historyDays],
     enabled: !!selectedId && (tab === "relatorio" || tab === "overview"),
+    placeholderData: keepPreviousData,
     queryFn: () =>
-      apiFetch<{ samples: StatsSample[] }>(`/api/v1/bng/stats/history?device_id=${selectedId}&limit=120`),
+      apiFetch<{ samples: StatsSample[] }>(
+        `/api/v1/bng/stats/history?device_id=${selectedId}&days=${historyDays}`,
+      ),
     refetchInterval: 60_000,
   });
 
   const sessionReport = useQuery({
     queryKey: ["bng-session-report", selectedId],
-    enabled: !!selectedId && tab === "relatorio",
+    enabled: !!selectedId && (tab === "relatorio" || tab === "overview"),
+    placeholderData: keepPreviousData,
     queryFn: () => apiFetch<SessionReportResponse>(`/api/v1/bng/devices/${selectedId}/sessions/report`),
     refetchInterval: tab === "relatorio" ? 60_000 : false,
   });
@@ -1460,11 +1485,10 @@ export function BngPage() {
     },
   });
 
-  const debouncedSearchQuery = useDebouncedValue(searchQuery, 450);
-  const loginSearchActive = searchField === "login" && debouncedSearchQuery.trim().length >= 2;
+  const loginSearchActive = searchField === "login" && submittedLoginQuery.length >= 2;
 
   const loginSearch = useQuery({
-    queryKey: ["bng-session-login-search", selectedId, debouncedSearchQuery.trim()],
+    queryKey: ["bng-session-login-search", selectedId, submittedLoginQuery],
     enabled: !!selectedId && tab === "sessions" && loginSearchActive,
     queryFn: () =>
       apiFetch<{
@@ -1473,7 +1497,7 @@ export function BngPage() {
         session?: PppoeSession;
         note?: string;
         query: string;
-      }>(`/api/v1/bng/devices/${selectedId}/sessions/lookup?q=${encodeURIComponent(debouncedSearchQuery.trim())}`, {
+      }>(`/api/v1/bng/devices/${selectedId}/sessions/lookup?q=${encodeURIComponent(submittedLoginQuery)}`, {
         timeoutMs: 45_000,
       }),
     staleTime: 0,
@@ -1513,6 +1537,10 @@ export function BngPage() {
     () => pageSlice.map((s) => String(s.index ?? s.login ?? "")).join("|"),
     [pageSlice],
   );
+
+  useEffect(() => {
+    setSubmittedLoginQuery("");
+  }, [selectedId, searchField]);
 
   useEffect(() => {
     setSessionPage(1);
@@ -1591,13 +1619,49 @@ export function BngPage() {
   const stats = overview.data?.latest_stats;
   const fields = overview.data?.fields ?? {};
   const historySamples = history.data?.samples ?? [];
+  const selectedDevice = rows.find((d) => d.id === selectedId) ?? null;
+  const infra = sessionReport.data?.infrastructure;
+
+  const overviewInitialLoading = !!selectedId && tab === "overview" && !overview.data && overview.isLoading;
 
   if (devices.isLoading) return <p>A carregar equipamentos BNG…</p>;
   if (devices.isError) return <div className="msg msg--err">{(devices.error as Error).message}</div>;
 
+  const bngToolbar = (
+    <>
+      <select
+        className="input mk-noc-btn"
+        style={{ maxWidth: 260, fontSize: 12, padding: "6px 10px" }}
+        value={selectedId ?? ""}
+        onChange={(e) => setSel(e.target.value || null)}
+      >
+        {rows.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.description || d.ip} {d.ip ? `(${d.ip})` : ""}
+          </option>
+        ))}
+      </select>
+      {canMutate && (
+        <button
+          type="button"
+          className="mk-noc-btn mk-noc-btn--primary"
+          disabled={!selectedId || collectPeriodic.isPending}
+          onClick={() => collectPeriodic.mutate()}
+        >
+          <RefreshCw size={14} className={collectPeriodic.isPending ? "spin" : ""} />
+          {collectPeriodic.isPending ? "A coletar…" : "Actualizar telemetria"}
+        </button>
+      )}
+    </>
+  );
+
   return (
     <>
-      <div className="page-heading">
+      <style>{`
+        .spin { animation: mk-spin 1s linear infinite; }
+        @keyframes mk-spin { to { transform: rotate(360deg); } }
+      `}</style>
+      <div className="page-heading" style={{ marginBottom: 8 }}>
         <h1>BNG</h1>
         {tab === "sessions" && <PageCountPill label="Sessões" count={filteredSessions.length} />}
       </div>
@@ -1608,126 +1672,51 @@ export function BngPage() {
           <Link to={APP_ROUTES.devices}>Equipamentos</Link>.
         </div>
       ) : (
-        <>
-          <div className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <label style={{ fontSize: 13 }}>Equipamento</label>
-            <select
-              className="input"
-              style={{ minWidth: 280 }}
-              value={selectedId ?? ""}
-              onChange={(e) => setSel(e.target.value || null)}
-            >
-              {rows.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.description || d.ip} {d.ip ? `(${d.ip})` : ""}
-                </option>
-              ))}
-            </select>
-            {canMutate && (
-              <button
-                type="button"
-                className="btn"
-                disabled={!selectedId || collectPeriodic.isPending}
-                onClick={() => collectPeriodic.mutate()}
-              >
-                <RefreshCw size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-                Coletar totais agora
-              </button>
-            )}
-          </div>
-
-          <div className="tabs" style={{ marginBottom: 16 }}>
-            <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
-              Visão geral
-            </button>
-            <button type="button" className={tab === "relatorio" ? "active" : ""} onClick={() => setTab("relatorio")}>
-              Relatório
-            </button>
-            <button type="button" className={tab === "auth" ? "active" : ""} onClick={() => setTab("auth")}>
-              Autenticações
-            </button>
-            <button type="button" className={tab === "sessions" ? "active" : ""} onClick={() => setTab("sessions")}>
-              Sessões PPPoE
-            </button>
-          </div>
-
-          {tab === "overview" && (
+        <DeviceMonitorShell
+          tabs={BNG_TABS}
+          activeTab={tab}
+          onTab={setTab}
+          title={selectedDevice?.description || selectedDevice?.ip || "BNG"}
+          subtitle="Sistema em funcionamento normal"
+          online
+          meta={
             <>
-              <div
-                className="row"
-                style={{ gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "stretch", justifyContent: "space-between" }}
-              >
-                <div className="row" style={{ gap: 12, flexWrap: "wrap", flex: 1 }}>
-                  {[
-                    { label: "PPPoE online", value: stats?.pppoe_online },
-                    { label: "IPv4 online", value: stats?.ipv4_online },
-                    { label: "IPv6 online", value: stats?.ipv6_online },
-                    { label: "Dual-stack", value: stats?.dual_stack_online },
-                    { label: "Total online", value: stats?.total_online },
-                  ].map((c) => (
-                    <div key={c.label} className="card" style={{ padding: "10px 14px", minWidth: 120 }}>
-                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{c.label}</div>
-                      <strong style={{ fontSize: 20 }}>{c.value ?? "—"}</strong>
-                    </div>
-                  ))}
-                </div>
-                {stats?.collected_at && (
-                  <div
-                    style={{
-                      alignSelf: "center",
-                      textAlign: "right",
-                      fontSize: 11,
-                      color: "var(--muted)",
-                      lineHeight: 1.45,
-                      paddingLeft: 8,
-                    }}
-                  >
-                    <div>Última coleta</div>
-                    <div style={{ fontVariantNumeric: "tabular-nums" }}>{formatBngDateTime(stats.collected_at)}</div>
-                    {overview.data?.telemetry_collected_at && (
-                      <div style={{ marginTop: 2, fontSize: 10 }}>
-                        Telemetria: {formatBngDateTime(overview.data.telemetry_collected_at)}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="card" style={{ padding: 14 }}>
-                <div style={{ marginBottom: 10 }}>
-                  <h3 style={{ margin: 0, fontSize: 15 }}>Saúde do equipamento</h3>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {OVERVIEW_KEYS.map((key) => {
-                    const val = fields[key];
-                    if (val == null || val === "") return null;
-                    return (
-                      <div key={key}>
-                        <div style={{ fontSize: 11, color: "var(--muted)" }}>{OVERVIEW_FIELD_LABELS[key]}</div>
-                        <div style={{ fontSize: 15, fontWeight: 600 }}>{formatOverviewField(key, val)}</div>
-                      </div>
-                    );
-                  })}
-                  {overview.data?.device?.ip && (
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--muted)" }}>IP de gestão</div>
-                      <div className="mono">{overview.data.device.ip}</div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <span>
+                <strong>IP</strong> <span className="mono">{selectedDevice?.ip || "—"}</span>
+              </span>
+              <span>
+                <strong>PPPoE</strong> {stats?.pppoe_online?.toLocaleString("pt-PT") ?? "—"}
+              </span>
+              <span>
+                <strong>Últ. coleta</strong> {stats?.collected_at ? formatBngDateTime(stats.collected_at) : "—"}
+              </span>
             </>
+          }
+          toolbar={bngToolbar}
+        >
+          {tab === "overview" && (
+            overviewInitialLoading ? (
+              <p style={{ color: "var(--muted)", padding: 16 }}>A carregar últimos dados coletados…</p>
+            ) : (
+            <BngOverviewPanel
+              deviceName={selectedDevice?.description || "BNG"}
+              deviceIp={selectedDevice?.ip}
+              fields={fields}
+              stats={stats}
+              telemetryCollectedAt={overview.data?.telemetry_collected_at}
+              historySamples={historySamples}
+              historyDays={historyDays}
+              onHistoryDaysChange={setHistoryDays}
+              physicalIfaces={infra?.physical_interfaces}
+              radiusServers={infra?.radius_servers}
+              ipv4Pools={infra?.ipv4_pools}
+            />
+            )
           )}
 
           {tab === "relatorio" && (
-            <>
-              <BngSessionReportPanel data={sessionReport.data} loading={sessionReport.isLoading} />
+            <div className="mk-noc-panel" style={{ padding: 14 }}>
+              <BngSessionReportPanel data={sessionReport.data} loading={sessionReport.isLoading && !sessionReport.data} />
 
               <h3 style={{ fontSize: 14, margin: "0 0 10px", color: "var(--muted)", fontWeight: 600 }}>
                 Totais periódicos (monitoramento)
@@ -1750,8 +1739,7 @@ export function BngPage() {
                   />
                 ))}
               </div>
-
-            </>
+            </div>
           )}
 
           {tab === "auth" && (
@@ -1759,14 +1747,15 @@ export function BngPage() {
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                 <button
                   type="button"
-                  className="btn btn--sm"
+                  className="mk-noc-btn"
                   disabled={authRecords.isFetching || !selectedId}
                   onClick={() => authRecords.refetch()}
                 >
-                  <RefreshCw size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
+                  <RefreshCw size={14} className={authRecords.isFetching ? "spin" : ""} />
                   {authRecords.isFetching ? "A actualizar…" : "Actualizar log AAA"}
                 </button>
               </div>
+              <div className="mk-noc-panel" style={{ padding: 14 }}>
               <BngAuthRecordsPanel
                 data={authRecords.data}
                 loading={authRecords.isLoading && !authRecords.data}
@@ -1777,6 +1766,7 @@ export function BngPage() {
                   setSearchQuery(login);
                 }}
               />
+              </div>
             </>
           )}
 
@@ -1786,7 +1776,7 @@ export function BngPage() {
                 {canMutate && (
                   <button
                     type="button"
-                    className="btn btn--primary"
+                    className="mk-noc-btn mk-noc-btn--primary"
                     disabled={!selectedId || collectSessions.isPending}
                     onClick={() => setConfirmCollectOpen(true)}
                   >
@@ -1830,12 +1820,20 @@ export function BngPage() {
                       className="input mono"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && searchField === "login") {
+                          e.preventDefault();
+                          setSubmittedLoginQuery(searchQuery.trim());
+                        }
+                      }}
                       placeholder={
                         searchField === "mac"
                           ? "30:16:9d… ou 3016"
                           : searchField === "vlan"
                             ? "100, 200…"
-                            : "parcial"
+                            : searchField === "login"
+                              ? "Enter para pesquisar no equipamento"
+                              : "parcial"
                       }
                     />
                   </div>
@@ -1882,6 +1880,13 @@ export function BngPage() {
                     aria-label="Actualizar lista"
                     disabled={sessionTableLoading}
                     onClick={() => {
+                      if (searchField === "login") {
+                        setSubmittedLoginQuery(searchQuery.trim());
+                        if (submittedLoginQuery === searchQuery.trim()) {
+                          void loginSearch.refetch();
+                        }
+                        return;
+                      }
                       if (loginSearchActive) {
                         void loginSearch.refetch();
                         return;
@@ -2013,7 +2018,7 @@ export function BngPage() {
 
               </div>
 
-              <div className="table-wrap" style={{ position: "relative", minHeight: 220 }}>
+              <div className="table-wrap mk-noc-panel" style={{ position: "relative", minHeight: 220, padding: 0, overflow: "hidden" }}>
                 {sessionTableLoading ? (
                   <div
                     style={{
@@ -2029,7 +2034,7 @@ export function BngPage() {
                     <Loader2 size={42} className="map-refresh-spin" aria-label="A carregar sessões" />
                   </div>
                 ) : null}
-                <table>
+                <table className="mk-noc-table">
                   <thead>
                     <tr>
                       <th>Status</th>
@@ -2051,10 +2056,14 @@ export function BngPage() {
                     {displayedSessions.length === 0 && !sessionTableLoading ? (
                       <tr>
                         <td colSpan={13} style={{ color: "var(--muted)" }}>
-                          {loginSearchActive
-                            ? loginSearch.data?.found === false
-                              ? "Login não encontrado online no BNG."
-                              : "Pesquise um login PPPoE (mín. 2 caracteres)."
+                          {searchField === "login" && submittedLoginQuery.length < 2
+                            ? "Digite o login e pressione Enter para pesquisar no equipamento (mín. 2 caracteres)."
+                            : loginSearchActive
+                            ? loginSearch.isFetching
+                              ? "Pesquisando login no equipamento…"
+                              : loginSearch.data?.found === false
+                                ? "Login não encontrado online no BNG."
+                                : "Aguardando resultado da pesquisa."
                             : "Nenhuma sessão. Execute a consulta completa SNMP."}
                         </td>
                       </tr>
@@ -2104,7 +2113,7 @@ export function BngPage() {
               </div>
             </>
           )}
-        </>
+        </DeviceMonitorShell>
       )}
 
       <ConfirmModal

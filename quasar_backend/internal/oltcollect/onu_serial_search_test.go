@@ -20,6 +20,28 @@ GPON0/2:5  GU201-G              PROFILE-1              sn      XGTC07101349`
 	}
 }
 
+func TestParseOnuListFromTelnetOutput_vsolAutoFind(t *testing.T) {
+	out := `OLT-PADUA(config-pon-0/4)# show onu auto-find 
+
+OnuIndex                 Sn                       State
+---------------------------------------------------------
+GPON0/4:1                ZTEGCFAA2AB1             unknow
+GPON0/4:2                ITBSCF8F197A             unknow`
+	entries := ParseOnuListFromTelnetOutput(out)
+	if len(entries) != 2 {
+		t.Fatalf("entries=%d want 2, got %+v", len(entries), entries)
+	}
+	if entries[0].Serial != "ZTEGCFAA2AB1" || entries[0].Pon != 4 || entries[0].Onu != 1 {
+		t.Fatalf("entry0=%+v", entries[0])
+	}
+	if entries[0].Mode != "unknow" || entries[0].GponOnu != "GPON0/4:1" {
+		t.Fatalf("entry0 mode/gpon=%+v", entries[0])
+	}
+	if entries[1].Serial != "ITBSCF8F197A" || entries[1].Pon != 4 || entries[1].Onu != 2 {
+		t.Fatalf("entry1=%+v", entries[1])
+	}
+}
+
 func TestFilterSerialSearchEntries(t *testing.T) {
 	entries := []SerialSearchOnuEntry{
 		{Pon: 1, Onu: 28, Serial: "XGTC07101752"},

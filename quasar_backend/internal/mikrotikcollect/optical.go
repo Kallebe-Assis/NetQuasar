@@ -40,8 +40,8 @@ func isOpticalSectionKey(key string) bool {
 	return strings.HasPrefix(key, "optical_")
 }
 
-func anyOpticalEnabled(c MetricsConfig) bool {
-	for _, e := range MetricCatalog {
+func anyOpticalEnabledForCatalog(c MetricsConfig, catalog []CatalogEntry) bool {
+	for _, e := range catalog {
 		if e.Section != "optical" {
 			continue
 		}
@@ -55,8 +55,15 @@ func anyOpticalEnabled(c MetricsConfig) bool {
 
 // OpticalWalkRoot devolve um único walk para toda a tabela óptica quando qualquer métrica óptica está activa.
 func OpticalWalkRoot(c MetricsConfig) string {
-	if !anyOpticalEnabled(c) {
+	return OpticalWalkRootForCatalog(c, MetricCatalog)
+}
+
+func OpticalWalkRootForCatalog(c MetricsConfig, catalog []CatalogEntry) string {
+	if !anyOpticalEnabledForCatalog(c, catalog) {
 		return ""
+	}
+	if def, ok := c["optical_table"]; ok && def.Enabled && strings.TrimSpace(def.OID) != "" {
+		return strings.TrimSpace(def.OID)
 	}
 	return OpticalTableBaseOID
 }

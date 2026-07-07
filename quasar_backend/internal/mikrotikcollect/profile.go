@@ -8,10 +8,27 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Profile perfil global de coleta MikroTik.
+// Profile perfil global de coleta MikroTik / Switch.
 type Profile struct {
-	Metrics         MetricsConfig `json:"metrics"`
-	CollectionSteps []Step        `json:"collection_steps"`
+	Metrics         MetricsConfig  `json:"metrics"`
+	CollectionSteps []Step         `json:"collection_steps"`
+	Catalog         []CatalogEntry `json:"-"`
+}
+
+// CatalogEntries devolve o catálogo efectivo (MikroTik por defeito).
+func (p Profile) CatalogEntries() []CatalogEntry {
+	if len(p.Catalog) > 0 {
+		return p.Catalog
+	}
+	return MetricCatalog
+}
+
+// MetricsDefaults devolve defaults do catálogo efectivo.
+func (p Profile) MetricsDefaults() MetricsConfig {
+	if len(p.Catalog) > 0 {
+		return DefaultMetricsForCatalog(p.Catalog, nil)
+	}
+	return DefaultMetrics()
 }
 
 // Step passo extra de coleta (walk/get manual).
@@ -76,8 +93,11 @@ func ParseSteps(raw []byte) []Step {
 	return out
 }
 
-// IsMikrotikDevice heurística de identificação MikroTik.
+// IsMikrotikDevice heurística de identificação MikroTik (exclui categoria Switch).
 func IsMikrotikDevice(category, brand, model, description string) bool {
+	if strings.EqualFold(strings.TrimSpace(category), "switch") {
+		return false
+	}
 	hay := strings.ToLower(strings.TrimSpace(category) + " " + strings.TrimSpace(brand) + " " +
 		strings.TrimSpace(model) + " " + strings.TrimSpace(description))
 	return strings.Contains(hay, "mikrotik") || strings.Contains(hay, "routeros") || strings.Contains(hay, "chr")

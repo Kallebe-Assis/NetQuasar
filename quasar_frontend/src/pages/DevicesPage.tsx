@@ -12,6 +12,7 @@ import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { DeviceEditBackupTab } from "../components/device/DeviceEditBackupTab";
 import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistoricoTab";
+import { DeviceEditMonitoramentoTab } from "../components/device/DeviceEditMonitoramentoTab";
 
 type Device = {
   id: string;
@@ -48,12 +49,19 @@ type Device = {
     uptime_oid?: string;
   } | null;
   max_pons?: number | null;
+  mikrotik_telnet_profile_id?: string | null;
+  switch_telnet_profile_id?: string | null;
+  telnet_user?: string | null;
+  telnet_enable?: string | null;
+  ssh_user?: string | null;
+  telnet_password_configured?: boolean;
+  ssh_password_configured?: boolean;
   snmp_health_status?: "unknown" | "ok" | "partial" | "failed" | null;
   snmp_health_reason?: string | null;
   snmp_health_checked_at?: string | null;
 };
 
-const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
+const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 const OPS = ["Ativo", "Inativo", "Manutenção", "Reserva"] as const;
 const NET = ["Normal", "Bridge"] as const;
 
@@ -146,38 +154,6 @@ function FilterIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
-  );
-}
-
-function PanelSwitch({
-  id,
-  label,
-  checked,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <label className="toggle" htmlFor={id}>
-      <span className="toggle__track">
-        <input
-          id={id}
-          type="checkbox"
-          role="switch"
-          className="toggle__input"
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <span className="toggle__thumb" aria-hidden />
-      </span>
-      <span className="toggle__label">{label}</span>
-    </label>
   );
 }
 
@@ -366,19 +342,27 @@ export function DevicesPage() {
   const [mibBrowseNote, setMibBrowseNote] = useState<string | null>(null);
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
-  const [editTab, setEditTab] = useState<"cadastro" | "historico" | "backup">("cadastro");
+  const [editTab, setEditTab] = useState<"cadastro" | "monitoramento" | "historico" | "backup">("cadastro");
   const [reportModalDevice, setReportModalDevice] = useState<DeviceReportTarget | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Device>>(emptyForm());
+  const [telnetPassword, setTelnetPassword] = useState("");
+  const [sshPassword, setSshPassword] = useState("");
 
   useEffect(() => {
-    if (modal === "create") setForm(emptyForm());
+    if (modal === "create") {
+      setForm(emptyForm());
+      setTelnetPassword("");
+      setSshPassword("");
+    }
   }, [modal]);
 
   useEffect(() => {
     if (!modal) {
       setMibBrowseNote(null);
       setEditTab("cadastro");
+      setTelnetPassword("");
+      setSshPassword("");
     }
   }, [modal]);
 
@@ -416,6 +400,8 @@ export function DevicesPage() {
     setEditingId(d.id);
     const acq = d.acquired_at?.trim();
     const acqShort = acq && acq.length >= 10 ? acq.slice(0, 10) : acq ?? "";
+    setTelnetPassword("");
+    setSshPassword("");
     setForm({
       ...d,
       ip: d.ip ?? "",
@@ -426,6 +412,13 @@ export function DevicesPage() {
       telemetry_oid_strategy: d.telemetry_oid_strategy ?? "default",
       telemetry_oid_overrides: d.telemetry_oid_overrides ?? null,
       brand: normalizeBrand(d.brand) || null,
+      mikrotik_telnet_profile_id: d.mikrotik_telnet_profile_id ?? null,
+      switch_telnet_profile_id: d.switch_telnet_profile_id ?? null,
+      telnet_user: d.telnet_user ?? null,
+      telnet_enable: d.telnet_enable ?? null,
+      ssh_user: d.ssh_user ?? null,
+      telnet_password_configured: d.telnet_password_configured,
+      ssh_password_configured: d.ssh_password_configured,
       ...(networkIsBridge(d.network_status)
         ? { ping_enabled: false, telemetry_enabled: false }
         : {}),
@@ -724,7 +717,7 @@ export function DevicesPage() {
         ip: form.ip && String(form.ip).trim() !== "" ? String(form.ip).trim() : null,
         network_status: ns,
         access_mode: form.access_mode && String(form.access_mode).trim() !== "" ? String(form.access_mode).trim() : null,
-        telemetry_mode: telOn ? normalizeTelemetryMode(form.telemetry_mode ?? "SNMP") : null,
+        telemetry_mode: bridge ? null : telOn ? normalizeTelemetryMode(form.telemetry_mode ?? "SNMP") : (form.telemetry_mode ? normalizeTelemetryMode(form.telemetry_mode) : null),
         ping_enabled: pingOn,
         telemetry_enabled: telOn,
         bng_enabled: !!form.bng_enabled,
@@ -738,7 +731,8 @@ export function DevicesPage() {
         software_version: form.software_version || null,
         hardware_version: form.hardware_version || null,
         acquired_at: form.acquired_at && String(form.acquired_at).trim() !== "" ? String(form.acquired_at).trim() : null,
-        snmp_community: telOn ? (form.snmp_community && String(form.snmp_community).trim() !== "" ? String(form.snmp_community).trim() : null) : null,
+        snmp_community:
+          form.snmp_community && String(form.snmp_community).trim() !== "" ? String(form.snmp_community).trim() : null,
         mib_folder_path: form.mib_folder_path && String(form.mib_folder_path).trim() !== "" ? String(form.mib_folder_path).trim() : null,
         telemetry_oid_strategy:
           telOn && String(form.category ?? "").trim() === "Outros"
@@ -758,6 +752,17 @@ export function DevicesPage() {
               }
             : {},
         max_pons: isOlt ? (form.max_pons != null && Number(form.max_pons) > 0 ? Number(form.max_pons) : null) : null,
+        mikrotik_telnet_profile_id:
+          (form.category ?? "").trim() === "Mikrotik" && form.mikrotik_telnet_profile_id
+            ? form.mikrotik_telnet_profile_id
+            : null,
+        switch_telnet_profile_id:
+          (form.category ?? "").trim() === "Switch" && form.switch_telnet_profile_id ? form.switch_telnet_profile_id : null,
+        telnet_user: form.telnet_user && String(form.telnet_user).trim() !== "" ? String(form.telnet_user).trim() : null,
+        telnet_enable: form.telnet_enable && String(form.telnet_enable).trim() !== "" ? String(form.telnet_enable).trim() : null,
+        ssh_user: form.ssh_user && String(form.ssh_user).trim() !== "" ? String(form.ssh_user).trim() : null,
+        ...(telnetPassword.trim() !== "" ? { telnet_password: telnetPassword.trim() } : {}),
+        ...(sshPassword.trim() !== "" ? { ssh_password: sshPassword.trim() } : {}),
       };
       if (modal === "create") {
         await apiFetch("/api/v1/devices", { method: "POST", json: body });
@@ -926,8 +931,6 @@ export function DevicesPage() {
 
   const formIsBridge = networkIsBridge(form.network_status);
   const formIsOlt = (form.category ?? "").trim() === "OLT";
-  const formIsOutros = (form.category ?? "").trim() === "Outros";
-  const formTelemetryOIDStrategy = ((form.telemetry_oid_strategy as "default" | "manual" | null) ?? "default");
 
   return (
     <>
@@ -1239,19 +1242,24 @@ export function DevicesPage() {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
             <h3>{modal === "create" ? "Novo equipamento" : "Editar equipamento"}</h3>
-            {modal === "edit" && editingId && (
-              <div className="tabs" style={{ marginBottom: 12, flexWrap: "wrap" }}>
-                <button type="button" className={editTab === "cadastro" ? "active" : ""} onClick={() => setEditTab("cadastro")}>
-                  Cadastro
-                </button>
-                <button type="button" className={editTab === "historico" ? "active" : ""} onClick={() => setEditTab("historico")}>
-                  Histórico
-                </button>
-                <button type="button" className={editTab === "backup" ? "active" : ""} onClick={() => setEditTab("backup")}>
-                  Backup
-                </button>
-              </div>
-            )}
+            <div className="tabs" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+              <button type="button" className={editTab === "cadastro" ? "active" : ""} onClick={() => setEditTab("cadastro")}>
+                Cadastro
+              </button>
+              <button type="button" className={editTab === "monitoramento" ? "active" : ""} onClick={() => setEditTab("monitoramento")}>
+                Monitoramento
+              </button>
+              {modal === "edit" && editingId && (
+                <>
+                  <button type="button" className={editTab === "historico" ? "active" : ""} onClick={() => setEditTab("historico")}>
+                    Histórico
+                  </button>
+                  <button type="button" className={editTab === "backup" ? "active" : ""} onClick={() => setEditTab("backup")}>
+                    Backup
+                  </button>
+                </>
+              )}
+            </div>
             {modal === "edit" && editTab === "historico" && editingId && <DeviceEditHistoricoTab deviceId={editingId} />}
 
             {modal === "edit" && editTab === "backup" && editingId && (
@@ -1262,10 +1270,44 @@ export function DevicesPage() {
               />
             )}
 
-            {(modal === "create" || editTab === "cadastro") && (
+            {editTab === "monitoramento" && (
+              <>
+                {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
+                <DeviceEditMonitoramentoTab
+                  form={form}
+                  setForm={setForm}
+                  telnetPassword={telnetPassword}
+                  setTelnetPassword={setTelnetPassword}
+                  sshPassword={sshPassword}
+                  setSshPassword={setSshPassword}
+                  mibFolderPickerRef={mibFolderPickerRef}
+                  mibBrowseNote={mibBrowseNote}
+                  setMibBrowseNote={setMibBrowseNote}
+                  onMibFolderPicked={onMibFolderPicked}
+                  onOpenMibFolderPicker={openMibFolderPicker}
+                  footer={
+                    <div className="row" style={{ marginTop: 12 }}>
+                      <button type="button" className="btn" onClick={() => setModal(null)}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={save.isPending || !form.description?.trim()}
+                        onClick={() => save.mutate()}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                  }
+                />
+              </>
+            )}
+
+            {editTab === "cadastro" && (
             <>
             <p style={{ color: "var(--muted)", fontSize: 12 }}>
-              Com telemetria ativa, o ping precisa estar ligado. Em modo <strong>Bridge</strong>, o IP é opcional e ping/telemetria ficam desativados — o servidor ajusta ao salvar, se necessário.
+              Em modo <strong>Bridge</strong>, o IP é opcional — o servidor ajusta ping/telemetria ao salvar, se necessário. Configure monitoramento na aba <strong>Monitoramento</strong>.
             </p>
             {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
 
@@ -1423,215 +1465,6 @@ export function DevicesPage() {
                 />
               </div>
 
-              <div className="toggle-row">
-                <PanelSwitch
-                  id="device-ping"
-                  label="Monitorar com ping"
-                  checked={formIsBridge ? false : !!form.ping_enabled}
-                  disabled={formIsBridge}
-                  onChange={(pingOn) =>
-                    setForm((f) => ({
-                      ...f,
-                      ping_enabled: pingOn,
-                      ...(pingOn ? {} : { telemetry_enabled: false }),
-                    }))
-                  }
-                />
-                <PanelSwitch
-                  id="device-tel"
-                  label="Telemetria"
-                  checked={formIsBridge ? false : !!form.telemetry_enabled}
-                  disabled={formIsBridge}
-                  onChange={(telOn) =>
-                    setForm((f) => ({
-                      ...f,
-                      telemetry_enabled: telOn,
-                      ping_enabled: telOn ? true : f.ping_enabled,
-                      telemetry_mode: telOn ? normalizeTelemetryMode(f.telemetry_mode ?? "SNMP") : f.telemetry_mode,
-                    }))
-                  }
-                />
-                <PanelSwitch
-                  id="device-bng"
-                  label="BNG"
-                  checked={!!form.bng_enabled}
-                  onChange={(bngOn) => setForm((f) => ({ ...f, bng_enabled: bngOn }))}
-                />
-              </div>
-              {formIsBridge && (
-                <p style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)", margin: "-0.25rem 0 0.5rem" }}>
-                  Estado Bridge: ping e telemetria não estão disponíveis.
-                </p>
-              )}
-
-              {!formIsBridge && form.telemetry_enabled ? (
-                <>
-                  <div className="field">
-                    <label>Modo de telemetria</label>
-                    <select
-                      className="select"
-                      style={{ width: "100%" }}
-                      value={normalizeTelemetryMode(form.telemetry_mode ?? "SNMP")}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          telemetry_mode: e.target.value as "SNMP" | "telnet" | "ssh",
-                        })
-                      }
-                    >
-                      {TELEMETRY_MODES.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>SNMP community (opcional)</label>
-                    <input className="input mono" style={{ width: "100%" }} value={form.snmp_community ?? ""} onChange={(e) => setForm({ ...form, snmp_community: e.target.value })} />
-                  </div>
-                  {formIsOutros && normalizeTelemetryMode(form.telemetry_mode ?? "SNMP") === "SNMP" && (
-                    <>
-                      <div className="field field--full">
-                        <label>OIDs de telemetria para categoria Outros</label>
-                        <select
-                          className="select"
-                          style={{ width: "100%" }}
-                          value={formTelemetryOIDStrategy}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              telemetry_oid_strategy: e.target.value as "default" | "manual",
-                              telemetry_oid_overrides: f.telemetry_oid_overrides ?? {},
-                            }))
-                          }
-                        >
-                          <option value="default">Usar OIDs padrão do sistema</option>
-                          <option value="manual">Inserir OIDs manualmente neste equipamento</option>
-                        </select>
-                      </div>
-                      {formTelemetryOIDStrategy === "manual" && (
-                        <>
-                          <div className="field">
-                            <label>CPU (uso)</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.cpu_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), cpu_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="field">
-                            <label>CPU disponível (idle)</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.cpu_available_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), cpu_available_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="field">
-                            <label>Memória usada</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.memory_used_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), memory_used_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="field">
-                            <label>Memória total</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.memory_size_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), memory_size_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="field">
-                            <label>Temperatura</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.temp_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), temp_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="field">
-                            <label>Uptime</label>
-                            <input
-                              className="input mono"
-                              style={{ width: "100%" }}
-                              value={form.telemetry_oid_overrides?.uptime_oid ?? ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  telemetry_oid_overrides: { ...(f.telemetry_oid_overrides ?? {}), uptime_oid: e.target.value },
-                                }))
-                              }
-                            />
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                  <div className="field field--full">
-                    <label>Pasta MIBs (.txt/.csv) para discovery — caminho na máquina do servidor ou relativo ao backend (opcional)</label>
-                    <div className="row" style={{ gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-                      <input
-                        className="input mono"
-                        style={{ flex: "1 1 200px", minWidth: 0 }}
-                        title="Ex.: data/mibs/marc ou caminho absoluto no servidor onde corre o backend"
-                        value={form.mib_folder_path ?? ""}
-                        onChange={(e) => {
-                          setMibBrowseNote(null);
-                          setForm({ ...form, mib_folder_path: e.target.value });
-                        }}
-                      />
-                      <input
-                        ref={mibFolderPickerRef}
-                        type="file"
-                        multiple
-                        style={{ display: "none" }}
-                        {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-                        onChange={onMibFolderPicked}
-                      />
-                      <button type="button" className="btn" style={{ flexShrink: 0 }} onClick={() => openMibFolderPicker()}>
-                        Procurar…
-                      </button>
-                    </div>
-                    {mibBrowseNote && (
-                      <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.35 }}>
-                        {mibBrowseNote}
-                      </p>
-                    )}
-                  </div>
-                </>
-              ) : null}
-
               <div className="field">
                 <label>Latitude</label>
                 <input className="input" style={{ width: "100%" }} value={form.latitude ?? ""} onChange={(e) => setForm({ ...form, latitude: e.target.value === "" ? null : Number(e.target.value) })} />
@@ -1726,7 +1559,7 @@ export function DevicesPage() {
             </>
             )}
 
-            {modal === "edit" && editTab !== "cadastro" && (
+            {modal === "edit" && (editTab === "historico" || editTab === "backup") && (
               <div className="row" style={{ marginTop: 12 }}>
                 <button type="button" className="btn" onClick={() => setModal(null)}>Fechar</button>
               </div>

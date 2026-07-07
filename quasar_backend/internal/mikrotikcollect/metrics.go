@@ -130,19 +130,31 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "tcp_established", Section: "ip", Label: "TCP established", Description: "Conexões TCP estabelecidas.", Placeholder: "1.3.6.1.2.1.6.9.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
 }
 
+func mikrotikDefaultEnabled(key string) bool {
+	return key == "cpu_load" || key == "temperature" || key == "sys_uptime" ||
+		key == "memory_used" || key == "memory_total" ||
+		key == "if_mib_table" || key == "if_x_table" || key == "if_oper_status" ||
+		key == "optical_table" || key == "optical_rx_power" || key == "optical_tx_power" ||
+		key == "optical_temperature" || key == "optical_supply_voltage" || key == "optical_bias_current" ||
+		key == "pppoe_active_sessions"
+}
+
 func DefaultMetrics() MetricsConfig {
-	out := make(MetricsConfig, len(MetricCatalog))
-	for _, e := range MetricCatalog {
+	return DefaultMetricsForCatalog(MetricCatalog, mikrotikDefaultEnabled)
+}
+
+// DefaultMetricsForCatalog constrói defaults a partir de um catálogo arbitrário.
+func DefaultMetricsForCatalog(catalog []CatalogEntry, enabledFn func(string) bool) MetricsConfig {
+	out := make(MetricsConfig, len(catalog))
+	for _, e := range catalog {
 		mode := e.DefaultMode
 		if mode == "" {
 			mode = ModeSNMPGet
 		}
-		enabled := e.Key == "cpu_load" || e.Key == "temperature" || e.Key == "sys_uptime" ||
-			e.Key == "memory_used" || e.Key == "memory_total" ||
-			e.Key == "if_mib_table" || e.Key == "if_x_table" || e.Key == "if_oper_status" ||
-			e.Key == "optical_table" || e.Key == "optical_rx_power" || e.Key == "optical_tx_power" ||
-			e.Key == "optical_temperature" || e.Key == "optical_supply_voltage" || e.Key == "optical_bias_current" ||
-			e.Key == "pppoe_active_sessions"
+		enabled := false
+		if enabledFn != nil {
+			enabled = enabledFn(e.Key)
+		}
 		div := e.DefaultDivisor
 		out[e.Key] = MetricDef{
 			Enabled:      enabled,
@@ -189,11 +201,15 @@ func (c MetricsConfig) Normalize() MetricsConfig {
 	return out
 }
 
-// MergeWithDefaults preenche chaves ausentes com defaults do catálogo.
+// MergeWithDefaults preenche chaves ausentes com defaults do catálogo MikroTik.
 func (c MetricsConfig) MergeWithDefaults() MetricsConfig {
-	def := DefaultMetrics()
-	out := make(MetricsConfig, len(MetricCatalog))
-	for k, v := range def {
+	return c.MergeWithCatalog(MetricCatalog, DefaultMetrics())
+}
+
+// MergeWithCatalog preenche chaves ausentes com defaults de um catálogo específico.
+func (c MetricsConfig) MergeWithCatalog(catalog []CatalogEntry, defaults MetricsConfig) MetricsConfig {
+	out := make(MetricsConfig, len(catalog))
+	for k, v := range defaults {
 		out[k] = v
 	}
 	for k, v := range c {
@@ -213,7 +229,7 @@ func (c MetricsConfig) MergeWithDefaults() MetricsConfig {
 			out[k] = v
 		}
 	}
-	// Migração: optical_sfp → optical_table
+	// Migração: optical_sfp → optical_table (só relevante para catálogo MikroTik)
 	if old, ok := c["optical_sfp"]; ok {
 		if cur, has := out["optical_table"]; has {
 			if old.Enabled {
@@ -225,12 +241,7 @@ func (c MetricsConfig) MergeWithDefaults() MetricsConfig {
 			out["optical_table"] = cur
 		}
 	}
-	// Migração: modos antigos → novos tipos de coleta SFP / status IF
-	if cur, ok := out["optical_table"]; ok && cur.CollectMode == ModeSNMPWalk {
-		cur.CollectMode = ModeOpticalSFPParse
-		out["optical_table"] = cur
-	}
-	for _, e := range MetricCatalog {
+	for _, e := range catalog {
 		if e.Section != "optical" || e.Key == "optical_table" {
 			continue
 		}
@@ -239,9 +250,15 @@ func (c MetricsConfig) MergeWithDefaults() MetricsConfig {
 			continue
 		}
 		if cur.CollectMode == ModeSNMPWalk || cur.CollectMode == "" {
-			cur.CollectMode = ModeOpticalSFPColumn
+			if e.DefaultMode == ModeOpticalSFPColumn {
+				cur.CollectMode = ModeOpticalSFPColumn
+			}
 			out[e.Key] = cur
 		}
+	}
+	if cur, ok := out["optical_table"]; ok && cur.CollectMode == ModeSNMPWalk {
+		cur.CollectMode = ModeOpticalSFPParse
+		out["optical_table"] = cur
 	}
 	return out
 }
@@ -264,7 +281,11 @@ func CatalogEntryFor(key string) (CatalogEntry, bool) {
 }
 
 func HasEnabledMetrics(c MetricsConfig) bool {
-	for _, e := range MetricCatalog {
+	return HasEnabledMetricsForCatalog(c, MetricCatalog)
+}
+
+func HasEnabledMetricsForCatalog(c MetricsConfig, catalog []CatalogEntry) bool {
+	for _, e := range catalog {
 		def, ok := c[e.Key]
 		if !ok {
 			continue
@@ -277,9 +298,13 @@ func HasEnabledMetrics(c MetricsConfig) bool {
 }
 
 func EnabledGetOIDs(c MetricsConfig) []string {
+	return EnabledGetOIDsForCatalog(c, MetricCatalog)
+}
+
+func EnabledGetOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
 	seen := map[string]struct{}{}
 	var out []string
-	for _, e := range MetricCatalog {
+	for _, e := range catalog {
 		def, ok := c[e.Key]
 		if !ok || !def.Enabled {
 			continue
@@ -308,6 +333,10 @@ func EnabledGetOIDs(c MetricsConfig) []string {
 }
 
 func InterfaceWalkOIDs(c MetricsConfig) []string {
+	return InterfaceWalkOIDsForCatalog(c, MetricCatalog)
+}
+
+func InterfaceWalkOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	add := func(oid string) {
@@ -321,10 +350,10 @@ func InterfaceWalkOIDs(c MetricsConfig) []string {
 		seen[oid] = struct{}{}
 		out = append(out, oid)
 	}
-	if root := OpticalWalkRoot(c); root != "" {
+	if root := OpticalWalkRootForCatalog(c, catalog); root != "" {
 		add(root)
 	}
-	for _, e := range MetricCatalog {
+	for _, e := range catalog {
 		if e.Section == "optical" {
 			continue // já coberto pelo walk único da tabela óptica
 		}
@@ -341,9 +370,13 @@ func InterfaceWalkOIDs(c MetricsConfig) []string {
 }
 
 func TelemetryWalkOIDs(c MetricsConfig) []string {
+	return TelemetryWalkOIDsForCatalog(c, MetricCatalog)
+}
+
+func TelemetryWalkOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
 	seen := map[string]struct{}{}
 	var out []string
-	for _, e := range MetricCatalog {
+	for _, e := range catalog {
 		if e.WalkTarget != TargetTelemetry {
 			continue
 		}

@@ -103,11 +103,17 @@ func runPipelineStep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	case StepKindMikrotik:
 		opts.InterfacePhase = InterfacePhaseMikrotik
 		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
+	case StepKindSwitch:
+		opts.InterfacePhase = InterfacePhaseSwitch
+		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
 	case StepKindInterfacesOLT:
 		opts.InterfacePhase = InterfacePhaseOLT
 		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
 	case StepKindInterfacesMikrotik:
 		opts.InterfacePhase = InterfacePhaseMikrotik
+		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
+	case StepKindInterfacesSwitch:
+		opts.InterfacePhase = InterfacePhaseSwitch
 		return RunInterfaceSnapshotSweep(ctx, pool, log, mode, opts)
 	default:
 		return fmt.Errorf("tipo de passo desconhecido: %s", step.Kind)

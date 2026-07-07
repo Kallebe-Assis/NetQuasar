@@ -44,17 +44,17 @@ func (s *Server) listOLTUnauthorizedOnus(w http.ResponseWriter, r *http.Request)
 			"Configure o comando de consulta de ONUs não autorizadas em Definições → Perfis OLT para "+sess.Brand+" / "+sess.Model, nil)
 		return
 	}
-	if sess.Cfg.NeedsEnablePassword() && sess.Enable == "" {
+	if sess.Cfg.NeedsEnablePasswordForUnauthorized() && sess.Enable == "" {
 		writeErr(w, http.StatusBadRequest, "NOT_CONFIGURED",
 			"configure a palavra-passe enable (telnet enable) em Definições → Rede e SNMP", nil)
 		return
 	}
 
 	secrets := oltcollect.TelnetSecrets{Password: sess.Password, Enable: sess.Enable}
-	target := oltcollect.OnuReportTarget{}
+	ponIndexes := oltcollect.LoadOLTPonIndexesFromSnapshot(ctx, s.DB(), id)
 	telCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	action := oltcollect.RunOnuTelnetAction(telCtx, sess.Host, sess.User, sess.Password, sess.Enable, sess.Cfg, secrets, target, cmdTpl, 3*time.Minute)
+	action := oltcollect.RunUnauthorizedOnuQueryMulti(telCtx, sess.Host, sess.User, sess.Password, sess.Enable, sess.Cfg, secrets, ponIndexes, 3*time.Minute)
 
 	entries := oltcollect.ParseOnuListFromTelnetOutput(action.Output)
 	matches := make([]map[string]any, 0, len(entries))
@@ -65,6 +65,7 @@ func (s *Server) listOLTUnauthorizedOnus(w http.ResponseWriter, r *http.Request)
 	actor := s.actorFromRequest(r)
 	s.appendAuditLog(ctx, "olt_device", id.String(), "unauthorized_onu_query", actor, nil, map[string]any{
 		"olt_description": sess.Desc, "command": action.Command, "ok": action.OK, "matches": len(matches),
+		"pons_queried": action.PonsQueried,
 	})
 
 	out := map[string]any{
@@ -75,6 +76,19 @@ func (s *Server) listOLTUnauthorizedOnus(w http.ResponseWriter, r *http.Request)
 		"output":          action.Output,
 		"entries":         matches,
 		"total":           len(matches),
+		"pons_queried":    action.PonsQueried,
+	}
+	if len(action.Steps) > 0 {
+		steps := make([]map[string]any, 0, len(action.Steps))
+		for _, st := range action.Steps {
+			steps = append(steps, map[string]any{
+				"command": st.Command,
+				"ok":      st.OK,
+				"output":  st.Output,
+				"error":   st.Error,
+			})
+		}
+		out["steps"] = steps
 	}
 	if action.Error != "" {
 		out["error"] = action.Error

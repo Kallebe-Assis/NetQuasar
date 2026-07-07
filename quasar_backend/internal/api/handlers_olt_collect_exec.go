@@ -119,7 +119,7 @@ func (s *Server) oltStepIfMibRefresh(ctx context.Context, st *oltCollectExecStat
 		return fmt.Errorf("host ou community SNMP em falta")
 	}
 	ifRefreshTO := s.loadCollectionTimeouts(ctx).InterfaceRefreshTotal()
-	walkRes := collectInterfaceSNMPWalks(ctx, s.DB(), st.Host, st.Community, ifRefreshTO, false)
+	walkRes := collectInterfaceSNMPWalks(ctx, s.DB(), st.Host, st.Community, ifRefreshTO, false, false)
 	merged := walkRes.Merged
 	arr := make([]map[string]any, 0, len(merged)+1)
 	for _, v := range merged {

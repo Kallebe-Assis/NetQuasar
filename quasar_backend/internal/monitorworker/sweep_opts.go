@@ -12,6 +12,7 @@ import (
 const (
 	InterfacePhaseAll      = ""
 	InterfacePhaseMikrotik = "mikrotik"
+	InterfacePhaseSwitch   = "switch"
 	InterfacePhaseOLT      = "olt"
 )
 

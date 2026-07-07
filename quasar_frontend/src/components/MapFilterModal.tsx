@@ -1,7 +1,7 @@
 import { createPortal } from "react-dom";
 import type { MapDisplayMode } from "./EquipmentMap";
 
-const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
+const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
 type Locality = { id: string; name: string };
 

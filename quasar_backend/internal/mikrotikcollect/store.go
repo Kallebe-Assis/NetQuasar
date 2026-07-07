@@ -10,12 +10,12 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
 
-// CollectAndStore executa coleta MikroTik conforme perfil global e persiste em telemetry_samples.
-func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (CollectOutput, error) {
+// CollectAndStore executa coleta MikroTik (SNMP + telnet conforme perfil) e persiste em telemetry_samples.
+func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (CollectOutput, TelnetCollectOutput, error) {
 	profile := LoadGlobalProfile(ctx, pool)
-	telemetry := CollectMetrics(ctx, host, community, profile, collectOpts{
-		walkTarget: TargetTelemetry,
-		timeout:    timeout,
+	telemetry := CollectMetrics(ctx, host, community, profile, CollectOpts{
+		WalkTarget: TargetTelemetry,
+		Timeout:    timeout,
 	})
 	var snmpVars []probing.SNMPVar
 	for _, fr := range telemetry.Fields {
@@ -26,15 +26,28 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 			snmpVars = append(snmpVars, probing.SNMPVar{OID: fr.OID, Value: formatSNMPValue(fr.Value)})
 		}
 	}
-	b, err := BuildTelemetryMetricsJSON(telemetry, snmpVars)
+	telnetProfile := LoadTelnetProfileForDevice(ctx, pool, deviceID)
+	telnetOut := TelnetCollectOutput{}
+	if HasEnabledTelnetMetrics(telnetProfile.Metrics) {
+		creds := LoadTelnetCredentialsForDevice(ctx, pool, deviceID)
+		telnetTO := timeout * 3
+		if telnetTO < 30*time.Second {
+			telnetTO = 30 * time.Second
+		}
+		if telnetTO > 120*time.Second {
+			telnetTO = 120 * time.Second
+		}
+		telnetOut = CollectTelnetMetrics(ctx, host, creds, telnetProfile, telnetTO)
+	}
+	b, err := BuildTelemetryMetricsJSON(telemetry, snmpVars, telnetOut)
 	if err != nil {
-		return telemetry, err
+		return telemetry, telnetOut, err
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return telemetry, ctx.Err()
+				return telemetry, telnetOut, ctx.Err()
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
@@ -46,15 +59,15 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 			break
 		}
 	}
-	return telemetry, err
+	return telemetry, telnetOut, err
 }
 
 // CollectInterfaceWalks devolve vars SNMP para interface_snapshots conforme perfil.
 func CollectInterfaceWalks(ctx context.Context, host, community string, pool *pgxpool.Pool, total time.Duration) ([]probing.SNMPVar, bool) {
 	profile := LoadGlobalProfile(ctx, pool)
-	out := CollectMetrics(ctx, host, community, profile, collectOpts{
-		walkTarget: TargetInterfaces,
-		timeout:    workerShareTimeout(total, 0.35, 12*time.Second, 90*time.Second),
+	out := CollectMetrics(ctx, host, community, profile, CollectOpts{
+		WalkTarget: TargetInterfaces,
+		Timeout:    workerShareTimeout(total, 0.35, 12*time.Second, 90*time.Second),
 	})
 	var merged []probing.SNMPVar
 	truncated := false

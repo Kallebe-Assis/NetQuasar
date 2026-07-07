@@ -40,8 +40,10 @@ const STEP_KINDS = [
   { value: "telemetry", label: "Telemetria SNMP (CPU, memória, uptime)" },
   { value: "bng", label: "BNG (logins / saúde SNMP)" },
   { value: "mikrotik", label: "MikroTik (interfaces/métricas)" },
+  { value: "switch", label: "Switch (interfaces/métricas)" },
   { value: "interfaces_olt", label: "Interfaces SNMP (OLT)" },
   { value: "interfaces_mikrotik", label: "Interfaces SNMP (MikroTik)" },
+  { value: "interfaces_switch", label: "Interfaces SNMP (Switch)" },
   { value: "olt_onu", label: "Coleta ONUs (OLT SNMP/telnet)" },
 ];
 
@@ -75,8 +77,13 @@ function newStep(kind: string): PipelineStep {
     base.scope = { target: "category", category: "mikrotik" };
     base.options = { mikrotik_mode: "full" };
   }
+  if (kind === "switch") {
+    base.scope = { target: "category", category: "switch" };
+    base.options = { mikrotik_mode: "full" };
+  }
   if (kind === "interfaces_olt") base.scope = { target: "category", category: "olt" };
   if (kind === "interfaces_mikrotik") base.scope = { target: "category", category: "mikrotik" };
+  if (kind === "interfaces_switch") base.scope = { target: "category", category: "switch" };
   return base;
 }
 
@@ -207,9 +214,11 @@ function MonitoringPipelineCard() {
                   </select>
                 </label>
               )}
-              {step.kind === "mikrotik" && (
+              {(step.kind === "mikrotik" || step.kind === "switch") && (
                 <label className="pipeline-step-field pipeline-step-field--mode">
-                  <span className="pipeline-step-field__label">Modo MikroTik</span>
+                  <span className="pipeline-step-field__label">
+                    {step.kind === "switch" ? "Modo Switch" : "Modo MikroTik"}
+                  </span>
                   <select
                     className="input"
                     value={step.options?.mikrotik_mode ?? "full"}

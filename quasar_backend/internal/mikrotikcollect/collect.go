@@ -59,13 +59,13 @@ type CollectOutput struct {
 	Status CollectionStatus       `json:"status"`
 }
 
-type collectOpts struct {
-	walkTarget string
-	timeout    time.Duration
+type CollectOpts struct {
+	WalkTarget string
+	Timeout    time.Duration
 }
 
 // CollectMetrics executa coleta conforme perfil — só métricas enabled com OID preenchido.
-func CollectMetrics(ctx context.Context, host, community string, profile Profile, opts collectOpts) CollectOutput {
+func CollectMetrics(ctx context.Context, host, community string, profile Profile, opts CollectOpts) CollectOutput {
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
 	out := CollectOutput{
@@ -76,19 +76,19 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 		out.Status.Message = "host ou community SNMP em falta"
 		return out
 	}
-	timeout := opts.timeout
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 12 * time.Second
 	}
-	targetFilter := strings.TrimSpace(opts.walkTarget)
+	targetFilter := strings.TrimSpace(opts.WalkTarget)
 
-	for _, entry := range MetricCatalog {
+	for _, entry := range profile.CatalogEntries() {
 		if targetFilter != "" && entry.WalkTarget != targetFilter {
 			continue
 		}
 		def, ok := profile.Metrics[entry.Key]
 		if !ok {
-			def = DefaultMetrics()[entry.Key]
+			def = profile.MetricsDefaults()[entry.Key]
 		}
 		label := entry.Label
 		if !def.Enabled {
@@ -173,7 +173,7 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 
 	// Propagar sub-métricas ópticas a partir do walk da tabela completa.
 	if tbl, ok := out.Fields["optical_table"]; ok && tbl.OK && len(tbl.OpticalPorts) > 0 {
-		for _, e := range MetricCatalog {
+		for _, e := range profile.CatalogEntries() {
 			if e.Section != "optical" || e.Key == "optical_table" {
 				continue
 			}
@@ -254,7 +254,7 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 	}
 
 	if out.Status.Enabled == 0 {
-		out.Status.Message = "Nenhuma métrica activa — configure e active campos na aba MikroTik."
+		out.Status.Message = "Nenhuma métrica activa — configure e active campos no perfil de coleta."
 	} else if len(out.Status.MissingOID) > 0 {
 		out.Status.Message = "Algumas métricas activas não têm OID configurado; não foram colectadas."
 	} else if out.Status.Collected == 0 && out.Status.Failed > 0 {
@@ -437,12 +437,15 @@ func applyDivisor(v any, div int) any {
 }
 
 // BuildTelemetryMetricsJSON serializa resultado para telemetry_samples.
-func BuildTelemetryMetricsJSON(collect CollectOutput, snmpVars []probing.SNMPVar) ([]byte, error) {
+func BuildTelemetryMetricsJSON(collect CollectOutput, snmpVars []probing.SNMPVar, telnet TelnetCollectOutput) ([]byte, error) {
 	doc := map[string]any{
 		"mikrotik_collection": collect,
 		"snmp": map[string]any{
 			"vars": snmpVars,
 		},
+	}
+	if telnet.ProfileID != "" || telnet.Collected > 0 || telnet.Failed > 0 || telnet.Message != "" {
+		doc["mikrotik_telnet_collection"] = telnet
 	}
 	return json.Marshal(doc)
 }

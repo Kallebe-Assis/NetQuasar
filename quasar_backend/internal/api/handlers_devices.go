@@ -53,8 +53,15 @@ type deviceDTO struct {
 	MIBFolderPath         *string         `json:"mib_folder_path,omitempty"`
 	TelemetryOIDStrategy  *string         `json:"telemetry_oid_strategy,omitempty"`
 	TelemetryOIDOverrides json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
-	MaxPons               *int            `json:"max_pons,omitempty"`
-	SNMPHealthStatus      *string         `json:"snmp_health_status,omitempty"`
+	MaxPons                  *int            `json:"max_pons,omitempty"`
+	MikrotikTelnetProfileID  *uuid.UUID      `json:"mikrotik_telnet_profile_id,omitempty"`
+	SwitchTelnetProfileID    *uuid.UUID      `json:"switch_telnet_profile_id,omitempty"`
+	TelnetUser               *string         `json:"telnet_user,omitempty"`
+	TelnetEnable             *string         `json:"telnet_enable,omitempty"`
+	SSHUser                  *string         `json:"ssh_user,omitempty"`
+	TelnetPasswordConfigured bool            `json:"telnet_password_configured,omitempty"`
+	SSHPasswordConfigured    bool            `json:"ssh_password_configured,omitempty"`
+	SNMPHealthStatus         *string         `json:"snmp_health_status,omitempty"`
 	SNMPHealthReason      *string         `json:"snmp_health_reason,omitempty"`
 	SNMPHealthCheckedAt   *string         `json:"snmp_health_checked_at,omitempty"`
 }
@@ -63,7 +70,8 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	q := `SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
 		d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
 		d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
-		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons,
+		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
+		d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
 		c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at::text
 		FROM devices d
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
@@ -79,15 +87,20 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		var d deviceDTO
 		var ip *string
 		var overrides []byte
+		var telPass, sshPass *string
 		if err := rows.Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 			&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 			&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &d.SNMPHealthStatus, &d.SNMPHealthReason, &d.SNMPHealthCheckedAt); err != nil {
+			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+			&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass,
+			&d.SNMPHealthStatus, &d.SNMPHealthReason, &d.SNMPHealthCheckedAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		d.IP = ip
 		d.TelemetryOIDOverrides = json.RawMessage(overrides)
+		d.TelnetPasswordConfigured = hasSecret(telPass)
+		d.SSHPasswordConfigured = hasSecret(sshPass)
 		out = append(out, d)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"devices": out})
@@ -148,10 +161,23 @@ func acquiredAtArg(s *string) any {
 
 func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	var body deviceDTO
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var telPass, sshPass *string
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	var secrets struct {
+		TelnetPassword *string `json:"telnet_password"`
+		SSHPassword    *string `json:"ssh_password"`
+	}
+	_ = json.Unmarshal(raw, &secrets)
+	telPass = secrets.TelnetPassword
+	sshPass = secrets.SSHPassword
 	if body.Description == "" || body.Category == "" {
 		writeErr(w, 422, "VALIDATION", "description e category obrigatórios", nil)
 		return
@@ -179,17 +205,22 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	if body.IP != nil {
 		ipArg = strings.TrimSpace(*body.IP)
 	}
-	err := s.DB().QueryRow(r.Context(), `
+	err = s.DB().QueryRow(r.Context(), `
 		INSERT INTO devices (pop_id, locality_id, category, description, ip, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, bng_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides, max_pons)
+			telemetry_oid_strategy, telemetry_oid_overrides, max_pons,
+			mikrotik_telnet_profile_id, switch_telnet_profile_id,
+			telnet_user, telnet_password, telnet_enable, ssh_user, ssh_password)
 		VALUES ($1,$2,$3,$4, NULLIF($5::text,'')::inet, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::date, $22, $23,
-			COALESCE($24,'default'), COALESCE($25::jsonb,'{}'::jsonb), $26)
+			COALESCE($24,'default'), COALESCE($25::jsonb,'{}'::jsonb), $26,
+			$27, $28, $29, $30, $31, $32)
 		RETURNING id
 	`, body.PopID, body.LocalityID, body.Category, body.Description, ipArg, ns, body.AccessMode, body.TelemetryMode, body.PingEnabled, body.TelemetryEnabled, body.BngEnabled, op,
 		body.Latitude, body.Longitude, body.Brand, body.Model, body.MAC, body.SerialNumber, body.SoftwareVersion, body.HardwareVersion, acquiredAtArg(body.AcquiredAt), body.SNMPCommunity, body.MIBFolderPath,
-		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons).Scan(&id)
+		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons,
+		body.MikrotikTelnetProfileID, body.SwitchTelnetProfileID,
+		body.TelnetUser, telPass, body.TelnetEnable, body.SSHUser, sshPass).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "telemetry_requires_ping") {
 			writeErr(w, 422, "VALIDATION", "telemetria exige ping", nil)
@@ -697,11 +728,13 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	var d deviceDTO
 	var ip *string
 	var popName, locName *string
+	var telPass, sshPass *string
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
 			d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
 			d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
-			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons,
+			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
+			d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
 			p.description, l.name
 		FROM devices d
 		LEFT JOIN pops p ON p.id = d.pop_id
@@ -710,7 +743,8 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &popName, &locName)
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass, &popName, &locName)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
@@ -720,6 +754,8 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.IP = ip
+	d.TelnetPasswordConfigured = hasSecret(telPass)
+	d.SSHPasswordConfigured = hasSecret(sshPass)
 	raw, _ := json.Marshal(d)
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
@@ -745,16 +781,19 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	var d deviceDTO
 	var ip *string
+	var telPassCur, sshPassCur *string
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, bng_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons
+			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons, mikrotik_telnet_profile_id, switch_telnet_profile_id,
+			telnet_user, telnet_enable, ssh_user, telnet_password, ssh_password
 		FROM devices WHERE id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons)
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPassCur, &sshPassCur)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
 		return
@@ -767,6 +806,36 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	prevPing := d.PingEnabled
 	prevTelemetry := d.TelemetryEnabled
 	mergeDeviceJSON(&d, body)
+	telPassArg := telPassCur
+	if v, ok := body["telnet_password"]; ok {
+		if string(v) == "null" {
+			telPassArg = nil
+		} else {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				if strings.TrimSpace(s) == "" {
+					telPassArg = nil
+				} else {
+					telPassArg = &s
+				}
+			}
+		}
+	}
+	sshPassArg := sshPassCur
+	if v, ok := body["ssh_password"]; ok {
+		if string(v) == "null" {
+			sshPassArg = nil
+		} else {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				if strings.TrimSpace(s) == "" {
+					sshPassArg = nil
+				} else {
+					sshPassArg = &s
+				}
+			}
+		}
+	}
 	if strings.TrimSpace(d.NetworkStatus) == "" {
 		d.NetworkStatus = "Normal"
 	}
@@ -792,12 +861,20 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 			telemetry_oid_strategy=COALESCE($25,'default'),
 			telemetry_oid_overrides=COALESCE($26::jsonb,'{}'::jsonb),
 			max_pons=$27,
+			mikrotik_telnet_profile_id=$28,
+			switch_telnet_profile_id=$29,
+			telnet_user=$30,
+			telnet_password=$31,
+			telnet_enable=$32,
+			ssh_user=$33,
+			ssh_password=$34,
 			updated_at=now()
 		WHERE id=$1
 	`, id, d.PopID, d.LocalityID, d.Category, d.Description, ipArg, d.NetworkStatus, d.AccessMode, d.TelemetryMode,
 		d.PingEnabled, d.TelemetryEnabled, d.OperationalMode, d.BngEnabled,
 		d.Latitude, d.Longitude, d.Brand, d.Model, d.MAC, d.SerialNumber, d.SoftwareVersion, d.HardwareVersion, acquiredAtArg(d.AcquiredAt), d.SNMPCommunity, d.MIBFolderPath,
-		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons)
+		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons, d.MikrotikTelnetProfileID, d.SwitchTelnetProfileID,
+		d.TelnetUser, telPassArg, d.TelnetEnable, d.SSHUser, sshPassArg)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -912,6 +989,35 @@ func mergeDeviceJSON(d *deviceDTO, body map[string]json.RawMessage) {
 		if json.Unmarshal(v, &x) == nil {
 			d.MaxPons = x
 		}
+	}
+	if v, ok := body["mikrotik_telnet_profile_id"]; ok {
+		if string(v) == "null" {
+			d.MikrotikTelnetProfileID = nil
+		} else {
+			var x *uuid.UUID
+			if json.Unmarshal(v, &x) == nil {
+				d.MikrotikTelnetProfileID = x
+			}
+		}
+	}
+	if v, ok := body["switch_telnet_profile_id"]; ok {
+		if string(v) == "null" {
+			d.SwitchTelnetProfileID = nil
+		} else {
+			var x *uuid.UUID
+			if json.Unmarshal(v, &x) == nil {
+				d.SwitchTelnetProfileID = x
+			}
+		}
+	}
+	if v, ok := body["telnet_user"]; ok {
+		_ = json.Unmarshal(v, &d.TelnetUser)
+	}
+	if v, ok := body["telnet_enable"]; ok {
+		_ = json.Unmarshal(v, &d.TelnetEnable)
+	}
+	if v, ok := body["ssh_user"]; ok {
+		_ = json.Unmarshal(v, &d.SSHUser)
 	}
 }
 

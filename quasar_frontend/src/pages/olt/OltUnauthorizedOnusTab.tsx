@@ -13,6 +13,8 @@ type UnauthorizedEntry = {
   pon?: number;
   onu?: number;
   gpon_onu?: string;
+  state?: string;
+  mode?: string;
   raw_line?: string;
 };
 
@@ -121,16 +123,17 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
               <thead>
                 <tr>
                   <th>Serial</th>
-                  <th>Modelo</th>
                   <th>PON</th>
                   <th>ONU</th>
                   <th>GPON ONU</th>
+                  <th>Estado</th>
+                  <th>Modelo</th>
                 </tr>
               </thead>
               <tbody>
                 {entries.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ color: "var(--muted)" }}>
+                    <td colSpan={6} style={{ color: "var(--muted)" }}>
                       Nenhuma ONU parseada — veja a saída bruta ou ajuste o comando no perfil OLT.
                     </td>
                   </tr>
@@ -138,12 +141,13 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                   entries.map((e, i) => (
                     <tr key={`${e.serial ?? i}-${e.pon ?? 0}-${e.onu ?? 0}`}>
                       <td className="mono">{e.serial ?? "—"}</td>
-                      <td>{e.model ?? "—"}</td>
                       <td>{e.pon ?? "—"}</td>
                       <td>{e.onu ?? "—"}</td>
                       <td className="mono" style={{ fontSize: 10 }}>
                         {e.gpon_onu ?? "—"}
                       </td>
+                      <td className="mono">{e.state ?? e.mode ?? "—"}</td>
+                      <td>{e.model ?? "—"}</td>
                     </tr>
                   ))
                 )}

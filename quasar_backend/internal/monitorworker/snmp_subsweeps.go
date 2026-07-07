@@ -239,6 +239,9 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 		if ph == InterfacePhaseMikrotik && !workerLikelyMikrotik(row.category, row.brand, row.model, row.description) {
 			continue
 		}
+		if ph == InterfacePhaseSwitch && !workerLikelySwitch(row.category) {
+			continue
+		}
 		if ph == InterfacePhaseOLT && !strings.EqualFold(strings.TrimSpace(row.category), "olt") {
 			continue
 		}

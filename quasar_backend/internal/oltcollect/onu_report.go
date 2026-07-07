@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// vsolGponInterfaceRE detecta linhas "interface gpon …" nos pré-comandos.
+var vsolGponInterfaceRE = regexp.MustCompile(`(?i)^interface\s+gpon\s+`)
+
 var (
 	gponOnuInterfaceRE = regexp.MustCompile(`gpon_onu-\d+/\d+/\d+:\d+`)
 	gponOnuPonOnuRE    = regexp.MustCompile(`(\d+):(\d+)\s*$`)
@@ -25,9 +28,10 @@ type OnuReportConfig struct {
 	Commands             []string `json:"commands"`
 	SerialSearchCommand      string   `json:"serial_search_command"`
 	SerialListSearchCommand  string   `json:"serial_list_search_command"`
-	OnuAuthorizeCommand      string   `json:"onu_authorize_command"`
-	OnuDeauthorizeCommand string  `json:"onu_deauthorize_command"`
-	UnauthorizedOnuQueryCommand string `json:"unauthorized_onu_query_command"`
+	OnuAuthorizeCommand             string   `json:"onu_authorize_command"`
+	OnuDeauthorizeCommand           string   `json:"onu_deauthorize_command"`
+	UnauthorizedOnuQueryCommand     string   `json:"unauthorized_onu_query_command"`
+	UnauthorizedOnuPreCommands      []string `json:"unauthorized_onu_pre_commands"`
 }
 
 // MonitorEnabled indica se o monitoramento deve enriquecer ONUs via telnet.
@@ -71,6 +75,7 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 	cfg.OnuAuthorizeCommand = strings.TrimSpace(cfg.OnuAuthorizeCommand)
 	cfg.OnuDeauthorizeCommand = strings.TrimSpace(cfg.OnuDeauthorizeCommand)
 	cfg.UnauthorizedOnuQueryCommand = strings.TrimSpace(cfg.UnauthorizedOnuQueryCommand)
+	cfg.UnauthorizedOnuPreCommands = trimNonEmpty(cfg.UnauthorizedOnuPreCommands)
 	return cfg
 }
 
@@ -122,8 +127,17 @@ func SubstituteTelnetTemplate(tpl string, t OnuReportTarget, sec TelnetSecrets) 
 }
 
 func (c OnuReportConfig) RenderPreCommands(t OnuReportTarget, sec TelnetSecrets) []string {
+	return renderTelnetPreTemplates(c.PreCommands, t, sec)
+}
+
+// RenderUnauthorizedPreCommands pré-comandos exclusivos da consulta de ONUs não autorizadas.
+func (c OnuReportConfig) RenderUnauthorizedPreCommands(t OnuReportTarget, sec TelnetSecrets) []string {
+	return renderTelnetPreTemplates(c.UnauthorizedOnuPreCommands, t, sec)
+}
+
+func renderTelnetPreTemplates(tpls []string, t OnuReportTarget, sec TelnetSecrets) []string {
 	var out []string
-	for _, tpl := range c.PreCommands {
+	for _, tpl := range tpls {
 		if cmd := SubstituteTelnetTemplate(tpl, t, sec); cmd != "" {
 			out = append(out, cmd)
 		}
@@ -238,6 +252,9 @@ func ResolveGponOnu(t OnuReportTarget) string {
 func SubstituteOnuReportTemplate(tpl string, t OnuReportTarget) string {
 	gponOnu := ResolveGponOnu(t)
 	s := tpl
+	if t.Pon > 0 {
+		s = strings.ReplaceAll(s, "{pon_port}", fmt.Sprintf("0/%d", t.Pon))
+	}
 	s = strings.ReplaceAll(s, "{pon}", strconv.Itoa(t.Pon))
 	s = strings.ReplaceAll(s, "{onu}", strconv.Itoa(t.Onu))
 	s = strings.ReplaceAll(s, "{serial}", strings.TrimSpace(t.Serial))
@@ -248,11 +265,41 @@ func SubstituteOnuReportTemplate(tpl string, t OnuReportTarget) string {
 	} else {
 		s = strings.ReplaceAll(s, "{if_index}", "")
 	}
+	s = normalizeVsolGponInterfaceCmd(strings.TrimSpace(s), t.Pon)
 	return strings.TrimSpace(s)
 }
 
+// normalizeVsolGponInterfaceCmd corrige "interface gpon 4" → "interface gpon 0/4" (VSOL).
+func normalizeVsolGponInterfaceCmd(cmd string, pon int) string {
+	if pon <= 0 {
+		return cmd
+	}
+	lower := strings.ToLower(strings.TrimSpace(cmd))
+	if !strings.HasPrefix(lower, "interface gpon ") {
+		return cmd
+	}
+	suffix := strings.TrimSpace(cmd[len("interface gpon "):])
+	want := fmt.Sprintf("0/%d", pon)
+	if suffix == want {
+		return cmd
+	}
+	if suffix == strconv.Itoa(pon) || suffix == "" {
+		return "interface gpon " + want
+	}
+	return cmd
+}
+
 func (c OnuReportConfig) NeedsEnablePassword() bool {
-	for _, tpl := range c.PreCommands {
+	return preCommandsNeedEnable(c.PreCommands)
+}
+
+// NeedsEnablePasswordForUnauthorized indica se a consulta de não autorizadas exige senha enable.
+func (c OnuReportConfig) NeedsEnablePasswordForUnauthorized() bool {
+	return preCommandsNeedEnable(c.UnauthorizedOnuPreCommands)
+}
+
+func preCommandsNeedEnable(pre []string) bool {
+	for _, tpl := range pre {
 		t := strings.TrimSpace(tpl)
 		if strings.EqualFold(t, "enable") || t == "{enable}" || t == "{enable_password}" || t == "{telnet_enable}" {
 			return true

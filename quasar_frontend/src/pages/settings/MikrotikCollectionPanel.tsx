@@ -101,7 +101,19 @@ function countEnabled(metrics: MikrotikMetricsForm, catalog: CatalogEntry[]) {
   return { enabled, missingOid };
 }
 
-export function MikrotikCollectionPanel() {
+export function MikrotikCollectionPanel({
+  embedded,
+  apiPath = "/api/v1/settings/mikrotik-collection",
+  queryKey = "mikrotik-collection",
+  saveSuccessMessage = "Perfil MikroTik guardado.",
+  loadingLabel = "A carregar perfil MikroTik…",
+}: {
+  embedded?: boolean;
+  apiPath?: string;
+  queryKey?: string;
+  saveSuccessMessage?: string;
+  loadingLabel?: string;
+} = {}) {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<MikrotikMetricsForm>({});
@@ -112,8 +124,8 @@ export function MikrotikCollectionPanel() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const config = useQuery({
-    queryKey: ["mikrotik-collection"],
-    queryFn: () => apiFetch<MikrotikCollectionResponse>("/api/v1/settings/mikrotik-collection"),
+    queryKey: [queryKey],
+    queryFn: () => apiFetch<MikrotikCollectionResponse>(apiPath),
   });
 
   const catalog = config.data?.catalog ?? [];
@@ -130,18 +142,18 @@ export function MikrotikCollectionPanel() {
 
   const patch = useMutation({
     mutationFn: () =>
-      apiFetch<{ ok: boolean; message?: string }>("/api/v1/settings/mikrotik-collection", {
+      apiFetch<{ ok: boolean; message?: string }>(apiPath, {
         method: "PATCH",
         json: { metrics, collection_steps: steps },
       }),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["mikrotik-collection"] });
-      toastOk(pushToast, data.message || "Perfil MikroTik guardado.");
+      qc.invalidateQueries({ queryKey: [queryKey] });
+      toastOk(pushToast, data.message || saveSuccessMessage);
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
-  if (config.isLoading) return <p>A carregar perfil MikroTik…</p>;
+  if (config.isLoading) return <p>{loadingLabel}</p>;
   if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
 
   const bySection = SECTION_ORDER.map((section) => ({
@@ -162,7 +174,7 @@ export function MikrotikCollectionPanel() {
   }
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: embedded ? 0 : 8 }}>
 
       <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — MikroTik</h2>

@@ -10,8 +10,10 @@ import (
 var (
 	telnetKvLineRE     = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_-]{2,44}):\s+(.+?)\s*$`)
 	telnetGponPowerRE  = regexp.MustCompile(`gpon_onu[^\n]+\s+(-?\d+(?:\.\d+)?)\s*\(dbm\)`)
-	telnetVsolInfoRE   = regexp.MustCompile(`^(GPON[\d/:\w-]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
-	telnetVsolStateRE  = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
+	telnetVsolInfoRE     = regexp.MustCompile(`^(GPON[\d/:\w-]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
+	// show onu auto-find: OnuIndex  Sn  State  (ex.: GPON0/4:1  ZTEGCFAA2AB1  unknow)
+	telnetVsolAutoFindRE = regexp.MustCompile(`^(?i)(GPON\d+/\d+:\d+)\s+(\S+)\s+(\S+)\s*$`)
+	telnetVsolStateRE    = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
 	telnetOnuNumberRE  = regexp.MustCompile(`ONU Number:\s*(\S+)`)
 )
 

@@ -16,8 +16,10 @@ const (
 	StepKindBng                = "bng"
 	StepKindOltOnu             = "olt_onu"
 	StepKindMikrotik           = "mikrotik"
+	StepKindSwitch             = "switch"
 	StepKindInterfacesOLT      = "interfaces_olt"
 	StepKindInterfacesMikrotik = "interfaces_mikrotik"
+	StepKindInterfacesSwitch   = "interfaces_switch"
 )
 
 // StepScope filtro de equipamentos para um passo do pipeline.
@@ -51,6 +53,7 @@ func DefaultPipelineSteps() []PipelineStep {
 		{ID: "telemetry-all", Kind: StepKindTelemetry, Enabled: true, Scope: StepScope{Target: "all"}},
 		{ID: "bng-subscribers", Kind: StepKindBng, Enabled: true, Scope: StepScope{Target: "category", Category: "bng"}, Options: StepOptions{BngMode: "totals"}},
 		{ID: "mikrotik-if", Kind: StepKindMikrotik, Enabled: true, Scope: StepScope{Target: "category", Category: "mikrotik"}, Options: StepOptions{MikrotikMode: "full"}},
+		{ID: "switch-if", Kind: StepKindSwitch, Enabled: true, Scope: StepScope{Target: "category", Category: "switch"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "olt-if", Kind: StepKindInterfacesOLT, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}},
 		{ID: "olt-onu", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "full"}},
 	}
@@ -187,10 +190,14 @@ func pipelineStepLabel(kind string) string {
 		return "Coleta ONUs (OLT)"
 	case StepKindMikrotik:
 		return "MikroTik"
+	case StepKindSwitch:
+		return "Switch"
 	case StepKindInterfacesOLT:
 		return "Interfaces SNMP (OLT)"
 	case StepKindInterfacesMikrotik:
 		return "Interfaces SNMP (MikroTik)"
+	case StepKindInterfacesSwitch:
+		return "Interfaces SNMP (Switch)"
 	default:
 		return kind
 	}

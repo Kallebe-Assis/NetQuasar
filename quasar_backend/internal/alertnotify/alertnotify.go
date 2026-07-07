@@ -87,6 +87,8 @@ func metricLabel(title, incident string) string {
 		return "Potência RX"
 	case strings.Contains(hay, "onu"):
 		return "ONUs"
+	case strings.Contains(hay, "pppoe"):
+		return "PPPoE"
 	default:
 		return "Valor"
 	}
@@ -489,6 +491,101 @@ func appendOltOnuDeltaTelegramLines(parts []string, alertType string, meta map[s
 	return parts
 }
 
+func bngSubscriberFieldLabel(field string) string {
+	switch strings.TrimSpace(field) {
+	case "pppoe_online":
+		return "PPPoE"
+	case "ipv4_online":
+		return "IPv4"
+	case "ipv6_online":
+		return "IPv6"
+	case "total_online":
+		return "Total"
+	case "dual_stack_online":
+		return "Dual-stack"
+	default:
+		return ""
+	}
+}
+
+func appendBngSubscriberDropTelegramLines(parts []string, meta map[string]any, title, inc string) []string {
+	field := metaString(meta, "subscriber_field")
+	label := bngSubscriberFieldLabel(field)
+	if label == "" {
+		if i := strings.LastIndex(title, "—"); i >= 0 {
+			label = strings.TrimSpace(title[i+len("—"):])
+		} else if i := strings.LastIndex(title, "-"); i >= 0 {
+			label = strings.TrimSpace(title[i+1:])
+		}
+	}
+	if label == "" {
+		label = "logins"
+	}
+
+	drop := metaFloat(meta, "drop_count")
+	prev, hasPrev := metaNumber(meta, "prev_online")
+	cur, hasCur := metaNumber(meta, "curr_online")
+
+	if drop <= 0 {
+		if m := regexp.MustCompile(`(?i)queda\s+de\s+(\d+(?:[.,]\d+)?)\s+`).FindStringSubmatch(inc); len(m) >= 2 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+				drop = f
+			}
+		}
+	}
+	if !hasPrev || !hasCur {
+		if m := regexp.MustCompile(`\((\d+(?:[.,]\d+)?)\s*→\s*(\d+(?:[.,]\d+)?)\)`).FindStringSubmatch(inc); len(m) >= 3 {
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+				prev, hasPrev = f, true
+			}
+			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[2], ",", "."), 64); err == nil {
+				cur, hasCur = f, true
+			}
+		}
+	}
+
+	parts = append(parts, fmt.Sprintf("• Queda de logins BNG — %s", label))
+	if drop > 0 {
+		sess := "sessões"
+		if strings.EqualFold(label, "PPPoE") {
+			sess = "PPPoEs"
+		}
+		parts = append(parts, fmt.Sprintf("• Queda de %.0f %s", drop, sess))
+	}
+	if hasPrev && hasCur {
+		parts = append(parts, fmt.Sprintf("• Online: %.0f → %.0f", prev, cur))
+	}
+	return parts
+}
+
+func metaNumber(meta map[string]any, key string) (float64, bool) {
+	if meta == nil {
+		return 0, false
+	}
+	v, ok := meta[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	}
+}
+
 func telegramMonitoringBlocks(level, title, message string, equipFallback string, ipFallback string) string {
 	return telegramMonitoringBlocksWithContext(level, title, message, equipFallback, ipFallback, "", nil)
 }
@@ -533,6 +630,8 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		}
 	case "olt_onu_drop", "olt_onu_rise":
 		parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
+	case "bng_subscriber_drop":
+		parts = appendBngSubscriberDropTelegramLines(parts, meta, title, inc)
 	default:
 		if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
 			parts = append(parts, "• "+tgt)

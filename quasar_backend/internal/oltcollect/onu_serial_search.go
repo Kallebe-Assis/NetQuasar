@@ -78,6 +78,24 @@ func onuListEntryKey(e SerialSearchOnuEntry) string {
 }
 
 func parseOnuListLine(line string) (SerialSearchOnuEntry, bool) {
+	// Formato auto-find (3 colunas): GPON0/4:1  ZTEGCFAA2AB1  unknow
+	if m := telnetVsolAutoFindRE.FindStringSubmatch(line); m != nil {
+		gponIdx := strings.TrimSpace(m[1])
+		serial := strings.TrimSpace(m[2])
+		state := strings.TrimSpace(m[3])
+		if looksLikeSerial(serial) {
+			pon, onu := ParsePonOnuFromVsolGponIndex(gponIdx)
+			return SerialSearchOnuEntry{
+				GponOnu: gponIdx,
+				Pon:     pon,
+				Onu:     onu,
+				Serial:  serial,
+				Mode:    state,
+			}, true
+		}
+	}
+
+	// Formato show onu info (5 colunas): GPON0/1:27 Model Profile Mode Serial
 	m := telnetVsolInfoRE.FindStringSubmatch(line)
 	if m == nil {
 		return SerialSearchOnuEntry{}, false
@@ -190,6 +208,8 @@ func SerialSearchEntryToMap(e SerialSearchOnuEntry) map[string]any {
 	}
 	if e.Mode != "" {
 		m["mode"] = e.Mode
+		// auto-find usa Mode para o State (unknow, etc.)
+		m["state"] = e.Mode
 	}
 	return m
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
+	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 	"github.com/rs/zerolog"
 )
 
@@ -740,6 +741,7 @@ func buildInterfaceMonitorPayload(ifaces []byte, collectedAt *time.Time, prevIfa
 		}
 		tab = append(tab, row)
 	}
+	switchcollect.EnrichInterfaceVlans(tab, vars)
 	var sensors []map[string]any
 	for _, v := range vars {
 		oid := strings.TrimSpace(v.OID)

@@ -4038,3 +4038,77 @@ details.collapsible-section .collapsible-section__body {
     opacity: 1;
   }
 }
+
+/* Perfis OLT — secções colapsáveis */
+.olt-profile-section {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.olt-profile-section__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+  transition: var(--hover-transition);
+}
+
+.olt-profile-section__summary::-webkit-details-marker {
+  display: none;
+}
+
+.olt-profile-section[open] > .olt-profile-section__summary {
+  border-bottom-color: var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.olt-profile-section__summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 2px;
+  transition: transform 0.14s ease;
+}
+
+.olt-profile-section[open] > .olt-profile-section__summary::before {
+  transform: rotate(90deg);
+}
+
+.olt-profile-section__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.olt-profile-section__hint {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1 1 200px;
+}
+
+.olt-profile-section__body {
+  padding: 10px 12px 12px;
+}
+
+.olt-telnet-block {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--panel2);
+}
+
+.olt-telnet-block h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.olt-telnet-block p {
+  font-size: 11px;
+  color: var(--muted);
+}

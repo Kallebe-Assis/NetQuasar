@@ -18,6 +18,7 @@ export const APP_ROUTES = {
   tools: "/tools",
   olt: "/olt",
   mikrotik: "/mikrotik",
+  switch: "/switch",
   bng: "/bng",
   events: "/events",
   reports: "/reports",

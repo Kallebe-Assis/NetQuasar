@@ -11,7 +11,8 @@ import { AppearancePanel } from "./settings/AppearancePanel";
 import { MonitoringSettingsPanel } from "./settings/MonitoringPipelinePanel";
 import { AuditingPanel } from "./settings/AuditingPanel";
 import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
-import { MikrotikCollectionPanel } from "./settings/MikrotikCollectionPanel";
+import { MikrotikSettingsPanel } from "./settings/MikrotikSettingsPanel";
+import { SwitchSettingsPanel } from "./settings/SwitchSettingsPanel";
 import { BngCollectionPanel } from "./settings/BngCollectionPanel";
 import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
 import { DatabaseCleanupButton } from "./settings/DatabaseCleanupModal";
@@ -28,6 +29,7 @@ type SettingsTab =
   | "telegram"
   | "olt"
   | "mikrotik"
+  | "switch"
   | "bng"
   | "automation";
 
@@ -37,7 +39,7 @@ export function SettingsPage() {
     <>
       <h1>Configurações</h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/BNG e relatórios automáticos.
+        Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/Switch/BNG e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
         {(
@@ -52,6 +54,7 @@ export function SettingsPage() {
             ["telegram", "Telegram"],
             ["olt", "Perfis OLT"],
             ["mikrotik", "MikroTik"],
+            ["switch", "Switch"],
             ["bng", "BNG"],
             ["automation", "Automações"],
           ] as const
@@ -75,7 +78,8 @@ export function SettingsPage() {
         </div>
       )}
       {tab === "olt" && <OltVendorsPanel />}
-      {tab === "mikrotik" && <MikrotikCollectionPanel />}
+      {tab === "mikrotik" && <MikrotikSettingsPanel />}
+      {tab === "switch" && <SwitchSettingsPanel />}
       {tab === "bng" && <BngCollectionPanel />}
       {tab === "automation" && <ScheduledReportsPanel />}
     </>
@@ -2153,6 +2157,7 @@ type OltOnuReportCommands = {
   onu_authorize_command?: string;
   onu_deauthorize_command?: string;
   unauthorized_onu_query_command?: string;
+  unauthorized_onu_pre_commands?: string[];
 };
 
 type OltPonTelnetCommands = {
@@ -2461,6 +2466,34 @@ function defaultOnuReportForBrand(brandName: string): { pre_commands: string[]; 
   return { pre_commands: [], commands: [] };
 }
 
+function defaultUnauthorizedForBrand(brandName: string): { pre_commands: string[]; command: string } {
+  const b = brandName.trim().toUpperCase();
+  if (b.includes("VSOL")) {
+    return {
+      pre_commands: ["enable", "{enable}", "configure terminal", "interface gpon 0/{pon}"],
+      command: "show onu auto-find",
+    };
+  }
+  if (b.includes("ZTE")) {
+    return {
+      pre_commands: ["terminal length 0", "terminal page-break disable"],
+      command: "show gpon onu uncfg",
+    };
+  }
+  return { pre_commands: [], command: "" };
+}
+
+function linesToText(lines?: string[]): string {
+  return (lines ?? []).join("\n");
+}
+
+function textToLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function defaultPonTelnetForBrand(brandName: string): { pre_commands: string[]; commands: string[] } {
   const b = brandName.trim().toUpperCase();
   if (b.includes("ZTE")) {
@@ -2502,6 +2535,34 @@ function onuReportCommandsFromApi(rc?: OltOnuReportCommands | null): { pre_comma
   };
 }
 
+function OltProfileSection({
+  title,
+  hint,
+  defaultOpen = true,
+  onToggle,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  defaultOpen?: boolean;
+  onToggle?: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      className="olt-profile-section"
+      open={defaultOpen}
+      onToggle={(e) => onToggle?.((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="olt-profile-section__summary">
+        <span className="olt-profile-section__title">{title}</span>
+        {hint ? <span className="olt-profile-section__hint">{hint}</span> : null}
+      </summary>
+      <div className="olt-profile-section__body">{children}</div>
+    </details>
+  );
+}
+
 function OltVendorsPanel() {
   const qc = useQueryClient();
   const brands = useQuery({ queryKey: ["olt-brands"], queryFn: () => apiFetch<{ brands: string[] }>("/api/v1/settings/olt-vendors") });
@@ -2526,6 +2587,7 @@ function OltVendorsPanel() {
   const [onuAuthorizeCmd, setOnuAuthorizeCmd] = useState("");
   const [onuDeauthorizeCmd, setOnuDeauthorizeCmd] = useState("");
   const [onuUnauthorizedQueryCmd, setOnuUnauthorizedQueryCmd] = useState("");
+  const [onuUnauthorizedPreText, setOnuUnauthorizedPreText] = useState("");
   const [ponTelnetPreText, setPonTelnetPreText] = useState("");
   const [ponTelnetCommandsText, setPonTelnetCommandsText] = useState("");
   const [ponTelnetEnabled, setPonTelnetEnabled] = useState(false);
@@ -2609,6 +2671,7 @@ function OltVendorsPanel() {
     setOnuAuthorizeCmd(rc?.onu_authorize_command?.trim() ?? "");
     setOnuDeauthorizeCmd(rc?.onu_deauthorize_command?.trim() ?? "");
     setOnuUnauthorizedQueryCmd(rc?.unauthorized_onu_query_command?.trim() ?? "");
+    setOnuUnauthorizedPreText(linesToText(rc?.unauthorized_onu_pre_commands));
     setOnuReportEnabled(rc?.enabled === true);
     setOnuReportOnlineOnly(rc?.monitor_online_only !== false);
     setOnuReportMaxPerCycle(rc?.max_onus_per_cycle != null && rc.max_onus_per_cycle > 0 ? String(rc.max_onus_per_cycle) : "25");
@@ -2628,23 +2691,12 @@ function OltVendorsPanel() {
       const autoSteps: OltCollectionStep[] = metricsReady
         ? [{ id: "onu_metrics", method: "onu_metrics_collect", enabled: true }]
         : steps;
-      const preCommands = onuReportPreText
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const commands = onuReportCommandsText
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const preCommands = textToLines(onuReportPreText);
+      const commands = textToLines(onuReportCommandsText);
+      const unauthorizedPre = textToLines(onuUnauthorizedPreText);
       const serialSearch = onuReportSerialSearchText.trim();
-      const ponPreCommands = ponTelnetPreText
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const ponCommands = ponTelnetCommandsText
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const ponPreCommands = textToLines(ponTelnetPreText);
+      const ponCommands = textToLines(ponTelnetCommandsText);
       const maxPons = Number.parseInt(ponTelnetMaxPerCycle, 10);
       const maxOnus = Number.parseInt(onuReportMaxPerCycle, 10);
       return apiFetch(`/api/v1/settings/olt-vendors/${encodeURIComponent(brand)}/models/${encodeURIComponent(model)}`, {
@@ -2662,6 +2714,7 @@ function OltVendorsPanel() {
             onu_authorize_command: onuAuthorizeCmd.trim() || undefined,
             onu_deauthorize_command: onuDeauthorizeCmd.trim() || undefined,
             unauthorized_onu_query_command: onuUnauthorizedQueryCmd.trim() || undefined,
+            unauthorized_onu_pre_commands: unauthorizedPre,
           },
           pon_telnet_commands: {
             enabled: ponTelnetEnabled,
@@ -2770,6 +2823,7 @@ function OltVendorsPanel() {
       setOnuAuthorizeCmd(src.onu_report_commands?.onu_authorize_command?.trim() ?? "");
       setOnuDeauthorizeCmd(src.onu_report_commands?.onu_deauthorize_command?.trim() ?? "");
       setOnuUnauthorizedQueryCmd(src.onu_report_commands?.unauthorized_onu_query_command?.trim() ?? "");
+      setOnuUnauthorizedPreText(linesToText(src.onu_report_commands?.unauthorized_onu_pre_commands));
       setOnuReportEnabled(src.onu_report_commands?.enabled === true);
       setOnuReportOnlineOnly(src.onu_report_commands?.monitor_online_only !== false);
       setOnuReportMaxPerCycle(
@@ -2877,10 +2931,11 @@ function OltVendorsPanel() {
             </div>
           )}
 
-          <h3 style={{ marginTop: 16, fontSize: 14, marginBottom: 4 }}>Dados a coletar das ONUs (SNMP)</h3>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>Métricas por ONU (sufixo .PON.ONU).</p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
+          <OltProfileSection
+            title="Métricas SNMP — ONU"
+            hint="Dados por ONU via walk SNMP (sufixo .PON.ONU)."
+          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 8 }}>
           {OLT_METRIC_FIELDS.map((field) => {
             const m = metrics[field.key] ?? {};
             const statusMode = m.status_mode ?? "pon_onu_suffix";
@@ -3127,12 +3182,13 @@ function OltVendorsPanel() {
             );
           })}
           </div>
+          </OltProfileSection>
 
-          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Métricas das portas PON (OLT)</h3>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Status e potência da porta GPON na OLT — distinto do status/RX/TX de cada ONU. Sufixo SNMP apenas .PON.
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 8 }}>
+          <OltProfileSection
+            title="Métricas SNMP — portas PON"
+            hint="Status e potência da porta GPON na OLT (sufixo .PON)."
+          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 8 }}>
             {OLT_PON_METRIC_FIELDS.map((field) => {
               const m = metrics[field.key] ?? {};
               const ponStatusMode = m.status_mode ?? (field.key === "pon_status" ? "if_mib_index" : "pon_onu_suffix");
@@ -3302,53 +3358,18 @@ function OltVendorsPanel() {
               );
             })}
           </div>
+          </OltProfileSection>
 
-          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por ONU (Pesquisa e monitoramento)</h3>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Os mesmos comandos usados na aba <strong>Pesquisa</strong> («Relatório telnet»). Com monitoramento activo, o worker executa estes comandos
-            por ONU após a coleta SNMP e actualiza a tabela de ONUs na página OLT. O login telnet e os pré-comandos são feitos{" "}
-            <strong>uma vez por ciclo</strong>. O limite «Máx. ONUs/ciclo» usa <strong>rodízio</strong>: a cada ciclo
-            avança para o próximo lote até cobrir todas; dados CLI de ONUs fora do lote mantêm-se do ciclo anterior.
-          </p>
-          <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
-            <input
-              type="checkbox"
-              checked={onuReportEnabled}
-              onChange={(e) => setOnuReportEnabled(e.target.checked)}
-              style={{ marginTop: 3 }}
-            />
-            <span style={{ fontSize: 13, lineHeight: 1.45 }}>
-              <strong>Coletar via telnet no monitoramento</strong> — enriquece ONUs com dados CLI (modelo, RX/TX, estado, etc.).
-            </span>
-          </label>
-          {onuReportEnabled ? (
-            <div className="row" style={{ gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "flex-end" }}>
-              <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 13 }}>
-                <input type="checkbox" checked={onuReportOnlineOnly} onChange={(e) => setOnuReportOnlineOnly(e.target.checked)} />
-                Só ONUs online
-              </label>
-              <div className="field" style={{ margin: 0, maxWidth: 140 }}>
-                <label htmlFor="onu-telnet-max">Máx. ONUs/ciclo</label>
-                <input
-                  id="onu-telnet-max"
-                  className="input"
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={onuReportMaxPerCycle}
-                  onChange={(e) => setOnuReportMaxPerCycle(e.target.value)}
-                />
-              </div>
-            </div>
-          ) : null}
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Login usa <strong>Rede e SNMP</strong> (utilizador + palavra-passe telnet). Nos pré-comandos pode usar{" "}
-            <code>{"{enable}"}</code> ou <code>{"{enable_password}"}</code> para a senha de enable, e{" "}
-            <code>{"{password}"}</code> para repetir a senha de login. O sistema também envia enable automaticamente e
-            detecta pedidos de <em>Password:</em> após o comando <code>enable</code>. Placeholders ONU:{" "}
+          <OltProfileSection
+            title="Comandos Telnet / CLI"
+            hint="Blocos independentes: métricas ONU, pesquisa, não autorizadas, autorizar e PON/SFP."
+            defaultOpen
+          >
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 10px", maxWidth: 720 }}>
+            Login em <strong>Rede e SNMP</strong>. Placeholders: <code>{"{enable}"}</code>, <code>{"{password}"}</code>,{" "}
             <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{serial}"}</code>, <code>{"{gpon_onu}"}</code>.
           </p>
-          <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ marginBottom: 12 }}>
             <span
               className={
                 connDefaults.data?.telnet_password_configured && connDefaults.data?.telnet_user
@@ -3361,73 +3382,58 @@ function OltVendorsPanel() {
                 ? `configurado (${connDefaults.data.telnet_user})`
                 : "credenciais em falta — configure em Rede e SNMP"}
             </span>
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: 12, padding: "4px 10px" }}
-              onClick={() => {
-                const d = defaultOnuReportForBrand(brand);
-                setOnuReportPreText(d.pre_commands.join("\n"));
-                setOnuReportCommandsText(d.commands.join("\n"));
-                toastOk(pushToast, "Comandos padrão da marca carregados no formulário. Clique em Guardar para persistir.");
-              }}
-            >
-              Restaurar padrão da marca
-            </button>
           </div>
-          <div className="card" style={{ padding: 10, marginBottom: 12 }}>
-            <div className="field">
-              <label>Pesquisa por série (telnet)</label>
-              <input
-                className="input mono"
-                value={onuReportSerialSearchText}
-                onChange={(e) => setOnuReportSerialSearchText(e.target.value)}
-                placeholder={
-                  brand.toUpperCase().includes("ZTE")
-                    ? "show gpon onu by sn {serial}"
-                    : "show onu info {pon}"
-                }
-              />
-              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                Comando na aba <strong>Pesquisa</strong>. Dois modos:
-                <br />
-                • Com <code>{"{serial}"}</code> — a OLT procura o serial directamente (ex.: ZTE).
-                <br />
-                • Sem <code>{"{serial}"}</code> — o sistema executa a listagem, interpreta todas as ONUs e filtra localmente pelo serial digitado (ex.: VSOL).
-                <br />
-                Use <code>{"{pon}"}</code> para listar uma porta específica; na Pesquisa o utilizador pode escolher uma PON ou «Todas» (percorre as portas do snapshot).
-              </p>
+
+          {/* 1. Métricas de ONU */}
+          <div className="card olt-telnet-block">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+              <div>
+                <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>1. Métricas de ONU (monitoramento e relatório)</h4>
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, maxWidth: 640 }}>
+                  Usado no monitoramento periódico e no relatório telnet por ONU. Pré-comandos uma vez por ciclo; depois os
+                  comandos por ONU. Placeholders: <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{gpon_onu}"}</code>.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                style={{ fontSize: 12, padding: "4px 10px" }}
+                onClick={() => {
+                  const d = defaultOnuReportForBrand(brand);
+                  setOnuReportPreText(d.pre_commands.join("\n"));
+                  setOnuReportCommandsText(d.commands.join("\n"));
+                  toastOk(pushToast, "Padrão de métricas ONU carregado. Clique em Guardar.");
+                }}
+              >
+                Padrão da marca
+              </button>
             </div>
-            <div className="field">
-              <label>Consulta ONUs não autorizadas (telnet)</label>
-              <input
-                className="input mono"
-                value={onuUnauthorizedQueryCmd}
-                onChange={(e) => setOnuUnauthorizedQueryCmd(e.target.value)}
-                placeholder="show gpon onu uncfg"
-              />
-            </div>
-            <div className="field">
-              <label>Autorizar ONU (telnet)</label>
-              <input
-                className="input mono"
-                value={onuAuthorizeCmd}
-                onChange={(e) => setOnuAuthorizeCmd(e.target.value)}
-                placeholder="ont add {pon} {onu} sn-auth {serial} omci ..."
-              />
-            </div>
-            <div className="field">
-              <label>Desautorizar ONU (telnet)</label>
-              <input
-                className="input mono"
-                value={onuDeauthorizeCmd}
-                onChange={(e) => setOnuDeauthorizeCmd(e.target.value)}
-                placeholder="ont delete {pon} {onu}"
-              />
-              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                Placeholders: <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{serial}"}</code>, <code>{"{gpon_onu}"}</code>.
-              </p>
-            </div>
+            <label className="row" style={{ gap: 8, alignItems: "flex-start", margin: "12px 0 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={onuReportEnabled} onChange={(e) => setOnuReportEnabled(e.target.checked)} style={{ marginTop: 3 }} />
+              <span style={{ fontSize: 13 }}>
+                <strong>Coletar no monitoramento</strong> — enriquece ONUs com dados CLI (modelo, RX/TX, estado).
+              </span>
+            </label>
+            {onuReportEnabled ? (
+              <div className="row" style={{ gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "flex-end" }}>
+                <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 13 }}>
+                  <input type="checkbox" checked={onuReportOnlineOnly} onChange={(e) => setOnuReportOnlineOnly(e.target.checked)} />
+                  Só ONUs online
+                </label>
+                <div className="field" style={{ margin: 0, maxWidth: 140 }}>
+                  <label htmlFor="onu-telnet-max">Máx. ONUs/ciclo</label>
+                  <input
+                    id="onu-telnet-max"
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={onuReportMaxPerCycle}
+                    onChange={(e) => setOnuReportMaxPerCycle(e.target.value)}
+                  />
+                </div>
+              </div>
+            ) : null}
             <div className="field">
               <label>Pré-comandos (um por linha)</label>
               <textarea
@@ -3435,116 +3441,204 @@ function OltVendorsPanel() {
                 rows={3}
                 value={onuReportPreText}
                 onChange={(e) => setOnuReportPreText(e.target.value)}
-                placeholder={
-                  brand.toUpperCase().includes("ZTE")
-                    ? "terminal length 0\nterminal page-break disable\nscroll 512"
-                    : "enable\n{enable}\nconf terminal"
-                }
+                placeholder={brand.toUpperCase().includes("ZTE") ? "terminal length 0\nterminal page-break disable" : "enable\n{enable}\nconf terminal"}
               />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Comandos (um por linha)</label>
+              <label>Comandos por ONU (um por linha)</label>
               <textarea
                 className="input mono"
-                rows={6}
+                rows={4}
                 value={onuReportCommandsText}
                 onChange={(e) => setOnuReportCommandsText(e.target.value)}
                 placeholder={
                   brand.toUpperCase().includes("ZTE")
-                    ? "show gpon onu detail-info {gpon_onu}\nshow pon onu information {gpon_onu}\nshow pon power onu-rx {gpon_onu}\nshow pon power onu-tx {gpon_onu}"
+                    ? "show gpon onu detail-info {gpon_onu}\nshow pon power onu-rx {gpon_onu}"
                     : "show onu info {pon} {onu}\nshow onu state {pon} {onu}"
                 }
               />
             </div>
           </div>
 
-          <h3 style={{ marginTop: 18, fontSize: 14, marginBottom: 4 }}>Telnet por PON / SFP (GBIC)</h3>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Comandos CLI por porta PON para voltagem, temperatura, TX/RX e corrente de bias do módulo óptico. Os valores
-            actualizam a tabela de PONs na página OLT após cada coleta. O login telnet e os pré-comandos são feitos{" "}
-            <strong>uma vez por ciclo</strong>; depois executa-se só o comando de cada porta. O limite «Máx. PONs/ciclo»
-            usa <strong>rodízio</strong> quando há mais portas que o máximo — métricas SFP fora do lote mantêm-se do ciclo anterior.
-          </p>
-          <label className="row" style={{ gap: 8, alignItems: "flex-start", marginBottom: 10, cursor: "pointer", maxWidth: 640 }}>
-            <input
-              type="checkbox"
-              checked={ponTelnetEnabled}
-              onChange={(e) => setPonTelnetEnabled(e.target.checked)}
-              style={{ marginTop: 3 }}
-            />
-            <span style={{ fontSize: 13, lineHeight: 1.45 }}>
-              <strong>Coletar métricas PON via telnet no monitoramento</strong> — voltagem, TX, temperatura, bias, etc.
-            </span>
-          </label>
-          {ponTelnetEnabled ? (
-            <div className="field" style={{ margin: "0 0 10px", maxWidth: 140 }}>
-              <label htmlFor="pon-telnet-max">Máx. PONs/ciclo</label>
+          {/* 2. Pesquisa por série */}
+          <div className="card olt-telnet-block">
+            <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>2. Pesquisa por série</h4>
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 10px", maxWidth: 640 }}>
+              Aba <strong>OLT → Pesquisa</strong>. Usa os <strong>pré-comandos do bloco 1</strong> (métricas ONU) e o comando abaixo.
+            </p>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Comando de pesquisa</label>
               <input
-                id="pon-telnet-max"
-                className="input"
-                type="number"
-                min={1}
-                max={64}
-                value={ponTelnetMaxPerCycle}
-                onChange={(e) => setPonTelnetMaxPerCycle(e.target.value)}
+                className="input mono"
+                value={onuReportSerialSearchText}
+                onChange={(e) => setOnuReportSerialSearchText(e.target.value)}
+                placeholder={brand.toUpperCase().includes("ZTE") ? "show gpon onu by sn {serial}" : "show onu info {pon}"}
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                Com <code>{"{serial}"}</code> a OLT procura directamente (ZTE). Sem <code>{"{serial}"}</code>, lista e filtra no
+                NetQuasar (VSOL). Use <code>{"{pon}"}</code> para uma porta; na Pesquisa pode escolher «Todas».
+              </p>
+            </div>
+          </div>
+
+          {/* 3. ONUs não autorizadas */}
+          <div className="card olt-telnet-block">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+              <div>
+                <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>3. ONUs não autorizadas</h4>
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, maxWidth: 640 }}>
+                  Aba <strong>OLT → Não autorizadas</strong>. Pré-comandos e comando <strong>próprios</strong> — não partilham com
+                  métricas de ONU. Ex. VSOL: entrar em <code>interface gpon 0/4</code> e depois <code>show onu auto-find</code>.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                style={{ fontSize: 12, padding: "4px 10px" }}
+                onClick={() => {
+                  const d = defaultUnauthorizedForBrand(brand);
+                  setOnuUnauthorizedPreText(d.pre_commands.join("\n"));
+                  setOnuUnauthorizedQueryCmd(d.command);
+                  toastOk(pushToast, "Padrão de não autorizadas carregado. Ajuste a porta GPON se necessário e guarde.");
+                }}
+              >
+                Padrão da marca
+              </button>
+            </div>
+            <div className="field" style={{ marginTop: 12 }}>
+              <label>Pré-comandos (um por linha)</label>
+              <textarea
+                className="input mono"
+                rows={4}
+                value={onuUnauthorizedPreText}
+                onChange={(e) => setOnuUnauthorizedPreText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("VSOL")
+                    ? "enable\n{enable}\nconfigure terminal\ninterface gpon 0/{pon}"
+                    : "terminal length 0"
+                }
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                VSOL: use <code>{"interface gpon 0/{pon}"}</code> — o NetQuasar percorre cada porta PON do snapshot (ex.{" "}
+                <code>0/4</code>) e executa <code>show onu auto-find</code> em cada uma.
+              </p>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Comando de consulta</label>
+              <input
+                className="input mono"
+                value={onuUnauthorizedQueryCmd}
+                onChange={(e) => setOnuUnauthorizedQueryCmd(e.target.value)}
+                placeholder={brand.toUpperCase().includes("VSOL") ? "show onu auto-find" : "show gpon onu uncfg"}
               />
             </div>
-          ) : null}
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-            Placeholder principal: <code>{"{pon}"}</code> (número da porta). Use os mesmos placeholders de credenciais dos
-            pré-comandos que na secção ONU.
-          </p>
-          <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: 12, padding: "4px 10px" }}
-              onClick={() => {
-                const d = defaultPonTelnetForBrand(brand);
-                setPonTelnetPreText(d.pre_commands.join("\n"));
-                setPonTelnetCommandsText(d.commands.join("\n"));
-                toastOk(pushToast, "Comandos PON padrão da marca carregados. Clique em Guardar para persistir.");
-              }}
-            >
-              Restaurar padrão PON da marca
-            </button>
           </div>
-          <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+
+          {/* 4. Autorizar / desautorizar */}
+          <div className="card olt-telnet-block">
+            <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>4. Autorizar / desautorizar ONU</h4>
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 10px", maxWidth: 640 }}>
+              Acções manuais na página OLT. Usam os pré-comandos do <strong>bloco 1</strong> (métricas ONU). Placeholders:{" "}
+              <code>{"{pon}"}</code>, <code>{"{onu}"}</code>, <code>{"{serial}"}</code>, <code>{"{gpon_onu}"}</code>.
+            </p>
             <div className="field">
-              <label>Pré-comandos PON (um por linha)</label>
+              <label>Autorizar ONU</label>
+              <input
+                className="input mono"
+                value={onuAuthorizeCmd}
+                onChange={(e) => setOnuAuthorizeCmd(e.target.value)}
+                placeholder="ont add {pon} {onu} sn-auth {serial} omci ..."
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Desautorizar ONU</label>
+              <input
+                className="input mono"
+                value={onuDeauthorizeCmd}
+                onChange={(e) => setOnuDeauthorizeCmd(e.target.value)}
+                placeholder="ont delete {pon} {onu}"
+              />
+            </div>
+          </div>
+
+          {/* 5. PON / SFP */}
+          <div className="card olt-telnet-block">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+              <div>
+                <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>5. Métricas PON / SFP (GBIC)</h4>
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, maxWidth: 640 }}>
+                  Voltagem, temperatura, TX/RX e bias do módulo óptico por porta PON. Pré-comandos e comandos próprios.
+                  Placeholder: <code>{"{pon}"}</code>.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                style={{ fontSize: 12, padding: "4px 10px" }}
+                onClick={() => {
+                  const d = defaultPonTelnetForBrand(brand);
+                  setPonTelnetPreText(d.pre_commands.join("\n"));
+                  setPonTelnetCommandsText(d.commands.join("\n"));
+                  toastOk(pushToast, "Padrão PON carregado. Clique em Guardar.");
+                }}
+              >
+                Padrão da marca
+              </button>
+            </div>
+            <label className="row" style={{ gap: 8, alignItems: "flex-start", margin: "12px 0 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={ponTelnetEnabled} onChange={(e) => setPonTelnetEnabled(e.target.checked)} style={{ marginTop: 3 }} />
+              <span style={{ fontSize: 13 }}>
+                <strong>Coletar no monitoramento</strong> — actualiza a tabela de PONs após cada coleta.
+              </span>
+            </label>
+            {ponTelnetEnabled ? (
+              <div className="field" style={{ margin: "0 0 10px", maxWidth: 140 }}>
+                <label htmlFor="pon-telnet-max">Máx. PONs/ciclo</label>
+                <input
+                  id="pon-telnet-max"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={ponTelnetMaxPerCycle}
+                  onChange={(e) => setPonTelnetMaxPerCycle(e.target.value)}
+                />
+              </div>
+            ) : null}
+            <div className="field">
+              <label>Pré-comandos (um por linha)</label>
               <textarea
                 className="input mono"
                 rows={3}
                 value={ponTelnetPreText}
                 onChange={(e) => setPonTelnetPreText(e.target.value)}
-                placeholder={
-                  brand.toUpperCase().includes("ZTE")
-                    ? "terminal length 0\nterminal page-break disable\nscroll 512"
-                    : "enable\n{enable}\nconf terminal"
-                }
+                placeholder={brand.toUpperCase().includes("ZTE") ? "terminal length 0\nterminal page-break disable" : "enable\n{enable}\nconf terminal"}
               />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Comandos PON (um por linha)</label>
+              <label>Comandos por PON (um por linha)</label>
               <textarea
                 className="input mono"
-                rows={5}
+                rows={4}
                 value={ponTelnetCommandsText}
                 onChange={(e) => setPonTelnetCommandsText(e.target.value)}
                 placeholder={
                   brand.toUpperCase().includes("ZTE")
-                    ? "show pon power olt-tx gpon-olt_1/1/{pon}\nshow pon power olt-rx gpon-olt_1/1/{pon}\nshow optical-module-info gpon-olt_1/1/{pon}"
+                    ? "show pon power olt-tx gpon-olt_1/1/{pon}\nshow optical-module-info gpon-olt_1/1/{pon}"
                     : "show pon optical-transceiver-diagnosis slot 0 pon {pon}"
                 }
               />
             </div>
           </div>
 
-          <details style={{ marginTop: 14 }} open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
-            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Opções avançadas (passos extras de coleta)</summary>
-            <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
-              Normalmente não é necessário — o perfil usa automaticamente coleta SNMP das métricas marcadas acima.
-            </p>
+          </OltProfileSection>
+
+          <OltProfileSection
+            title="Opções avançadas"
+            hint="Passos extra de coleta SNMP/telnet (normalmente não necessário)."
+            defaultOpen={showAdvanced}
+            onToggle={setShowAdvanced}
+          >
             {steps.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Nenhum passo extra.</p>}
             {steps.map((st, idx) => (
               <div key={`${st.id ?? st.method}-${idx}`} className="card" style={{ marginTop: 8, padding: 10 }}>
@@ -3579,7 +3673,7 @@ function OltVendorsPanel() {
             >
               Adicionar passo extra
             </button>
-          </details>
+          </OltProfileSection>
 
           <button type="button" className="btn btn--primary" style={{ marginTop: 14 }} disabled={patch.isPending} onClick={() => patch.mutate()}>
             {patch.isPending ? "A guardar…" : "Guardar perfil (SNMP e telnet)"}

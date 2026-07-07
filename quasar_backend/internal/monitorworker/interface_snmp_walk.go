@@ -9,6 +9,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
+	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 )
 
 const (
@@ -39,17 +40,22 @@ type WorkerInterfaceWalkResult struct {
 	Truncated bool
 }
 
-// collectWorkerInterfaceSNMPWalks walks IF-MIB (+ Mikrotik) com limites altos para equipamentos com muitas interfaces.
-func collectWorkerInterfaceSNMPWalks(ctx context.Context, host, community string, total time.Duration, isMikrotik bool, pool *pgxpool.Pool) WorkerInterfaceWalkResult {
+// collectWorkerInterfaceSNMPWalks walks IF-MIB (+ Mikrotik/Switch) com limites altos para equipamentos com muitas interfaces.
+func collectWorkerInterfaceSNMPWalks(ctx context.Context, host, community string, total time.Duration, extendedWalks bool, pool *pgxpool.Pool, useSwitchProfile bool) WorkerInterfaceWalkResult {
 	host = strings.TrimSpace(host)
 	community = strings.TrimSpace(community)
 	if host == "" || community == "" {
 		return WorkerInterfaceWalkResult{}
 	}
 
-	if isMikrotik && pool != nil {
-		profile := mikrotikcollect.LoadGlobalProfile(ctx, pool)
-		roots := mikrotikcollect.InterfaceWalkOIDs(profile.Metrics)
+	if extendedWalks && pool != nil {
+		var profile mikrotikcollect.Profile
+		if useSwitchProfile {
+			profile = switchcollect.LoadGlobalProfile(ctx, pool)
+		} else {
+			profile = mikrotikcollect.LoadGlobalProfile(ctx, pool)
+		}
+		roots := mikrotikcollect.InterfaceWalkOIDsForCatalog(profile.Metrics, profile.CatalogEntries())
 		if len(roots) > 0 {
 			var merged []probing.SNMPVar
 			trunc := false
@@ -87,7 +93,7 @@ func collectWorkerInterfaceSNMPWalks(ctx context.Context, host, community string
 	merged := append([]probing.SNMPVar{}, walkIF...)
 	merged = append(merged, walkX...)
 	trunc := truncIF || truncX
-	if isMikrotik {
+	if extendedWalks {
 		walkMk, truncMk, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 			Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
 			Version: "2c", Timeout: workerWalkShareTimeout(total, 0.12, 8*time.Second, 40*time.Second),

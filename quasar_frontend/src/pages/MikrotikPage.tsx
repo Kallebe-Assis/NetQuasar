@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
+import { MikrotikNocDashboard, type MikrotikNocSection } from "../components/MikrotikNocDashboard";
 import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
@@ -11,7 +12,7 @@ import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
-import { MikrotikMetricsOverview } from "../components/MikrotikMetricsOverview";
+import { buildMikrotikNocKpis, ifDisplayName, type MikrotikIfRow } from "../lib/mikrotikNocData";
 
 type DeviceRow = {
   id: string;
@@ -21,39 +22,19 @@ type DeviceRow = {
   model?: string | null;
   ip?: string | null;
   telemetry_enabled?: boolean;
+  mikrotik_telnet_profile_id?: string | null;
 };
-
-type IfRow = {
-  if_index: number;
-  descr?: string;
-  if_name?: string;
-  display_name?: string;
-  sfp?: boolean;
-  tx_dbm?: number;
-  rx_dbm?: number;
-  speed_bps?: number;
-  admin_status?: string;
-  oper_status?: string;
-  in_octets?: number;
-  out_octets?: number;
-  in_bps?: number;
-  out_bps?: number;
-};
-
-function ifDisplayLabel(r: IfRow): string {
-  const s = String(r.display_name ?? r.if_name ?? r.descr ?? "").trim();
-  return s || EM_DASH;
-}
 
 type SensorRow = { oid?: string; value?: string; type?: string };
 
 function isMikrotik(d: DeviceRow): boolean {
+  if (String(d.category ?? "").trim().toLowerCase() === "switch") return false;
   const c = String(d.category ?? "").toLowerCase();
   const b = String(d.brand ?? "").toLowerCase();
   return c.includes("mikrotik") || b.includes("mikrotik");
 }
 
-function inferIfaceType(r: IfRow): string {
+function inferIfaceType(r: MikrotikIfRow): string {
   const n = String(r.if_name ?? r.display_name ?? r.descr ?? "").toLowerCase();
   if (n.includes("wlan") || n.includes("wifi")) return "Wireless";
   if (n.includes("sfp")) return "SFP";
@@ -63,23 +44,19 @@ function inferIfaceType(r: IfRow): string {
   return "Ether";
 }
 
-function ifaceStatus(r: IfRow): "up" | "down" | "other" {
+function ifaceStatus(r: MikrotikIfRow): "up" | "down" | "other" {
   const s = String(r.oper_status ?? "").toLowerCase();
   if (s === "up") return "up";
   if (s === "down") return "down";
   return "other";
 }
 
-function MiniTrafficChart({
-  points,
-}: {
-  points: Array<{ ts: number; tx: number; rx: number }>;
-}) {
+function MiniTrafficChart({ points }: { points: Array<{ ts: number; tx: number; rx: number }> }) {
   if (points.length < 2) {
     const p = points[0];
     return (
       <div>
-        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 6px 0" }}>Aguardando histórico do gráfico em tempo real.</p>
+        <p className="mk-noc-muted" style={{ margin: "0 0 6px 0" }}>Aguardando histórico do gráfico em tempo real.</p>
         <div className="row" style={{ gap: 12 }}>
           <span className="mono">TX atual: {p ? formatBitrate(p.tx) : "—"}</span>
           <span className="mono">RX atual: {p ? formatBitrate(p.rx) : "—"}</span>
@@ -90,11 +67,7 @@ function MiniTrafficChart({
   const w = 520;
   const h = 170;
   const pad = 16;
-  const maxV = Math.max(
-    1,
-    ...points.map((p) => (Number.isFinite(p.tx) ? p.tx : 0)),
-    ...points.map((p) => (Number.isFinite(p.rx) ? p.rx : 0)),
-  );
+  const maxV = Math.max(1, ...points.map((p) => (Number.isFinite(p.tx) ? p.tx : 0)), ...points.map((p) => (Number.isFinite(p.rx) ? p.rx : 0)));
   const xFor = (i: number) => pad + (i * (w - pad * 2)) / Math.max(1, points.length - 1);
   const yFor = (v: number) => h - pad - (Math.max(0, v) / maxV) * (h - pad * 2);
   const txPath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(p.tx)}`).join(" ");
@@ -103,8 +76,8 @@ function MiniTrafficChart({
     <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} role="img" aria-label="Gráfico de tráfego da interface">
       <rect x={0} y={0} width={w} height={h} fill="transparent" />
       <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="var(--border)" strokeWidth={1} />
-      <path d={txPath} fill="none" stroke="#f59e0b" strokeWidth={2} />
-      <path d={rxPath} fill="none" stroke="#3b82f6" strokeWidth={2} />
+      <path d={txPath} fill="none" stroke="var(--ok)" strokeWidth={2} />
+      <path d={rxPath} fill="none" stroke="var(--accent)" strokeWidth={2} />
     </svg>
   );
 }
@@ -115,14 +88,16 @@ export function MikrotikPage() {
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const [telCollecting, setTelCollecting] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "interfaces">("overview");
+  const [section, setSection] = useState<MikrotikNocSection>("overview");
   const [realtimeOn, setRealtimeOn] = useState(false);
   const [realtimeMs, setRealtimeMs] = useState(3000);
   const [realtimeModalOpen, setRealtimeModalOpen] = useState(false);
   const [realtimeDraft, setRealtimeDraft] = useState("3000");
-  const [liveTable, setLiveTable] = useState<IfRow[]>([]);
+  const [liveTable, setLiveTable] = useState<MikrotikIfRow[]>([]);
   const [selectedChartIfs, setSelectedChartIfs] = useState<number[]>([]);
   const [trafficHistory, setTrafficHistory] = useState<Record<number, Array<{ ts: number; tx: number; rx: number }>>>({});
+  const [cpuHistory, setCpuHistory] = useState<Array<{ ts: number; v: number }>>([]);
+  const [memHistory, setMemHistory] = useState<Array<{ ts: number; v: number }>>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "Ether" | "Wireless" | "SFP" | "Bridge" | "PPPoE" | "VLAN">("all");
@@ -148,7 +123,7 @@ export function MikrotikPage() {
       apiFetch<{
         device_id: string;
         collected_at?: string;
-        interface_table?: IfRow[];
+        interface_table?: MikrotikIfRow[];
         interface_count?: number;
         walk_truncated?: boolean;
         walk_note?: string;
@@ -164,14 +139,20 @@ export function MikrotikPage() {
     queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown> }>(`/api/v1/telemetry/devices/${sel}/latest`),
   });
 
-  const mikrotikConfig = useQuery({
-    queryKey: ["mikrotik-collection"],
-    queryFn: () =>
-      apiFetch<{
-        metrics: Record<string, { enabled?: boolean; oid?: string; collect_mode?: string; value_divisor?: number }>;
-        catalog: Array<{ key: string; section: string; label: string; unit?: string; default_divisor?: number }>;
-        sections: Record<string, string>;
-      }>("/api/v1/settings/mikrotik-collection"),
+  const telnetProfiles = useQuery({
+    queryKey: ["mikrotik-telnet-profiles"],
+    queryFn: () => apiFetch<{ profiles: Array<{ id: string; name: string; is_default?: boolean }> }>("/api/v1/settings/mikrotik-telnet-profiles"),
+    staleTime: 60_000,
+  });
+
+  const patchTelnetProfile = useMutation({
+    mutationFn: ({ deviceId, profileId }: { deviceId: string; profileId: string | null }) =>
+      apiFetch(`/api/v1/devices/${deviceId}`, { method: "PATCH", json: { mikrotik_telnet_profile_id: profileId } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["devices-mikrotik-list"] });
+      toastOk(pushToast, "Perfil telnet actualizado.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao atribuir perfil."),
   });
 
   const refreshIf = useMutation({
@@ -179,23 +160,16 @@ export function MikrotikPage() {
       apiFetch<{
         device_id: string;
         collected_at?: string;
-        interface_table?: IfRow[];
+        interface_table?: MikrotikIfRow[];
         interface_count?: number;
         walk_truncated?: boolean;
         walk_note?: string;
-        optical_sensors?: SensorRow[];
-        note?: string;
       }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} }),
     onSuccess: (data, id) => {
-      if (data && data.device_id) {
-        qc.setQueryData(["mikrotik-if", id], data);
-      }
+      if (data?.device_id) qc.setQueryData(["mikrotik-if", id], data);
       qc.invalidateQueries({ queryKey: ["mikrotik-if", id] });
       const n = data.interface_count ?? data.interface_table?.length;
-      toastOk(
-        pushToast,
-        typeof n === "number" ? `Interfaces actualizadas (${n} interface(s)).` : "Interfaces actualizadas com sucesso.",
-      );
+      toastOk(pushToast, typeof n === "number" ? `Interfaces actualizadas (${n}).` : "Interfaces actualizadas.");
     },
     onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
   });
@@ -203,32 +177,23 @@ export function MikrotikPage() {
   const realtimeTick = useMutation({
     mutationFn: async (id: string) => {
       try {
-        return await apiFetch<{
-          updates?: Array<{
-            if_index: number;
-            tx_dbm?: number;
-            rx_dbm?: number;
-            in_bps?: number;
-            out_bps?: number;
-          }>;
-        }>(`/api/v1/interfaces/devices/${id}/realtime`, { method: "POST", json: {} });
+        return await apiFetch<{ updates?: Array<{ if_index: number; tx_dbm?: number; rx_dbm?: number; in_bps?: number; out_bps?: number }> }>(
+          `/api/v1/interfaces/devices/${id}/realtime`,
+          { method: "POST", json: {} },
+        );
       } catch (e) {
         const msg = String((e as Error)?.message ?? e);
-        const isNotFound = msg.includes("404") || msg.toLowerCase().includes("not found");
-        if (!isNotFound) throw e;
-        // Fallback para backend ainda sem a rota de realtime.
-        const full = await apiFetch<{
-          interface_table?: IfRow[];
-        }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} });
-        const updates =
-          (full.interface_table ?? []).map((r) => ({
-              if_index: r.if_index,
-              tx_dbm: r.tx_dbm,
-              rx_dbm: r.rx_dbm,
-              in_bps: r.in_bps,
-              out_bps: r.out_bps,
-            })) ?? [];
-        return { updates };
+        if (!msg.includes("404") && !msg.toLowerCase().includes("not found")) throw e;
+        const full = await apiFetch<{ interface_table?: MikrotikIfRow[] }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} });
+        return {
+          updates: (full.interface_table ?? []).map((r) => ({
+            if_index: r.if_index,
+            tx_dbm: r.tx_dbm,
+            rx_dbm: r.rx_dbm,
+            in_bps: r.in_bps,
+            out_bps: r.out_bps,
+          })),
+        };
       }
     },
     onSuccess: (data) => {
@@ -238,13 +203,7 @@ export function MikrotikPage() {
         prev.map((row) => {
           const up = ups.find((u) => u.if_index === row.if_index);
           if (!up) return row;
-          return {
-            ...row,
-            tx_dbm: up.tx_dbm ?? row.tx_dbm,
-            rx_dbm: up.rx_dbm ?? row.rx_dbm,
-            in_bps: up.in_bps ?? row.in_bps,
-            out_bps: up.out_bps ?? row.out_bps,
-          };
+          return { ...row, tx_dbm: up.tx_dbm ?? row.tx_dbm, rx_dbm: up.rx_dbm ?? row.rx_dbm, in_bps: up.in_bps ?? row.in_bps, out_bps: up.out_bps ?? row.out_bps };
         }),
       );
     },
@@ -257,31 +216,17 @@ export function MikrotikPage() {
     try {
       await collectDeviceTelemetry(sel, selectedDevice.description ?? "", { push: pushToast, dismiss: dismissToast }, qc);
       await qc.invalidateQueries({ queryKey: ["mikrotik-tel", sel] });
-    } catch {
-      /* toast já exibido */
     } finally {
       setTelCollecting(false);
     }
   };
 
   const table = liveTable;
-  const interfaceTotal = iface.data?.interface_count ?? table.length;
   const walkTruncated = Boolean(iface.data?.walk_truncated) || /truncad/i.test(String(iface.data?.walk_note ?? iface.data?.note ?? ""));
   const collectionStatus = useMemo(
     () => parseMikrotikCollectionStatus(telemetry.data?.metrics as Record<string, unknown> | undefined),
     [telemetry.data?.metrics],
   );
-
-  const onOffSummary = useMemo(() => {
-    let up = 0;
-    let down = 0;
-    for (const r of table) {
-      const s = ifaceStatus(r);
-      if (s === "up") up += 1;
-      if (s === "down") down += 1;
-    }
-    return { up, down, total: table.length };
-  }, [table]);
 
   const interfaceRowsFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -301,10 +246,7 @@ export function MikrotikPage() {
     });
   }, [table, search, statusFilter, typeFilter, trafficFilter]);
 
-  const selectedChartRows = useMemo(
-    () => table.filter((r) => selectedChartIfs.includes(r.if_index)),
-    [table, selectedChartIfs],
-  );
+  const selectedChartRows = useMemo(() => table.filter((r) => selectedChartIfs.includes(r.if_index)), [table, selectedChartIfs]);
 
   useEffect(() => {
     setLiveTable(iface.data?.interface_table ?? []);
@@ -327,6 +269,14 @@ export function MikrotikPage() {
   }, [table]);
 
   useEffect(() => {
+    if (!telemetry.data?.metrics) return;
+    const kpis = buildMikrotikNocKpis(telemetry.data.metrics, selectedDevice?.description ?? "");
+    const now = Date.now();
+    if (kpis.cpuPct != null) setCpuHistory((h) => [...h, { ts: now, v: kpis.cpuPct! }].slice(-40));
+    if (kpis.memPct != null) setMemHistory((h) => [...h, { ts: now, v: kpis.memPct! }].slice(-40));
+  }, [telemetry.data?.metrics, telemetry.data?.collected_at, selectedDevice?.description]);
+
+  useEffect(() => {
     if (!realtimeOn || !sel) return;
     const intervalMs = Math.max(1500, Number(realtimeMs) || 3000);
     const timer = window.setInterval(() => {
@@ -338,397 +288,263 @@ export function MikrotikPage() {
   useEffect(() => {
     setRealtimeOn(false);
     setSelectedChartIfs([]);
+    setCpuHistory([]);
+    setMemHistory([]);
+    setTrafficHistory({});
   }, [sel]);
 
   useEffect(() => {
     if (!sel && rows.length > 0) setSel(rows[0].id);
   }, [rows, sel]);
 
+  const devicePicker = (
+    <select
+      className="input"
+      style={{ maxWidth: 280, fontSize: 12 }}
+      value={sel ?? ""}
+      onChange={(e) => setSel(e.target.value || null)}
+    >
+      {rows.map((d) => (
+        <option key={d.id} value={d.id}>
+          {d.description ?? "—"}
+        </option>
+      ))}
+    </select>
+  );
+
+  const telnetProfileSelect =
+    canMutate && sel ? (
+      <select
+        className="input"
+        style={{ maxWidth: 180, fontSize: 12 }}
+        value={selectedDevice?.mikrotik_telnet_profile_id ?? ""}
+        disabled={patchTelnetProfile.isPending}
+        onChange={(e) => patchTelnetProfile.mutate({ deviceId: sel, profileId: e.target.value === "" ? null : e.target.value })}
+      >
+        <option value="">Telnet: Padrão</option>
+        {(telnetProfiles.data?.profiles ?? []).map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    ) : null;
+
+  const collectionWarning =
+    collectionStatus && (collectionStatus.missingOid.length > 0 || collectionStatus.message) ? (
+      <div className="msg msg--warn" style={{ fontSize: 12, marginBottom: 12 }}>
+        {collectionStatus.message || "Algumas métricas activas não têm OID configurado."}
+        {collectionStatus.missingOid.length > 0 ? (
+          <span>
+            {" "}
+            Campos: <span className="mono">{collectionStatus.missingOid.join(", ")}</span>
+          </span>
+        ) : null}
+      </div>
+    ) : null;
+
+  const interfacesPanel = (
+    <div className="mk-noc-panel" style={{ background: "transparent", border: "none", padding: 0 }}>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {devicePicker}
+        <input className="input" style={{ minWidth: 200, fontSize: 12 }} placeholder="Buscar interface…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | "up" | "down")}>
+          <option value="all">Todos status</option>
+          <option value="up">UP</option>
+          <option value="down">DOWN</option>
+        </select>
+        <select className="input" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
+          <option value="all">Todos tipos</option>
+          <option value="Ether">Ether</option>
+          <option value="Wireless">Wireless</option>
+          <option value="SFP">SFP</option>
+          <option value="Bridge">Bridge</option>
+          <option value="PPPoE">PPPoE</option>
+          <option value="VLAN">VLAN</option>
+        </select>
+        {canMutate ? (
+          <>
+            <button type="button" className="mk-noc-btn" disabled={refreshIf.isPending || !sel} onClick={() => sel && refreshIf.mutate(sel)}>
+              {refreshIf.isPending ? "A actualizar…" : "Actualizar interfaces"}
+            </button>
+            <button
+              type="button"
+              className="mk-noc-btn"
+              onClick={() => {
+                if (realtimeOn) {
+                  setRealtimeOn(false);
+                  return;
+                }
+                setRealtimeDraft(String(Math.max(1500, realtimeMs || 3000)));
+                setRealtimeModalOpen(true);
+              }}
+              disabled={!sel}
+            >
+              {realtimeOn ? "Parar tempo real" : "Tempo real"}
+            </button>
+          </>
+        ) : null}
+        <DropdownMenu
+          align="end"
+          minWidth={210}
+          trigger={({ toggle }) => (
+            <button type="button" className="mk-noc-btn" onClick={toggle}>
+              ⚙
+            </button>
+          )}
+        >
+          {({ close }) => (
+            <Link to="/devices" className="mk-options-item" onClick={() => close()} style={{ color: "inherit" }}>
+              Ir para equipamentos ↗
+            </Link>
+          )}
+        </DropdownMenu>
+      </div>
+      {walkTruncated && (
+        <div className="msg msg--warn" style={{ fontSize: 12, marginBottom: 8 }}>
+          Coleta SNMP truncada — aumente o timeout em Configurações → Alertas.
+        </div>
+      )}
+      {realtimeOn && <p style={{ fontSize: 11, color: "var(--ok)" }}>Tempo real activo ({realtimeMs} ms)</p>}
+      <div className="table-wrap" style={{ maxHeight: "min(70vh, 640px)", overflow: "auto" }}>
+        <table className="mk-noc-table">
+          <thead>
+            <tr>
+              <th>Idx</th>
+              <th>Nome</th>
+              <th>Tipo</th>
+              <th>Status</th>
+              <th>TX</th>
+              <th>RX</th>
+              <th>TX dBm</th>
+              <th>RX dBm</th>
+              <th>Gráfico</th>
+            </tr>
+          </thead>
+          <tbody>
+            {interfaceRowsFiltered.map((r) => (
+              <tr key={r.if_index}>
+                <td className="mono">{r.if_index}</td>
+                <td>{ifDisplayName(r)}</td>
+                <td>{inferIfaceType(r)}</td>
+                <td>
+                  <span className={`mk-noc-dot ${ifaceStatus(r) === "up" ? "mk-noc-dot--up" : "mk-noc-dot--down"}`} /> {ifaceStatus(r)}
+                </td>
+                <td className="mono">{formatBitrate(r.out_bps)}</td>
+                <td className="mono">{formatBitrate(r.in_bps)}</td>
+                <td className="mono">{formatDbm(r.tx_dbm)}</td>
+                <td className="mono">{formatDbm(r.rx_dbm)}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedChartIfs.includes(r.if_index)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedChartIfs((p) => [...p, r.if_index]);
+                      else setSelectedChartIfs((p) => p.filter((x) => x !== r.if_index));
+                    }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {selectedChartRows.length > 0 && (
+        <div ref={chartsRef} style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+          {selectedChartRows.map((row) => (
+            <div key={row.if_index} className="mk-noc-panel">
+              <strong style={{ fontSize: 12 }}>{ifDisplayName(row)}</strong>
+              <MiniTrafficChart points={trafficHistory[row.if_index] ?? []} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
+      <style>{`
+        .mk-switch { position: relative; width: 36px; height: 20px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel2); display: inline-block; }
+        .mk-switch__knob { position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 999px; background: var(--toggle-thumb-active); transition: transform 140ms; }
+        .mk-switch--on { background: color-mix(in srgb, var(--ok) 45%, var(--panel2)); }
+        .mk-switch--on .mk-switch__knob { transform: translateX(16px); }
+        .mk-options-item { display: flex; padding: 8px 10px; text-decoration: none; border-radius: 6px; }
+        .mk-options-item:hover { background: var(--hover-bg-menu); }
+        @keyframes mk-spin { to { transform: rotate(360deg); } }
+        .spin { animation: mk-spin 1s linear infinite; }
+      `}</style>
+
       {devices.isLoading && <p>A carregar equipamentos…</p>}
       {devices.isError && <div className="msg msg--err">{(devices.error as Error).message}</div>}
-      {devices.isLoading || devices.isError ? null : (
+
+      {!devices.isLoading && !devices.isError && (
         <>
-          <style>{`
-            .mk-switch {
-              position: relative;
-              width: 36px;
-              height: 20px;
-              border-radius: 999px;
-              border: 1px solid var(--border);
-              background: rgba(255,255,255,0.12);
-              transition: background 140ms ease;
-              display: inline-block;
-              vertical-align: middle;
-            }
-            .mk-switch__knob {
-              position: absolute;
-              top: 1px;
-              left: 1px;
-              width: 16px;
-              height: 16px;
-              border-radius: 999px;
-              background: #fff;
-              transition: transform 140ms ease;
-            }
-            .mk-switch--on {
-              background: rgba(34,197,94,0.45);
-              border-color: rgba(34,197,94,0.7);
-            }
-            .mk-switch--on .mk-switch__knob {
-              transform: translateX(16px);
-            }
-            .mk-options-item {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: 8px;
-              width: 100%;
-              padding: 8px 10px;
-              border-radius: 6px;
-              color: inherit;
-              text-decoration: none;
-              background: transparent;
-            }
-            .mk-options-item:hover { background: var(--hover-bg-menu); }
-          `}</style>
-          <div className="page-heading">
+          <div className="page-heading" style={{ marginBottom: 8 }}>
             <h1>MikroTik</h1>
             <PageCountPill label="Mikrotiks" count={rows.length} />
           </div>
-          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-            <button type="button" className={tab === "overview" ? "btn btn--primary" : "btn"} onClick={() => setTab("overview")}>
-              Overview
-            </button>
-            <button type="button" className={tab === "interfaces" ? "btn btn--primary" : "btn"} onClick={() => setTab("interfaces")}>
-              Interfaces
-            </button>
-          </div>
-
-          {tab === "overview" && (
-            <div className="card" style={{ minWidth: 0, maxWidth: "100%" }}>
-              <div className="row" style={{ gap: 8, alignItems: "center", marginBottom: 10 }}>
-                <label className="mono" style={{ fontSize: 12 }}>MikroTik:</label>
-                <select className="input" style={{ maxWidth: 420 }} value={sel ?? ""} onChange={(e) => setSel(e.target.value || null)}>
-                  {rows.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.description ?? "—"}
-                    </option>
-                  ))}
-                </select>
-                {canMutate ? (
-                  <button type="button" className="btn" disabled={telCollecting || !sel} onClick={() => void runTelCollect()}>
-                    {telCollecting ? "Coletando..." : "Atualizar telemetria"}
-                  </button>
-                ) : null}
-              </div>
-              {!selectedDevice ? (
-                <p style={{ color: "var(--muted)" }}>Selecione um MikroTik.</p>
-              ) : (
+          {rows.length === 0 ? (
+            <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>
+          ) : selectedDevice ? (
+            <MikrotikNocDashboard
+              section={section}
+              onSection={setSection}
+              deviceLabel={selectedDevice.description ?? EM_DASH}
+              deviceModel={selectedDevice.model}
+              deviceIp={selectedDevice.ip}
+              deviceOnline
+              collectedAt={telemetry.data?.collected_at}
+              formatCollectedAt={formatCollectedPt}
+              metrics={telemetry.data?.metrics}
+              ifaces={table}
+              ifaceCollectedAt={iface.data?.collected_at}
+              trafficHistory={trafficHistory}
+              cpuHistory={cpuHistory}
+              memHistory={memHistory}
+              canMutate={canMutate}
+              collecting={telCollecting}
+              refreshingIf={refreshIf.isPending}
+              onCollect={() => void runTelCollect()}
+              onRefreshIf={() => sel && refreshIf.mutate(sel)}
+              telnetProfileSelect={
                 <>
-                  <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                    Últ. interfaces: <span className="mono">{formatCollectedPt(iface.data?.collected_at)}</span> · Últ. telemetria:{" "}
-                    <span className="mono">{formatCollectedPt(telemetry.data?.collected_at)}</span>
-                  </p>
-                  {collectionStatus && (collectionStatus.missingOid.length > 0 || collectionStatus.message) ? (
-                    <div className="msg msg--warn" style={{ fontSize: 12, marginBottom: 10 }}>
-                      {collectionStatus.message ||
-                        "Algumas métricas activas no perfil não têm OID configurado e não foram colectadas."}
-                      {collectionStatus.missingOid.length > 0 ? (
-                        <span>
-                          {" "}
-                          Campos:{" "}
-                          <span className="mono">{collectionStatus.missingOid.join(", ")}</span>
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <MikrotikMetricsOverview
-                    metrics={telemetry.data?.metrics as Record<string, unknown> | undefined}
-                    catalog={mikrotikConfig.data?.catalog ?? []}
-                    config={mikrotikConfig.data?.metrics ?? {}}
-                    sectionLabels={mikrotikConfig.data?.sections ?? {}}
-                    deviceLabel={selectedDevice.description ?? "—"}
-                    deviceModel={selectedDevice.model}
-                    deviceIp={selectedDevice.ip}
-                    collectedAt={telemetry.data?.collected_at}
-                    formatCollectedAt={formatCollectedPt}
-                    ifaceUp={onOffSummary.up}
-                    ifaceDown={onOffSummary.down}
-                    ifaceTotal={onOffSummary.total}
-                  />
+                  {rows.length > 1 ? devicePicker : null}
+                  {telnetProfileSelect}
                 </>
-              )}
-            </div>
-          )}
-
-          {tab === "interfaces" && (
-            <div className="card" style={{ minWidth: 0, maxWidth: "100%", overflowX: "hidden" }}>
-              <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <h2 style={{ margin: 0 }}>Interfaces</h2>
-                <DropdownMenu
-                  key={sel ?? "mk-options"}
-                  align="end"
-                  minWidth={210}
-                  trigger={({ toggle, open }) => (
-                    <button type="button" className="btn" onClick={toggle} title="Opções" aria-haspopup="menu" aria-expanded={open}>
-                      ⚙
-                    </button>
-                  )}
-                >
-                  {({ close }) => (
-                    <Link to="/devices" className="mk-options-item" onClick={() => close()}>
-                      <span>Ir para equipamentos</span>
-                      <span aria-hidden style={{ opacity: 0.7 }}>↗</span>
-                    </Link>
-                  )}
-                </DropdownMenu>
-              </div>
-              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-                <select className="input" style={{ minWidth: 260 }} value={sel ?? ""} onChange={(e) => setSel(e.target.value || null)}>
-                  {rows.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.description ?? "—"} {d.ip ? `(${d.ip})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <input className="input" style={{ minWidth: 220 }} placeholder="Buscar interface..." value={search} onChange={(e) => setSearch(e.target.value)} />
-                <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | "up" | "down")}>
-                  <option value="all">Todos status</option>
-                  <option value="up">UP</option>
-                  <option value="down">DOWN</option>
-                </select>
-                <select className="input" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as "all" | "Ether" | "Wireless" | "SFP" | "Bridge" | "PPPoE" | "VLAN")}>
-                  <option value="all">Todos tipos</option>
-                  <option value="Ether">Ether</option>
-                  <option value="Wireless">Wireless</option>
-                  <option value="SFP">SFP</option>
-                  <option value="Bridge">Bridge</option>
-                  <option value="PPPoE">PPPoE</option>
-                  <option value="VLAN">VLAN</option>
-                </select>
-                <select className="input" value={trafficFilter} onChange={(e) => setTrafficFilter(e.target.value as "all" | "with" | "without")}>
-                  <option value="all">Todo tráfego</option>
-                  <option value="with">Com tráfego</option>
-                  <option value="without">Sem tráfego</option>
-                </select>
-                {canMutate ? (
-                  <>
-                    <button type="button" className="btn btn--primary" disabled={refreshIf.isPending || !sel} onClick={() => sel && refreshIf.mutate(sel)}>
-                      {refreshIf.isPending ? "Atualizando..." : "Atualizar"}
-                    </button>
-                    <button
-                      type="button"
-                      className={realtimeOn ? "btn btn--danger" : "btn"}
-                      onClick={() => {
-                        if (realtimeOn) {
-                          setRealtimeOn(false);
-                          return;
-                        }
-                        setRealtimeDraft(String(Math.max(1500, realtimeMs || 3000)));
-                        setRealtimeModalOpen(true);
-                      }}
-                      disabled={!sel}
-                    >
-                      {realtimeOn ? "Parar tempo real" : "Tempo real"}
-                    </button>
-                  </>
-                ) : null}
-              </div>
-              {selectedChartIfs.length > 0 && (
-                <div className="row" style={{ marginTop: -2, marginBottom: 8 }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ fontSize: 11, opacity: 0.9 }}
-                    onClick={() => chartsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  >
-                    ↓ Ver gráficos
-                  </button>
-                </div>
-              )}
-              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                Últ. interfaces: <span className="mono">{formatCollectedPt(iface.data?.collected_at)}</span> · Últ. telemetria:{" "}
-                <span className="mono">{formatCollectedPt(telemetry.data?.collected_at)}</span>
-                {" · "}
-                <strong>{interfaceTotal}</strong> interface{interfaceTotal === 1 ? "" : "s"} no snapshot
-                {interfaceRowsFiltered.length !== table.length
-                  ? ` · a mostrar ${interfaceRowsFiltered.length} com filtros`
-                  : " · todas listadas abaixo"}
-              </p>
-              {walkTruncated && (
-                <div className="msg" style={{ fontSize: 12, marginBottom: 8, borderColor: "var(--warn)", color: "var(--text)" }}>
-                  A coleta SNMP foi truncada antes de obter todas as interfaces. Aumente o timeout de snapshot de interfaces em Configurações →
-                  Alertas e execute <strong>Atualizar</strong> novamente.
-                  {iface.data?.walk_note ? <span className="mono" style={{ display: "block", marginTop: 4, fontSize: 10 }}>{iface.data.walk_note}</span> : null}
-                </div>
-              )}
-              {(iface.isLoading || refreshIf.isPending || (realtimeOn && realtimeTick.isPending)) && (
-                <p style={{ fontSize: 11, color: "var(--muted)" }}>Coletando dados de interface...</p>
-              )}
-              {realtimeOn && <p style={{ fontSize: 11, color: "var(--ok)" }}>Monitoramento em tempo real ativo ({Math.max(1500, realtimeMs)} ms) para tráfego e potência óptica SFP.</p>}
-              {refreshIf.isError && <div className="msg msg--err">{(refreshIf.error as Error).message}</div>}
-              {realtimeTick.isError && <div className="msg msg--err">{(realtimeTick.error as Error).message}</div>}
-
-              <div className="table-wrap" style={{ maxHeight: "min(75vh, 720px)", overflowY: "auto", overflowX: "auto", maxWidth: "100%" }}>
-                <table style={{ fontSize: 9, width: "100%", tableLayout: "fixed" }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 36 }}>Idx</th>
-                      <th style={{ width: "26%" }}>Nome</th>
-                      <th style={{ width: 64 }}>Tipo</th>
-                      <th style={{ width: 58 }}>Status</th>
-                      <th className="mono" style={{ width: 78 }}>TX tráfego</th>
-                      <th className="mono" style={{ width: 78 }}>RX tráfego</th>
-                      <th className="mono" style={{ width: 74 }}>TX dBm</th>
-                      <th className="mono" style={{ width: 74 }}>RX dBm</th>
-                      <th style={{ width: 66 }}>Vel.</th>
-                      <th style={{ width: 88 }}>Exibir gráfico</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {interfaceRowsFiltered.map((r) => (
-                      <tr key={r.if_index}>
-                        <td className="mono">{r.if_index}</td>
-                        <td style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{ifDisplayLabel(r)}</td>
-                        <td>{inferIfaceType(r)}</td>
-                        <td>
-                          <span className={ifaceStatus(r) === "up" ? "badge badge--ok" : ifaceStatus(r) === "down" ? "badge badge--err" : "badge badge--off"} style={{ fontSize: 9, lineHeight: 1.1, padding: "1px 5px" }}>
-                            {ifaceStatus(r).toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="mono">{formatBitrate(r.out_bps)}</td>
-                        <td className="mono">{formatBitrate(r.in_bps)}</td>
-                        <td className="mono">{formatDbm(r.tx_dbm)}</td>
-                        <td className="mono">{formatDbm(r.rx_dbm)}</td>
-                        <td className="mono">{r.speed_bps != null && r.speed_bps > 0 ? formatBitrate(r.speed_bps) : "—"}</td>
-                        <td>
-                          <label
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              cursor: "pointer",
-                              userSelect: "none",
-                            }}
-                            title="Ativar/desativar gráfico individual da interface"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedChartIfs.includes(r.if_index)}
-                              onChange={(e) => {
-                                const now = Date.now();
-                                if (e.target.checked) {
-                                  setTrafficHistory((prev) => {
-                                    const arr = [...(prev[r.if_index] ?? [])];
-                                    const tx = Number(r.out_bps ?? 0);
-                                    const rx = Number(r.in_bps ?? 0);
-                                    if (Number.isFinite(tx) && Number.isFinite(rx)) {
-                                      arr.push({ ts: now, tx, rx });
-                                    }
-                                    return { ...prev, [r.if_index]: arr.slice(-50) };
-                                  });
-                                  setSelectedChartIfs((prev) => (prev.includes(r.if_index) ? prev : [...prev, r.if_index]));
-                                  return;
-                                }
-                                setSelectedChartIfs((prev) => prev.filter((x) => x !== r.if_index));
-                              }}
-                              style={{ display: "none" }}
-                            />
-                            <span className={`mk-switch ${selectedChartIfs.includes(r.if_index) ? "mk-switch--on" : ""}`} aria-hidden>
-                              <span className="mk-switch__knob" />
-                            </span>
-                            <span className="mono" style={{ fontSize: 9 }}>
-                              {selectedChartIfs.includes(r.if_index) ? "ON" : "OFF"}
-                            </span>
-                          </label>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {interfaceRowsFiltered.length === 0 && !iface.isLoading && (
-                <p style={{ color: "var(--muted)", fontSize: 12 }}>
-                  {table.length === 0 ? "Nenhuma interface no snapshot — use Atualizar para coletar via SNMP." : "Nenhuma interface encontrada para os filtros."}
-                </p>
-              )}
-              {selectedChartRows.length > 0 && (
-                <div ref={chartsRef} style={{ marginTop: 10 }}>
-                  <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-                    <strong>Gráficos de interfaces selecionadas</strong>
-                    <button type="button" className="btn" onClick={() => setSelectedChartIfs([])}>Limpar seleção</button>
-                  </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                      gap: 10,
-                    }}
-                  >
-                    {selectedChartRows.map((row) => (
-                      <div key={`chart-${row.if_index}`} className="card" style={{ minWidth: 0 }}>
-                        <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-                          <strong style={{ fontSize: 12 }}>{ifDisplayLabel(row)}</strong>
-                          <button type="button" className="btn" style={{ padding: "2px 6px", minHeight: 0 }} onClick={() => setSelectedChartIfs((prev) => prev.filter((x) => x !== row.if_index))}>
-                            OFF
-                          </button>
-                        </div>
-                        <MiniTrafficChart points={trafficHistory[row.if_index] ?? []} />
-                      </div>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, marginBottom: 0 }}>
-                    Linha laranja = TX tráfego · Linha azul = RX tráfego
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-          {realtimeModalOpen && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.45)",
-                display: "grid",
-                placeItems: "center",
-                zIndex: 30,
-              }}
-              onClick={() => setRealtimeModalOpen(false)}
-            >
-              <div className="card" style={{ width: "min(420px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
-                <h3 style={{ marginTop: 0 }}>Configurar tempo real</h3>
-                <p style={{ fontSize: 12, color: "var(--muted)" }}>Informe o intervalo de atualização em milissegundos (mínimo 1500 ms).</p>
-                <input
-                  className="input mono"
-                  type="number"
-                  min={1500}
-                  step={500}
-                  value={realtimeDraft}
-                  onChange={(e) => setRealtimeDraft(e.target.value)}
-                />
-                <div className="row" style={{ justifyContent: "flex-end", marginTop: 10, gap: 8 }}>
-                  <button type="button" className="btn" onClick={() => setRealtimeModalOpen(false)}>Cancelar</button>
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={() => {
-                      const n = Number(realtimeDraft);
-                      const ms = Number.isFinite(n) ? Math.max(1500, Math.round(n)) : 3000;
-                      setRealtimeMs(ms);
-                      setRealtimeOn(true);
-                      setRealtimeModalOpen(false);
-                    }}
-                  >
-                    Iniciar
-                  </button>
-                </div>
-              </div>
-            </div>
+              }
+              collectionWarning={collectionWarning}
+              interfacesPanel={interfacesPanel}
+            />
+          ) : (
+            <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>
           )}
         </>
+      )}
+
+      {realtimeModalOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "grid", placeItems: "center", zIndex: 40 }} onClick={() => setRealtimeModalOpen(false)}>
+          <div className="card" style={{ width: "min(420px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Intervalo tempo real (ms)</h3>
+            <input className="input mono" type="number" min={1500} step={500} value={realtimeDraft} onChange={(e) => setRealtimeDraft(e.target.value)} />
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: 10, gap: 8 }}>
+              <button type="button" className="btn" onClick={() => setRealtimeModalOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  setRealtimeMs(Math.max(1500, Number(realtimeDraft) || 3000));
+                  setRealtimeOn(true);
+                  setRealtimeModalOpen(false);
+                }}
+              >
+                Iniciar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
