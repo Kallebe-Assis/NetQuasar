@@ -87,7 +87,7 @@ type Props = {
   setTelnetPassword: (v: string) => void;
   sshPassword: string;
   setSshPassword: (v: string) => void;
-  mibFolderPickerRef: RefObject<HTMLInputElement | null>;
+  mibFolderPickerRef: RefObject<HTMLInputElement>;
   mibBrowseNote: string | null;
   setMibBrowseNote: (v: string | null) => void;
   onMibFolderPicked: (ev: ChangeEvent<HTMLInputElement>) => void;

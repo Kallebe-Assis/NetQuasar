@@ -100,7 +100,7 @@ export function SwitchPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "Ethernet" | "Port-Channel" | "VLAN" | "Mgmt" | "SFP" | "Outros">("all");
-  const [trafficFilter, setTrafficFilter] = useState<"all" | "with" | "without">("all");
+  const [trafficFilter] = useState<"all" | "with" | "without">("all");
   const chartsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

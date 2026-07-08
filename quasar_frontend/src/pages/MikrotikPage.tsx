@@ -101,7 +101,7 @@ export function MikrotikPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "Ether" | "Wireless" | "SFP" | "Bridge" | "PPPoE" | "VLAN">("all");
-  const [trafficFilter, setTrafficFilter] = useState<"all" | "with" | "without">("all");
+  const [trafficFilter] = useState<"all" | "with" | "without">("all");
   const chartsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

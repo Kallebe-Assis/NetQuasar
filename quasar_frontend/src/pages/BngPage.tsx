@@ -37,7 +37,6 @@ import {
   formatBngIpv6Display,
   formatBngIpType,
   formatBngSessionStatus,
-  formatOverviewField,
   sessionDisplayDnLimit,
   sessionDisplayOnline,
   sessionDisplayUpLimit,
