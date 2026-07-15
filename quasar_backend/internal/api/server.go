@@ -416,8 +416,10 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
 				r.Post("/devices/{id}/onu-serial-search", s.searchOLTOnuBySerial)
 				r.Post("/devices/{id}/unauthorized-onus", s.listOLTUnauthorizedOnus)
+				r.Post("/devices/{id}/onu-authorize-preview", s.previewAuthorizeOLTOnu)
 				r.Post("/devices/{id}/onu-authorize", s.authorizeOLTOnu)
 				r.Post("/devices/{id}/onu-deauthorize", s.deauthorizeOLTOnu)
+				r.Post("/devices/{id}/discover-vlans", s.discoverOLTVlanCatalog)
 			})
 		})
 

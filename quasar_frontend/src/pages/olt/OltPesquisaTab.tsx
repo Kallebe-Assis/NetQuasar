@@ -1,14 +1,24 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileText, Filter, RefreshCw, Server } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActionMenu } from "../../components/ActionMenu";
+import { ConfirmModal } from "../../components/ConfirmModal";
 import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { ApiError, apiFetch } from "../../lib/api";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
+import { useAppToast } from "../../lib/appToast";
+import { toastErr, toastOk } from "../../lib/operationToast";
 import { OltOnuTelnetReportModal } from "./OltOnuTelnetReportModal";
-import type { OltTelnetReportStep } from "../../lib/oltTelnetReportFormat";
+import {
+  buildTelnetReportSections,
+  buildUnifiedReportTable,
+  type OltTelnetReportStep,
+} from "../../lib/oltTelnetReportFormat";
 import { EM_DASH, formatSnmpMetricCell } from "../../lib/formatDisplay";
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 export type OltOnuSearchResult = {
   olt_id: string;
@@ -102,12 +112,47 @@ function fmtRx(r: OltOnuSearchResult): string {
   return r.rx_pwr ? formatSnmpMetricCell(r.rx_pwr) : EM_DASH;
 }
 
+function rowKey(r: Pick<OltOnuSearchResult, "olt_id" | "pon" | "onu" | "serial">): string {
+  return `${r.olt_id}|${r.pon ?? 0}|${r.onu ?? 0}|${(r.serial ?? "").toLowerCase()}`;
+}
+
+function applyTelnetFieldsToRow(row: OltOnuSearchResult, steps: OltTelnetReportStep[]): OltOnuSearchResult {
+  const fields = buildUnifiedReportTable(buildTelnetReportSections(steps));
+  const byLabel = new Map(fields.map((f) => [f.label.toLowerCase(), f.value]));
+  const next: OltOnuSearchResult = { ...row, data_source_telnet: true, telnet_report_at: new Date().toISOString() };
+  const model = byLabel.get("modelo") ?? byLabel.get("modelo reportado");
+  if (model) next.model = model;
+  const rx = byLabel.get("rx");
+  if (rx) {
+    next.rx_pwr = rx;
+    const n = Number(String(rx).replace(",", "."));
+    if (Number.isFinite(n)) next.rx_dbm = n;
+  }
+  const tx = byLabel.get("tx");
+  if (tx) next.tx_pwr = tx;
+  const temp = byLabel.get("temperatura");
+  if (temp) next.temp = temp;
+  const volt = byLabel.get("voltagem");
+  if (volt) next.voltage = volt;
+  const sn = byLabel.get("sn");
+  if (sn && !next.serial) next.serial = sn;
+  return next;
+}
+
+function pageRangeLabel(page: number, pageSize: number, total: number): string {
+  if (total <= 0) return "0/0";
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  return `${start}-${end}/${total}`;
+}
+
 type Props = {
   canMutate: boolean;
   olts: Array<{ id: string; description?: string | null }>;
 };
 
 export function OltPesquisaTab({ canMutate, olts }: Props) {
+  const { push: pushToast } = useAppToast();
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 320);
   const [selectedOltId, setSelectedOltId] = useState("");
@@ -123,6 +168,10 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [errorModal, setErrorModal] = useState<ParsedApiError | null>(null);
   const [telnetResult, setTelnetResult] = useState<TelnetSerialResult | null>(null);
   const [telnetLoading, setTelnetLoading] = useState(false);
+  const [deauthTarget, setDeauthTarget] = useState<OltOnuSearchResult | null>(null);
+  const [rowOverrides, setRowOverrides] = useState<Record<string, Partial<OltOnuSearchResult>>>({});
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState(1);
 
   const selectedOltLabel = useMemo(() => {
     if (!selectedOltId) return "Todas as OLTs";
@@ -281,6 +330,28 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     return list;
   }, [snapshotResults, telnetResult, debouncedQ]);
 
+  const enrichedResults = useMemo(() => {
+    return displayResults.map((r) => {
+      const ov = rowOverrides[rowKey(r)];
+      return ov ? { ...r, ...ov } : r;
+    });
+  }, [displayResults, rowOverrides]);
+
+  const totalPages = Math.max(1, Math.ceil(enrichedResults.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedResults = useMemo(
+    () => enrichedResults.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [enrichedResults, safePage, pageSize],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [payloadKey, pageSize, selectedOltId, selectedPon, ponManual, filters, debouncedQ]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   async function runReport(row: OltOnuSearchResult) {
     if (!canMutate) return;
     setReportLoading(true);
@@ -307,26 +378,50 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         },
       );
       const steps = Array.isArray(res.commands) && res.commands.length > 0
-        ? res.commands.map((c) => ({
-            command: String(c.command ?? ""),
-            ok: c.ok !== false,
-            output: c.output ?? "",
-            error: c.error,
-          }))
-        : res.output
-          ? [{ command: "relatório", ok: res.ok, output: res.output }]
-          : [];
+        ? res.commands
+        : [{ command: "onu-report", ok: res.ok, output: res.output ?? "", error: res.error }];
       setReportSteps(steps);
-      if (!res.ok) {
-        openErrorModal(new ApiError(res.error || "Falha no relatório telnet.", 200, "TELNET_FAILED", res), "Erro no relatório telnet");
-      }
+      const updated = applyTelnetFieldsToRow(row, steps);
+      setRowOverrides((prev) => ({ ...prev, [rowKey(row)]: updated }));
     } catch (e) {
+      openErrorModal(e, "Erro no relatório telnet da ONU");
       setReportOpen(false);
-      openErrorModal(e, "Erro no relatório telnet");
     } finally {
       setReportLoading(false);
     }
   }
+
+  const deauthMut = useMutation({
+    mutationFn: (row: OltOnuSearchResult) =>
+      apiFetch<{ ok: boolean; error?: string; command?: string }>(`/api/v1/olt/devices/${row.olt_id}/onu-deauthorize`, {
+        method: "POST",
+        json: {
+          pon: row.pon ?? 0,
+          onu: row.onu ?? 0,
+          serial: row.serial ?? "",
+          if_index: row.if_index ?? 0,
+          if_name: row.if_name ?? "",
+        },
+        timeoutMs: 120_000,
+      }),
+    onSuccess: (data, row) => {
+      setDeauthTarget(null);
+      if (data.ok) {
+        toastOk(
+          pushToast,
+          `ONU desautorizada: PON ${row.pon ?? "?"} / ONU ${row.onu ?? "?"}${row.serial ? ` (${row.serial})` : ""}.`,
+        );
+        searchMut.mutate(payload);
+      } else {
+        toastErr(pushToast, new Error(data.error || "Comando telnet falhou."), "Falha ao desautorizar ONU.");
+      }
+    },
+    onError: (err) => {
+      setDeauthTarget(null);
+      toastErr(pushToast, err, "Falha ao desautorizar ONU.");
+      openErrorModal(err, "Erro ao desautorizar ONU");
+    },
+  });
 
   return (
     <>
@@ -465,128 +560,20 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         </button>
 
         <div className="conn-toolbar__spacer" aria-hidden />
-        <PageCountPill label="ONUs encontradas" count={displayResults.length} />
+        <PageCountPill label="ONUs encontradas" count={enrichedResults.length} />
       </div>
 
-      {canMutate && selectedOltId && debouncedQ.trim().length >= 2 ? (
-        <div className="card" style={{ padding: "10px 12px", marginBottom: 12, fontSize: 12 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div>
-              <strong>Consulta telnet na OLT</strong>
-              <span style={{ color: "var(--muted)", marginLeft: 8 }}>{selectedOltLabel}</span>
-              {effectivePon > 0 ? (
-                <span style={{ color: "var(--muted)", marginLeft: 8 }}>
-                  · PON {effectivePon} — lista ONUs e compara serial parcial
-                </span>
-              ) : (
-                <span style={{ color: "var(--muted)", marginLeft: 8 }}>· todas as PONs (ou pesquisa directa por serial)</span>
-              )}
-            </div>
-            <button
-              type="button"
-              className="btn btn--icon"
-              title="Repetir consulta telnet"
-              disabled={telnetLoading}
-              onClick={() => void runTelnetSerialSearch(selectedOltId, debouncedQ.trim(), effectivePon)}
-            >
-              <RefreshCw size={15} className={telnetLoading ? "map-refresh-spin" : undefined} />
-            </button>
-          </div>
-          {telnetLoading && !telnetResult ? (
-            <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>A consultar série via telnet…</p>
-          ) : telnetResult ? (
-            <div style={{ marginTop: 8 }}>
-              <p style={{ margin: "0 0 6px", color: "var(--muted)" }}>
-                Modo: <span className="mono">{telnetResult.mode === "list" ? "listagem + filtro local" : "directo"}</span>
-                {typeof telnetResult.matches?.length === "number" ? (
-                  <>
-                    {" "}
-                    · Correspondências: <span className="mono">{telnetResult.matches.length}</span>
-                  </>
-                ) : null}
-              </p>
-              <p style={{ margin: "0 0 6px", color: "var(--muted)" }}>
-                Comando: <span className="mono">{telnetResult.command ?? EM_DASH}</span>
-                {telnetResult.gpon_onu ? (
-                  <>
-                    {" "}
-                    · Interface: <span className="mono">{telnetResult.gpon_onu}</span>
-                  </>
-                ) : null}
-                {telnetResult.pon && telnetResult.onu ? (
-                  <>
-                    {" "}
-                    · PON <span className="mono">{telnetResult.pon}</span> / ONU <span className="mono">{telnetResult.onu}</span>
-                  </>
-                ) : null}
-              </p>
-              {telnetResult.output ? (
-                <pre
-                  className="mono"
-                  style={{
-                    margin: 0,
-                    maxHeight: 140,
-                    overflow: "auto",
-                    fontSize: 11,
-                    padding: 8,
-                    background: "var(--bg)",
-                    borderRadius: 6,
-                    border: "1px solid var(--border)",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {telnetResult.output}
-                </pre>
-              ) : (
-                <p style={{ margin: 0, color: "var(--muted)" }}>Sem saída do equipamento.</p>
-              )}
-              {telnetResult.ok && (telnetResult.matches?.length ?? 0) > 0 ? (
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ marginTop: 8 }}
-                  disabled={reportLoading}
-                  onClick={() => {
-                    const first = telnetResult.matches?.[0];
-                    if (!first?.pon || !first?.onu) return;
-                    void runReport({
-                      olt_id: telnetResult.olt_id,
-                      olt_description: telnetResult.olt_description,
-                      pon: first.pon,
-                      onu: first.onu,
-                      serial: first.serial ?? telnetResult.serial ?? debouncedQ.trim(),
-                      if_name: first.gpon_onu ?? telnetResult.gpon_onu ?? undefined,
-                    });
-                  }}
-                >
-                  <FileText size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                  Relatório completo telnet
-                </button>
-              ) : telnetResult.ok && telnetResult.pon && telnetResult.onu ? (
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ marginTop: 8 }}
-                  disabled={reportLoading}
-                  onClick={() =>
-                    void runReport({
-                      olt_id: telnetResult.olt_id,
-                      olt_description: telnetResult.olt_description,
-                      pon: telnetResult.pon,
-                      onu: telnetResult.onu,
-                      serial: telnetResult.serial ?? debouncedQ.trim(),
-                      if_name: telnetResult.gpon_onu ?? undefined,
-                    })
-                  }
-                >
-                  <FileText size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                  Relatório completo telnet
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : canMutate && debouncedQ.trim().length >= 2 && !selectedOltId ? (
+      {canMutate && selectedOltId && debouncedQ.trim().length >= 2 && telnetLoading ? (
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px" }} aria-live="polite">
+          A consultar serial na OLT…
+        </p>
+      ) : null}
+      {canMutate && selectedOltId && debouncedQ.trim().length >= 2 && telnetResult?.ok === false && !telnetLoading ? (
+        <p style={{ fontSize: 12, color: "var(--danger, #c62828)", margin: "0 0 12px" }}>
+          Falha na consulta telnet: {telnetResult.error || "erro desconhecido"}
+        </p>
+      ) : null}
+      {canMutate && debouncedQ.trim().length >= 2 && !selectedOltId ? (
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px" }}>
           Seleccione uma OLT para consultar o número de série via telnet. Com uma PON definida, o sistema lista as ONUs
           dessa porta e compara o serial digitado (mesmo parcial, ex. <span className="mono">CF8F197A</span> em{" "}
@@ -614,20 +601,9 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             </tr>
           </thead>
           <tbody>
-            {displayResults.map((r) => (
+            {pagedResults.map((r) => (
               <tr key={`${r.olt_id}-${r.pon}-${r.onu}-${r.serial ?? ""}-${r.telnet_only ? "t" : "s"}`}>
-                <td>
-                  {r.olt_description ?? EM_DASH}
-                  {r.telnet_only ? (
-                    <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>
-                      telnet
-                    </span>
-                  ) : r.data_source_telnet ? (
-                    <span className="badge badge--ok" style={{ marginLeft: 6, fontSize: 10 }} title={r.telnet_report_at ? `Telnet ${r.telnet_report_at}` : undefined}>
-                      CLI
-                    </span>
-                  ) : null}
-                </td>
+                <td>{r.olt_description ?? EM_DASH}</td>
                 <td className="mono">{r.pon ?? EM_DASH}</td>
                 <td className="mono">{r.onu ?? EM_DASH}</td>
                 <td className="mono">{r.serial ?? EM_DASH}</td>
@@ -641,50 +617,32 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                     EM_DASH
                   )}
                 </td>
-                <td className="mono">
-                  {fmtRx(r)}
-                  {r.data_source_telnet ? (
-                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="RX via telnet">
-                      CLI
-                    </span>
-                  ) : null}
-                </td>
-                <td className="mono">
-                  {r.tx_pwr ? formatSnmpMetricCell(r.tx_pwr) : EM_DASH}
-                  {r.data_source_telnet && r.tx_pwr ? (
-                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="TX via telnet">
-                      CLI
-                    </span>
-                  ) : null}
-                </td>
-                <td className="mono">
-                  {r.temp ? formatSnmpMetricCell(r.temp) : EM_DASH}
-                  {r.data_source_telnet && r.temp ? (
-                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="Temperatura via telnet">
-                      CLI
-                    </span>
-                  ) : null}
-                </td>
-                <td className="mono">
-                  {r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}
-                  {r.data_source_telnet && r.voltage ? (
-                    <span className="badge badge--ok" style={{ marginLeft: 4, fontSize: 9 }} title="Voltagem via telnet">
-                      CLI
-                    </span>
-                  ) : null}
-                </td>
+                <td className="mono">{fmtRx(r)}</td>
+                <td className="mono">{r.tx_pwr ? formatSnmpMetricCell(r.tx_pwr) : EM_DASH}</td>
+                <td className="mono">{r.temp ? formatSnmpMetricCell(r.temp) : EM_DASH}</td>
+                <td className="mono">{r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}</td>
                 {canMutate ? (
                   <td>
                     {r.pon && r.onu ? (
-                      <button
-                        type="button"
-                        className="btn btn--icon"
-                        title="Relatório telnet desta ONU"
-                        disabled={reportLoading}
-                        onClick={() => void runReport(r)}
-                      >
-                        <FileText size={15} />
-                      </button>
+                      <ActionMenu
+                        title="Mais opções"
+                        align="end"
+                        items={[
+                          {
+                            id: "report",
+                            label: "Relatório telnet",
+                            disabled: reportLoading,
+                            onClick: () => void runReport(r),
+                          },
+                          {
+                            id: "deauth",
+                            label: "Desautorizar ONU",
+                            danger: true,
+                            disabled: deauthMut.isPending,
+                            onClick: () => setDeauthTarget(r),
+                          },
+                        ]}
+                      />
                     ) : null}
                   </td>
                 ) : null}
@@ -692,7 +650,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             ))}
           </tbody>
         </table>
-        {!searchMut.isPending && displayResults.length === 0 ? (
+        {!searchMut.isPending && enrichedResults.length === 0 ? (
           <p style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
             Nenhuma ONU encontrada nos snapshots.
             {canMutate && debouncedQ.trim().length >= 2 && !selectedOltId
@@ -701,6 +659,62 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           </p>
         ) : null}
       </div>
+
+      {enrichedResults.length > 0 ? (
+        <div
+          className="row"
+          style={{
+            marginTop: 10,
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 12,
+          }}
+        >
+          <label className="row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
+            <span style={{ color: "var(--muted)" }}>Por página</span>
+            <select
+              className="input"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              style={{ width: "auto", minWidth: 72, padding: "4px 8px", fontSize: 12 }}
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "var(--muted)" }}>{pageRangeLabel(safePage, pageSize, enrichedResults.length)}</span>
+          </label>
+          <div className="row" style={{ gap: 6, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn--icon"
+              disabled={safePage <= 1}
+              title="Página anterior"
+              aria-label="Página anterior"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="mono" style={{ minWidth: 64, textAlign: "center" }}>
+              {safePage}/{totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn btn--icon"
+              disabled={safePage >= totalPages}
+              title="Página seguinte"
+              aria-label="Página seguinte"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {filtersOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setFiltersOpen(false)}>
@@ -805,6 +819,25 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           onClose={() => setReportOpen(false)}
         />
       ) : null}
+
+      <ConfirmModal
+        open={!!deauthTarget}
+        title="Desautorizar ONU"
+        message={
+          deauthTarget
+            ? `Remover a ONU da OLT via telnet? ${deauthTarget.olt_description ?? "OLT"} — PON ${deauthTarget.pon ?? "?"} / ONU ${deauthTarget.onu ?? "?"}${deauthTarget.serial ? ` — série ${deauthTarget.serial}` : ""}. Esta acção não pode ser desfeita automaticamente.`
+            : ""
+        }
+        confirmLabel="Desautorizar"
+        danger
+        busy={deauthMut.isPending}
+        onCancel={() => {
+          if (!deauthMut.isPending) setDeauthTarget(null);
+        }}
+        onConfirm={() => {
+          if (deauthTarget) deauthMut.mutate(deauthTarget);
+        }}
+      />
     </>
   );
 }

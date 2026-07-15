@@ -78,6 +78,21 @@ func onuListEntryKey(e SerialSearchOnuEntry) string {
 }
 
 func parseOnuListLine(line string) (SerialSearchOnuEntry, bool) {
+	// Formato ZTE uncfg: gpon_olt-1/1/9  R1v2  ITBSCF8F197E  123456789
+	if m := telnetZtePonUncfgRE.FindStringSubmatch(line); m != nil {
+		pon, _ := strconv.Atoi(strings.TrimSpace(m[2]))
+		model := strings.TrimSpace(m[3])
+		serial := strings.TrimSpace(m[4])
+		if looksLikeSerial(serial) {
+			// Não guardar gpon_olt como gpon_onu — o índice ONU só existe após autorizar.
+			return SerialSearchOnuEntry{
+				Pon:    pon,
+				Model:  model,
+				Serial: serial,
+			}, true
+		}
+	}
+
 	// Formato auto-find (3 colunas): GPON0/4:1  ZTEGCFAA2AB1  unknow
 	if m := telnetVsolAutoFindRE.FindStringSubmatch(line); m != nil {
 		gponIdx := strings.TrimSpace(m[1])

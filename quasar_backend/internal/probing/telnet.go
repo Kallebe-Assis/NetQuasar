@@ -429,11 +429,18 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 		return TelnetRunScriptResult{OK: false, LatencyMs: lat, Error: err.Error(), Note: note}
 	}
 
-	res := execTelnetCommands(sess, p.Commands, 8*time.Second)
+	res := execTelnetCommands(sess, p.Commands, commandReadWait(len(p.Commands)))
 	res.LatencyMs = lat
 	res.Note = note
 	_, _ = fmt.Fprintf(conn, "exit\r\n")
 	return res
+}
+
+func commandReadWait(nCommands int) time.Duration {
+	if nCommands > 8 {
+		return 3 * time.Second
+	}
+	return 8 * time.Second
 }
 
 // TelnetSessionHandle sessão telnet reutilizável (login e pré-comandos uma vez).

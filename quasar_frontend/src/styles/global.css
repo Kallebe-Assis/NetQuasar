@@ -4112,3 +4112,218 @@ details.collapsible-section .collapsible-section__body {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* Perfis OLT — lista + edição */
+.olt-profiles-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.olt-brand-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.olt-brand-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  min-width: 72px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  transition: var(--hover-transition);
+}
+
+.olt-brand-filter img {
+  display: block;
+  max-height: 28px;
+  max-width: 64px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.olt-brand-filter:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.olt-brand-filter--active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, #fff);
+}
+
+.olt-profiles-table th,
+.olt-profiles-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.olt-profiles-table__actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.olt-profile-modal-backdrop {
+  z-index: 70;
+  padding: 2vh 2vw;
+}
+
+.olt-profile-modal {
+  width: 90vw;
+  height: 90vh;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.olt-profile-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.olt-profile-modal__body {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 260px;
+  gap: 14px;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.olt-profile-modal__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+}
+
+.olt-profile-modal__nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.olt-profile-modal__nav-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: var(--hover-transition);
+}
+
+.olt-profile-modal__nav-btn:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.olt-profile-modal__nav-btn--active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  font-weight: 600;
+}
+
+.olt-profile-modal__nav-delete {
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.olt-profile-modal__main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.olt-profile-modal__section-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.olt-profile-modal__aside {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.olt-profile-modal__aside .card {
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 1100px) {
+  .olt-profile-modal__body {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+
+  .olt-profile-modal__aside {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .olt-profile-modal {
+    width: 96vw;
+    height: 94vh;
+    padding: 12px;
+  }
+
+  .olt-profile-modal__body {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .olt-profile-modal__nav {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 10px;
+  }
+
+  .olt-profile-modal__nav-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .olt-profile-modal__nav-btn {
+    width: auto;
+  }
+}

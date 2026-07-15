@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -17,7 +18,7 @@ var (
 )
 
 // OnuReportConfig comandos telnet para relatório individual de uma ONU.
-// Placeholders ONU: {pon}, {onu}, {serial}, {if_index}, {gpon_onu}, {onu_if}
+// Placeholders ONU: {pon}, {onu}, {serial}, {if_index}, {gpon_onu}, {onu_if}, {vlan}, {onu_type}, {name}
 // Placeholders credenciais (pré-comandos): {enable}, {enable_password}, {password}, {telnet_password}
 type OnuReportConfig struct {
 	Enabled           bool     `json:"enabled"`
@@ -32,6 +33,13 @@ type OnuReportConfig struct {
 	OnuDeauthorizeCommand           string   `json:"onu_deauthorize_command"`
 	UnauthorizedOnuQueryCommand     string   `json:"unauthorized_onu_query_command"`
 	UnauthorizedOnuPreCommands      []string `json:"unauthorized_onu_pre_commands"`
+	// Valores por omissão para placeholders de autorização (ex. ZTE).
+	AuthorizeVlan    string `json:"authorize_vlan,omitempty"`
+	AuthorizeOnuType string `json:"authorize_onu_type,omitempty"`
+	AuthorizeName    string `json:"authorize_name,omitempty"`
+	// Catálogo SNMP de VLANs por PON (configurável no perfil).
+	AuthorizeVlanSnmpOID string                      `json:"authorize_vlan_snmp_oid,omitempty"`
+	AuthorizeVlanCatalog []AuthorizeVlanCatalogEntry `json:"authorize_vlan_catalog,omitempty"`
 }
 
 // MonitorEnabled indica se o monitoramento deve enriquecer ONUs via telnet.
@@ -76,6 +84,26 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 	cfg.OnuDeauthorizeCommand = strings.TrimSpace(cfg.OnuDeauthorizeCommand)
 	cfg.UnauthorizedOnuQueryCommand = strings.TrimSpace(cfg.UnauthorizedOnuQueryCommand)
 	cfg.UnauthorizedOnuPreCommands = trimNonEmpty(cfg.UnauthorizedOnuPreCommands)
+	cfg.AuthorizeVlan = strings.TrimSpace(cfg.AuthorizeVlan)
+	cfg.AuthorizeOnuType = strings.TrimSpace(cfg.AuthorizeOnuType)
+	cfg.AuthorizeName = strings.TrimSpace(cfg.AuthorizeName)
+	cfg.AuthorizeVlanSnmpOID = strings.TrimSpace(cfg.AuthorizeVlanSnmpOID)
+	if len(cfg.AuthorizeVlanCatalog) > 0 {
+		out := make([]AuthorizeVlanCatalogEntry, 0, len(cfg.AuthorizeVlanCatalog))
+		for _, e := range cfg.AuthorizeVlanCatalog {
+			if e.VID <= 0 {
+				continue
+			}
+			e.Name = strings.TrimSpace(e.Name)
+			e.Description = strings.TrimSpace(e.Description)
+			if e.Pon <= 0 {
+				e.Pon = PonFromZteVlanDescription(e.Description)
+			}
+			out = append(out, e)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].VID < out[j].VID })
+		cfg.AuthorizeVlanCatalog = out
+	}
 	return cfg
 }
 
@@ -109,6 +137,9 @@ type OnuReportTarget struct {
 	IfIndex int
 	IfName  string
 	GponOnu string
+	Vlan    string // {vlan}
+	OnuType string // {onu_type}
+	Name    string // {name}
 }
 
 type TelnetSecrets struct {
@@ -231,22 +262,50 @@ func (c OnuReportConfig) RenderSerialSearchCommand(t OnuReportTarget, sec Telnet
 }
 
 func ResolveGponOnu(t OnuReportTarget) string {
-	if g := strings.TrimSpace(t.GponOnu); g != "" {
+	if g := strings.TrimSpace(t.GponOnu); looksLikeGponOnuInterface(g) {
 		return g
 	}
 	ifName := strings.TrimSpace(t.IfName)
+	if looksLikeGponOnuInterface(ifName) {
+		return ifName
+	}
 	if ifName != "" {
-		if g := ParseGponOnuFromOutput(ifName); g != "" {
+		if g := ParseGponOnuFromOutput(ifName); looksLikeGponOnuInterface(g) {
 			return g
-		}
-		if strings.HasPrefix(strings.ToLower(ifName), "gpon") {
-			return ifName
 		}
 	}
 	if t.Pon > 0 && t.Onu > 0 {
 		return fmt.Sprintf("gpon_onu-1/1/%d:%d", t.Pon, t.Onu)
 	}
 	return ""
+}
+
+// looksLikeGponOnuInterface distingue gpon_onu-…:N (ONU) de gpon_olt-… (porta OLT).
+func looksLikeGponOnuInterface(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "gpon_olt") || strings.Contains(lower, "gpon-olt") {
+		return false
+	}
+	return gponOnuInterfaceRE.MatchString(s) ||
+		strings.HasPrefix(lower, "gpon_onu-") ||
+		strings.HasPrefix(lower, "gpon-onu_")
+}
+
+// ApplyAuthorizeTemplateDefaults preenche {onu_type}/{name}.
+// VLAN não recebe fallback aqui: deve vir do catálogo PON ou SNMP.
+// Tipo ONU: sempre GU201-G no script operativo (independente do modelo reportado).
+func ApplyAuthorizeTemplateDefaults(t OnuReportTarget, cfg OnuReportConfig) OnuReportTarget {
+	t.OnuType = "GU201-G"
+	if strings.TrimSpace(t.Name) == "" {
+		if t.Pon > 0 && t.Onu > 0 {
+			t.Name = fmt.Sprintf("%d-%d", t.Pon, t.Onu)
+		}
+	}
+	return t
 }
 
 func SubstituteOnuReportTemplate(tpl string, t OnuReportTarget) string {
@@ -260,6 +319,9 @@ func SubstituteOnuReportTemplate(tpl string, t OnuReportTarget) string {
 	s = strings.ReplaceAll(s, "{serial}", strings.TrimSpace(t.Serial))
 	s = strings.ReplaceAll(s, "{gpon_onu}", gponOnu)
 	s = strings.ReplaceAll(s, "{onu_if}", gponOnu)
+	s = strings.ReplaceAll(s, "{vlan}", strings.TrimSpace(t.Vlan))
+	s = strings.ReplaceAll(s, "{onu_type}", strings.TrimSpace(t.OnuType))
+	s = strings.ReplaceAll(s, "{name}", strings.TrimSpace(t.Name))
 	if t.IfIndex > 0 {
 		s = strings.ReplaceAll(s, "{if_index}", strconv.Itoa(t.IfIndex))
 	} else {

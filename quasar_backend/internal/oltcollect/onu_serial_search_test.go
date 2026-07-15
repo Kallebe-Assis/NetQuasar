@@ -42,6 +42,28 @@ GPON0/4:2                ITBSCF8F197A             unknow`
 	}
 }
 
+func TestParseOnuListFromTelnetOutput_ztePonOnuUncfg(t *testing.T) {
+	out := `show pon onu uncfg
+OltIndex            Model                SN                 PW
+-----------------------------------------------------------------------------
+gpon_olt-1/1/9      R1v2                 ITBSCF8F197E       123456789
+gpon_olt-1/1/9      HG8010H              HWTC36D05643       N/A
+olt-zte-miracema-01#`
+	entries := ParseOnuListFromTelnetOutput(out)
+	if len(entries) != 2 {
+		t.Fatalf("entries=%d want 2, got %+v", len(entries), entries)
+	}
+	if entries[0].Pon != 9 || entries[0].Model != "R1v2" || entries[0].Serial != "ITBSCF8F197E" {
+		t.Fatalf("entry0=%+v", entries[0])
+	}
+	if entries[1].Pon != 9 || entries[1].Model != "HG8010H" || entries[1].Serial != "HWTC36D05643" {
+		t.Fatalf("entry1=%+v", entries[1])
+	}
+	if entries[0].GponOnu != "" || entries[1].GponOnu != "" {
+		t.Fatalf("uncfg must not set gpon_olt as gpon_onu: %+v / %+v", entries[0], entries[1])
+	}
+}
+
 func TestFilterSerialSearchEntries(t *testing.T) {
 	entries := []SerialSearchOnuEntry{
 		{Pon: 1, Onu: 28, Serial: "XGTC07101752"},

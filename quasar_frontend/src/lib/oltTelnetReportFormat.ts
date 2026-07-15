@@ -23,6 +23,7 @@ const LABEL_PT: Record<string, string> = {
   onuindex: "Índice",
   "onu interface": "Interface",
   interface: "Interface",
+  "onu pon interface": "Interface PON",
   name: "Nome",
   type: "Modelo",
   model: "Modelo",
@@ -50,6 +51,28 @@ const LABEL_PT: Record<string, string> = {
   "software version": "SW",
   rx: "RX",
   tx: "TX",
+  "rx optical level": "RX",
+  "tx optical level": "TX",
+  "rx power": "RX",
+  "tx power": "TX",
+  "power feed voltage": "Voltagem",
+  voltage: "Voltagem",
+  temperature: "Temperatura",
+  temp: "Temperatura",
+  "laser bias current": "Bias",
+  "gem_blocklen": "GEM blocklen",
+  "sf threshold": "SF threshold",
+  "sd threshold": "SD threshold",
+  alarm: "Alarm",
+  "alarm disable interval": "Alarm disable interval",
+  "total t-cont number": "T-CONT",
+  "piggyback dba rpt mode": "Piggyback DBA",
+  "whole onu dba rpt mode": "Whole ONU DBA",
+  "lower rx optical threshold": "RX mín.",
+  "upper rx optical threshold": "RX máx.",
+  "lower tx optical threshold": "TX mín.",
+  "upper tx optical threshold": "TX máx.",
+  "onu response time": "Tempo resposta",
   "authentication mode": "Autenticação",
   "configured speed mode": "Velocidade config.",
   "current speed mode": "Velocidade actual",
@@ -61,7 +84,9 @@ const LABEL_PT: Record<string, string> = {
 
 const FIELD_ORDER = [
   "Interface",
+  "Interface PON",
   "Índice",
+  "ONU ID",
   "Nome",
   "Modelo",
   "Modelo reportado",
@@ -77,9 +102,17 @@ const FIELD_ORDER = [
   "Autenticação",
   "RX",
   "TX",
+  "Voltagem",
+  "Temperatura",
+  "Bias",
+  "RX mín.",
+  "RX máx.",
+  "TX mín.",
+  "TX máx.",
   "Distância",
   "Tempo online",
-  "ONU ID",
+  "Tempo resposta",
+  "T-CONT",
   "ONU Number",
   "HW",
   "SW",
@@ -87,6 +120,13 @@ const FIELD_ORDER = [
   "Velocidade actual",
   "FEC",
   "SN bind",
+  "GEM blocklen",
+  "SF threshold",
+  "SD threshold",
+  "Alarm",
+  "Alarm disable interval",
+  "Piggyback DBA",
+  "Whole ONU DBA",
 ];
 
 function normalizeLabel(raw: string): string {
@@ -94,11 +134,24 @@ function normalizeLabel(raw: string): string {
   return LABEL_PT[key] ?? raw.trim();
 }
 
+function stripUnitParen(raw: string, unit: string): string {
+  let v = raw.trim().replace(",", ".");
+  const lower = v.toLowerCase();
+  const u = unit.toLowerCase();
+  const idx = lower.indexOf(`(${u}`);
+  if (idx >= 0) v = v.slice(0, idx).trim();
+  return v.replace(new RegExp(`${u}$`, "i"), "").trim();
+}
+
 function normalizeValue(label: string, value: string): string {
   let v = value.trim();
   const snParen = v.match(/sn\(([A-Za-z0-9]+)\)/i);
   if (snParen) return snParen[1];
   if (label === "SN" && /^sn\s+/i.test(v)) return v.replace(/^sn\s+/i, "").trim();
+  if (label === "RX" || label === "TX") return stripUnitParen(v, "dbm");
+  if (label === "Voltagem") return stripUnitParen(v, "v");
+  if (label === "Temperatura") return stripUnitParen(v, "c");
+  if (label === "Bias") return stripUnitParen(v, "ma");
   return v;
 }
 
@@ -135,16 +188,50 @@ function stripCommandEcho(output: string, command: string): string {
   return kept.join("\n").trim();
 }
 
+function looksLikeLabelOnly(line: string): RegExpMatchArray | null {
+  return line.match(/^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s*$/);
+}
+
+function looksLikeLabelWithValue(line: string): RegExpMatchArray | null {
+  return line.match(/^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s+(.+?)\s*$/);
+}
+
 function extractKeyValueFields(text: string): OltTelnetReportField[] {
   const fields: OltTelnetReportField[] = [];
   const seen = new Set<string>();
-  for (const line of text.split("\n")) {
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (/^-{3,}/.test(line.trim())) continue;
     if (/^Authpass\s+Time/i.test(line.trim())) break;
-    const m = line.match(/^\s{0,6}([A-Za-z0-9 /_-]{2,44}):\s+(.+?)\s*$/);
-    if (!m) continue;
-    const label = normalizeLabel(m[1].trim());
-    const value = normalizeValue(label, m[2]);
+
+    let labelRaw = "";
+    let valueRaw = "";
+
+    const sameLine = looksLikeLabelWithValue(line);
+    if (sameLine) {
+      labelRaw = sameLine[1].trim();
+      valueRaw = sameLine[2];
+    } else {
+      const labelOnly = looksLikeLabelOnly(line);
+      if (!labelOnly) continue;
+      labelRaw = labelOnly[1].trim();
+      // VSOL optical_info: rótulo numa linha, valor na seguinte.
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        if (looksLikeLabelOnly(lines[j]) || looksLikeLabelWithValue(lines[j])) break;
+        if (/^-{3,}/.test(next)) break;
+        valueRaw = next;
+        i = j;
+        break;
+      }
+    }
+
+    if (!valueRaw) continue;
+    const label = normalizeLabel(labelRaw);
+    const value = normalizeValue(label, valueRaw);
     if (!value || label.length < 1) continue;
     const key = fieldKey(label);
     if (seen.has(key)) continue;

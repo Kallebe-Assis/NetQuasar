@@ -49,6 +49,10 @@ type Device = {
     uptime_oid?: string;
   } | null;
   max_pons?: number | null;
+  /** Mapa "1" → "Centro" (só OLT, máx. 30 caracteres). */
+  pon_descriptions?: Record<string, string> | null;
+  /** Mapa "1" → 101 (só OLT, VLAN 1–4094). */
+  pon_vlans?: Record<string, number | string> | null;
   mikrotik_telnet_profile_id?: string | null;
   switch_telnet_profile_id?: string | null;
   telnet_user?: string | null;
@@ -305,7 +309,87 @@ function emptyForm(): Partial<Device> {
     telemetry_oid_strategy: "default",
     telemetry_oid_overrides: null,
     acquired_at: null,
+    pon_descriptions: {},
+    pon_vlans: {},
   };
+}
+
+function normalizePonDescriptions(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(String(k).trim());
+    if (!Number.isFinite(n) || n < 1) continue;
+    const s = String(v ?? "").trim();
+    if (!s) continue;
+    out[String(Math.trunc(n))] = s.slice(0, 30);
+  }
+  return out;
+}
+
+function normalizePonVlans(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(String(k).trim());
+    if (!Number.isFinite(n) || n < 1) continue;
+    const vid = Number(String(v ?? "").trim());
+    if (!Number.isFinite(vid) || vid < 1 || vid > 4094) continue;
+    out[String(Math.trunc(n))] = Math.trunc(vid);
+  }
+  return out;
+}
+
+function compactPonDescriptions(
+  raw: Record<string, string> | null | undefined,
+  maxPons: number | null | undefined,
+): Record<string, string> {
+  const src = normalizePonDescriptions(raw ?? {});
+  const limit = maxPons != null && maxPons > 0 ? Math.trunc(maxPons) : 0;
+  if (limit <= 0) return src;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(src)) {
+    const n = Number(k);
+    if (n >= 1 && n <= limit && v.trim()) out[String(n)] = v.trim().slice(0, 30);
+  }
+  return out;
+}
+
+function compactPonVlans(
+  raw: Record<string, number | string> | null | undefined,
+  maxPons: number | null | undefined,
+): Record<string, number> {
+  const src = normalizePonVlans(raw ?? {});
+  const limit = maxPons != null && maxPons > 0 ? Math.trunc(maxPons) : 0;
+  if (limit <= 0) return src;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(src)) {
+    const n = Number(k);
+    if (n >= 1 && n <= limit) out[String(n)] = v;
+  }
+  return out;
+}
+
+function validatePonInterfacesForm(form: Partial<Device>): string | null {
+  if ((form.category ?? "").trim() !== "OLT") return null;
+  const max = form.max_pons != null && form.max_pons > 0 ? Math.trunc(form.max_pons) : 0;
+  const descs = form.pon_descriptions ?? {};
+  const vlans = form.pon_vlans ?? {};
+  for (const [k, v] of Object.entries(descs)) {
+    const pon = Number(k);
+    if (max > 0 && (pon < 1 || pon > max)) continue;
+    const s = String(v ?? "").trim();
+    if (s.length > 30) return `Descrição da PON ${k} não pode ter mais de 30 caracteres.`;
+  }
+  for (const [k, v] of Object.entries(vlans)) {
+    const raw = String(v ?? "").trim();
+    if (!raw) continue;
+    const vid = Number(raw);
+    if (!Number.isFinite(vid) || vid < 1 || vid > 4094 || !Number.isInteger(vid)) {
+      return `VLAN da PON ${k} deve ser um número inteiro entre 1 e 4094.`;
+    }
+  }
+  return null;
 }
 
 export function DevicesPage() {
@@ -342,7 +426,7 @@ export function DevicesPage() {
   const [mibBrowseNote, setMibBrowseNote] = useState<string | null>(null);
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
-  const [editTab, setEditTab] = useState<"cadastro" | "monitoramento" | "historico" | "backup">("cadastro");
+  const [editTab, setEditTab] = useState<"cadastro" | "interfaces" | "monitoramento" | "historico" | "backup">("cadastro");
   const [reportModalDevice, setReportModalDevice] = useState<DeviceReportTarget | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Device>>(emptyForm());
@@ -414,6 +498,8 @@ export function DevicesPage() {
       brand: normalizeBrand(d.brand) || null,
       mikrotik_telnet_profile_id: d.mikrotik_telnet_profile_id ?? null,
       switch_telnet_profile_id: d.switch_telnet_profile_id ?? null,
+      pon_descriptions: normalizePonDescriptions(d.pon_descriptions),
+      pon_vlans: normalizePonVlans(d.pon_vlans),
       telnet_user: d.telnet_user ?? null,
       telnet_enable: d.telnet_enable ?? null,
       ssh_user: d.ssh_user ?? null,
@@ -706,6 +792,8 @@ export function DevicesPage() {
       if (isOlt && !(form.model ?? "").trim()) {
         throw new Error("Selecione o modelo da OLT (Definições → Perfis OLT para cadastrar modelos).");
       }
+      const ponErr = validatePonInterfacesForm(form);
+      if (ponErr) throw new Error(ponErr);
 
       const telOn = !!form.telemetry_enabled && !bridge;
       const pingOn = !!form.ping_enabled && !bridge;
@@ -752,6 +840,8 @@ export function DevicesPage() {
               }
             : {},
         max_pons: isOlt ? (form.max_pons != null && Number(form.max_pons) > 0 ? Number(form.max_pons) : null) : null,
+        pon_descriptions: isOlt ? compactPonDescriptions(form.pon_descriptions, form.max_pons) : {},
+        pon_vlans: isOlt ? compactPonVlans(form.pon_vlans, form.max_pons) : {},
         mikrotik_telnet_profile_id:
           (form.category ?? "").trim() === "Mikrotik" && form.mikrotik_telnet_profile_id
             ? form.mikrotik_telnet_profile_id
@@ -1246,6 +1336,9 @@ export function DevicesPage() {
               <button type="button" className={editTab === "cadastro" ? "active" : ""} onClick={() => setEditTab("cadastro")}>
                 Cadastro
               </button>
+              <button type="button" className={editTab === "interfaces" ? "active" : ""} onClick={() => setEditTab("interfaces")}>
+                Interfaces
+              </button>
               <button type="button" className={editTab === "monitoramento" ? "active" : ""} onClick={() => setEditTab("monitoramento")}>
                 Monitoramento
               </button>
@@ -1304,6 +1397,106 @@ export function DevicesPage() {
               </>
             )}
 
+            {editTab === "interfaces" && (
+              <>
+                {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
+                {!formIsOlt ? (
+                  <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                    A aba Interfaces (PONs) aplica-se apenas a equipamentos da categoria <strong>OLT</strong>.
+                  </p>
+                ) : (form.max_pons ?? 0) <= 0 ? (
+                  <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                    Defina a <strong>quantidade máxima de PONs</strong> na aba Cadastro para configurar descrição e VLAN
+                    de cada porta.
+                  </p>
+                ) : (
+                  <>
+                    <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
+                      Descrição (máx. 30 caracteres) e VLAN (1–4094) por PON. Se a VLAN estiver vazia, na autorização o
+                      sistema usa o mapa do perfil ou coleta SNMP.
+                    </p>
+                    <div className="table-wrap" style={{ maxHeight: 420, overflow: "auto" }}>
+                      <table style={{ width: "100%", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: 72 }}>PON</th>
+                            <th>Descrição</th>
+                            <th style={{ width: 120 }}>VLAN</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: Number(form.max_pons) }, (_, i) => i + 1).map((pon) => {
+                            const key = String(pon);
+                            const desc = form.pon_descriptions?.[key] ?? "";
+                            const vlanRaw = form.pon_vlans?.[key];
+                            const vlanStr = vlanRaw == null || vlanRaw === "" ? "" : String(vlanRaw);
+                            return (
+                              <tr key={pon}>
+                                <td className="mono">PON {pon}</td>
+                                <td>
+                                  <input
+                                    className="input"
+                                    style={{ width: "100%" }}
+                                    maxLength={30}
+                                    placeholder="Ex.: Centro"
+                                    value={desc}
+                                    onChange={(e) => {
+                                      const value = e.target.value.slice(0, 30);
+                                      setForm((f) => ({
+                                        ...f,
+                                        pon_descriptions: { ...(f.pon_descriptions ?? {}), [key]: value },
+                                      }));
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="input mono"
+                                    style={{ width: "100%" }}
+                                    type="number"
+                                    min={1}
+                                    max={4094}
+                                    step={1}
+                                    placeholder="—"
+                                    value={vlanStr}
+                                    onChange={(e) => {
+                                      const raw = e.target.value.trim();
+                                      setForm((f) => {
+                                        const next = { ...(f.pon_vlans ?? {}) } as Record<string, number | string>;
+                                        if (raw === "") {
+                                          delete next[key];
+                                        } else {
+                                          next[key] = raw;
+                                        }
+                                        return { ...f, pon_vlans: next };
+                                      });
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+                <div className="row" style={{ marginTop: 12 }}>
+                  <button type="button" className="btn" onClick={() => setModal(null)}>
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={save.isPending || !form.description?.trim() || !formIsOlt}
+                    onClick={() => save.mutate()}
+                  >
+                    Salvar
+                  </button>
+                </div>
+              </>
+            )}
+
             {editTab === "cadastro" && (
             <>
             <p style={{ color: "var(--muted)", fontSize: 12 }}>
@@ -1325,6 +1518,8 @@ export function DevicesPage() {
                       category,
                       locality_id: category === "OLT" ? f.locality_id : null,
                       max_pons: category === "OLT" ? f.max_pons ?? null : null,
+                      pon_descriptions: category === "OLT" ? f.pon_descriptions ?? {} : {},
+                      pon_vlans: category === "OLT" ? f.pon_vlans ?? {} : {},
                       telemetry_oid_strategy: category === "Outros" ? (f.telemetry_oid_strategy ?? "default") : "default",
                       telemetry_oid_overrides: category === "Outros" ? f.telemetry_oid_overrides ?? {} : {},
                     }));
@@ -1427,6 +1622,9 @@ export function DevicesPage() {
                         setForm({ ...form, max_pons: Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : null });
                       }}
                     />
+                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                      Defina a quantidade aqui; descrição e VLAN de cada PON ficam na aba Interfaces.
+                    </p>
                   </div>
                 </>
               )}

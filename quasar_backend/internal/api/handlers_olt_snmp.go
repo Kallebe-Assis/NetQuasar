@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
@@ -26,6 +27,7 @@ func applyMaxPonsLimitAnyRows(pons []any, maxPons *int) []any {
 func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
 		SELECT d.id, d.description, host(d.ip)::text, d.brand, d.model, d.locality_id, l.name,
+			d.max_pons, COALESCE(d.pon_descriptions::text, '{}'), COALESCE(d.pon_vlans::text, '{}'),
 			COALESCE(o.summary::text, '{}'), COALESCE(o.pons::text, '[]'), o.updated_at,
 			c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at
 		FROM devices d
@@ -45,25 +47,39 @@ func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 		var id uuid.UUID
 		var desc, ip, brand, model, locName *string
 		var locID *uuid.UUID
-		var sum, pons string
+		var maxPons *int
+		var ponDesc, ponVlans, sum, pons string
 		var snapAt *time.Time
 		var hStatus, hReason *string
 		var hAt *time.Time
-		if err := rows.Scan(&id, &desc, &ip, &brand, &model, &locID, &locName, &sum, &pons, &snapAt, &hStatus, &hReason, &hAt); err != nil {
+		if err := rows.Scan(&id, &desc, &ip, &brand, &model, &locID, &locName, &maxPons, &ponDesc, &ponVlans, &sum, &pons, &snapAt, &hStatus, &hReason, &hAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		item := map[string]any{
 			"id": id, "description": desc, "ip": ip, "brand": brand, "model": model,
 			"locality_id": locID, "locality_name": locName,
+			"max_pons": maxPons,
+			"pon_descriptions": normalizePonDescriptionsJSON(json.RawMessage(ponDesc)),
+			"pon_vlans":        normalizePonVlansJSON(json.RawMessage(ponVlans)),
 			"summary": json.RawMessage(sum), "pons": json.RawMessage(pons),
 		}
 		item["computed"] = oltparse.SnapshotComputed([]byte(sum), []byte(pons))
 		if snapAt != nil {
 			item["olt_snapshot_at"] = snapAt.UTC().Format(time.RFC3339)
 		}
-		item["snmp_health_status"] = hStatus
-		item["snmp_health_reason"] = hReason
+		var summaryMap map[string]any
+		_ = json.Unmarshal([]byte(sum), &summaryMap)
+		oltStatus, oltReason := oltcollect.DeriveSnmpHealthFromSummary(summaryMap)
+		if oltStatus != "unknown" {
+			item["snmp_health_status"] = oltStatus
+			if oltReason != "" {
+				item["snmp_health_reason"] = oltReason
+			}
+		} else {
+			item["snmp_health_status"] = hStatus
+			item["snmp_health_reason"] = hReason
+		}
 		if hAt != nil {
 			item["snmp_health_checked_at"] = hAt.UTC().Format(time.RFC3339)
 		}

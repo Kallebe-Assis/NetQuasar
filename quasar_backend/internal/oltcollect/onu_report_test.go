@@ -1,6 +1,9 @@
 package oltcollect
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestResolveGponOnuFromPonOnu(t *testing.T) {
 	got := ResolveGponOnu(OnuReportTarget{Pon: 9, Onu: 80})
@@ -13,6 +16,28 @@ func TestResolveGponOnuFromIfName(t *testing.T) {
 	got := ResolveGponOnu(OnuReportTarget{IfName: "gpon_onu-1/1/9:80"})
 	if got != "gpon_onu-1/1/9:80" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveGponOnuIgnoresGponOltUncfg(t *testing.T) {
+	got := ResolveGponOnu(OnuReportTarget{
+		Pon: 9, Onu: 127,
+		IfName:  "gpon_olt-1/1/9",
+		GponOnu: "gpon_olt-1/1/9",
+	})
+	if got != "gpon_onu-1/1/9:127" {
+		t.Fatalf("got %q want gpon_onu-1/1/9:127", got)
+	}
+}
+
+func TestSubstituteAuthorizeUsesGponOnuNotOlt(t *testing.T) {
+	tpl := "interface {gpon_onu}\npon-onu-mng {gpon_onu}"
+	got := SubstituteOnuReportTemplate(tpl, OnuReportTarget{
+		Pon: 9, Onu: 127, IfName: "gpon_olt-1/1/9",
+	})
+	want := "interface gpon_onu-1/1/9:127\npon-onu-mng gpon_onu-1/1/9:127"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
@@ -74,6 +99,180 @@ func TestRenderPreCommandsSecrets(t *testing.T) {
 	pre := cfg.RenderPreCommands(OnuReportTarget{}, TelnetSecrets{Enable: "secret-en"})
 	if len(pre) != 3 || pre[1] != "secret-en" {
 		t.Fatalf("pre=%v", pre)
+	}
+}
+
+func TestSplitTelnetCommands(t *testing.T) {
+	in := "interface gpon_olt-1/1/9; no onu 80; exit; exit"
+	out := splitTelnetCommands(in)
+	if len(out) != 4 {
+		t.Fatalf("len=%d out=%v", len(out), out)
+	}
+	if out[0] != "interface gpon_olt-1/1/9" || out[1] != "no onu 80" {
+		t.Fatalf("out=%v", out)
+	}
+}
+
+func TestSplitTelnetCommands_mashedZteAuthorize(t *testing.T) {
+	in := "interface gpon_olt-1/1/9 onu 80 type GU201-G sn HWTC36D0543 exit " +
+		"interface gpon_onu-1/1/9:80 name CLIENTE sn-bind enable sn tcont 1 profile 1G " +
+		"gemport 1 name 1G tcont 1 exit interface vport-1/1/9.80:1 " +
+		"service-port 1 user-vlan 74 vlan 74 exit " +
+		"pon-onu-mng gpon_onu-1/1/9:80 " +
+		"vlan port eth_0/1 mode tag vlan 74 vlan port eth_0/2 mode tag vlan 74 " +
+		"vlan port eth_0/3 mode tag vlan 74 vlan port eth_0/4 mode tag vlan 74 " +
+		"service 1 gemport 1 vlan 74 exit"
+	out := splitTelnetCommands(in)
+	want := []string{
+		"interface gpon_olt-1/1/9",
+		"onu 80 type GU201-G sn HWTC36D0543",
+		"exit",
+		"interface gpon_onu-1/1/9:80",
+		"name CLIENTE",
+		"sn-bind enable sn",
+		"tcont 1 profile 1G",
+		"gemport 1 name 1G tcont 1",
+		"exit",
+		"interface vport-1/1/9.80:1",
+		"service-port 1 user-vlan 74 vlan 74",
+		"exit",
+		"pon-onu-mng gpon_onu-1/1/9:80",
+		"vlan port eth_0/1 mode tag vlan 74",
+		"vlan port eth_0/2 mode tag vlan 74",
+		"vlan port eth_0/3 mode tag vlan 74",
+		"vlan port eth_0/4 mode tag vlan 74",
+		"service 1 gemport 1 vlan 74",
+		"exit",
+	}
+	if len(out) != len(want) {
+		t.Fatalf("len=%d want=%d\nout=%v", len(out), len(want), out)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Fatalf("i=%d got=%q want=%q\nfull=%v", i, out[i], want[i], out)
+		}
+	}
+}
+
+func TestSplitTelnetCommands_mashedWithPlaceholders(t *testing.T) {
+	in := "interface gpon_olt-1/1/{pon} onu {onu} type GU201-G sn {serial} exit interface {gpon_onu} name CLIENTE exit"
+	out := splitTelnetCommands(in)
+	if len(out) < 5 {
+		t.Fatalf("out=%v", out)
+	}
+	if out[0] != "interface gpon_olt-1/1/{pon}" || out[1] != "onu {onu} type GU201-G sn {serial}" {
+		t.Fatalf("out=%v", out)
+	}
+	if out[3] != "interface {gpon_onu}" {
+		t.Fatalf("out=%v", out)
+	}
+}
+
+func TestEnsureConfigTerminalPrefix(t *testing.T) {
+	got := ensureConfigTerminalPrefix(
+		[]string{"terminal length 0"},
+		[]string{"interface gpon_olt-1/1/9", "onu 1 type GU201-G sn ABC"},
+	)
+	if len(got) < 3 || got[0] != "configure terminal" {
+		t.Fatalf("got=%v", got)
+	}
+	got2 := ensureConfigTerminalPrefix(
+		[]string{"configure terminal"},
+		[]string{"interface gpon_olt-1/1/9"},
+	)
+	if got2[0] != "interface gpon_olt-1/1/9" {
+		t.Fatalf("should not duplicate: %v", got2)
+	}
+}
+
+func TestSubstituteAuthorizePlaceholders(t *testing.T) {
+	tpl := "onu {onu} type {onu_type} sn {serial}; vlan {vlan}; name {name}"
+	got := SubstituteOnuReportTemplate(tpl, OnuReportTarget{
+		Onu: 80, Serial: "HWTC36D05", Vlan: "74", OnuType: "GU201-G", Name: "9-80",
+	})
+	want := "onu 80 type GU201-G sn HWTC36D05; vlan 74; name 9-80"
+	if got != want {
+		t.Fatalf("got=%q want=%q", got, want)
+	}
+}
+
+func TestApplyAuthorizeTemplateDefaults_nameFromPonOnu(t *testing.T) {
+	got := ApplyAuthorizeTemplateDefaults(OnuReportTarget{Pon: 9, Onu: 80, Vlan: "16", OnuType: "HG8010H"}, OnuReportConfig{})
+	if got.Name != "9-80" {
+		t.Fatalf("name=%q", got.Name)
+	}
+	if got.OnuType != "GU201-G" {
+		t.Fatalf("onu_type always GU201-G, got %q", got.OnuType)
+	}
+	if got.Vlan != "16" {
+		t.Fatalf("vlan should stay from caller, got %q", got.Vlan)
+	}
+}
+
+func TestApplyAuthorizeTemplateDefaults_doesNotInventVlan(t *testing.T) {
+	got := ApplyAuthorizeTemplateDefaults(OnuReportTarget{Pon: 1, Onu: 1}, OnuReportConfig{AuthorizeVlan: "74"})
+	if got.Vlan != "" {
+		t.Fatalf("expected empty vlan without catalog/SNMP, got %q", got.Vlan)
+	}
+}
+
+func TestSplitTelnetCommands_zteAuthorizeScript(t *testing.T) {
+	tpl := strings.Join([]string{
+		"configure terminal",
+		"interface gpon_olt-1/1/{pon}",
+		"onu {onu} type GU201-G sn {serial}",
+		"exit",
+		"interface gpon_onu-1/1/{pon}:{onu}",
+		"name {name}",
+		"sn-bind enable sn",
+		"tcont 1 profile 1G",
+		"gemport 1 name 1G tcont 1",
+		"exit",
+		"interface vport-1/1/{pon}.{onu}:1",
+		"service-port 1 user-vlan {vlan} vlan {vlan}",
+		"exit",
+		"pon-onu-mng gpon_onu-1/1/{pon}:{onu}",
+		"vlan port eth_0/1 mode tag vlan {vlan}",
+		"vlan port eth_0/2 mode tag vlan {vlan}",
+		"vlan port eth_0/3 mode tag vlan {vlan}",
+		"vlan port eth_0/4 mode tag vlan {vlan}",
+		"service 1 gemport 1 vlan {vlan}",
+		"exit",
+	}, "\n")
+	t.Helper()
+	rendered := SubstituteOnuReportTemplate(tpl, OnuReportTarget{
+		Pon: 9, Onu: 80, Serial: "HWTC36D05643", Vlan: "16", OnuType: "GU201-G", Name: "9-80",
+	})
+	got := splitTelnetCommands(rendered)
+	want := []string{
+		"configure terminal",
+		"interface gpon_olt-1/1/9",
+		"onu 80 type GU201-G sn HWTC36D05643",
+		"exit",
+		"interface gpon_onu-1/1/9:80",
+		"name 9-80",
+		"sn-bind enable sn",
+		"tcont 1 profile 1G",
+		"gemport 1 name 1G tcont 1",
+		"exit",
+		"interface vport-1/1/9.80:1",
+		"service-port 1 user-vlan 16 vlan 16",
+		"exit",
+		"pon-onu-mng gpon_onu-1/1/9:80",
+		"vlan port eth_0/1 mode tag vlan 16",
+		"vlan port eth_0/2 mode tag vlan 16",
+		"vlan port eth_0/3 mode tag vlan 16",
+		"vlan port eth_0/4 mode tag vlan 16",
+		"service 1 gemport 1 vlan 16",
+		"exit",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len got=%d want=%d\ngot=%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cmd[%d]=%q want %q", i, got[i], want[i])
+		}
 	}
 }
 

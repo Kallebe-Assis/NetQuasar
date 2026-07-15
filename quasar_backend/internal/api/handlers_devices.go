@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -54,6 +55,8 @@ type deviceDTO struct {
 	TelemetryOIDStrategy  *string         `json:"telemetry_oid_strategy,omitempty"`
 	TelemetryOIDOverrides json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
 	MaxPons                  *int            `json:"max_pons,omitempty"`
+	PonDescriptions          json.RawMessage `json:"pon_descriptions,omitempty"`
+	PonVlans                 json.RawMessage `json:"pon_vlans,omitempty"`
 	MikrotikTelnetProfileID  *uuid.UUID      `json:"mikrotik_telnet_profile_id,omitempty"`
 	SwitchTelnetProfileID    *uuid.UUID      `json:"switch_telnet_profile_id,omitempty"`
 	TelnetUser               *string         `json:"telnet_user,omitempty"`
@@ -70,7 +73,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	q := `SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
 		d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
 		d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
-		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
+		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, COALESCE(d.pon_descriptions::text, '{}'), COALESCE(d.pon_vlans::text, '{}'), d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
 		d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
 		c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at::text
 		FROM devices d
@@ -87,11 +90,12 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		var d deviceDTO
 		var ip *string
 		var overrides []byte
+		var ponDesc, ponVlans []byte
 		var telPass, sshPass *string
 		if err := rows.Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 			&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 			&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 			&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass,
 			&d.SNMPHealthStatus, &d.SNMPHealthReason, &d.SNMPHealthCheckedAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -99,6 +103,8 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		d.IP = ip
 		d.TelemetryOIDOverrides = json.RawMessage(overrides)
+		d.PonDescriptions = normalizePonDescriptionsJSON(ponDesc)
+		d.PonVlans = normalizePonVlansJSON(ponVlans)
 		d.TelnetPasswordConfigured = hasSecret(telPass)
 		d.SSHPasswordConfigured = hasSecret(sshPass)
 		out = append(out, d)
@@ -129,10 +135,138 @@ func validateDeviceIP(networkStatus string, ip *string) error {
 	return nil
 }
 
+func normalizePonDescriptionsJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{}`)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		n, err := strconv.Atoi(strings.TrimSpace(k))
+		if err != nil || n < 1 {
+			continue
+		}
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "" || s == "<nil>" {
+			continue
+		}
+		if len([]rune(s)) > 30 {
+			s = string([]rune(s)[:30])
+		}
+		out[strconv.Itoa(n)] = s
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return b
+}
+
+func normalizePonVlansJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{}`)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		n, err := strconv.Atoi(strings.TrimSpace(k))
+		if err != nil || n < 1 {
+			continue
+		}
+		vid, ok := parsePonVlanValue(v)
+		if !ok {
+			continue
+		}
+		out[strconv.Itoa(n)] = vid
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return b
+}
+
+func parsePonVlanValue(v any) (int, bool) {
+	switch x := v.(type) {
+	case float64:
+		n := int(x)
+		if n >= 1 && n <= 4094 {
+			return n, true
+		}
+	case json.Number:
+		n, err := x.Int64()
+		if err == nil && n >= 1 && n <= 4094 {
+			return int(n), true
+		}
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(s)
+		if err == nil && n >= 1 && n <= 4094 {
+			return n, true
+		}
+	case int:
+		if x >= 1 && x <= 4094 {
+			return x, true
+		}
+	}
+	return 0, false
+}
+
+// validateDevicePonInterfaces valida descrição (≤30) e VLAN (1–4094) por PON.
+func validateDevicePonInterfaces(d *deviceDTO) error {
+	if strings.TrimSpace(d.Category) != "OLT" {
+		return nil
+	}
+	if len(d.PonDescriptions) > 0 && string(d.PonDescriptions) != "null" {
+		var m map[string]any
+		if err := json.Unmarshal(d.PonDescriptions, &m); err == nil {
+			for k, v := range m {
+				s := strings.TrimSpace(fmt.Sprint(v))
+				if s == "" || s == "<nil>" {
+					continue
+				}
+				if len([]rune(s)) > 30 {
+					return errValidation("descrição da PON " + k + " não pode ter mais de 30 caracteres")
+				}
+			}
+		}
+	}
+	if len(d.PonVlans) > 0 && string(d.PonVlans) != "null" && string(d.PonVlans) != "{}" {
+		var m map[string]any
+		if err := json.Unmarshal(d.PonVlans, &m); err != nil {
+			return errValidation("pon_vlans inválido")
+		}
+		for k, v := range m {
+			s := strings.TrimSpace(fmt.Sprint(v))
+			if s == "" || s == "<nil>" {
+				continue
+			}
+			if _, ok := parsePonVlanValue(v); !ok {
+				return errValidation("VLAN da PON " + k + " deve ser um número entre 1 e 4094")
+			}
+		}
+	}
+	return nil
+}
+
 func applyDeviceBridgeAndLocalityRules(d *deviceDTO) {
 	if strings.TrimSpace(d.Category) != "OLT" {
 		d.LocalityID = nil
 		d.MaxPons = nil
+		d.PonDescriptions = json.RawMessage(`{}`)
+		d.PonVlans = json.RawMessage(`{}`)
+	} else {
+		d.PonDescriptions = normalizePonDescriptionsJSON(d.PonDescriptions)
+		d.PonVlans = normalizePonVlansJSON(d.PonVlans)
 	}
 	if strings.TrimSpace(d.Category) != "Outros" {
 		def := "default"
@@ -187,6 +321,10 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		ns = "Normal"
 	}
 	body.NetworkStatus = ns
+	if err := validateDevicePonInterfaces(&body); err != nil {
+		writeErr(w, 422, "VALIDATION", err.Error(), nil)
+		return
+	}
 	applyDeviceBridgeAndLocalityRules(&body)
 	if err := validateDeviceIP(ns, body.IP); err != nil {
 		writeErr(w, 422, "VALIDATION", err.Error(), nil)
@@ -209,16 +347,16 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO devices (pop_id, locality_id, category, description, ip, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, bng_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides, max_pons,
+			telemetry_oid_strategy, telemetry_oid_overrides, max_pons, pon_descriptions, pon_vlans,
 			mikrotik_telnet_profile_id, switch_telnet_profile_id,
 			telnet_user, telnet_password, telnet_enable, ssh_user, ssh_password)
 		VALUES ($1,$2,$3,$4, NULLIF($5::text,'')::inet, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::date, $22, $23,
-			COALESCE($24,'default'), COALESCE($25::jsonb,'{}'::jsonb), $26,
-			$27, $28, $29, $30, $31, $32)
+			COALESCE($24,'default'), COALESCE($25::jsonb,'{}'::jsonb), $26, COALESCE($27::jsonb,'{}'::jsonb), COALESCE($28::jsonb,'{}'::jsonb),
+			$29, $30, $31, $32, $33, $34, $35)
 		RETURNING id
 	`, body.PopID, body.LocalityID, body.Category, body.Description, ipArg, ns, body.AccessMode, body.TelemetryMode, body.PingEnabled, body.TelemetryEnabled, body.BngEnabled, op,
 		body.Latitude, body.Longitude, body.Brand, body.Model, body.MAC, body.SerialNumber, body.SoftwareVersion, body.HardwareVersion, acquiredAtArg(body.AcquiredAt), body.SNMPCommunity, body.MIBFolderPath,
-		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons,
+		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons, normalizePonDescriptionsJSON(body.PonDescriptions), normalizePonVlansJSON(body.PonVlans),
 		body.MikrotikTelnetProfileID, body.SwitchTelnetProfileID,
 		body.TelnetUser, telPass, body.TelnetEnable, body.SSHUser, sshPass).Scan(&id)
 	if err != nil {
@@ -729,11 +867,12 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	var ip *string
 	var popName, locName *string
 	var telPass, sshPass *string
+	var ponDesc, ponVlans []byte
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
 			d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
 			d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
-			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
+			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, COALESCE(d.pon_descriptions::text, '{}'), COALESCE(d.pon_vlans::text, '{}'), d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
 			d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
 			p.description, l.name
 		FROM devices d
@@ -743,7 +882,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass, &popName, &locName)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
@@ -754,6 +893,8 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.IP = ip
+	d.PonDescriptions = normalizePonDescriptionsJSON(ponDesc)
+	d.PonVlans = normalizePonVlansJSON(ponVlans)
 	d.TelnetPasswordConfigured = hasSecret(telPass)
 	d.SSHPasswordConfigured = hasSecret(sshPass)
 	raw, _ := json.Marshal(d)
@@ -782,17 +923,18 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	var d deviceDTO
 	var ip *string
 	var telPassCur, sshPassCur *string
+	var ponDesc, ponVlans []byte
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
 			ping_enabled, telemetry_enabled, bng_enabled, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
-			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons, mikrotik_telnet_profile_id, switch_telnet_profile_id,
+			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons, COALESCE(pon_descriptions::text, '{}'), COALESCE(pon_vlans::text, '{}'), mikrotik_telnet_profile_id, switch_telnet_profile_id,
 			telnet_user, telnet_enable, ssh_user, telnet_password, ssh_password
 		FROM devices WHERE id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
 		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
-		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
+		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPassCur, &sshPassCur)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento não encontrado", nil)
@@ -803,6 +945,8 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.IP = ip
+	d.PonDescriptions = normalizePonDescriptionsJSON(ponDesc)
+	d.PonVlans = normalizePonVlansJSON(ponVlans)
 	prevPing := d.PingEnabled
 	prevTelemetry := d.TelemetryEnabled
 	mergeDeviceJSON(&d, body)
@@ -839,6 +983,10 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(d.NetworkStatus) == "" {
 		d.NetworkStatus = "Normal"
 	}
+	if err := validateDevicePonInterfaces(&d); err != nil {
+		writeErr(w, 422, "VALIDATION", err.Error(), nil)
+		return
+	}
 	applyDeviceBridgeAndLocalityRules(&d)
 	if err := validateDeviceIP(d.NetworkStatus, d.IP); err != nil {
 		writeErr(w, 422, "VALIDATION", err.Error(), nil)
@@ -861,19 +1009,21 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 			telemetry_oid_strategy=COALESCE($25,'default'),
 			telemetry_oid_overrides=COALESCE($26::jsonb,'{}'::jsonb),
 			max_pons=$27,
-			mikrotik_telnet_profile_id=$28,
-			switch_telnet_profile_id=$29,
-			telnet_user=$30,
-			telnet_password=$31,
-			telnet_enable=$32,
-			ssh_user=$33,
-			ssh_password=$34,
+			pon_descriptions=COALESCE($28::jsonb,'{}'::jsonb),
+			pon_vlans=COALESCE($29::jsonb,'{}'::jsonb),
+			mikrotik_telnet_profile_id=$30,
+			switch_telnet_profile_id=$31,
+			telnet_user=$32,
+			telnet_password=$33,
+			telnet_enable=$34,
+			ssh_user=$35,
+			ssh_password=$36,
 			updated_at=now()
 		WHERE id=$1
 	`, id, d.PopID, d.LocalityID, d.Category, d.Description, ipArg, d.NetworkStatus, d.AccessMode, d.TelemetryMode,
 		d.PingEnabled, d.TelemetryEnabled, d.OperationalMode, d.BngEnabled,
 		d.Latitude, d.Longitude, d.Brand, d.Model, d.MAC, d.SerialNumber, d.SoftwareVersion, d.HardwareVersion, acquiredAtArg(d.AcquiredAt), d.SNMPCommunity, d.MIBFolderPath,
-		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons, d.MikrotikTelnetProfileID, d.SwitchTelnetProfileID,
+		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons, normalizePonDescriptionsJSON(d.PonDescriptions), normalizePonVlansJSON(d.PonVlans), d.MikrotikTelnetProfileID, d.SwitchTelnetProfileID,
 		d.TelnetUser, telPassArg, d.TelnetEnable, d.SSHUser, sshPassArg)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -989,6 +1139,12 @@ func mergeDeviceJSON(d *deviceDTO, body map[string]json.RawMessage) {
 		if json.Unmarshal(v, &x) == nil {
 			d.MaxPons = x
 		}
+	}
+	if v, ok := body["pon_descriptions"]; ok {
+		d.PonDescriptions = normalizePonDescriptionsJSON(v)
+	}
+	if v, ok := body["pon_vlans"]; ok {
+		d.PonVlans = v // validado depois; normalize em apply/ persist
 	}
 	if v, ok := body["mikrotik_telnet_profile_id"]; ok {
 		if string(v) == "null" {

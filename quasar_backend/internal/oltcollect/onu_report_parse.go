@@ -8,11 +8,14 @@ import (
 )
 
 var (
-	telnetKvLineRE     = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_-]{2,44}):\s+(.+?)\s*$`)
+	telnetKvLineRE     = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s+(.+?)\s*$`)
+	telnetKvLabelOnlyRE = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s*$`)
 	telnetGponPowerRE  = regexp.MustCompile(`gpon_onu[^\n]+\s+(-?\d+(?:\.\d+)?)\s*\(dbm\)`)
 	telnetVsolInfoRE     = regexp.MustCompile(`^(GPON[\d/:\w-]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
 	// show onu auto-find: OnuIndex  Sn  State  (ex.: GPON0/4:1  ZTEGCFAA2AB1  unknow)
 	telnetVsolAutoFindRE = regexp.MustCompile(`^(?i)(GPON\d+/\d+:\d+)\s+(\S+)\s+(\S+)\s*$`)
+	// show pon onu uncfg: gpon_olt-1/1/9  Model  SERIAL  PW
+	telnetZtePonUncfgRE  = regexp.MustCompile(`^(?i)(gpon_olt-\d+/\d+/(\d+))\s+(\S+)\s+([A-Za-z0-9]{6,})\s+(\S+)\s*$`)
 	telnetVsolStateRE    = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
 	telnetOnuNumberRE  = regexp.MustCompile(`ONU Number:\s*(\S+)`)
 )
@@ -31,12 +34,16 @@ var telnetLabelPT = map[string]string{
 	"distance": "Distância", "online duration": "Tempo online",
 	"hardware version": "HW", "software version": "SW",
 	"rx": "RX", "tx": "TX",
+	"rx optical level": "RX", "tx optical level": "TX",
+	"rx power": "RX", "tx power": "TX",
 	"authentication mode": "Autenticação",
 	"configured speed mode": "Velocidade config.",
 	"current speed mode": "Velocidade actual",
 	"config state": "Config", "onu status": "Status ONU", "fec": "FEC",
 	"onu number": "ONU Number", "temperature": "Temperatura", "temp": "Temperatura",
-	"voltage": "Voltagem",
+	"voltage": "Voltagem", "power feed voltage": "Voltagem",
+	"laser bias current": "Bias",
+	"onu pon interface": "Interface PON",
 }
 
 func normalizeTelnetLabel(raw string) string {
@@ -53,9 +60,31 @@ func normalizeTelnetValue(label, value string) string {
 		return m[1]
 	}
 	if label == "RX" || label == "TX" {
-		v = strings.TrimSuffix(strings.TrimSpace(v), "dBm")
-		v = strings.TrimSuffix(strings.TrimSpace(v), "dbm")
+		v = stripUnitParen(v, "dbm")
 	}
+	if label == "Voltagem" {
+		v = stripUnitParen(v, "v")
+	}
+	if label == "Temperatura" {
+		v = stripUnitParen(v, "c")
+	}
+	if label == "Bias" {
+		v = stripUnitParen(v, "ma")
+	}
+	return strings.TrimSpace(v)
+}
+
+// stripUnitParen normaliza " -23.280(dBm) ", "3.28(V)", "31.430(C)".
+func stripUnitParen(raw, unit string) string {
+	v := strings.TrimSpace(raw)
+	v = strings.ReplaceAll(v, ",", ".")
+	lower := strings.ToLower(v)
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	if idx := strings.Index(lower, "("+unit); idx >= 0 {
+		v = strings.TrimSpace(v[:idx])
+	}
+	lower = strings.ToLower(v)
+	v = strings.TrimSpace(strings.TrimSuffix(lower, unit))
 	return strings.TrimSpace(v)
 }
 
@@ -81,7 +110,9 @@ func cleanTelnetCLIOutput(raw string) string {
 func extractTelnetKVFields(text string) map[string]string {
 	out := map[string]string{}
 	seen := map[string]bool{}
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "---") {
 			continue
@@ -89,12 +120,37 @@ func extractTelnetKVFields(text string) map[string]string {
 		if strings.HasPrefix(strings.ToLower(t), "authpass time") {
 			break
 		}
-		m := telnetKvLineRE.FindStringSubmatch(line)
-		if m == nil {
+
+		labelRaw := ""
+		valueRaw := ""
+		if m := telnetKvLineRE.FindStringSubmatch(line); m != nil {
+			labelRaw = strings.TrimSpace(m[1])
+			valueRaw = m[2]
+		} else if m := telnetKvLabelOnlyRE.FindStringSubmatch(line); m != nil {
+			labelRaw = strings.TrimSpace(m[1])
+			for j := i + 1; j < len(lines); j++ {
+				next := strings.TrimSpace(lines[j])
+				if next == "" {
+					continue
+				}
+				if telnetKvLineRE.MatchString(lines[j]) || telnetKvLabelOnlyRE.MatchString(lines[j]) {
+					break
+				}
+				if strings.HasPrefix(next, "---") {
+					break
+				}
+				valueRaw = next
+				i = j
+				break
+			}
+		} else {
 			continue
 		}
-		label := normalizeTelnetLabel(m[1])
-		value := normalizeTelnetValue(label, m[2])
+		if strings.TrimSpace(valueRaw) == "" {
+			continue
+		}
+		label := normalizeTelnetLabel(labelRaw)
+		value := normalizeTelnetValue(label, valueRaw)
 		if value == "" {
 			continue
 		}
@@ -313,9 +369,7 @@ func stringFromAny(v any) string {
 }
 
 func parseDbmValue(s string) *float64 {
-	s = strings.TrimSpace(strings.ReplaceAll(s, ",", "."))
-	s = strings.TrimSuffix(strings.ToLower(s), "dbm")
-	s = strings.TrimSpace(s)
+	s = stripUnitParen(s, "dbm")
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return nil
