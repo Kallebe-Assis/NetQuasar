@@ -13,6 +13,10 @@ type MonitoringIntervalsPayload = {
   telemetry_seconds: number;
   interface_snapshot_seconds: number;
   olt_if_derived_pon_seconds: number;
+  olt_pon_status_seconds?: number;
+  olt_onu_counts_seconds?: number;
+  olt_full_collect_seconds?: number;
+  olt_full_collect_schedule?: string;
   pipeline_cycle_seconds?: number;
   telemetry_minutes: number;
   ping_timeout_ms: number;
@@ -52,6 +56,10 @@ export function MonitoringPingIntervalsCard() {
   const [telS, setTelS] = useState("");
   const [ifaceS, setIfaceS] = useState("");
   const [oltDerivedS, setOltDerivedS] = useState("");
+  const [oltPonStatusS, setOltPonStatusS] = useState("");
+  const [oltOnuCountsS, setOltOnuCountsS] = useState("");
+  const [oltFullCollectS, setOltFullCollectS] = useState("");
+  const [oltFullSchedule, setOltFullSchedule] = useState("");
   const [pto, setPto] = useState("");
   const [telTimeout, setTelTimeout] = useState("");
   const [ifaceTimeout, setIfaceTimeout] = useState("");
@@ -70,6 +78,10 @@ export function MonitoringPingIntervalsCard() {
     setTelS((v) => (v === "" ? String(q.data.telemetry_seconds ?? q.data.telemetry_minutes * 60) : v));
     setIfaceS((v) => (v === "" ? String(q.data.interface_snapshot_seconds ?? 300) : v));
     setOltDerivedS((v) => (v === "" ? String(q.data.olt_if_derived_pon_seconds ?? 240) : v));
+    setOltPonStatusS((v) => (v === "" ? String(q.data.olt_pon_status_seconds ?? 60) : v));
+    setOltOnuCountsS((v) => (v === "" ? String(q.data.olt_onu_counts_seconds ?? 180) : v));
+    setOltFullCollectS((v) => (v === "" ? String(q.data.olt_full_collect_seconds ?? 0) : v));
+    setOltFullSchedule((v) => (v === "" ? String(q.data.olt_full_collect_schedule ?? "") : v));
     setPto((v) => (v === "" ? String(q.data.ping_timeout_ms ?? 5500) : v));
     setTelTimeout((v) => (v === "" ? String(q.data.telemetry_timeout_ms ?? 120000) : v));
     setIfaceTimeout((v) => (v === "" ? String(q.data.interface_snapshot_timeout_ms ?? 120000) : v));
@@ -217,6 +229,73 @@ export function MonitoringPingIntervalsCard() {
               aria-label="Intervalo entre colectas ONUs/PON derive IF-MIB em segundos"
               value={oltDerivedS}
               onChange={(e) => setOltDerivedS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="OLT status PON (s)"
+            hintLabel="Cadência do status up/down das PONs"
+            hint={
+              <p>
+                Coleta <strong>leve e frequente</strong>: só o estado operacional das portas PON (up/down). Default sugerido: <strong>60 s</strong>.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo status PON em segundos"
+              value={oltPonStatusS}
+              onChange={(e) => setOltPonStatusS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="OLT contagens ONU (s)"
+            hintLabel="Cadência online/offline por PON"
+            hint={
+              <p>
+                Coleta <strong>intermédia</strong>: quantidade de ONUs online e offline por PON. Default sugerido: <strong>180 s</strong>.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo contagens ONU em segundos"
+              value={oltOnuCountsS}
+              onChange={(e) => setOltOnuCountsS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="OLT coleta completa (s)"
+            hintLabel="Intervalo da coleta completa (0 = só manual/agenda)"
+            hint={
+              <p>
+                Coleta <strong>pesada</strong> (SNMP completo + telnet se activo no perfil): serial, RX, temperatura, modelo, etc.
+                Use <strong>0</strong> para não repetir automaticamente — só refresh manual ou horário agendado abaixo.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Intervalo coleta completa OLT em segundos"
+              value={oltFullCollectS}
+              onChange={(e) => setOltFullCollectS(e.target.value)}
+            />
+          </SettingsField>
+          <SettingsField
+            label="Agenda coleta completa"
+            hintLabel="Horário diário HH:MM"
+            hint={
+              <p>
+                Hora local do servidor para disparar a coleta completa uma vez por dia (ex.: <strong>03:00</strong>).
+                Deixe vazio se usar só intervalo ou refresh manual na página OLT.
+              </p>
+            }
+          >
+            <input
+              className="input mono"
+              aria-label="Horário agenda coleta completa HH:MM"
+              placeholder="03:00"
+              value={oltFullSchedule}
+              onChange={(e) => setOltFullSchedule(e.target.value)}
             />
           </SettingsField>
         </div>
@@ -385,6 +464,10 @@ export function MonitoringPingIntervalsCard() {
               telemetry_seconds: telS ? Number(telS) : undefined,
               interface_snapshot_seconds: ifaceS ? Number(ifaceS) : undefined,
               olt_if_derived_pon_seconds: oltDerivedS ? Number(oltDerivedS) : undefined,
+              olt_pon_status_seconds: oltPonStatusS ? Number(oltPonStatusS) : undefined,
+              olt_onu_counts_seconds: oltOnuCountsS ? Number(oltOnuCountsS) : undefined,
+              olt_full_collect_seconds: oltFullCollectS !== "" ? Number(oltFullCollectS) : undefined,
+              olt_full_collect_schedule: oltFullSchedule,
               ping_timeout_ms: pto ? Number(pto) : undefined,
               telemetry_timeout_ms: telTimeout ? Number(telTimeout) : undefined,
               interface_snapshot_timeout_ms: ifaceTimeout ? Number(ifaceTimeout) : undefined,

@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -294,6 +296,8 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout, bngTimeout int
 	var telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout int
+	var oltPonStatusSec, oltOnuCountsSec, oltFullCollectSec int
+	var oltFullSchedule string
 	var icmpPB, offTh, uptimeRestart int
 	var pingParallel bool
 	var pipelineRaw []byte
@@ -307,10 +311,15 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 			COALESCE(uptime_restart_alert_minutes, 0),
 			pipeline_cycle_seconds, mikrotik_timeout_ms, bng_timeout_ms,
 			COALESCE(ping_parallel, true),
-			coalesce(pipeline_steps::text, '[]')
+			coalesce(pipeline_steps::text, '[]'),
+			COALESCE(olt_pon_status_seconds, 60),
+			COALESCE(olt_onu_counts_seconds, 180),
+			COALESCE(olt_full_collect_seconds, 0),
+			COALESCE(olt_full_collect_schedule, '')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
 		&telTimeout, &ifaceTimeout, &oltTimeout, &oltOnuTelnetTimeout, &icmpPB, &offTh, &uptimeRestart,
-		&pipelineSec, &mikrotikTimeout, &bngTimeout, &pingParallel, &pipelineRaw); err != nil {
+		&pipelineSec, &mikrotikTimeout, &bngTimeout, &pingParallel, &pipelineRaw,
+		&oltPonStatusSec, &oltOnuCountsSec, &oltFullCollectSec, &oltFullSchedule); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
@@ -319,13 +328,17 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 	if len(steps) == 0 {
 		steps = monitorworker.DefaultPipelineSteps()
 	} else {
-		steps = monitorworker.EnsureBngPipelineStep(steps)
+		steps = monitorworker.EnsureOltTierPipelineSteps(monitorworker.EnsureBngPipelineStep(steps))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ping_seconds":                    ps,
 		"telemetry_seconds":               telSec,
 		"interface_snapshot_seconds":      ifaceSec,
 		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"olt_pon_status_seconds":          oltPonStatusSec,
+		"olt_onu_counts_seconds":          oltOnuCountsSec,
+		"olt_full_collect_seconds":        oltFullCollectSec,
+		"olt_full_collect_schedule":       oltFullSchedule,
 		"pipeline_cycle_seconds":          pipelineSec,
 		"telemetry_minutes":               tm,
 		"ping_timeout_ms":                 pto,
@@ -350,6 +363,10 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		TelemetrySeconds              *int                           `json:"telemetry_seconds"`
 		InterfaceSnapshotSeconds      *int                           `json:"interface_snapshot_seconds"`
 		OltIfDerivedPonSeconds        *int                           `json:"olt_if_derived_pon_seconds"`
+		OltPonStatusSeconds           *int                           `json:"olt_pon_status_seconds"`
+		OltOnuCountsSeconds           *int                           `json:"olt_onu_counts_seconds"`
+		OltFullCollectSeconds         *int                           `json:"olt_full_collect_seconds"`
+		OltFullCollectSchedule        *string                        `json:"olt_full_collect_schedule"`
 		PipelineCycleSeconds          *int                           `json:"pipeline_cycle_seconds"`
 		PingTimeoutMs                 *int                           `json:"ping_timeout_ms"`
 		TelemetryTimeoutMs            *int                           `json:"telemetry_timeout_ms"`
@@ -361,8 +378,8 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		IcmpPayloadBytes              *int                           `json:"icmp_payload_bytes"`
 		OfflinePingFailThreshold      *int                           `json:"offline_ping_fail_threshold"`
 		UptimeRestartAlertMinutes     *int                           `json:"uptime_restart_alert_minutes"`
-		PipelineSteps                 *[]monitorworker.PipelineStep `json:"pipeline_steps"`
-		PingParallel                  *bool                         `json:"ping_parallel"`
+		PipelineSteps                 *[]monitorworker.PipelineStep  `json:"pipeline_steps"`
+		PingParallel                  *bool                          `json:"ping_parallel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -371,6 +388,8 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	var ps, tm, pto int
 	var telSecRaw, ifaceSec, oltDerivedSec, pipelineSec, mikrotikTimeout, bngTimeout int
 	var telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout int
+	var oltPonStatusSec, oltOnuCountsSec, oltFullCollectSec int
+	var oltFullSchedule string
 	var icmpPB, offTh, uptimeRestart int
 	var pingParallel bool
 	var pipelineRaw []byte
@@ -384,10 +403,15 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			COALESCE(uptime_restart_alert_minutes, 0),
 			pipeline_cycle_seconds, mikrotik_timeout_ms, bng_timeout_ms,
 			COALESCE(ping_parallel, true),
-			coalesce(pipeline_steps::text, '[]')
+			coalesce(pipeline_steps::text, '[]'),
+			COALESCE(olt_pon_status_seconds, 60),
+			COALESCE(olt_onu_counts_seconds, 180),
+			COALESCE(olt_full_collect_seconds, 0),
+			COALESCE(olt_full_collect_schedule, '')
 		FROM monitoring_intervals WHERE id=1`).Scan(&ps, &tm, &pto, &telSecRaw, &ifaceSec, &oltDerivedSec,
 		&telTimeout, &ifaceTimeout, &oltTimeout, &oltOnuTelnetTimeout, &icmpPB, &offTh, &uptimeRestart,
-		&pipelineSec, &mikrotikTimeout, &bngTimeout, &pingParallel, &pipelineRaw); err != nil {
+		&pipelineSec, &mikrotikTimeout, &bngTimeout, &pingParallel, &pipelineRaw,
+		&oltPonStatusSec, &oltOnuCountsSec, &oltFullCollectSec, &oltFullSchedule); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
@@ -408,6 +432,18 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	}
 	if body.OltIfDerivedPonSeconds != nil {
 		oltDerivedSec = *body.OltIfDerivedPonSeconds
+	}
+	if body.OltPonStatusSeconds != nil {
+		oltPonStatusSec = *body.OltPonStatusSeconds
+	}
+	if body.OltOnuCountsSeconds != nil {
+		oltOnuCountsSec = *body.OltOnuCountsSeconds
+	}
+	if body.OltFullCollectSeconds != nil {
+		oltFullCollectSec = *body.OltFullCollectSeconds
+	}
+	if body.OltFullCollectSchedule != nil {
+		oltFullSchedule = strings.TrimSpace(*body.OltFullCollectSchedule)
 	}
 	if body.PipelineCycleSeconds != nil {
 		pipelineSec = *body.PipelineCycleSeconds
@@ -452,6 +488,32 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			"pipeline_cycle_seconds": pipelineSec,
 		})
 		return
+	}
+	if oltPonStatusSec < 30 || oltPonStatusSec > 3600 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_pon_status_seconds entre 30 e 3600", map[string]any{"olt_pon_status_seconds": oltPonStatusSec})
+		return
+	}
+	if oltOnuCountsSec < 60 || oltOnuCountsSec > 7200 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_onu_counts_seconds entre 60 e 7200", map[string]any{"olt_onu_counts_seconds": oltOnuCountsSec})
+		return
+	}
+	if oltFullCollectSec < 0 || oltFullCollectSec > 86400 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_full_collect_seconds entre 0 (só manual/agenda) e 86400", map[string]any{"olt_full_collect_seconds": oltFullCollectSec})
+		return
+	}
+	if oltFullSchedule != "" {
+		parts := strings.Split(oltFullSchedule, ":")
+		okSched := len(parts) >= 2
+		if okSched {
+			hh, e1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+			mm, e2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+			okSched = e1 == nil && e2 == nil && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59
+		}
+		if !okSched {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_full_collect_schedule deve ser HH:MM (ex. 03:00) ou vazio", map[string]any{"olt_full_collect_schedule": oltFullSchedule})
+			return
+		}
+		oltFullSchedule = fmt.Sprintf("%02d:%02d", mustAtoiHHMM(parts[0]), mustAtoiHHMM(parts[1]))
 	}
 	if pto < 1000 || pto > 30000 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "ping_timeout_ms entre 1000 e 30000 (1–30 s por sonda ICMP+TCP)", map[string]any{"ping_timeout_ms": pto})
@@ -507,8 +569,13 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 			uptime_restart_alert_minutes=$16,
 			pipeline_steps=$17::jsonb,
 			ping_parallel=$18,
+			olt_pon_status_seconds=$19,
+			olt_onu_counts_seconds=$20,
+			olt_full_collect_seconds=$21,
+			olt_full_collect_schedule=$22,
 			updated_at=now() WHERE id=1`,
-		ps, tm, telSec, ifaceSec, oltDerivedSec, pipelineSec, pto, telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout, mikrotikTimeout, bngTimeout, icmpPB, offTh, uptimeRestart, stepsJSON, pingParallel)
+		ps, tm, telSec, ifaceSec, oltDerivedSec, pipelineSec, pto, telTimeout, ifaceTimeout, oltTimeout, oltOnuTelnetTimeout, mikrotikTimeout, bngTimeout, icmpPB, offTh, uptimeRestart, stepsJSON, pingParallel,
+		oltPonStatusSec, oltOnuCountsSec, oltFullCollectSec, oltFullSchedule)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -518,6 +585,10 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		"telemetry_seconds":               telSec,
 		"interface_snapshot_seconds":      ifaceSec,
 		"olt_if_derived_pon_seconds":      oltDerivedSec,
+		"olt_pon_status_seconds":          oltPonStatusSec,
+		"olt_onu_counts_seconds":          oltOnuCountsSec,
+		"olt_full_collect_seconds":        oltFullCollectSec,
+		"olt_full_collect_schedule":       oltFullSchedule,
 		"pipeline_cycle_seconds":          pipelineSec,
 		"telemetry_minutes":               tm,
 		"ping_timeout_ms":                 pto,
@@ -535,6 +606,11 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	}
 	s.appendAuditLog(r.Context(), "monitoring_intervals", "1", "patch", s.actorFromRequest(r), nil, payload)
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func mustAtoiHHMM(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
 }
 
 func (s *Server) getMonitoringSettings(w http.ResponseWriter, r *http.Request) {

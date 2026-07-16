@@ -3,6 +3,7 @@ package alertnotify
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTelegramMonitoringBlocksUptimeRestart(t *testing.T) {
@@ -48,6 +49,7 @@ func TestTelegramMonitoringBlocksOltOnuDrop(t *testing.T) {
 		},
 	)
 	for _, want := range []string{
+		"🟡 QUEDA DE ONUs",
 		"PON 08",
 		"Queda de 5 ONUs",
 		"50%",
@@ -56,6 +58,59 @@ func TestTelegramMonitoringBlocksOltOnuDrop(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
 		}
+	}
+}
+
+func TestTelegramMonitoringHeaderInterfaceDown(t *testing.T) {
+	h := monitoringHeader("WARNING", "Interface DOWN (mudança de estado)", "interface eth1 mudou de UP para DOWN.", "interface_down_transition")
+	if h != "🔴 INTERFACE DOWN" {
+		t.Fatalf("got %q", h)
+	}
+}
+
+func TestTelegramMonitoringHeaderOnuRise(t *testing.T) {
+	h := monitoringHeader("INFO", "Subida de ONUs online — PON", "PON 04 — subida de 3 ONUs", "olt_onu_rise")
+	if h != "🟢 SUBIDA DE ONUs" {
+		t.Fatalf("got %q", h)
+	}
+}
+
+func TestTelegramUnifiedOnuResolution(t *testing.T) {
+	closed := time.Date(2026, 7, 14, 15, 58, 0, 0, time.UTC)
+	active := time.Date(2026, 7, 14, 15, 29, 0, 0, time.UTC)
+	text := telegramUnifiedOnuResolutionBlocks(
+		"olt_onu_drop",
+		"Contagem de ONUs online normalizada",
+		"PON 04 — queda de 17 ONUs online (89% de 19) — OLT VSOL Miracema (10.255.30.2).",
+		"OLT VSOL Miracema",
+		"10.255.30.2",
+		map[string]any{
+			"pon":               "04",
+			"drop_online_count": 17.0,
+			"drop_online_pct":   89.0,
+			"prev_online":       19.0,
+			"curr_online":       2.0,
+		},
+		"Servidor Miracema",
+		active,
+		&closed,
+	)
+	for _, want := range []string{
+		"🟢 ONUs NORMALIZADAS",
+		"PON 04",
+		"Queda de 17 ONUs",
+		"ONUs online normalizadas",
+		"Início:",
+		"Fim:",
+		"Duração:",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	// Não deve parecer duas mensagens separadas com header amarelo.
+	if strings.Contains(text, "ALERTA TELEMETRIA") {
+		t.Fatalf("unexpected ALERTA TELEMETRIA in unified text:\n%s", text)
 	}
 }
 

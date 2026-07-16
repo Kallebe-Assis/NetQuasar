@@ -144,6 +144,9 @@ function MonitoringPipelineCard() {
         <InfoHint label="Pipeline sequencial">
           <p>
             Telemetria, BNG, interfaces e coleta ONU correm <strong>em sequência</strong> (cada etapa só inicia após a anterior).
+            A coleta OLT tem <strong>3 cadências</strong>: status PON (frequente), contagens ONU (intermédia) e completa
+            (manual, intervalo ou horário agendado em Intervalos). Cada passo <code>olt_onu</code> só corre quando o seu
+            intervalo/agenda estiver vencido.
             Equipamentos com coleta BNG activa são recolhidos no passo <strong>BNG</strong>, não na telemetria genérica.
             O passo <strong>Ping</strong> na lista abaixo serve para definir o alvo (todos/categoria); com «Ping em paralelo» activo
             (Configurações → Intervalos), o ping <strong>não entra na fila</strong> — corre à parte, no intervalo «Intervalo entre pings».
@@ -208,9 +211,11 @@ function MonitoringPipelineCard() {
                     value={step.options?.olt_onu_mode ?? "full"}
                     onChange={(e) => updateStep(idx, { options: { ...step.options, olt_onu_mode: e.target.value } })}
                   >
-                    <option value="full">Completo</option>
-                    <option value="status_only">Só UP/DOWN</option>
+                    <option value="pon_status">Status PON (up/down)</option>
+                    <option value="onu_counts">Contagens ONU online/offline</option>
+                    <option value="status_only">Status PON + ONU</option>
                     <option value="status_rx">Status + RX</option>
+                    <option value="full">Completo (SNMP + telnet)</option>
                   </select>
                 </label>
               )}

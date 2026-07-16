@@ -207,6 +207,7 @@ func (c OnuMetricsConfig) HasAnyEnabled() bool {
 }
 
 // FilterOnuMetricsByMode reduz métricas para coleta periódica simplificada.
+// Modos: full | status_only | status_rx | pon_status | onu_counts
 func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" || mode == "full" {
@@ -227,6 +228,10 @@ func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 		}
 	}
 	switch mode {
+	case "pon_status":
+		enable(MetricPonStatus)
+	case "onu_counts":
+		enable(MetricStatus)
 	case "status_only":
 		enable(MetricStatus, MetricPonStatus)
 	case "status_rx":
@@ -235,6 +240,22 @@ func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 		return c
 	}
 	return out
+}
+
+// IsPartialOnuCollectMode indica coleta leve (sem detalhe ONU / telnet).
+func IsPartialOnuCollectMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "pon_status", "onu_counts", "status_only", "status_rx":
+		return true
+	default:
+		return false
+	}
+}
+
+// IncludesTelnetOnuCollectMode — telnet e métricas completas só no modo full.
+func IncludesTelnetOnuCollectMode(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == "" || m == "full"
 }
 
 func DefaultStepsFromMetrics(c OnuMetricsConfig) []Step {

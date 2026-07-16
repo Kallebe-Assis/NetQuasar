@@ -2,6 +2,7 @@ package monitorworker
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -9,13 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorview"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telemetryengine"
 )
 
 // RunTelemetrySweep coleta telemetria SNMP (CPU, memória, uptime, etc.) para todos os equipamentos elegíveis.
-// Cada ciclo grava amostra ou motivo de falha/skip em telemetry_samples e actualiza snmp_health_* no cache.
+// Cada ciclo grava amostra em telemetry_samples (sucesso) ou motivo de skip/falha no probe cache.
 func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, opts SweepOpts) error {
 	if mode != ModeFull {
 		return nil
@@ -147,6 +149,12 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			}
 			patchProbeSNMPHealth(sctx, pool, row.id, ModeSimplePing, snmpOK, healthStatus, healthReason,
 				probeDetailFromTelemetry(src, snmpDetail, mikrotikDetail))
+
+			if telErr == nil && c.Metrics != nil {
+				if mb, err := json.Marshal(c.Metrics); err == nil {
+					monitorview.PatchProbeKPIs(sctx, pool, row.id, mb, time.Now())
+				}
+			}
 
 			if snmpOK {
 				okN++

@@ -533,6 +533,38 @@ func (s *Server) bngDeviceOverview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// bngDeviceSubscribersLive faz SNMP GET só dos totais de logins (sem gravar amostra nem alterar collected_at).
+func (s *Server) bngDeviceSubscribersLive(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, comm, err := s.resolveBngDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	if comm == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	profile := bngcollect.ProfileWithCollectMode(bngcollect.LoadGlobalProfile(ctx, s.DB()), "totals")
+	out := bngcollect.CollectPeriodic(ctx, strings.TrimSpace(dev.IP), comm, profile, 20*time.Second)
+	st := bngcollect.ExtractStatsTotals(out)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":          id,
+		"fetched_at":         time.Now().UTC(),
+		"total_online":       st.TotalOnline,
+		"pppoe_online":       st.PPPoEOnline,
+		"ipv4_online":        st.IPv4Online,
+		"ipv6_online":        st.IPv6Online,
+		"dual_stack_online":  st.DualStackOnline,
+	})
+}
+
 func (s *Server) bngStatsHistory(w http.ResponseWriter, r *http.Request) {
 	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
 	if deviceID == "" {

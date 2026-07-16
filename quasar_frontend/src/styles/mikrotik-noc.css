@@ -213,6 +213,42 @@
   margin-bottom: 8px;
 }
 
+.mk-noc-kpi__refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px -4px -2px 0;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mk-noc-kpi__refresh:hover:not(:disabled) {
+  opacity: 0.9;
+  color: var(--text);
+  background: var(--panel2, rgba(0, 0, 0, 0.04));
+}
+
+.mk-noc-kpi__refresh:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.mk-noc-kpi__refresh .map-refresh-spin {
+  animation: mk-noc-spin 0.8s linear infinite;
+}
+
+@keyframes mk-noc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .mk-noc-kpi__value {
   font-size: 22px;
   font-weight: 700;

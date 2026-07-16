@@ -20,6 +20,10 @@ type intervalConfig struct {
 	IfaceSeconds           int
 	OltDerivedSeconds      int
 	PipelineCycleSeconds   int
+	OltPonStatusSeconds    int
+	OltOnuCountsSeconds    int
+	OltFullCollectSeconds  int
+	OltFullCollectSchedule string
 	MikrotikTimeoutMs      int
 	BngTimeoutMs           int
 	PingParallel           bool
@@ -52,13 +56,18 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			telemetry_timeout_ms, interface_snapshot_timeout_ms, olt_if_derived_pon_timeout_ms,
 			olt_onu_telnet_timeout_ms,
 			pipeline_cycle_seconds, mikrotik_timeout_ms, bng_timeout_ms,
-			COALESCE(ping_parallel, true)
+			COALESCE(ping_parallel, true),
+			COALESCE(olt_pon_status_seconds, 60),
+			COALESCE(olt_onu_counts_seconds, 180),
+			COALESCE(olt_full_collect_seconds, 0),
+			COALESCE(olt_full_collect_schedule, '')
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
 		&c.TelemetryTimeoutMs, &c.InterfaceTimeoutMs, &c.OltIfDerivedTimeoutMs,
 		&c.OltOnuTelnetTimeoutMs,
-		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel); err != nil {
+		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel,
+		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)
@@ -77,6 +86,15 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 	}
 	if c.PingSeconds < 30 {
 		c.PingSeconds = 30
+	}
+	if c.OltPonStatusSeconds < 30 {
+		c.OltPonStatusSeconds = 60
+	}
+	if c.OltOnuCountsSeconds < 60 {
+		c.OltOnuCountsSeconds = 180
+	}
+	if c.OltFullCollectSeconds < 0 {
+		c.OltFullCollectSeconds = 0
 	}
 	if c.MikrotikTimeoutMs < 5000 {
 		c.MikrotikTimeoutMs = 120000

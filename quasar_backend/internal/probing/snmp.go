@@ -242,7 +242,53 @@ func octetStringToUTF8(b []byte) string {
 	if utf8.ValidString(s) && isMostlyPrintableUTF8(s) {
 		return s
 	}
+	// Texto Latin-1 / Windows-1252 (ex.: nomes com acento) antes de cair em hex.
+	if latin, ok := bytesAsLatin1Text(b); ok {
+		return latin
+	}
 	return formatOctetsHex(b)
+}
+
+// bytesAsLatin1Text interpreta octetos como ISO-8859-1 quando há texto legível (não MAC binário).
+func bytesAsLatin1Text(b []byte) (string, bool) {
+	if len(b) == 0 || len(b) > 256 {
+		return "", false
+	}
+	// 6 octetos sem espaço costumam ser MAC — só aceitar se houver espaços (nome curto).
+	if len(b) == 6 {
+		hasSpace := false
+		for _, c := range b {
+			if c == ' ' {
+				hasSpace = true
+				break
+			}
+		}
+		if !hasSpace {
+			return "", false
+		}
+	}
+	letters := 0
+	runes := make([]rune, 0, len(b))
+	for _, c := range b {
+		if c == 0 {
+			continue
+		}
+		if c < 32 || c == 127 || (c >= 0x80 && c < 0xA0) {
+			return "", false
+		}
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= 0xC0 && c != 0xD7 && c != 0xF7) {
+			letters++
+		}
+		runes = append(runes, rune(c))
+	}
+	if len(runes) == 0 || letters < 3 {
+		return "", false
+	}
+	out := strings.TrimSpace(string(runes))
+	if out == "" {
+		return "", false
+	}
+	return out, true
 }
 
 func trimTrailingNulls(b []byte) []byte {
@@ -383,18 +429,17 @@ func TryDecodeFakeIPv4InterfaceName(s string) (string, bool) {
 	return string(b), true
 }
 
-// TryDecodeColonHexASCII converte «63:6f:6d:62:6f:31» em texto quando todos os octetos são ASCII imprimível.
-// Não altera MACs binários já formatados (ex.: contêm octetos > 0x7e).
+// TryDecodeColonHexASCII converte «63:6f:6d:62:6f:31» em texto (ASCII ou Latin-1).
 func TryDecodeColonHexASCII(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	if !strings.Contains(s, ":") {
 		return "", false
 	}
 	parts := strings.Split(s, ":")
-	if len(parts) < 2 || len(parts) > 64 {
+	if len(parts) < 2 || len(parts) > 128 {
 		return "", false
 	}
-	var b strings.Builder
+	b := make([]byte, 0, len(parts))
 	for _, p := range parts {
 		if len(p) != 2 {
 			return "", false
@@ -403,16 +448,19 @@ func TryDecodeColonHexASCII(s string) (string, bool) {
 		if err != nil {
 			return "", false
 		}
-		if n < 32 || n > 126 {
-			return "", false
+		b = append(b, byte(n))
+	}
+	if latin, ok := bytesAsLatin1Text(b); ok {
+		return latin, true
+	}
+	if isPrintableASCII(b) {
+		// combo1 (6 ASCII) é nome de interface; MAC real falha em isPrintableASCII.
+		out := strings.TrimSpace(string(b))
+		if out != "" {
+			return out, true
 		}
-		b.WriteByte(byte(n))
 	}
-	out := strings.TrimSpace(b.String())
-	if out == "" {
-		return "", false
-	}
-	return out, true
+	return "", false
 }
 
 func truncateSNMPString(s string) string {

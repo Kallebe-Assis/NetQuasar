@@ -7,11 +7,18 @@ import {
 
 export type BngSessionSearchField = "login" | "ipv4" | "ipv6" | "mac" | "vlan";
 
+/** Filtro por tipo IP exibido na coluna (mesma lógica de formatBngIpType). */
+export type BngIpTypeFilter = "any" | "ipv4" | "ipv6" | "dual";
+
+/** @deprecated use BngIpTypeFilter — mantido para compatibilidade de imports. */
 export type BngDualStackFilter = "any" | "yes" | "no";
 
 export type BngSessionAdvancedFilters = {
   ipv4Like: string;
-  dualStack: BngDualStackFilter;
+  /** Preferido: any | ipv4 | ipv6 | dual */
+  ipType: BngIpTypeFilter;
+  /** @deprecated mapeado a partir de dualStack legado se presente */
+  dualStack?: BngDualStackFilter;
   vlans: string;
   minOnlineSec: string;
   dnLimitKbps: string;
@@ -27,7 +34,7 @@ export const BNG_SESSION_SEARCH_FIELDS: { value: BngSessionSearchField; label: s
 
 export const EMPTY_BNG_SESSION_FILTERS: BngSessionAdvancedFilters = {
   ipv4Like: "",
-  dualStack: "any",
+  ipType: "any",
   vlans: "",
   minOnlineSec: "",
   dnLimitKbps: "",
@@ -54,6 +61,65 @@ export function normalizeMacDigits(raw: string): string {
   return raw.toLowerCase().replace(/[^0-9a-f]/g, "");
 }
 
+/** Extrai IDs numéricos de VLAN (QinQ, «VLAN 743», etc.). */
+export function extractVlanIds(raw: string): string[] {
+  const s = String(raw ?? "").trim();
+  if (!s) return [];
+  const nums = s.match(/\d+/g);
+  return nums ?? [];
+}
+
+/**
+ * Match de VLAN: se o termo for só dígitos, exige ID exacto (743 ≠ 1743).
+ * Caso contrário, igualdade exacta case-insensitive ou contains do texto.
+ */
+export function vlanMatchesNeedle(sessionVlan: string, needle: string): boolean {
+  const n = needle.trim();
+  if (!n) return true;
+  const sv = String(sessionVlan ?? "").trim();
+  if (!sv) return false;
+  if (sv === n || sv.toLowerCase() === n.toLowerCase()) return true;
+
+  if (/^\d+$/.test(n)) {
+    return extractVlanIds(sv).includes(n);
+  }
+
+  return sv.toLowerCase().includes(n.toLowerCase());
+}
+
+/** Normaliza IPv4 (dotted ou hex SNMP tipo c0:a8:01:01) para comparação. */
+export function normalizeBngIpv4ForMatch(raw: string): string {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s || s === "0.0.0.0") return "";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return s;
+  const colon = s.split(":");
+  if (colon.length === 4 && colon.every((p) => /^[0-9a-f]{1,2}$/i.test(p))) {
+    return colon.map((p) => String(parseInt(p, 16))).join(".");
+  }
+  const compact = s.replace(/[^0-9a-f]/gi, "");
+  if (compact.length === 8 && /^[0-9a-f]+$/i.test(compact)) {
+    const octets: string[] = [];
+    for (let i = 0; i < 8; i += 2) {
+      octets.push(String(parseInt(compact.slice(i, i + 2), 16)));
+    }
+    return octets.join(".");
+  }
+  return s;
+}
+
+function ipv4MatchesNeedle(sessionIpv4: string, needle: string): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  const raw = String(sessionIpv4 ?? "").trim();
+  if (!raw) return false;
+  const norm = normalizeBngIpv4ForMatch(raw);
+  const needleNorm = normalizeBngIpv4ForMatch(q);
+  if (norm && (norm === needleNorm || norm.includes(q) || (needleNorm && norm.includes(needleNorm)))) {
+    return true;
+  }
+  return raw.toLowerCase().includes(q);
+}
+
 function sessionIpv6Haystack(s: BngSessionLike): string {
   return `${s.ipv6 ?? ""} ${s.ipv6_pd ?? ""}`.toLowerCase();
 }
@@ -68,22 +134,33 @@ function sessionDnLimitKbps(s: BngSessionLike): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function isDualStackSession(s: BngSessionLike): boolean {
+/** Tipo IP canónico alinhado com a coluna da tabela. */
+export function sessionCanonicalIpType(s: BngSessionLike): "ipv4" | "ipv6" | "dual" | "" {
   const t = formatBngIpType(s.ip_type, s.ip_type_raw, s).toLowerCase();
-  if (t.includes("v4/v6") || t.includes("dual")) return true;
-  const has4 = Boolean(String(s.ipv4 ?? "").trim() && s.ipv4 !== "0.0.0.0");
-  const has6 = Boolean(String(s.ipv6 ?? "").trim() || String(s.ipv6_pd ?? "").trim());
-  return has4 && has6;
+  if (t === "ipv4/v6" || t.includes("dual")) return "dual";
+  if (t === "ipv4" || t.startsWith("ipv4")) return "ipv4";
+  if (t === "ipv6" || t.startsWith("ipv6")) return "ipv6";
+  return "";
+}
+
+function resolveIpTypeFilter(filters: BngSessionAdvancedFilters): BngIpTypeFilter {
+  if (filters.ipType != null) return filters.ipType;
+  // Legado dualStack → ipType
+  if (filters.dualStack === "yes") return "dual";
+  if (filters.dualStack === "no") return "ipv4";
+  return "any";
 }
 
 export function matchBngSessionSearch(s: BngSessionLike, field: BngSessionSearchField, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   switch (field) {
-    case "login":
-      return String(s.login ?? "").toLowerCase().includes(q);
+    case "login": {
+      const login = String(s.login ?? "").toLowerCase();
+      return login === q;
+    }
     case "ipv4":
-      return String(s.ipv4 ?? "").toLowerCase().includes(q);
+      return ipv4MatchesNeedle(String(s.ipv4 ?? ""), q);
     case "ipv6":
       return sessionIpv6Haystack(s).includes(q);
     case "mac": {
@@ -92,7 +169,7 @@ export function matchBngSessionSearch(s: BngSessionLike, field: BngSessionSearch
       return needle.length > 0 && hay.includes(needle);
     }
     case "vlan":
-      return String(s.vlan ?? "").toLowerCase().includes(q);
+      return vlanMatchesNeedle(String(s.vlan ?? ""), q);
     default:
       return true;
   }
@@ -106,18 +183,22 @@ function parseVlanList(raw: string): string[] {
 }
 
 export function applyBngSessionAdvancedFilters(s: BngSessionLike, filters: BngSessionAdvancedFilters): boolean {
-  const ipv4Like = filters.ipv4Like.trim().toLowerCase();
-  if (ipv4Like && !String(s.ipv4 ?? "").toLowerCase().includes(ipv4Like)) {
+  const ipv4Like = filters.ipv4Like.trim();
+  if (ipv4Like && !ipv4MatchesNeedle(String(s.ipv4 ?? ""), ipv4Like)) {
     return false;
   }
 
-  if (filters.dualStack === "yes" && !isDualStackSession(s)) return false;
-  if (filters.dualStack === "no" && isDualStackSession(s)) return false;
+  const ipType = resolveIpTypeFilter(filters);
+  if (ipType !== "any") {
+    const got = sessionCanonicalIpType(s);
+    if (ipType === "dual" && got !== "dual") return false;
+    if (ipType === "ipv4" && got !== "ipv4") return false;
+    if (ipType === "ipv6" && got !== "ipv6") return false;
+  }
 
   const vlans = parseVlanList(filters.vlans);
   if (vlans.length > 0) {
-    const sv = String(s.vlan ?? "").trim();
-    if (!vlans.some((v) => v === sv)) return false;
+    if (!vlans.some((v) => vlanMatchesNeedle(String(s.vlan ?? ""), v))) return false;
   }
 
   const minSec = Number(filters.minOnlineSec.trim());
@@ -151,7 +232,7 @@ export function filterBngSessions(
 export function countActiveBngSessionFilters(advanced: BngSessionAdvancedFilters): number {
   let n = 0;
   if (advanced.ipv4Like.trim()) n++;
-  if (advanced.dualStack !== "any") n++;
+  if (resolveIpTypeFilter(advanced) !== "any") n++;
   if (advanced.vlans.trim()) n++;
   if (advanced.minOnlineSec.trim()) n++;
   if (advanced.dnLimitKbps.trim()) n++;

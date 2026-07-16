@@ -1,4 +1,4 @@
-import { EM_DASH, formatDbm } from "./formatDisplay";
+import { EM_DASH, formatDbm, formatSnmpDisplayText } from "./formatDisplay";
 import { formatBytes, formatKilobytes, formatUptimeTicks } from "./formatBytes";
 import { stripPPPoEName } from "./mikrotikMetricsDisplay";
 
@@ -474,7 +474,8 @@ export function buildMikrotikSystemInfo(metrics: Record<string, unknown> | undef
   const res = mergeTelnetResource(metrics);
   const sysDescr = str(snmpScalar(metrics, "sys_descr"));
   const firmware = str(snmpScalar(metrics, "firmware_version"));
-  const board = str(res["board-name"]) || sysDescr.split("\n")[0] || EM_DASH;
+  const boardRaw = str(res["board-name"]) || sysDescr.split("\n")[0] || EM_DASH;
+  const board = boardRaw === EM_DASH ? EM_DASH : formatSnmpDisplayText(boardRaw);
   return {
     model: board,
     arch: str(res["architecture-name"]) || EM_DASH,

@@ -1381,6 +1381,7 @@ export function BngPage() {
   const [confirmCollectOpen, setConfirmCollectOpen] = useState(false);
   const [detailLogin, setDetailLogin] = useState<string | null>(null);
   const [collectProgress, setCollectProgress] = useState<BngCollectProgress | null>(null);
+  const [pppoeOnlineOverride, setPppoeOnlineOverride] = useState<number | null>(null);
 
   const devices = useQuery({
     queryKey: ["bng-devices"],
@@ -1448,11 +1449,25 @@ export function BngPage() {
   const collectPeriodic = useMutation({
     mutationFn: () => apiFetch(`/api/v1/bng/devices/${selectedId}/collect`, { method: "POST" }),
     onSuccess: () => {
+      setPppoeOnlineOverride(null);
       qc.invalidateQueries({ queryKey: ["bng-overview", selectedId] });
       qc.invalidateQueries({ queryKey: ["bng-stats-history", selectedId] });
       toastOk(pushToast, "Coleta BNG concluída.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha na coleta."),
+  });
+
+  const refreshPppoeOnline = useMutation({
+    mutationFn: () =>
+      apiFetch<{ pppoe_online?: number | null }>(`/api/v1/bng/devices/${selectedId}/subscribers/live`, {
+        timeoutMs: 35_000,
+      }),
+    onSuccess: (data) => {
+      if (data.pppoe_online != null && Number.isFinite(Number(data.pppoe_online))) {
+        setPppoeOnlineOverride(Number(data.pppoe_online));
+      }
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao actualizar PPPoE online."),
   });
 
   const collectSessions = useMutation({
@@ -1503,10 +1518,10 @@ export function BngPage() {
     retry: false,
   });
 
-  const cacheFilteredSessions = useMemo(
-    () => filterBngSessions(sessions.data?.sessions ?? [], searchField, searchQuery, advancedFilters),
-    [sessions.data?.sessions, searchField, searchQuery, advancedFilters],
-  );
+  const cacheFilteredSessions = useMemo(() => {
+    const effectiveQuery = searchField === "login" ? submittedLoginQuery : searchQuery;
+    return filterBngSessions(sessions.data?.sessions ?? [], searchField, effectiveQuery, advancedFilters);
+  }, [sessions.data?.sessions, searchField, searchQuery, submittedLoginQuery, advancedFilters]);
 
   const filteredSessions = useMemo(() => {
     if (loginSearchActive) {
@@ -1540,6 +1555,10 @@ export function BngPage() {
   useEffect(() => {
     setSubmittedLoginQuery("");
   }, [selectedId, searchField]);
+
+  useEffect(() => {
+    setPppoeOnlineOverride(null);
+  }, [selectedId]);
 
   useEffect(() => {
     setSessionPage(1);
@@ -1616,6 +1635,13 @@ export function BngPage() {
     sessions.isLoading || (loginSearchActive ? loginSearch.isFetching : sessionRefreshMode === "auto" && livePageLoading);
 
   const stats = overview.data?.latest_stats;
+  const displayStats = useMemo(() => {
+    if (!stats && pppoeOnlineOverride == null) return stats;
+    return {
+      ...(stats ?? {}),
+      pppoe_online: pppoeOnlineOverride ?? stats?.pppoe_online,
+    };
+  }, [stats, pppoeOnlineOverride]);
   const fields = overview.data?.fields ?? {};
   const historySamples = history.data?.samples ?? [];
   const selectedDevice = rows.find((d) => d.id === selectedId) ?? null;
@@ -1684,7 +1710,7 @@ export function BngPage() {
                 <strong>IP</strong> <span className="mono">{selectedDevice?.ip || "—"}</span>
               </span>
               <span>
-                <strong>PPPoE</strong> {stats?.pppoe_online?.toLocaleString("pt-PT") ?? "—"}
+                <strong>PPPoE</strong> {displayStats?.pppoe_online?.toLocaleString("pt-PT") ?? "—"}
               </span>
               <span>
                 <strong>Últ. coleta</strong> {stats?.collected_at ? formatBngDateTime(stats.collected_at) : "—"}
@@ -1701,7 +1727,7 @@ export function BngPage() {
               deviceName={selectedDevice?.description || "BNG"}
               deviceIp={selectedDevice?.ip}
               fields={fields}
-              stats={stats}
+              stats={displayStats}
               telemetryCollectedAt={overview.data?.telemetry_collected_at}
               historySamples={historySamples}
               historyDays={historyDays}
@@ -1709,6 +1735,8 @@ export function BngPage() {
               physicalIfaces={infra?.physical_interfaces}
               radiusServers={infra?.radius_servers}
               ipv4Pools={infra?.ipv4_pools}
+              onRefreshPppoeOnline={selectedId ? () => refreshPppoeOnline.mutate() : undefined}
+              refreshingPppoeOnline={refreshPppoeOnline.isPending}
             />
             )
           )}
@@ -1956,20 +1984,21 @@ export function BngPage() {
                       />
                     </div>
                     <div className="field" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Dual-stack</label>
+                      <label style={{ fontSize: 11 }}>Tipo IP</label>
                       <select
                         className="input"
-                        value={advancedFilters.dualStack}
+                        value={advancedFilters.ipType}
                         onChange={(e) =>
                           setAdvancedFilters((f) => ({
                             ...f,
-                            dualStack: e.target.value as BngSessionAdvancedFilters["dualStack"],
+                            ipType: e.target.value as BngSessionAdvancedFilters["ipType"],
                           }))
                         }
                       >
                         <option value="any">Qualquer</option>
-                        <option value="yes">Com IPv4 e IPv6</option>
-                        <option value="no">Só IPv4 ou só IPv6</option>
+                        <option value="ipv4">IPv4</option>
+                        <option value="ipv6">IPv6</option>
+                        <option value="dual">ipv4/v6</option>
                       </select>
                     </div>
                     <div className="field" style={{ margin: 0 }}>
@@ -2070,7 +2099,7 @@ export function BngPage() {
                       displayedSessions.map((s) => {
                         const st = formatBngSessionStatus(s.status);
                         return (
-                        <tr key={s.index ?? `${s.login}-${s.mac}`}>
+                          <tr key={`${s.index ?? ""}-${s.login ?? ""}-${s.mac ?? ""}`}>
                           <td>
                             <span style={{ color: st.online ? "var(--ok, #16a34a)" : "var(--danger, #dc2626)", fontWeight: 600 }}>
                               {st.label}
@@ -2097,7 +2126,7 @@ export function BngPage() {
                                 type="button"
                                 className="btn btn--sm"
                                 title="Consultar login via SNMP no BNG"
-                                onClick={() => setDetailLogin(s.login!)}
+                                onClick={() => setDetailLogin(String(s.login ?? "").trim())}
                               >
                                 <Eye size={14} />
                               </button>

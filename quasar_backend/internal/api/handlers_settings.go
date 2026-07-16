@@ -733,7 +733,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, display_name, email, phone, role FROM users ORDER BY display_name
+		SELECT id, display_name, email, phone, role, COALESCE(is_active, true) FROM users ORDER BY display_name
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -746,12 +746,13 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		Email       string    `json:"email"`
 		Phone       *string   `json:"phone"`
 		Role        string    `json:"role"`
+		IsActive    bool      `json:"is_active"`
 	}
 	var list []u
 	for rows.Next() {
 		var x u
 		var ph sql.NullString
-		if err := rows.Scan(&x.ID, &x.DisplayName, &x.Email, &ph, &x.Role); err != nil {
+		if err := rows.Scan(&x.ID, &x.DisplayName, &x.Email, &ph, &x.Role, &x.IsActive); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -832,10 +833,11 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var displayName, email, role string
 	var ph sql.NullString
-	var created any
+	var created time.Time
+	var isActive bool
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT display_name, email, phone, role, created_at FROM users WHERE id=$1
-	`, id).Scan(&displayName, &email, &ph, &role, &created)
+		SELECT display_name, email, phone, role, created_at, COALESCE(is_active, true) FROM users WHERE id=$1
+	`, id).Scan(&displayName, &email, &ph, &role, &created, &isActive)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
 		return
@@ -855,6 +857,7 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 		"email":        email,
 		"phone":        phonePtr,
 		"role":         role,
+		"is_active":    isActive,
 		"created_at":   created,
 	})
 }
@@ -874,6 +877,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		Phone       *string `json:"phone"`
 		Password    *string `json:"password"`
 		Role        *string `json:"role"`
+		IsActive    *bool   `json:"is_active"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -892,6 +896,38 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		_, err = s.DB().Exec(r.Context(), `UPDATE users SET password_hash=$2, updated_at=now() WHERE id=$1`, id, string(hash))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+	}
+	if body.IsActive != nil {
+		// Impede o último admin activo de se inactivar a si próprio.
+		if !*body.IsActive {
+			var activeAdmins int
+			if err := s.DB().QueryRow(r.Context(), `
+				SELECT COUNT(*) FROM users WHERE role='admin' AND COALESCE(is_active, true) = true AND id <> $1
+			`, id).Scan(&activeAdmins); err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			var selfAdmin bool
+			if err := s.DB().QueryRow(r.Context(), `
+				SELECT (role = 'admin' AND COALESCE(is_active, true) = true) FROM users WHERE id=$1
+			`, id).Scan(&selfAdmin); err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			if selfAdmin && activeAdmins == 0 {
+				writeErr(w, 422, "VALIDATION", "não é possível inactivar o último administrador activo", nil)
+				return
+			}
+		}
+		ct, err := s.DB().Exec(r.Context(), `UPDATE users SET is_active=$2, updated_at=now() WHERE id=$1`, id, *body.IsActive)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		if ct.RowsAffected() == 0 {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
 			return
 		}
 	}
@@ -930,6 +966,17 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.appendAuditLog(r.Context(), "user", id.String(), "patch", s.actorFromRequest(r), nil, body)
+	// Resposta directa quando só se altera is_active (evita falhas laterais em getUser).
+	if body.IsActive != nil &&
+		body.DisplayName == nil && body.Email == nil && body.Phone == nil && body.Role == nil &&
+		(body.Password == nil || strings.TrimSpace(*body.Password) == "") {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":        id,
+			"is_active": *body.IsActive,
+			"ok":        true,
+		})
+		return
+	}
 	s.getUser(w, r)
 }
 

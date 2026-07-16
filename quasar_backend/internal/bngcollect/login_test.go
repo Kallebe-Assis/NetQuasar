@@ -17,6 +17,9 @@ func TestMatchPPPoELogin(t *testing.T) {
 	if !MatchPPPoELogin("marciabarreto", "marciabarreto@g2.com.br", sfx) {
 		t.Fatal("expected match")
 	}
+	if MatchPPPoELogin("bar", "marciabarreto", sfx) {
+		t.Fatal("substring must not match")
+	}
 }
 
 func TestNormalizeSNMPLoginValue_HexASCII(t *testing.T) {

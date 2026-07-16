@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorview"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
@@ -180,6 +181,11 @@ func (s *Server) telemetryCollect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
+	}
+	if col.Metrics != nil {
+		if mb, mErr := json.Marshal(col.Metrics); mErr == nil {
+			monitorview.PatchProbeKPIs(ctx, s.DB(), id, mb, time.Now())
+		}
 	}
 	monitorworker.RunPostTelemetryAlertEval(ctx, s.DB(), &s.Log, id, devDesc, strings.TrimSpace(*ip), comm, devCat, devBrand, devModel, col)
 	monitorworker.NudgeMonitoringRuntimeRefresh(ctx, s.DB())

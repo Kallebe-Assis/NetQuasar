@@ -98,25 +98,35 @@ export function alertEquipmentPrimary(type: string | null | undefined, deviceNam
     return olt || "-";
   }
   const msgStr = String(message ?? "");
+  const equipName = String(deviceName ?? "").trim();
+
+  function looksLikeIpOrOnlyDigits(raw: string): boolean {
+    const s = raw.trim();
+    if (!s) return false;
+    if (/^\d+$/.test(s)) return true;
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(s)) return true;
+    return false;
+  }
+
   /** Nome SNMP / lógico da porta (sem o equipamento). */
   function resolveIfaceLabel(): string {
     const display = m?.display_name;
-    if (typeof display === "string" && display.trim()) return display.trim();
+    if (typeof display === "string" && display.trim() && !looksLikeIpOrOnlyDigits(display)) return display.trim();
     const ifName = m?.if_name;
-    if (typeof ifName === "string" && ifName.trim()) return ifName.trim();
+    if (typeof ifName === "string" && ifName.trim() && !looksLikeIpOrOnlyDigits(ifName)) return ifName.trim();
     const ifIdx = m?.if_index;
-    if (typeof ifIdx === "number" && Number.isFinite(ifIdx)) return String(Math.round(ifIdx));
+    if (typeof ifIdx === "number" && Number.isFinite(ifIdx)) return `ifIndex ${Math.round(ifIdx)}`;
     const sfpIf = msgStr.match(/\binterface\s+(.+?)\s+[—\-]\s*potência/i);
-    if (sfpIf?.[1]?.trim()) return sfpIf[1].trim();
+    if (sfpIf?.[1]?.trim() && !looksLikeIpOrOnlyDigits(sfpIf[1])) return sfpIf[1].trim();
     const mudouIf = msgStr.match(/\binterface\s+(\S+)\s+mudou/i);
-    if (mudouIf?.[1]) return mudouIf[1];
+    if (mudouIf?.[1] && !looksLikeIpOrOnlyDigits(mudouIf[1])) return mudouIf[1];
     const loose = msgStr.match(/\binterface\s+([a-z0-9_\/.@+-]+)/i);
-    if (loose?.[1]) return loose[1];
+    if (loose?.[1] && !looksLikeIpOrOnlyDigits(loose[1])) return loose[1];
     return "";
   }
 
   if (t === "mikrotik_sfp_tx" || t === "mikrotik_sfp_rx") {
-    let equip = String(deviceName ?? "").trim();
+    let equip = equipName;
     if (!equip) {
       const head = msgStr.match(/^\s*(.+?)\s*\([^)]+\)\s*:/);
       if (head?.[1]?.trim()) equip = head[1].trim();
@@ -130,9 +140,11 @@ export function alertEquipmentPrimary(type: string | null | undefined, deviceNam
 
   if (t === "interface_down_transition" || t === "interface_down") {
     const iface = resolveIfaceLabel();
+    if (equipName && iface) return `${equipName} - ${iface}`;
+    if (equipName) return equipName;
     if (iface) return iface;
   }
-  return String(deviceName ?? "").trim() || "-";
+  return equipName || "-";
 }
 
 /** Tipos conhecidos para filtro (valor API = value) */

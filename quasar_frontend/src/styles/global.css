@@ -4123,18 +4123,34 @@ details.collapsible-section .collapsible-section__body {
 .olt-brand-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 0;
   align-items: center;
+  flex: 1 1 auto;
+}
+
+.olt-profiles-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  align-items: flex-end;
+}
+
+.olt-profiles-toolbar__search {
+  margin: 0;
+  flex: 1 1 360px;
+  min-width: min(100%, 320px);
+  max-width: 100%;
 }
 
 .olt-brand-filter {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 40px;
-  min-width: 72px;
-  padding: 4px 10px;
+  height: 44px;
+  min-width: 80px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: #fff;
@@ -4145,10 +4161,21 @@ details.collapsible-section .collapsible-section__body {
 .olt-brand-filter img {
   display: block;
   max-height: 28px;
-  max-width: 64px;
+  max-width: 72px;
   width: auto;
   height: auto;
   object-fit: contain;
+}
+
+/* Huawei: logotipo mais largo — precisa de mais área para legibilidade */
+.olt-brand-filter--huawei {
+  min-width: 110px;
+  padding: 6px 14px;
+}
+
+.olt-brand-filter--huawei img {
+  max-height: 34px;
+  max-width: 96px;
 }
 
 .olt-brand-filter:hover {
@@ -4326,4 +4353,197 @@ details.collapsible-section .collapsible-section__body {
   .olt-profile-modal__nav-btn {
     width: auto;
   }
+}
+
+/* —— OLT: tabela de métricas / OIDs —— */
+.olt-metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.olt-metrics-panel__desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 56rem;
+}
+
+.olt-metrics-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: auto;
+  background: var(--panel);
+}
+
+.olt-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.olt-metrics-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, rgba(0, 0, 0, 0.03));
+  white-space: nowrap;
+}
+
+.olt-metrics-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.olt-metrics-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.olt-metrics-table__row--off {
+  opacity: 0.55;
+}
+
+.olt-metrics-table__metric {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 160px;
+}
+
+.olt-metrics-table__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.olt-metrics-table__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.olt-metrics-table__short {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.olt-metrics-table__oid-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 200px;
+}
+
+.olt-metrics-table__oid {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.olt-metrics-table__unit {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.olt-metrics-entity {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.olt-metrics-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.olt-metrics-badge--gauge {
+  background: color-mix(in srgb, #16a34a 14%, transparent);
+  color: #15803d;
+}
+
+.olt-metrics-badge--int {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.olt-metrics-badge--str {
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  color: var(--muted);
+}
+
+.olt-metrics-badge--status {
+  background: color-mix(in srgb, #ca8a04 16%, transparent);
+  color: #a16207;
+}
+
+.olt-metrics-table__switch {
+  justify-content: center;
+  margin: 0;
+}
+
+.olt-metrics-table__expand td {
+  background: var(--surface-2, rgba(0, 0, 0, 0.03));
+  padding: 12px 14px 14px;
+}
+
+.olt-metrics-table__expand-body {
+  max-width: 720px;
+}
+
+.olt-cmd-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  max-height: 360px;
+  overflow-y: auto;
+  resize: none;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre;
+  field-sizing: content;
+}
+
+.info-hint--subtle .info-hint__trigger {
+  width: 18px;
+  height: 18px;
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
+}
+
+.info-hint--subtle .info-hint__trigger:hover,
+.info-hint--subtle .info-hint__trigger:focus-visible {
+  color: var(--accent);
+  background: transparent;
+}
+
+.info-hint--subtle .info-hint__trigger svg {
+  width: 13px;
+  height: 13px;
 }

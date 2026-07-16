@@ -45,11 +45,13 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	var id uuid.UUID
 	var hash []byte
 	var role, displayName string
+	var isActive bool
 	err := p.QueryRow(r.Context(), `
 		SELECT id, password_hash, role,
-			COALESCE(NULLIF(trim(display_name), ''), trim(email))
+			COALESCE(NULLIF(trim(display_name), ''), trim(email)),
+			COALESCE(is_active, true)
 		FROM users WHERE lower(trim(email)) = lower(trim($1))
-	`, email).Scan(&id, &hash, &role, &displayName)
+	`, email).Scan(&id, &hash, &role, &displayName, &isActive)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			s.appendAuditLog(r.Context(), "auth", email, "login_failed", email, nil, map[string]any{"reason": "user_not_found"})
@@ -57,6 +59,11 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !isActive {
+		s.appendAuditLog(r.Context(), "auth", id.String(), "login_failed", email, nil, map[string]any{"reason": "inactive"})
+		writeErr(w, http.StatusUnauthorized, "AUTH_FAILED", "utilizador inactivo", nil)
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword(hash, []byte(pw)); err != nil {

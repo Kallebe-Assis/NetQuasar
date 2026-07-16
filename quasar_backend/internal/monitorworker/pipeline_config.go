@@ -55,7 +55,9 @@ func DefaultPipelineSteps() []PipelineStep {
 		{ID: "mikrotik-if", Kind: StepKindMikrotik, Enabled: true, Scope: StepScope{Target: "category", Category: "mikrotik"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "switch-if", Kind: StepKindSwitch, Enabled: true, Scope: StepScope{Target: "category", Category: "switch"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "olt-if", Kind: StepKindInterfacesOLT, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}},
-		{ID: "olt-onu", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "full"}},
+		{ID: "olt-pon-status", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "pon_status"}},
+		{ID: "olt-onu-counts", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "onu_counts"}},
+		{ID: "olt-onu-full", Kind: StepKindOltOnu, Enabled: false, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "full"}},
 	}
 }
 
@@ -139,7 +141,7 @@ func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep,
 	if len(steps) == 0 {
 		return DefaultPipelineSteps(), nil
 	}
-	return ensureBngPipelineStep(steps), nil
+	return ensureOltTierPipelineSteps(ensureBngPipelineStep(steps)), nil
 }
 
 func hasPipelineKind(steps []PipelineStep, kind string) bool {
@@ -149,6 +151,11 @@ func hasPipelineKind(steps []PipelineStep, kind string) bool {
 		}
 	}
 	return false
+}
+
+// EnsureOltTierPipelineSteps expõe promoção dos 3 tiers OLT para API/UI.
+func EnsureOltTierPipelineSteps(steps []PipelineStep) []PipelineStep {
+	return ensureOltTierPipelineSteps(steps)
 }
 
 // EnsureBngPipelineStep expõe inserção do passo BNG para API/UI.
@@ -176,6 +183,38 @@ func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 		}
 	}
 	return append([]PipelineStep{bng}, steps...)
+}
+
+// ensureOltTierPipelineSteps promove o passo único olt_onu "full" para 3 cadências.
+func ensureOltTierPipelineSteps(steps []PipelineStep) []PipelineStep {
+	oltIdx := make([]int, 0, 3)
+	for i, s := range steps {
+		if s.Kind == StepKindOltOnu {
+			oltIdx = append(oltIdx, i)
+		}
+	}
+	if len(oltIdx) != 1 {
+		return steps
+	}
+	i := oltIdx[0]
+	mode := NormalizeOltOnuMode(steps[i].Options.OltOnuMode)
+	if mode != "full" {
+		return steps
+	}
+	scope := steps[i].Scope
+	if strings.TrimSpace(scope.Target) == "" {
+		scope = StepScope{Target: "category", Category: "olt"}
+	}
+	tiers := []PipelineStep{
+		{ID: "olt-pon-status", Kind: StepKindOltOnu, Enabled: true, Scope: scope, Options: StepOptions{OltOnuMode: "pon_status"}},
+		{ID: "olt-onu-counts", Kind: StepKindOltOnu, Enabled: true, Scope: scope, Options: StepOptions{OltOnuMode: "onu_counts"}},
+		{ID: "olt-onu-full", Kind: StepKindOltOnu, Enabled: false, Scope: scope, Options: StepOptions{OltOnuMode: "full"}},
+	}
+	out := make([]PipelineStep, 0, len(steps)+2)
+	out = append(out, steps[:i]...)
+	out = append(out, tiers...)
+	out = append(out, steps[i+1:]...)
+	return out
 }
 
 func pipelineStepLabel(kind string) string {

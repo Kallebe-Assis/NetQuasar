@@ -7,7 +7,7 @@ import (
 )
 
 // periodicCollectionSteps ajusta passos para coleta automática (ex.: VSOL métricas + walk inicial + telnet ONU).
-func periodicCollectionSteps(profile oltcollect.Profile, brand string) []oltcollect.Step {
+func periodicCollectionSteps(profile oltcollect.Profile, brand, onuCollectMode string) []oltcollect.Step {
 	steps := oltcollect.EffectiveCollectionSteps(profile)
 	bl := strings.ToLower(strings.TrimSpace(brand))
 	if strings.Contains(bl, "vsol") {
@@ -19,6 +19,9 @@ func periodicCollectionSteps(profile oltcollect.Profile, brand string) []oltcoll
 			}
 			steps = append([]oltcollect.Step{walk}, steps...)
 		}
+	}
+	if !oltcollect.IncludesTelnetOnuCollectMode(onuCollectMode) {
+		return steps
 	}
 	return oltcollect.AppendPonTelnetCollectStep(
 		oltcollect.AppendOnuTelnetReportStep(steps, profile),

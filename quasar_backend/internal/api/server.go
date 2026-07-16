@@ -435,6 +435,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/bng", func(r chi.Router) {
 			r.Get("/devices", s.bngListDevices)
 			r.Get("/devices/{id}/overview", s.bngDeviceOverview)
+			r.Get("/devices/{id}/subscribers/live", s.bngDeviceSubscribersLive)
 			r.Get("/devices/{id}/sessions", s.bngDeviceSessions)
 			r.Get("/devices/{id}/sessions/report", s.bngDeviceSessionReport)
 			r.Get("/devices/{id}/sessions/lookup", s.bngDeviceSessionLookup)

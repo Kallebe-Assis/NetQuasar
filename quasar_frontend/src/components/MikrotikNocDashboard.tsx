@@ -31,7 +31,7 @@ import {
 import { Link } from "react-router-dom";
 import { DeviceMonitorShell } from "./DeviceMonitorShell";
 import { KpiCard, RingGauge } from "./DeviceMonitorWidgets";
-import { EM_DASH } from "../lib/formatDisplay";
+import { EM_DASH, formatSnmpDisplayText } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import {
   buildMikrotikNocKpis,
@@ -175,7 +175,7 @@ export function MikrotikNocDashboard(props: Props) {
       meta={
         <>
           <span>
-            <strong>Modelo</strong> {props.deviceModel || sys.model}
+            <strong>Modelo</strong> {formatSnmpDisplayText(props.deviceModel || sys.model)}
           </span>
           <span>
             <strong>IP</strong> <span className="mono">{props.deviceIp || EM_DASH}</span>

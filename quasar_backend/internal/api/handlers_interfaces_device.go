@@ -34,52 +34,54 @@ func (s *Server) listDeviceInterfaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"device_id": id, "interfaces": []any{}, "note": "execute POST .../refresh para coletar via SNMP"})
 		return
 	}
-	// Proteção contra snapshots parciais antigos: escolhe o mais completo entre os últimos.
-	cRows, qErr := s.DB().Query(r.Context(), `
+	// Escaneia snapshots antigos apenas quando solicitado (evita ler 20 JSONBs por pedido).
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("resolve_best")), "1") {
+		cRows, qErr := s.DB().Query(r.Context(), `
 		SELECT interfaces::text, collected_at
 		FROM interface_snapshots
 		WHERE device_id=$1
 		ORDER BY collected_at DESC
 		LIMIT 20
 	`, id)
-	if qErr == nil {
-		defer cRows.Close()
-		type cand struct {
-			raw []byte
-			at  time.Time
-		}
-		var cands []cand
-		for cRows.Next() {
-			var raw []byte
-			var at time.Time
-			if err := cRows.Scan(&raw, &at); err != nil {
-				break
+		if qErr == nil {
+			defer cRows.Close()
+			type cand struct {
+				raw []byte
+				at  time.Time
 			}
-			cands = append(cands, cand{raw: raw, at: at})
-		}
-		bestIdx := 0
-		bestN := -1
-		for i, c := range cands {
-			p := buildInterfaceMonitorPayload(c.raw, &c.at, nil, nil)
-			n := 0
-			if tab, ok := p["interface_table"].([]map[string]any); ok {
-				n = len(tab)
+			var cands []cand
+			for cRows.Next() {
+				var raw []byte
+				var at time.Time
+				if err := cRows.Scan(&raw, &at); err != nil {
+					break
+				}
+				cands = append(cands, cand{raw: raw, at: at})
 			}
-			if n > bestN {
-				bestN = n
-				bestIdx = i
+			bestIdx := 0
+			bestN := -1
+			for i, c := range cands {
+				p := buildInterfaceMonitorPayload(c.raw, &c.at, nil, nil)
+				n := 0
+				if tab, ok := p["interface_table"].([]map[string]any); ok {
+					n = len(tab)
+				}
+				if n > bestN {
+					bestN = n
+					bestIdx = i
+				}
 			}
-		}
-		if len(cands) > 0 && bestN > 1 {
-			ifaces = cands[bestIdx].raw
-			at := cands[bestIdx].at
-			collected = &at
-			prevIfaces = nil
-			prevCollected = nil
-			if bestIdx+1 < len(cands) {
-				prevIfaces = cands[bestIdx+1].raw
-				pAt := cands[bestIdx+1].at
-				prevCollected = &pAt
+			if len(cands) > 0 && bestN > 1 {
+				ifaces = cands[bestIdx].raw
+				at := cands[bestIdx].at
+				collected = &at
+				prevIfaces = nil
+				prevCollected = nil
+				if bestIdx+1 < len(cands) {
+					prevIfaces = cands[bestIdx+1].raw
+					pAt := cands[bestIdx+1].at
+					prevCollected = &pAt
+				}
 			}
 		}
 	}

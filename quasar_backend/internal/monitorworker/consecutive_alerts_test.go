@@ -16,3 +16,12 @@ func TestConsecutivePingsRequired(t *testing.T) {
 		t.Fatal("5 -> 5")
 	}
 }
+
+func TestConsecutiveLatencyRequired(t *testing.T) {
+	if consecutiveLatencyRequired(0) != 2 {
+		t.Fatal("want 2")
+	}
+	if consecutiveLatencyRequired(5) != 2 {
+		t.Fatal("latency always 2 coletas")
+	}
+}

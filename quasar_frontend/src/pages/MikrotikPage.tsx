@@ -1,10 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
 import { MikrotikNocDashboard, type MikrotikNocSection } from "../components/MikrotikNocDashboard";
 import { apiFetch } from "../lib/api";
-import { EM_DASH, formatDbm } from "../lib/formatDisplay";
+import { EM_DASH, formatDbm, formatSnmpDisplayText } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
@@ -13,6 +13,8 @@ import { toastErr, toastOk } from "../lib/operationToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
 import { buildMikrotikNocKpis, ifDisplayName, type MikrotikIfRow } from "../lib/mikrotikNocData";
+import { queryKeys } from "../lib/queryKeys";
+import { isDeviceOnline, trafficHistoryFromInterfaces, useInterfaceMonitorLoop } from "../lib/monitor";
 
 type DeviceRow = {
   id: string;
@@ -116,9 +118,26 @@ export function MikrotikPage() {
   const rows = useMemo(() => (devices.data?.devices ?? []).filter(isMikrotik), [devices.data?.devices]);
   const selectedDevice = useMemo(() => rows.find((r) => r.id === sel) ?? null, [rows, sel]);
 
+  const monitoring = useQuery({
+    queryKey: queryKeys.monitoringActiveEquipment,
+    queryFn: () =>
+      apiFetch<{ devices: Array<{ id: string; ping_reachable?: boolean | null }> }>(
+        "/api/v1/monitoring/active-equipment",
+      ),
+    refetchInterval: 15_000,
+  });
+
+  const deviceOnline = useMemo(() => {
+    if (!sel) return false;
+    const row = monitoring.data?.devices?.find((d) => d.id === sel);
+    return isDeviceOnline(row);
+  }, [monitoring.data, sel]);
+
   const iface = useQuery({
     queryKey: ["mikrotik-if", sel],
     enabled: !!sel,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
     queryFn: () =>
       apiFetch<{
         device_id: string;
@@ -135,6 +154,8 @@ export function MikrotikPage() {
   const telemetry = useQuery({
     queryKey: ["mikrotik-tel", sel],
     enabled: !!sel,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
     refetchInterval: sel ? 30_000 : false,
     queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown> }>(`/api/v1/telemetry/devices/${sel}/latest`),
   });
@@ -254,19 +275,16 @@ export function MikrotikPage() {
 
   useEffect(() => {
     const now = Date.now();
-    setTrafficHistory((prev) => {
-      const next = { ...prev };
-      for (const r of table) {
-        const tx = Number(r.out_bps ?? NaN);
-        const rx = Number(r.in_bps ?? NaN);
-        if (!Number.isFinite(tx) || !Number.isFinite(rx)) continue;
-        const arr = [...(next[r.if_index] ?? [])];
-        arr.push({ ts: now, tx, rx });
-        next[r.if_index] = arr.slice(-50);
-      }
-      return next;
-    });
+    setTrafficHistory((prev) => trafficHistoryFromInterfaces(prev, table, now));
   }, [table]);
+
+  useInterfaceMonitorLoop({
+    deviceId: sel,
+    queryKey: ["mikrotik-if", sel ?? ""],
+    canMutate,
+    onTable: (rows) => setLiveTable(rows as MikrotikIfRow[]),
+    enabled: !!sel,
+  });
 
   useEffect(() => {
     if (!telemetry.data?.metrics) return;
@@ -296,6 +314,9 @@ export function MikrotikPage() {
   useEffect(() => {
     if (!sel && rows.length > 0) setSel(rows[0].id);
   }, [rows, sel]);
+
+  const initialDataLoading =
+    !!sel && !iface.data && !telemetry.data && (iface.isLoading || telemetry.isLoading);
 
   const devicePicker = (
     <select
@@ -487,13 +508,16 @@ export function MikrotikPage() {
           {rows.length === 0 ? (
             <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>
           ) : selectedDevice ? (
+            initialDataLoading ? (
+              <p style={{ color: "var(--muted)" }}>A carregar últimos dados coletados…</p>
+            ) : (
             <MikrotikNocDashboard
               section={section}
               onSection={setSection}
               deviceLabel={selectedDevice.description ?? EM_DASH}
-              deviceModel={selectedDevice.model}
+              deviceModel={formatSnmpDisplayText(selectedDevice.model)}
               deviceIp={selectedDevice.ip}
-              deviceOnline
+              deviceOnline={deviceOnline}
               collectedAt={telemetry.data?.collected_at}
               formatCollectedAt={formatCollectedPt}
               metrics={telemetry.data?.metrics}
@@ -516,6 +540,7 @@ export function MikrotikPage() {
               collectionWarning={collectionWarning}
               interfacesPanel={interfacesPanel}
             />
+            )
           ) : (
             <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>
           )}

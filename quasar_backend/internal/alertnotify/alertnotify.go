@@ -115,20 +115,41 @@ func incidentTarget(incident string) string {
 	return ""
 }
 
-func monitoringHeader(level, title, message string) string {
+func monitoringHeader(level, title, message, alertType string) string {
 	_ = level
+	at := strings.TrimSpace(alertType)
 	low := strings.ToLower(strings.TrimSpace(title + " " + message))
+	switch at {
+	case "interface_down_transition":
+		return "🔴 INTERFACE DOWN"
+	case "ping_unreachable":
+		return "🔴 EQUIPAMENTO OFFLINE"
+	case "olt_onu_rise":
+		return "🟢 SUBIDA DE ONUs"
+	case "olt_onu_drop":
+		return "🟡 QUEDA DE ONUs"
+	}
 	if strings.Contains(low, "offline") || strings.Contains(low, "sem resposta") || strings.Contains(low, "inalcan") {
 		return "🔴 EQUIPAMENTO OFFLINE"
+	}
+	if strings.Contains(low, "interface") && strings.Contains(low, "down") {
+		return "🔴 INTERFACE DOWN"
+	}
+	if strings.Contains(low, "subida") && strings.Contains(low, "onu") {
+		return "🟢 SUBIDA DE ONUs"
 	}
 	return "🟡 ALERTA TELEMETRIA"
 }
 
 func resolutionHeader(alertType, title, detail string) string {
-	_ = alertType
 	_ = title
 	_ = detail
-	return "🟢 ALERTA RESOLVIDO"
+	switch strings.TrimSpace(alertType) {
+	case "olt_onu_drop", "olt_onu_rise":
+		return "🟢 ONUs NORMALIZADAS"
+	default:
+		return "🟢 ALERTA RESOLVIDO"
+	}
 }
 
 // ResolutionStatusLine mensagem personalizada por tipo (corpo do Telegram de resolução).
@@ -591,7 +612,7 @@ func telegramMonitoringBlocks(level, title, message string, equipFallback string
 }
 
 func telegramMonitoringBlocksWithContext(level, title, message string, equipFallback string, ipFallback string, alertType string, meta map[string]any) string {
-	header := monitoringHeader(level, title, message)
+	header := monitoringHeader(level, title, message, alertType)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
 	if strings.TrimSpace(equipFallback) != "" {
 		eq = strings.TrimSpace(equipFallback)
@@ -711,29 +732,51 @@ func telegramRefFromMeta(meta map[string]any) (telegramMessageRef, bool) {
 	return telegramRefFromMap(meta, "telegram")
 }
 
-// telegramResolvedEditBlocks texto para editMessageText na mensagem original do alerta.
-func telegramResolvedEditBlocks(alertType, title, detail string, equipFallback string, activeSince time.Time, closedAt *time.Time) string {
+// telegramUnifiedOnuResolutionBlocks uma única mensagem com o incidente + resolução (edit da original).
+func telegramUnifiedOnuResolutionBlocks(
+	alertType, title, detail string,
+	equipFallback, ipFallback string,
+	meta map[string]any,
+	popName string,
+	activeSince time.Time,
+	closedAt *time.Time,
+) string {
 	header := resolutionHeader(alertType, title, detail)
-	eq, _, inc, _ := shortEquipmentAndIncident(detail)
+	eq, ip, inc, _ := shortEquipmentAndIncident(detail)
 	if strings.TrimSpace(equipFallback) != "" {
 		eq = strings.TrimSpace(equipFallback)
 	}
-	incLine := strings.TrimSpace(inc)
-	if incLine == "" {
-		incLine = strings.TrimSpace(title)
+	if strings.TrimSpace(ipFallback) != "" {
+		ip = strings.TrimSpace(ipFallback)
 	}
-	parts := []string{header, "", eq, incLine, ""}
+	parts := []string{header, "", "• " + eq, "• " + ip}
+	parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
+	parts = append(parts, "• "+ResolutionStatusLine(alertType, detail))
+	if pn := strings.TrimSpace(popName); pn != "" {
+		parts = append(parts, "• POP: "+pn)
+	}
 	if !activeSince.IsZero() {
-		parts = append(parts, "Início: "+activeSince.UTC().Format("15:04"))
+		parts = append(parts, "• Início: "+activeSince.UTC().Format("02/01/2006 15:04"))
 	}
 	if closedAt != nil {
-		parts = append(parts, "Fim: "+closedAt.UTC().Format("15:04"))
+		parts = append(parts, "• Fim: "+closedAt.UTC().Format("02/01/2006 15:04"))
 		if d := closedAt.Sub(activeSince); d > 0 {
-			parts = append(parts, "Duração: "+formatDurationPT(d))
+			parts = append(parts, "• Duração: "+formatDurationPT(d))
+		} else {
+			parts = append(parts, "• Duração: < 1 min")
 		}
 	}
 	parts = append(parts, "", "===============")
 	return strings.Join(parts, "\n")
+}
+
+func shouldUnifyOnuResolutionTelegram(alertType string) bool {
+	switch strings.TrimSpace(alertType) {
+	case "olt_onu_drop", "olt_onu_rise":
+		return true
+	default:
+		return false
+	}
 }
 
 func telegramResolutionReplyShort(alertType string, duration time.Duration) string {
@@ -949,7 +992,61 @@ func SendResolutionTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 	tg := map[string]any{"attempted_at": attempted}
 	origRef, hasOrig := telegramRefFromMeta(row.Meta)
 
-	if hasOrig {
+	// ONU drop/rise: edita a mensagem original (incidente + resolução numa só) — sem 2.ª mensagem.
+	if shouldUnifyOnuResolutionTelegram(row.AlertType) && hasOrig {
+		text := telegramUnifiedOnuResolutionBlocks(
+			row.AlertType, title, detail, eqName, eqIP, row.Meta, row.PopName, row.ActiveSince, row.ClosedAt,
+		)
+		tg["text"] = text
+		tg["unified_edit"] = true
+		editErr := telegramclient.EditMessageText(ctx, cfg, origRef.ChatID, origRef.MessageID, text)
+		if editErr != nil {
+			tg["ok"] = false
+			tg["error"] = editErr.Error()
+			if log != nil {
+				log.Warn().Err(editErr).Str("alert_id", alertID.String()).Int64("message_id", origRef.MessageID).
+					Msg("telegram resolução ONU (edit unificado) falhou — a enviar mensagem única")
+			}
+			// Fallback: uma mensagem nova (sem reply) para não ficar só com o alerta antigo.
+			sendErr := telegramclient.SendMessage(ctx, cfg, text)
+			if sendErr != nil {
+				tg["fallback_error"] = sendErr.Error()
+				if log != nil {
+					log.Warn().Err(sendErr).Str("alert_id", alertID.String()).Msg("telegram resolução ONU fallback falhou")
+				}
+			} else {
+				tg["ok"] = true
+				tg["fallback_full_message"] = true
+			}
+		} else {
+			tg["ok"] = true
+			tg["chat_id"] = origRef.ChatID
+			tg["message_id"] = origRef.MessageID
+			tg["edited_problem_message"] = true
+		}
+		resBlock["telegram"] = tg
+		patchResolutionBlock(ctx, pool, alertID, resBlock)
+		return
+	}
+
+	if shouldUnifyOnuResolutionTelegram(row.AlertType) {
+		text := telegramUnifiedOnuResolutionBlocks(
+			row.AlertType, title, detail, eqName, eqIP, row.Meta, row.PopName, row.ActiveSince, row.ClosedAt,
+		)
+		sendErr := telegramclient.SendMessage(ctx, cfg, text)
+		tg["fallback_full_message"] = true
+		tg["unified_standalone"] = true
+		tg["text"] = text
+		if sendErr != nil {
+			tg["ok"] = false
+			tg["error"] = sendErr.Error()
+			if log != nil {
+				log.Warn().Err(sendErr).Str("alert_id", alertID.String()).Msg("telegram resolução ONU (sem original) falhou")
+			}
+		} else {
+			tg["ok"] = true
+		}
+	} else if hasOrig {
 		text := telegramResolutionBlocks(row.AlertType, title, detail, eqName, eqIP, currentValue, extras...)
 		sent, sendErr := telegramclient.SendMessageWithResult(ctx, cfg, text, telegramclient.SendOpts{
 			ReplyToMessageID: origRef.MessageID,

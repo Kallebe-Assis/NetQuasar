@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type CSSProperties } from "react";
-import { Blend, ClockFading, Cpu, Sun, ThermometerSun } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Blend, ClockFading, Cpu, Filter, Plus, Sun, ThermometerSun } from "lucide-react";
 import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { InfoHint } from "../components/InfoHint";
+import { ActionMenu } from "../components/ActionMenu";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
 import { AppearancePanel } from "./settings/AppearancePanel";
@@ -519,11 +520,16 @@ type UserRow = {
   email: string;
   phone?: string | null;
   role: string;
+  is_active?: boolean;
 };
 
 function UsersPanel() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["settings-users"], queryFn: () => apiFetch<{ users: UserRow[] }>("/api/v1/settings/users") });
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "viewer">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [createOpen, setCreateOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -535,8 +541,23 @@ function UsersPanel() {
   const [ePhone, setEPhone] = useState("");
   const [ePass, setEPass] = useState("");
   const [eRole, setERole] = useState<"admin" | "viewer">("viewer");
+  const [confirmAction, setConfirmAction] = useState<null | { type: "delete" | "activate" | "deactivate"; user: UserRow }>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const { push: pushToast } = useAppToast();
   const [userCreateErr, setUserCreateErr] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (list.data?.users ?? []).filter((u) => {
+      const active = u.is_active !== false;
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (statusFilter === "active" && !active) return false;
+      if (statusFilter === "inactive" && active) return false;
+      if (!q) return true;
+      const hay = `${u.display_name} ${u.email} ${u.phone ?? ""} ${u.role}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [list.data?.users, search, roleFilter, statusFilter]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -557,6 +578,8 @@ function UsersPanel() {
       setEmail("");
       setPhone("");
       setPassword("");
+      setRole("viewer");
+      setCreateOpen(false);
       toastOk(pushToast, "Utilizador criado com sucesso.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao criar utilizador."),
@@ -579,10 +602,32 @@ function UsersPanel() {
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar (usuário)."),
   });
 
+  const setActive = useMutation({
+    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
+      apiFetch<{ ok?: boolean; is_active?: boolean }>(`/api/v1/settings/users/${id}`, {
+        method: "PATCH",
+        json: { is_active },
+      }),
+    onSuccess: (_d, vars) => {
+      qc.setQueryData<{ users: UserRow[] }>(["settings-users"], (prev) => {
+        if (!prev?.users) return prev;
+        return {
+          ...prev,
+          users: prev.users.map((u) => (u.id === vars.id ? { ...u, is_active: vars.is_active } : u)),
+        };
+      });
+      void qc.invalidateQueries({ queryKey: ["settings-users"] });
+      setConfirmAction(null);
+      toastOk(pushToast, vars.is_active ? "Utilizador activado." : "Utilizador inactivado.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao alterar estado do utilizador."),
+  });
+
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/settings/users/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-users"] });
+      setConfirmAction(null);
       toastOk(pushToast, "Utilizador removido.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao remover utilizador."),
@@ -599,58 +644,74 @@ function UsersPanel() {
 
   return (
     <>
-      <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
-        Novos usuários só podem ser criados aqui (não existe registo público). Campos: nome, e-mail, <strong>telefone com DDD</strong> (10 ou 11 dígitos), palavra-passe e nível{" "}
-        <strong>administrador</strong> ou <strong>visitante (viewer)</strong>.
+      <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px", maxWidth: 720 }}>
+        Gestão de acessos. Novos usuários só podem ser criados aqui (não existe registo público).
       </p>
-      <div className="card">
-        <h2>Novo usuário</h2>
-        <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-          <div className="field" style={{ minWidth: 140 }}>
-            <label style={{ fontSize: 11 }}>Nome</label>
-            <input className="input" placeholder="Nome completo" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 180 }}>
-            <label style={{ fontSize: 11 }}>E-mail</label>
-            <input className="input" type="email" placeholder="email@empresa.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 120 }}>
-            <label style={{ fontSize: 11 }}>Telefone</label>
-            <input className="input" placeholder="(11) 98765-4321" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-          <div className="field" style={{ minWidth: 120 }}>
-            <label style={{ fontSize: 11 }}>Palavra-passe</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </div>
-          <select className="input" style={{ maxWidth: 140 }} value={role} onChange={(e) => setRole(e.target.value as "admin" | "viewer")}>
-            <option value="viewer">Visitante (viewer)</option>
-            <option value="admin">Administrador</option>
-          </select>
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={create.isPending}
-            onClick={() => {
-              setUserCreateErr("");
-              const pe = validateBRPhoneMessage(phone);
-              if (pe) {
-                setUserCreateErr(pe);
-                return;
-              }
-              if (!displayName.trim() || !email.trim() || !password) {
-                setUserCreateErr("Preencha nome, e-mail, telefone e palavra-passe.");
-                return;
-              }
-              create.mutate();
-            }}
-          >
-            Criar usuário
-          </button>
+
+      <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end", marginBottom: 12 }}>
+        <div className="field" style={{ margin: 0, flex: "1 1 420px", minWidth: 280 }}>
+          <label style={{ fontSize: 11 }}>Pesquisar</label>
+          <input
+            className="input"
+            placeholder="Nome, e-mail ou telefone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-        {userCreateErr ? <div className="msg msg--err">{userCreateErr}</div> : null}
-        {create.isError && <div className="msg msg--err">{(create.error as Error).message}</div>}
+        <button
+          type="button"
+          className={`btn btn--icon-menu${filtersOpen || roleFilter !== "all" || statusFilter !== "all" ? " btn--primary" : ""}`}
+          title={
+            roleFilter !== "all" || statusFilter !== "all"
+              ? "Filtros activos"
+              : "Filtros"
+          }
+          aria-label="Filtros"
+          aria-pressed={filtersOpen}
+          onClick={() => setFiltersOpen((v) => !v)}
+        >
+          <Filter size={16} aria-hidden />
+        </button>
+        <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}>
+          <Plus size={16} aria-hidden /> Novo usuário
+        </button>
       </div>
-      <div className="table-wrap" style={{ marginTop: 12 }}>
+
+      {filtersOpen && (
+        <div
+          className="row"
+          style={{
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "flex-end",
+            marginBottom: 12,
+            paddingTop: 4,
+          }}
+        >
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
+            <label style={{ fontSize: 11 }}>Nível</label>
+            <select className="input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}>
+              <option value="all">Todos</option>
+              <option value="admin">Administrador</option>
+              <option value="viewer">Visitante</option>
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
+            <label style={{ fontSize: 11 }}>Estado</label>
+            <select
+              className="input"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            >
+              <option value="all">Todos</option>
+              <option value="active">Activos</option>
+              <option value="inactive">Inactivos</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -658,91 +719,220 @@ function UsersPanel() {
               <th>E-mail</th>
               <th>Telefone</th>
               <th>Nível</th>
-              <th />
+              <th>Estado</th>
+              <th style={{ width: 56 }} />
             </tr>
           </thead>
           <tbody>
-            {(list.data?.users ?? []).map((u) => (
-              <tr key={u.id}>
-                <td>{u.display_name}</td>
-                <td className="mono">{u.email}</td>
-                <td className="mono">{formatBRPhoneDisplay(u.phone)}</td>
-                <td>{u.role === "admin" ? "Administrador" : "Visitante"}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setEditId(u.id);
-                      setEName(u.display_name);
-                      setEEmail(u.email);
-                      setEPhone(u.phone ?? "");
-                      setERole(u.role === "admin" ? "admin" : "viewer");
-                      setEPass("");
-                    }}
-                  >
-                    Editar
-                  </button>{" "}
-                  <button
-                    type="button"
-                    className="btn btn--danger"
-                    onClick={() => {
-                      if (confirm(`Eliminar ${u.email}?`)) del.mutate(u.id);
-                    }}
-                  >
-                    Apagar
-                  </button>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ color: "var(--muted)" }}>
+                  Nenhum utilizador encontrado.
                 </td>
               </tr>
-            ))}
+            ) : (
+              filtered.map((u) => {
+                const active = u.is_active !== false;
+                return (
+                  <tr key={u.id} style={active ? undefined : { opacity: 0.65 }}>
+                    <td>{u.display_name}</td>
+                    <td className="mono">{u.email}</td>
+                    <td className="mono">{formatBRPhoneDisplay(u.phone)}</td>
+                    <td>{u.role === "admin" ? "Administrador" : "Visitante"}</td>
+                    <td>
+                      <span className={active ? "badge badge--ok" : "badge"}>{active ? "Activo" : "Inactivo"}</span>
+                    </td>
+                    <td>
+                      <ActionMenu
+                        title={`Opções de ${u.display_name}`}
+                        items={[
+                          {
+                            id: "edit",
+                            label: "Editar",
+                            onClick: () => {
+                              setEditId(u.id);
+                              setEName(u.display_name);
+                              setEEmail(u.email);
+                              setEPhone(u.phone ?? "");
+                              setERole(u.role === "admin" ? "admin" : "viewer");
+                              setEPass("");
+                            },
+                          },
+                          {
+                            id: "toggle",
+                            label: active ? "Inactivar" : "Activar",
+                            onClick: () => setConfirmAction({ type: active ? "deactivate" : "activate", user: u }),
+                          },
+                          {
+                            id: "delete",
+                            label: "Apagar",
+                            danger: true,
+                            onClick: () => setConfirmAction({ type: "delete", user: u }),
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
 
-      {editId && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <h2>Editar usuário</h2>
-          <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-            <div className="field" style={{ minWidth: 140 }}>
-              <label style={{ fontSize: 11 }}>Nome</label>
-              <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+      {createOpen && (
+        <div className="modal-backdrop" style={{ zIndex: 60 }} onClick={() => !create.isPending && setCreateOpen(false)}>
+          <div className="card" style={{ width: "min(520px, 94vw)", margin: "8vh auto" }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0 }}>Novo usuário</h2>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Nome</label>
+                <input className="input" placeholder="Nome completo" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>E-mail</label>
+                <input className="input" type="email" placeholder="email@empresa.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Telefone</label>
+                <input className="input" placeholder="(11) 98765-4321" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Palavra-passe</label>
+                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Nível</label>
+                <select className="input" value={role} onChange={(e) => setRole(e.target.value as "admin" | "viewer")}>
+                  <option value="viewer">Visitante (viewer)</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
             </div>
-            <div className="field" style={{ minWidth: 180 }}>
-              <label style={{ fontSize: 11 }}>E-mail</label>
-              <input className="input" type="email" value={eEmail} onChange={(e) => setEEmail(e.target.value)} />
+            {userCreateErr ? <div className="msg msg--err">{userCreateErr}</div> : null}
+            {create.isError && <div className="msg msg--err">{(create.error as Error).message}</div>}
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button type="button" className="btn" disabled={create.isPending} onClick={() => setCreateOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={create.isPending}
+                onClick={() => {
+                  setUserCreateErr("");
+                  const pe = validateBRPhoneMessage(phone);
+                  if (pe) {
+                    setUserCreateErr(pe);
+                    return;
+                  }
+                  if (!displayName.trim() || !email.trim() || !password) {
+                    setUserCreateErr("Preencha nome, e-mail, telefone e palavra-passe.");
+                    return;
+                  }
+                  create.mutate();
+                }}
+              >
+                Criar usuário
+              </button>
             </div>
-            <div className="field" style={{ minWidth: 120 }}>
-              <label style={{ fontSize: 11 }}>Telefone</label>
-              <input className="input" value={ePhone} onChange={(e) => setEPhone(e.target.value)} placeholder="(11) 98765-4321" />
-            </div>
-            <div className="field" style={{ minWidth: 140 }}>
-              <label style={{ fontSize: 11 }}>Nova palavra-passe (opcional)</label>
-              <input className="input" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} />
-            </div>
-            <select className="input" style={{ maxWidth: 160 }} value={eRole} onChange={(e) => setERole(e.target.value as "admin" | "viewer")}>
-              <option value="viewer">Visitante (viewer)</option>
-              <option value="admin">Administrador</option>
-            </select>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={patch.isPending}
-              onClick={() => {
-                const pe = validateBRPhoneMessage(ePhone);
-                if (pe) {
-                  toastErr(pushToast, new Error(pe));
-                  return;
-                }
-                patch.mutate();
-              }}
-            >
-              Salvar
-            </button>
-            <button type="button" className="btn" onClick={() => setEditId(null)}>
-              Cancelar
-            </button>
           </div>
-          {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
+        </div>
+      )}
+
+      {editId && (
+        <div className="modal-backdrop" style={{ zIndex: 60 }} onClick={() => !patch.isPending && setEditId(null)}>
+          <div className="card" style={{ width: "min(520px, 94vw)", margin: "8vh auto" }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0 }}>Editar usuário</h2>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Nome</label>
+                <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>E-mail</label>
+                <input className="input" type="email" value={eEmail} onChange={(e) => setEEmail(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Telefone</label>
+                <input className="input" value={ePhone} onChange={(e) => setEPhone(e.target.value)} placeholder="(11) 98765-4321" />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Nova palavra-passe (opcional)</label>
+                <input className="input" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Nível</label>
+                <select className="input" value={eRole} onChange={(e) => setERole(e.target.value as "admin" | "viewer")}>
+                  <option value="viewer">Visitante (viewer)</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+            </div>
+            {patch.isError && <div className="msg msg--err">{(patch.error as Error).message}</div>}
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button type="button" className="btn" disabled={patch.isPending} onClick={() => setEditId(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={patch.isPending}
+                onClick={() => {
+                  const pe = validateBRPhoneMessage(ePhone);
+                  if (pe) {
+                    toastErr(pushToast, new Error(pe));
+                    return;
+                  }
+                  patch.mutate();
+                }}
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="modal-backdrop" style={{ zIndex: 70 }} onClick={() => !(setActive.isPending || del.isPending) && setConfirmAction(null)}>
+          <div className="card" style={{ width: "min(420px, 92vw)", margin: "12vh auto" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>
+              {confirmAction.type === "delete"
+                ? "Apagar utilizador"
+                : confirmAction.type === "activate"
+                  ? "Activar utilizador"
+                  : "Inactivar utilizador"}
+            </h3>
+            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>
+              {confirmAction.type === "delete"
+                ? `Eliminar permanentemente ${confirmAction.user.email}?`
+                : confirmAction.type === "activate"
+                  ? `Activar o acesso de ${confirmAction.user.email}?`
+                  : `Inactivar ${confirmAction.user.email}? O utilizador não poderá iniciar sessão.`}
+            </p>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={setActive.isPending || del.isPending}
+                onClick={() => setConfirmAction(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className={confirmAction.type === "delete" ? "btn btn--danger" : "btn btn--primary"}
+                disabled={setActive.isPending || del.isPending}
+                onClick={() => {
+                  if (confirmAction.type === "delete") del.mutate(confirmAction.user.id);
+                  else setActive.mutate({ id: confirmAction.user.id, is_active: confirmAction.type === "activate" });
+                }}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

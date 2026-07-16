@@ -49,17 +49,20 @@ export function KpiCard({
   title,
   children,
   accent,
+  headAction,
 }: {
   icon: LucideIcon;
   title: string;
   children: React.ReactNode;
   accent?: string;
+  headAction?: React.ReactNode;
 }) {
   return (
     <div className="mk-noc-kpi" style={accent ? { borderColor: accent } : undefined}>
       <div className="mk-noc-kpi__head">
         <Icon size={14} style={{ opacity: 0.85 }} />
-        <span>{title}</span>
+        <span style={{ flex: 1 }}>{title}</span>
+        {headAction}
       </div>
       <div className="mk-noc-kpi__body">{children}</div>
     </div>

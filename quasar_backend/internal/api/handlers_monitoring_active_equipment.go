@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorview"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmetrics"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
@@ -525,18 +525,9 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 			COALESCE(NULLIF(TRIM(BOTH FROM d.brand), ''), '')::text,
 			host(d.ip)::text,
 			c.checked_at, c.latency_ms, c.ok, c.reach_ok, COALESCE(c.ping_fail_streak, 0),
-			c.detail::text,
-			tel.metrics::text AS telemetry_metrics,
-			tel.collected_at AS telemetry_collected_at
+			c.detail::text
 		FROM devices d
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
-		LEFT JOIN LATERAL (
-			SELECT metrics, collected_at
-			FROM telemetry_samples ts
-			WHERE ts.device_id = d.id
-			ORDER BY ts.collected_at DESC
-			LIMIT 1
-		) tel ON true
 		WHERE TRIM(BOTH FROM COALESCE(d.network_status, '')) = 'Normal'
 			AND COALESCE(TRIM(BOTH FROM d.network_status), '') <> ''
 			AND d.ping_enabled = true
@@ -562,25 +553,27 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		var reachOK *bool
 		var pingFailStreak int
 		var detail *string
-		var metrics *string
-		var telemetryAt *time.Time
 
-		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &reachOK, &pingFailStreak, &detail, &metrics, &telemetryAt); err != nil {
+		if err := rows.Scan(&id, &desc, &cat, &brand, &ip, &ca, &lat, &probeOK, &reachOK, &pingFailStreak, &detail); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 
-		var detB, metB []byte
+		var detB []byte
 		if detail != nil {
 			detB = []byte(*detail)
 		}
-		if metrics != nil {
-			metB = []byte(*metrics)
+		kpis, hasKpis := monitorview.KPIsFromProbeDetail(detB)
+		var cpu, mem, temp *float64
+		uptime := "—"
+		if hasKpis {
+			cpu = kpis.CPUPercent
+			mem = kpis.MemoryPercent
+			temp = kpis.TemperatureC
+			if strings.TrimSpace(kpis.Uptime) != "" {
+				uptime = kpis.Uptime
+			}
 		}
-		vars := snmpVarsFromMetricsOrDetail(metB, detB)
-		prof := profileFromMetrics(metB)
-		cpu, mem, uptime, temp := extractExtendedMetrics(vars, prof)
-		mergeMikrotikKPIs(metB, &cpu, &mem, &temp, &uptime)
 
 		row := map[string]any{
 			"id":               id,
@@ -604,8 +597,8 @@ func (s *Server) monitoringActiveEquipment(w http.ResponseWriter, r *http.Reques
 		if lat != nil {
 			row["latency_ms"] = *lat
 		}
-		if telemetryAt != nil {
-			row["telemetry_collected_at"] = telemetryAt.UTC().Format(time.RFC3339)
+		if hasKpis && strings.TrimSpace(kpis.CollectedAt) != "" {
+			row["telemetry_collected_at"] = kpis.CollectedAt
 		}
 		list = append(list, row)
 	}

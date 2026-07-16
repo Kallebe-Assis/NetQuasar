@@ -14,6 +14,8 @@ import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { formatCollectedPt } from "../lib/deviceReportHelpers";
 import { parseSwitchCollectionStatus, buildSwitchNocKpis, type MikrotikIfRow } from "../lib/switchNocData";
 import { ifDisplayName } from "../lib/mikrotikNocData";
+import { queryKeys } from "../lib/queryKeys";
+import { isDeviceOnline, trafficHistoryFromInterfaces, useInterfaceMonitorLoop } from "../lib/monitor";
 
 type DeviceRow = {
   id: string;
@@ -115,6 +117,21 @@ export function SwitchPage() {
   const rows = useMemo(() => (devices.data?.devices ?? []).filter(isSwitch), [devices.data?.devices]);
   const selectedId = sel ?? rows[0]?.id ?? null;
   const selectedDevice = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
+
+  const monitoring = useQuery({
+    queryKey: queryKeys.monitoringActiveEquipment,
+    queryFn: () =>
+      apiFetch<{ devices: Array<{ id: string; ping_reachable?: boolean | null }> }>(
+        "/api/v1/monitoring/active-equipment",
+      ),
+    refetchInterval: 15_000,
+  });
+
+  const deviceOnline = useMemo(() => {
+    if (!selectedId) return false;
+    const row = monitoring.data?.devices?.find((d) => d.id === selectedId);
+    return isDeviceOnline(row);
+  }, [monitoring.data, selectedId]);
 
   const iface = useQuery({
     queryKey: ["switch-if", selectedId],
@@ -257,19 +274,16 @@ export function SwitchPage() {
 
   useEffect(() => {
     const now = Date.now();
-    setTrafficHistory((prev) => {
-      const next = { ...prev };
-      for (const r of table) {
-        const tx = Number(r.out_bps ?? NaN);
-        const rx = Number(r.in_bps ?? NaN);
-        if (!Number.isFinite(tx) || !Number.isFinite(rx)) continue;
-        const arr = [...(next[r.if_index] ?? [])];
-        arr.push({ ts: now, tx, rx });
-        next[r.if_index] = arr.slice(-50);
-      }
-      return next;
-    });
+    setTrafficHistory((prev) => trafficHistoryFromInterfaces(prev, table, now));
   }, [table]);
+
+  useInterfaceMonitorLoop({
+    deviceId: selectedId,
+    queryKey: ["switch-if", selectedId ?? ""],
+    canMutate,
+    onTable: (rows) => setLiveTable(rows as MikrotikIfRow[]),
+    enabled: !!selectedId,
+  });
 
   useEffect(() => {
     if (!telemetry.data?.metrics) return;
@@ -516,7 +530,7 @@ export function SwitchPage() {
               deviceLabel={selectedDevice.description ?? EM_DASH}
               deviceModel={selectedDevice.model}
               deviceIp={selectedDevice.ip}
-              deviceOnline
+              deviceOnline={deviceOnline}
               collectedAt={telemetry.data?.collected_at}
               formatCollectedAt={formatCollectedPt}
               metrics={telemetry.data?.metrics}

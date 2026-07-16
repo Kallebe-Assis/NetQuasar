@@ -59,13 +59,36 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		}
 
 		stepOpts := opts
-		stepOpts.Force = true
 		stepOpts.Source = "pipeline"
 		stepOpts.PipelineStep = &step
 		stepOpts.ScopedDevices = devices
+		if step.Kind == StepKindOltOnu {
+			// Cadência própria por modo (PON status / contagens / full).
+			stepOpts.Force = opts.Force
+			onuMode := "full"
+			if step.Options.OltOnuMode != "" {
+				onuMode = step.Options.OltOnuMode
+			}
+			cfg, cerr := loadClampMonitoringIntervals(ctx, pool)
+			if cerr == nil && !oltOnuStepDue(ctx, pool, cfg, onuMode, stepOpts.Force) {
+				if log != nil {
+					log.Debug().Str("step_id", step.ID).Str("mode", NormalizeOltOnuMode(onuMode)).
+						Msg("pipeline: passo OLT adiado (intervalo/agenda)")
+				}
+				continue
+			}
+		} else {
+			stepOpts.Force = true
+		}
 
 		if err := runPipelineStep(ctx, pool, log, mode, step, stepOpts); err != nil && log != nil {
 			log.Warn().Err(err).Str("step_id", step.ID).Str("kind", step.Kind).Msg("pipeline: passo falhou")
+		} else if step.Kind == StepKindOltOnu {
+			onuMode := "full"
+			if step.Options.OltOnuMode != "" {
+				onuMode = step.Options.OltOnuMode
+			}
+			markOltOnuTierRan(ctx, pool, onuMode)
 		}
 	}
 

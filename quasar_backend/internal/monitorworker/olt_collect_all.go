@@ -173,6 +173,12 @@ func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logg
 	}
 	result.Eligible = len(queue)
 
+	onuCollectMode := ""
+	if opts.PipelineStep != nil {
+		onuCollectMode = NormalizeOltOnuMode(opts.PipelineStep.Options.OltOnuMode)
+	}
+	partial := oltcollect.IsPartialOnuCollectMode(onuCollectMode)
+
 	for idx, it := range queue {
 		row := it.row
 		comm := resolveSNMPCommunity(row, defCommunity)
@@ -193,12 +199,18 @@ func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logg
 					_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
 				}
 				out = CollectOltPonAndEvaluate(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.category, row.brand, row.model, row.maxPons)
-			} else if manualOut, ok := tryOltManualRefresh(ctx, row.id, src); ok {
-				out = manualOut
+			} else if !partial {
+				if manualOut, ok := tryOltManualRefresh(ctx, row.id, src); ok {
+					out = manualOut
+				} else {
+					sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.oltIfDerivedTimeout())
+					defer scancel()
+					out = CollectOltVendorPeriodic(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.brand, row.model, row.maxPons, onuCollectMode)
+				}
 			} else {
 				sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.oltIfDerivedTimeout())
 				defer scancel()
-				out = CollectOltVendorPeriodic(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.brand, row.model, row.maxPons, "")
+				out = CollectOltVendorPeriodic(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm, row.description, row.brand, row.model, row.maxPons, onuCollectMode)
 			}
 
 			persistOltCollectStatus(ctx, pool, row.id, src, out)

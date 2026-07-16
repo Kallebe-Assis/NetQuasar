@@ -17,8 +17,7 @@ type telemetryCycleOutcome struct {
 	Extra   map[string]any
 }
 
-// recordTelemetryCycleOutcome grava sempre um ponto no histórico (telemetry_samples) para skips
-// ou falhas que não chegaram a inserir amostra via CollectAndStore.
+// recordTelemetryCycleOutcome regista skip/falha no detail do probe cache (sem INSERT em telemetry_samples).
 func recordTelemetryCycleOutcome(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, source string, out telemetryCycleOutcome) {
 	if pool == nil || deviceID == uuid.Nil {
 		return
@@ -36,18 +35,18 @@ func recordTelemetryCycleOutcome(ctx context.Context, pool *pgxpool.Pool, device
 	if r := strings.TrimSpace(out.Reason); r != "" {
 		cycle["reason"] = r
 	}
-	metrics := map[string]any{"telemetry_cycle": cycle}
-	for k, v := range out.Extra {
-		metrics[k] = v
-	}
-	b, err := json.Marshal(metrics)
+	patch, err := json.Marshal(map[string]any{"telemetry_cycle": cycle})
 	if err != nil {
 		return
 	}
-	_, _ = pool.Exec(ctx, `
-		INSERT INTO telemetry_samples (device_id, collected_at, metrics)
-		VALUES ($1, now(), $2::jsonb)
-	`, deviceID, b)
+	WithDeviceProbeRowLock(deviceID, func() {
+		_, _ = pool.Exec(ctx, `
+			UPDATE device_probe_cache SET
+				detail = COALESCE(detail, '{}'::jsonb) || $2::jsonb,
+				checked_at = now()
+			WHERE device_id = $1
+		`, deviceID, string(patch))
+	})
 }
 
 func patchProbeSNMPHealth(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, mode string, snmpOK bool, healthStatus, healthReason string, detailJSON []byte) {

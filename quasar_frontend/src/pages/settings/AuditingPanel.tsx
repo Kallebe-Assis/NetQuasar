@@ -38,7 +38,7 @@ const ACTION_FILTER_OPTIONS = [
 
 export function AuditingPanel() {
   const [sub, setSub] = useState<"ops" | "db">("ops");
-  const [lim, setLim] = useState("300");
+  const [lim, setLim] = useState("30");
   const [searchQ, setSearchQ] = useState("");
   const [entityType, setEntityType] = useState("");
   const [actionFilter, setActionFilter] = useState("");
@@ -47,7 +47,7 @@ export function AuditingPanel() {
 
   const opsUrl = useMemo(() => {
     const p = new URLSearchParams();
-    p.set("limit", lim.trim() || "300");
+    p.set("limit", lim.trim() || "30");
     if (applied.q) p.set("q", applied.q);
     if (applied.entityType) p.set("entity_type", applied.entityType);
     if (applied.action) p.set("action", applied.action);

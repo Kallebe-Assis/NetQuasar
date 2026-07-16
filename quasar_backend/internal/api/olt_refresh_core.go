@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
@@ -192,5 +193,8 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		}
 	}
 	_ = oltparse.SnapshotComputed(sb, pb)
+	if out.OK {
+		monitorworker.MarkOltOnuTierRan(ctx, pool, "full")
+	}
 	return out, nil
 }

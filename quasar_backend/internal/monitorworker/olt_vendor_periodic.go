@@ -47,7 +47,7 @@ func CollectOltVendorPeriodic(
 	if strings.TrimSpace(onuCollectMode) != "" {
 		profile.OnuMetrics = oltcollect.FilterOnuMetricsByMode(profile.OnuMetrics, onuCollectMode)
 	}
-	periodicSteps := periodicCollectionSteps(profile, brand)
+	periodicSteps := periodicCollectionSteps(profile, brand, onuCollectMode)
 	steps := oltcollect.StepsForScope(periodicSteps, oltcollect.ScopeFull)
 	if len(steps) == 0 {
 		out.Reason = "perfil sem passos de coleta ONU activos"
@@ -67,7 +67,9 @@ func CollectOltVendorPeriodic(
 	telnetTO := cfg.oltOnuTelnetTimeout()
 	budget := cfg.oltIfDerivedTimeout()
 	totalBudget := budget
-	if profile.OnuReport.MonitorEnabled() || profile.PonTelnet.MonitorEnabled() {
+	includeTelnet := oltcollect.IncludesTelnetOnuCollectMode(onuCollectMode) &&
+		(profile.OnuReport.MonitorEnabled() || profile.PonTelnet.MonitorEnabled())
+	if includeTelnet {
 		totalBudget = budget + telnetTO
 	}
 	if budget < 120*time.Second {
@@ -79,9 +81,11 @@ func CollectOltVendorPeriodic(
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), totalBudget)
 	defer cancel()
 
+	modeNorm := NormalizeOltOnuMode(onuCollectMode)
 	summary := map[string]any{
 		"source":              "monitor_worker_olt_periodic",
 		"olt_collection_mode": "profile_periodic",
+		"olt_onu_mode":        modeNorm,
 		"updated_at":          time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -134,11 +138,19 @@ func CollectOltVendorPeriodic(
 		}
 		execSt.Summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
 	}
+	if oltcollect.IsPartialOnuCollectMode(onuCollectMode) && len(prevMaps) > 0 {
+		pons = oltifderive.OverlayPartialPonSnapshot(prevMaps, pons, modeNorm)
+		oltifderive.StripPartialSummaryKeys(execSt.Summary, modeNorm)
+	}
 	oltifderive.ApplyPonOperStatusAll(pons)
-	if !incomplete {
+	if !incomplete && !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {
+		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	} else if NormalizeOltOnuMode(onuCollectMode) == "onu_counts" || NormalizeOltOnuMode(onuCollectMode) == "status_only" {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	}
-	alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
+	if !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {
+		alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
+	}
 
 	summary = execSt.Summary
 	summary["if_mib_derived_at"] = time.Now().UTC().Format(time.RFC3339)

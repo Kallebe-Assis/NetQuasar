@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Save } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
-import { InfoHint } from "../../components/InfoHint";
 import { apiFetch } from "../../lib/api";
 import {
   bngExtraRowsFromBlock,
@@ -12,6 +11,7 @@ import {
   type ExtraOidRow,
 } from "../../lib/oidExtrasConfig";
 import { OidExtrasEditor } from "./OidExtrasEditor";
+import { OltMetricsOidTable, type MetricsOidFieldMeta } from "./OltMetricsOidTable";
 
 type BngMetricDef = {
   enabled?: boolean;
@@ -47,6 +47,8 @@ type BngCollectionOptions = {
 };
 
 const SECTION_ORDER = ["system", "health", "subscribers", "pppoe"];
+
+type EditSection = "geral" | (typeof SECTION_ORDER)[number] | "extras";
 
 function defaultMetricsForm(catalog: CatalogEntry[]): BngMetricsForm {
   const out: BngMetricsForm = {};
@@ -91,16 +93,105 @@ function countEnabled(metrics: BngMetricsForm, catalog: CatalogEntry[]) {
   return { enabled, missingOid, recommendedOn };
 }
 
+function collectModeTypeLabel(mode: string): string {
+  const m = mode.toLowerCase();
+  if (m.includes("walk") || m.includes("access")) return "Walk";
+  if (m.includes("get")) return "GET";
+  return "SNMP";
+}
+
+function catalogToOidFields(fields: CatalogEntry[], entity: string): MetricsOidFieldMeta[] {
+  return fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    shortDesc: f.recommended ? "Recomendado" : f.description.slice(0, 80) + (f.description.length > 80 ? "…" : ""),
+    hint: f.description,
+    placeholder: f.placeholder,
+    entity,
+    unit: f.unit || "—",
+    typeLabel: collectModeTypeLabel(f.default_mode || "snmp_get"),
+    expandable: (f.collect_modes?.length ?? 0) > 1 || Boolean(f.collect_modes?.length),
+  }));
+}
+
+function BngMetricsOidSection({
+  title,
+  description,
+  fields,
+  entity,
+  metrics,
+  modeLabels,
+  onSetMetric,
+  expandedKey,
+  onToggleExpand,
+}: {
+  title: string;
+  description: string;
+  fields: CatalogEntry[];
+  entity: string;
+  metrics: BngMetricsForm;
+  modeLabels: Record<string, string>;
+  onSetMetric: (key: string, patch: Partial<BngMetricDef>) => void;
+  expandedKey: string | null;
+  onToggleExpand: (key: string) => void;
+}) {
+  const oidFields = catalogToOidFields(fields, entity);
+  const tableMetrics: Record<string, { enabled?: boolean; oid?: string }> = {};
+  for (const f of fields) {
+    tableMetrics[f.key] = { enabled: metrics[f.key]?.enabled, oid: metrics[f.key]?.oid };
+  }
+  return (
+    <OltMetricsOidTable
+      title={title}
+      description={description}
+      fields={oidFields}
+      metrics={tableMetrics}
+      expandedKey={expandedKey}
+      onToggleExpand={onToggleExpand}
+      onToggleEnabled={(key, enabled) => onSetMetric(key, { enabled })}
+      onOidChange={(key, oid) => onSetMetric(key, { oid })}
+      idPrefix="bng-metric"
+      defaultEnabled={false}
+      renderExpanded={(field) => {
+        const cat = fields.find((f) => f.key === field.key);
+        if (!cat) return null;
+        const m = metrics[field.key] ?? {};
+        if (m.enabled !== true) {
+          return <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Active a métrica para configurar o tipo de coleta.</p>;
+        }
+        const modes = cat.collect_modes?.length ? cat.collect_modes : ["snmp_get", "snmp_walk"];
+        return (
+          <div className="field" style={{ margin: 0, maxWidth: 360 }}>
+            <label style={{ fontSize: 11 }}>Tipo de coleta</label>
+            <select
+              className="input"
+              style={{ fontSize: 12, padding: "4px 8px" }}
+              value={m.collect_mode ?? cat.default_mode}
+              onChange={(e) => onSetMetric(field.key, { collect_mode: e.target.value })}
+            >
+              {modes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {modeLabels[mode] || mode}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      }}
+    />
+  );
+}
+
 export function BngCollectionPanel() {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
+  const [editing, setEditing] = useState(false);
+  const [editSection, setEditSection] = useState<EditSection>("geral");
+  const [expandedMetricKey, setExpandedMetricKey] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<BngMetricsForm>({});
   const [options, setOptions] = useState<BngCollectionOptions>({});
   const [extraRows, setExtraRows] = useState<ExtraOidRow[]>([]);
   const [extrasBaseline, setExtrasBaseline] = useState<CategoryOverrides | undefined>();
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(SECTION_ORDER.map((s) => [s, s === "subscribers" || s === "system"])),
-  );
 
   const config = useQuery({
     queryKey: ["bng-collection"],
@@ -136,6 +227,25 @@ export function BngCollectionPanel() {
 
   const stats = useMemo(() => countEnabled(metrics, catalog), [metrics, catalog]);
 
+  const bySection = useMemo(
+    () =>
+      SECTION_ORDER.map((section) => ({
+        section,
+        label: sectionLabels[section] || section,
+        fields: catalog.filter((c) => c.section === section),
+      })).filter((g) => g.fields.length > 0),
+    [catalog, sectionLabels],
+  );
+
+  const navSections = useMemo(
+    () => [
+      { id: "geral" as const, label: "Geral" },
+      ...bySection.map((g) => ({ id: g.section as EditSection, label: g.label })),
+      { id: "extras" as const, label: "OIDs extra" },
+    ],
+    [bySection],
+  );
+
   const patch = useMutation({
     mutationFn: async () => {
       await apiFetch<{ ok: boolean; message?: string }>("/api/v1/settings/bng-collection", {
@@ -162,24 +272,45 @@ export function BngCollectionPanel() {
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
-  if (config.isLoading || connDefaults.isLoading) return <p>A carregar perfil BNG…</p>;
-  if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
-  if (connDefaults.isError) return <div className="msg msg--err">{(connDefaults.error as Error).message}</div>;
-
-  const bySection = SECTION_ORDER.map((section) => ({
-    section,
-    label: sectionLabels[section] || section,
-    fields: catalog.filter((c) => c.section === section),
-  })).filter((g) => g.fields.length > 0);
-
-  function toggleSection(section: string) {
-    setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  function openEdit() {
+    if (config.data) {
+      setMetrics(mergeMetricsFromApi(config.data.metrics, config.data.catalog));
+      setOptions(config.data.options ?? {});
+    }
+    if (connDefaults.data) {
+      const overrides = connDefaults.data.snmp_oid_overrides;
+      const bngBlock =
+        overrides && typeof overrides === "object" && !Array.isArray(overrides)
+          ? (overrides as { bng?: CategoryOverrides }).bng
+          : undefined;
+      setExtrasBaseline(bngBlock);
+      setExtraRows(bngExtraRowsFromBlock(bngBlock));
+    }
+    setEditSection("geral");
+    setEditing(true);
   }
 
-  function setMetric(key: string, patch: Partial<BngMetricDef>) {
+  function closeEdit() {
+    if (config.data) {
+      setMetrics(mergeMetricsFromApi(config.data.metrics, config.data.catalog));
+      setOptions(config.data.options ?? {});
+    }
+    if (connDefaults.data) {
+      const overrides = connDefaults.data.snmp_oid_overrides;
+      const bngBlock =
+        overrides && typeof overrides === "object" && !Array.isArray(overrides)
+          ? (overrides as { bng?: CategoryOverrides }).bng
+          : undefined;
+      setExtrasBaseline(bngBlock);
+      setExtraRows(bngExtraRowsFromBlock(bngBlock));
+    }
+    setEditing(false);
+  }
+
+  function setMetric(key: string, patchMetric: Partial<BngMetricDef>) {
     setMetrics((prev) => ({
       ...prev,
-      [key]: { ...prev[key], ...patch },
+      [key]: { ...prev[key], ...patchMetric },
     }));
   }
 
@@ -200,223 +331,228 @@ export function BngCollectionPanel() {
     });
   }
 
+  if (config.isLoading || connDefaults.isLoading) return <p>A carregar perfil BNG…</p>;
+  if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
+  if (connDefaults.isError) return <div className="msg msg--err">{(connDefaults.error as Error).message}</div>;
+
+  const statusLabel =
+    stats.enabled > 0
+      ? `${stats.enabled} métrica${stats.enabled === 1 ? "" : "s"} activa${stats.enabled === 1 ? "" : "s"}`
+      : "Inactivo";
+
   return (
-    <div style={{ marginTop: 8 }}>
-      <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
-        <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — BNG</h2>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-          Perfil para concentradores BNG (Huawei NE8000 e similares). O monitoramento periódico coleta métricas{" "}
-          <strong>activas</strong> com OID preenchido no intervalo de <strong>Telemetria SNMP</strong> (Configurações → Monitoramento).
-          Totais de logins (PPPoE, IPv4, IPv6, dual-stack) entram nesse ciclo — o equipamento precisa de{" "}
-          <strong>telemetria activa</strong> e <strong>BNG activo</strong> no inventário. A secção «Sessões PPPoE» é só para consulta manual na página BNG —
-          não active walks de sessão no ciclo automático (milhares de linhas SNMP).
-        </p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, fontSize: 12, alignItems: "center" }}>
-          <span>
-            Métricas activas: <strong>{stats.enabled}</strong>
-          </span>
-          <span>
-            Recomendadas activas: <strong>{stats.recommendedOn}</strong>
-          </span>
-          {stats.missingOid > 0 && (
-            <span style={{ color: "var(--warn, #b45309)" }}>
-              Sem OID: <strong>{stats.missingOid}</strong>
-            </span>
-          )}
-          <button type="button" className="btn btn--sm" onClick={applyRecommended}>
-            Activar recomendadas
-          </button>
+    <>
+      <div className="olt-profiles-layout">
+        <div className="card">
+          <div>
+            <h2 style={{ margin: 0 }}>Perfis BNG</h2>
+            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, marginBottom: 0 }}>
+              Coleta SNMP para concentradores BNG (Huawei NE8000 e similares). Intervalo em Configurações →
+              Monitoramento.
+            </p>
+          </div>
+
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table className="olt-profiles-table">
+              <thead>
+                <tr>
+                  <th>Descrição</th>
+                  <th>Marca/Tipo</th>
+                  <th>Modelo</th>
+                  <th>Status</th>
+                  <th style={{ width: 110 }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Coleta SNMP global</td>
+                  <td>BNG</td>
+                  <td className="mono">Huawei NE8000+</td>
+                  <td>
+                    <span className={stats.enabled > 0 ? "badge badge--ok" : "badge"}>{statusLabel}</span>
+                  </td>
+                  <td>
+                    <div className="olt-profiles-table__actions">
+                      <button
+                        type="button"
+                        className="btn btn--icon"
+                        title="Editar"
+                        aria-label="Editar coleta SNMP BNG"
+                        onClick={openEdit}
+                      >
+                        <Pencil size={14} aria-hidden />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
-        <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Logins PPPoE</h3>
-        <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-          Sufixo RADIUS a ignorar nos logins SNMP (ex.: <span className="mono">@g2.com.br</span>). O valor é removido na
-          exibição e na pesquisa; o equipamento continua a reportar o login completo.
-        </p>
-        <div className="field" style={{ maxWidth: 360, margin: 0 }}>
-          <label style={{ fontSize: 11 }}>Sufixo a ignorar</label>
-          <input
-            className="input mono"
-            placeholder="@g2.com.br"
-            value={options.pppoe_login_strip_suffix ?? ""}
-            onChange={(e) => setOptions((prev) => ({ ...prev, pppoe_login_strip_suffix: e.target.value }))}
-          />
-        </div>
-      </div>
+      {editing && (
+        <div
+          className="modal-backdrop olt-profile-modal-backdrop"
+          role="presentation"
+          onClick={closeEdit}
+        >
+          <div
+            className="olt-profile-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bng-profile-edit-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="olt-profile-modal__header">
+              <div>
+                <h2 id="bng-profile-edit-title" style={{ margin: 0 }}>
+                  Editar perfil BNG
+                </h2>
+                <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0" }}>
+                  Coleta SNMP global · Huawei NE8000+
+                </p>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="btn" onClick={closeEdit}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={patch.isPending}
+                  onClick={() => patch.mutate()}
+                >
+                  {patch.isPending ? "A guardar…" : "Guardar"}
+                </button>
+              </div>
+            </div>
 
-      <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
-        <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Links BGP (tráfego uplink)</h3>
-        <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-          Nomes das interfaces de uplink para medir download/upload por rota (ex.:{" "}
-          <span className="mono">WAN-BGP</span>, <span className="mono">VLAN-254-BGP</span>). Um nome por linha ou
-          separados por vírgula. Se vazio, detecta interfaces com «BGP» ou «WAN-BGP» no nome.
-        </p>
-        <div className="field" style={{ maxWidth: 480, margin: 0 }}>
-          <label style={{ fontSize: 11 }}>Interfaces de uplink</label>
-          <textarea
-            className="input mono"
-            rows={3}
-            placeholder={"WAN-BGP\nVLAN-254-BGP"}
-            value={(options.uplink_interfaces ?? []).join("\n")}
-            onChange={(e) => {
-              const parts = e.target.value
-                .split(/[\n,;]+/)
-                .map((s) => s.trim())
-                .filter(Boolean);
-              setOptions((prev) => ({ ...prev, uplink_interfaces: parts.length > 0 ? parts : undefined }));
-            }}
-          />
-        </div>
-      </div>
+            <div className="olt-profile-modal__body" style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}>
+              <nav className="olt-profile-modal__nav" aria-label="Secções do perfil">
+                <div className="olt-profile-modal__nav-list">
+                  {navSections.map((sec) => (
+                    <button
+                      key={sec.id}
+                      type="button"
+                      className={
+                        "olt-profile-modal__nav-btn" +
+                        (editSection === sec.id ? " olt-profile-modal__nav-btn--active" : "")
+                      }
+                      onClick={() => setEditSection(sec.id)}
+                    >
+                      {sec.label}
+                    </button>
+                  ))}
+                </div>
+              </nav>
 
-      <div className="msg msg--off" style={{ marginBottom: 12, fontSize: 12 }}>
-        <strong>Recomendado no ciclo automático:</strong> sistema (nome, modelo, versão), totais de logins (PPPoE, IPv4,
-        IPv6, dual-stack) e saúde (CPU). Consulta completa de sessões PPPoE — login, MAC, IP, estados — na página{" "}
-        <em>BNG → Sessões PPPoE</em>.
-      </div>
+              <div className="olt-profile-modal__main">
+                {editSection === "geral" && (
+                  <div className="olt-profile-modal__section">
+                    <h3 className="olt-profile-modal__section-title">Geral</h3>
+                    <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+                      O monitoramento periódico coleta métricas <strong>activas</strong> com OID preenchido. Totais de
+                      logins entram no ciclo de telemetria — o equipamento precisa de telemetria e BNG activos. A
+                      secção «Sessões PPPoE» é só para consulta manual (não active walks no ciclo automático).
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, fontSize: 12, alignItems: "center" }}>
+                      <span>
+                        Métricas activas: <strong>{stats.enabled}</strong>
+                      </span>
+                      <span>
+                        Recomendadas activas: <strong>{stats.recommendedOn}</strong>
+                      </span>
+                      {stats.missingOid > 0 && (
+                        <span style={{ color: "var(--warn, #b45309)" }}>
+                          Sem OID: <strong>{stats.missingOid}</strong>
+                        </span>
+                      )}
+                      <button type="button" className="btn btn--sm" onClick={applyRecommended}>
+                        Activar recomendadas
+                      </button>
+                    </div>
 
-      {stats.missingOid > 0 && (
-        <div className="msg msg--warn" style={{ marginBottom: 12, fontSize: 12 }}>
-          {stats.missingOid} métrica(s) activa(s) sem OID — não serão colectadas até preencher o OID (ajuste o índice da placa
-          em CPU/memória/temperatura).
+                    <div className="field" style={{ maxWidth: 360, margin: "0 0 16px" }}>
+                      <label style={{ fontSize: 11 }}>Sufixo a ignorar (logins PPPoE)</label>
+                      <input
+                        className="input mono"
+                        placeholder="@g2.com.br"
+                        value={options.pppoe_login_strip_suffix ?? ""}
+                        onChange={(e) =>
+                          setOptions((prev) => ({ ...prev, pppoe_login_strip_suffix: e.target.value }))
+                        }
+                      />
+                      <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.4 }}>
+                        Sufixo RADIUS removido na exibição e na pesquisa (ex.: <span className="mono">@g2.com.br</span>).
+                      </p>
+                    </div>
+
+                    <div className="field" style={{ maxWidth: 480, margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>Interfaces de uplink (Links BGP)</label>
+                      <textarea
+                        className="input mono"
+                        rows={3}
+                        placeholder={"WAN-BGP\nVLAN-254-BGP"}
+                        value={(options.uplink_interfaces ?? []).join("\n")}
+                        onChange={(e) => {
+                          const parts = e.target.value
+                            .split(/[\n,;]+/)
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          setOptions((prev) => ({
+                            ...prev,
+                            uplink_interfaces: parts.length > 0 ? parts : undefined,
+                          }));
+                        }}
+                      />
+                      <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.4 }}>
+                        Um nome por linha. Se vazio, detecta interfaces com «BGP» ou «WAN-BGP» no nome.
+                      </p>
+                    </div>
+
+                    {stats.missingOid > 0 && (
+                      <div className="msg msg--warn" style={{ marginTop: 12, fontSize: 12 }}>
+                        {stats.missingOid} métrica(s) activa(s) sem OID — não serão colectadas até preencher o OID.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {bySection.map(({ section, label, fields }) =>
+                  editSection === section ? (
+                    <div key={section} className="olt-profile-modal__section">
+                      {section === "pppoe" && (
+                        <div className="msg msg--off" style={{ marginBottom: 12, fontSize: 12 }}>
+                          Secção pesada — só consulta manual na página BNG → Sessões PPPoE. Não active no ciclo automático.
+                        </div>
+                      )}
+                      <BngMetricsOidSection
+                        title={label}
+                        description={`Métricas SNMP — ${label}. Active o switch e preencha o OID.`}
+                        fields={fields}
+                        entity={section === "pppoe" ? "PPPoE" : section === "subscribers" ? "Totais" : "BNG"}
+                        metrics={metrics}
+                        modeLabels={modeLabels}
+                        onSetMetric={setMetric}
+                        expandedKey={expandedMetricKey}
+                        onToggleExpand={(key) => setExpandedMetricKey((cur) => (cur === key ? null : key))}
+                      />
+                    </div>
+                  ) : null,
+                )}
+
+                {editSection === "extras" && (
+                  <div className="olt-profile-modal__section">
+                    <h3 className="olt-profile-modal__section-title">OIDs extra</h3>
+                    <OidExtrasEditor title="OIDs extra (telemetria BNG)" rows={extraRows} onChange={setExtraRows} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
-
-      {bySection.map(({ section, label, fields }) => {
-        const open = openSections[section] === true;
-        const sectionStats = countEnabled(
-          Object.fromEntries(fields.map((f) => [f.key, metrics[f.key] ?? {}])),
-          fields,
-        );
-        const isHeavy = section === "pppoe";
-        return (
-          <div key={section} className="card" style={{ marginBottom: 10, padding: 0, overflow: "hidden" }}>
-            <button
-              type="button"
-              onClick={() => toggleSection(section)}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 14px",
-                background: "var(--surface-2, rgba(0,0,0,0.03))",
-                border: "none",
-                cursor: "pointer",
-                textAlign: "left",
-                fontWeight: 600,
-                fontSize: 14,
-              }}
-            >
-              {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              {label}
-              {isHeavy && (
-                <span style={{ fontSize: 10, color: "var(--warn, #b45309)", fontWeight: 500 }}>pesado — só manual</span>
-              )}
-              <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
-                {sectionStats.enabled} activa(s)
-              </span>
-            </button>
-            {open && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-                  gap: 8,
-                  padding: 12,
-                }}
-              >
-                {fields.map((field) => {
-                  const m = metrics[field.key] ?? {};
-                  const enabled = m.enabled === true;
-                  const oidMissing = enabled && !m.oid?.trim();
-                  const modes = field.collect_modes?.length ? field.collect_modes : ["snmp_get", "snmp_walk"];
-                  return (
-                    <div
-                      key={field.key}
-                      className="card"
-                      style={{
-                        margin: 0,
-                        padding: "10px 12px",
-                        background: "var(--surface-2, rgba(0,0,0,0.04))",
-                        borderColor: oidMissing ? "var(--warn, #f59e0b)" : undefined,
-                      }}
-                    >
-                      <div className="row" style={{ alignItems: "center", gap: 6, marginBottom: 8 }}>
-                        <label
-                          style={{
-                            fontWeight: 600,
-                            margin: 0,
-                            fontSize: 13,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            flex: 1,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={enabled}
-                            onChange={(e) => setMetric(field.key, { enabled: e.target.checked })}
-                          />
-                          {field.label}
-                          {field.recommended ? (
-                            <span style={{ fontSize: 10, color: "var(--ok, #16a34a)" }}>recomendado</span>
-                          ) : null}
-                          {field.unit ? (
-                            <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>({field.unit})</span>
-                          ) : null}
-                        </label>
-                        <InfoHint label={field.label}>{field.description}</InfoHint>
-                      </div>
-                      {enabled && (
-                        <>
-                          <div className="field" style={{ margin: "0 0 6px" }}>
-                            <label style={{ fontSize: 11 }}>Tipo de coleta</label>
-                            <select
-                              className="input"
-                              style={{ fontSize: 12, padding: "4px 8px" }}
-                              value={m.collect_mode ?? field.default_mode}
-                              onChange={(e) => setMetric(field.key, { collect_mode: e.target.value })}
-                            >
-                              {modes.map((mode) => (
-                                <option key={mode} value={mode}>
-                                  {modeLabels[mode] || mode}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label style={{ fontSize: 11 }}>OID</label>
-                            <input
-                              className="input mono"
-                              style={{ fontSize: 12, borderColor: oidMissing ? "var(--warn, #f59e0b)" : undefined }}
-                              placeholder={field.placeholder}
-                              value={m.oid ?? ""}
-                              onChange={(e) => setMetric(field.key, { oid: e.target.value })}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <OidExtrasEditor title="OIDs extra (telemetria BNG)" rows={extraRows} onChange={setExtraRows} />
-
-      <div className="row" style={{ marginTop: 16, gap: 8 }}>
-        <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
-          <Save size={16} style={{ marginRight: 6, verticalAlign: -2 }} />
-          Guardar perfil BNG
-        </button>
-      </div>
-    </div>
+    </>
   );
 }

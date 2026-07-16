@@ -66,7 +66,11 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 
 			var streak int
 			var latHighStreak int
-			_ = pool.QueryRow(ctx, `SELECT COALESCE(ping_fail_streak, 0), COALESCE(latency_high_streak, 0) FROM device_probe_cache WHERE device_id=$1`, id).Scan(&streak, &latHighStreak)
+			var prevLatMs sql.NullInt64
+			_ = pool.QueryRow(ctx, `
+				SELECT COALESCE(ping_fail_streak, 0), COALESCE(latency_high_streak, 0), latency_ms
+				FROM device_probe_cache WHERE device_id=$1
+			`, id).Scan(&streak, &latHighStreak, &prevLatMs)
 
 			pctx, cancel := context.WithTimeout(ctx, perProbe+300*time.Millisecond)
 			devLabel := monitoringDeviceLabel(description, host)
@@ -104,7 +108,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			if probeReachOK {
 				recoveredPing[id] = lat
 			}
-			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, latHighStreak, cfg.alertConsecutiveRequired())
+			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, prevLatMs.Int64, latHighStreak, cfg.latencyConsecutiveRequired())
 
 			overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
 			if overallOK {
@@ -251,10 +255,13 @@ func UpsertSingleDeviceLatencyProbe(ctx context.Context, pool *pgxpool.Pool, log
 		}
 
 		var latHighStreak int
-		_ = pool.QueryRow(ctx, `SELECT COALESCE(latency_high_streak, 0) FROM device_probe_cache WHERE device_id=$1`, deviceID).Scan(&latHighStreak)
+		var prevLatMs sql.NullInt64
+		_ = pool.QueryRow(ctx, `
+			SELECT COALESCE(latency_high_streak, 0), latency_ms FROM device_probe_cache WHERE device_id=$1
+		`, deviceID).Scan(&latHighStreak, &prevLatMs)
 		latHighStreakAfter := latHighStreak
 		if host != "" {
-			latHighStreakAfter = EvaluateLatencyHighAlerts(ctx, pool, log, deviceID, cat, description, host, probeReachOK, lat, latHighStreak, cfg.alertConsecutiveRequired())
+			latHighStreakAfter = EvaluateLatencyHighAlerts(ctx, pool, log, deviceID, cat, description, host, probeReachOK, lat, prevLatMs.Int64, latHighStreak, cfg.latencyConsecutiveRequired())
 		}
 
 		overallOK := compositeProbeOK(mode, reachOK, snmpPrev)

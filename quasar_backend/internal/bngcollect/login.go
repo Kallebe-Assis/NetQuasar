@@ -108,10 +108,7 @@ func MatchPPPoELogin(search, snmpValue, stripSuffix string) bool {
 	}
 	ns := strings.ToLower(NormalizeSNMPLoginValue(search, stripSuffix))
 	nv := strings.ToLower(NormalizeSNMPLoginValue(snmpValue, stripSuffix))
-	if ns == nv {
-		return true
-	}
-	return strings.Contains(nv, ns) || strings.Contains(ns, nv)
+	return ns == nv
 }
 
 // PPPoELoginLookupTargets gera variantes para procurar no SNMP (com/sem sufixo).

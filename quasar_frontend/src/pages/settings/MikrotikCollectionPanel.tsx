@@ -1,10 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from "react";
 import { ChevronDown, ChevronRight, Save } from "lucide-react";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
-import { InfoHint } from "../../components/InfoHint";
 import { apiFetch } from "../../lib/api";
+import { OltMetricsOidTable, type MetricsOidFieldMeta } from "./OltMetricsOidTable";
 
 type MikrotikMetricDef = {
   enabled?: boolean;
@@ -46,7 +52,19 @@ type MikrotikCollectionResponse = {
   collect_mode_labels: Record<string, string>;
 };
 
-const SECTION_ORDER = ["system", "health", "interfaces", "optical", "wireless", "ppp", "users", "dhcp", "ip"];
+export const MIKROTIK_SNMP_SECTION_ORDER = [
+  "system",
+  "health",
+  "interfaces",
+  "optical",
+  "wireless",
+  "ppp",
+  "users",
+  "dhcp",
+  "ip",
+] as const;
+
+const SECTION_ORDER = MIKROTIK_SNMP_SECTION_ORDER;
 
 const COLLECT_METHODS = [
   { value: "snmp_get", label: "SNMP GET (escalar)" },
@@ -81,7 +99,9 @@ function mergeMetricsFromApi(raw: MikrotikMetricsForm | undefined, catalog: Cata
         enabled: m.enabled ?? base[e.key]?.enabled,
         oid: m.oid ?? base[e.key]?.oid ?? e.placeholder,
         collect_mode: m.collect_mode ?? base[e.key]?.collect_mode ?? e.default_mode,
-        value_divisor: m.value_divisor ?? (e.default_divisor && e.default_divisor > 1 ? e.default_divisor : base[e.key]?.value_divisor),
+        value_divisor:
+          m.value_divisor ??
+          (e.default_divisor && e.default_divisor > 1 ? e.default_divisor : base[e.key]?.value_divisor),
       };
     }
   }
@@ -101,19 +121,235 @@ function countEnabled(metrics: MikrotikMetricsForm, catalog: CatalogEntry[]) {
   return { enabled, missingOid };
 }
 
-export function MikrotikCollectionPanel({
-  embedded,
-  apiPath = "/api/v1/settings/mikrotik-collection",
-  queryKey = "mikrotik-collection",
-  saveSuccessMessage = "Perfil MikroTik guardado.",
-  loadingLabel = "A carregar perfil MikroTik…",
-}: {
+export type MikrotikCollectionHandle = {
+  save: () => void;
+  isPending: boolean;
+  reloadFromServer: () => void;
+};
+
+type Props = {
   embedded?: boolean;
+  variant?: "page" | "modal";
+  activeSection?: string;
   apiPath?: string;
   queryKey?: string;
   saveSuccessMessage?: string;
   loadingLabel?: string;
-} = {}) {
+  onSaved?: () => void;
+  onPendingChange?: (pending: boolean) => void;
+};
+
+function collectModeTypeLabel(mode: string): string {
+  const m = mode.toLowerCase();
+  if (m.includes("walk") || m.includes("table") || m.includes("column") || m.includes("pppoe")) return "Walk";
+  if (m.includes("get") || m.includes("status")) return "GET";
+  return "SNMP";
+}
+
+function MetricFieldsGrid({
+  fields,
+  metrics,
+  modeLabels,
+  onSetMetric,
+  title,
+  description,
+  entity,
+  expandedKey,
+  onToggleExpand,
+  idPrefix = "mk-metric",
+}: {
+  fields: CatalogEntry[];
+  metrics: MikrotikMetricsForm;
+  modeLabels: Record<string, string>;
+  onSetMetric: (key: string, patch: Partial<MikrotikMetricDef>) => void;
+  title: string;
+  description: string;
+  entity: string;
+  expandedKey: string | null;
+  onToggleExpand: (key: string) => void;
+  idPrefix?: string;
+}) {
+  const oidFields: MetricsOidFieldMeta[] = fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    shortDesc: f.description.slice(0, 80) + (f.description.length > 80 ? "…" : ""),
+    hint: f.description,
+    placeholder: f.placeholder,
+    entity,
+    unit: f.unit || "—",
+    typeLabel: collectModeTypeLabel(f.default_mode || "snmp_get"),
+    expandable: true,
+    supportsDivisor: Boolean(f.show_divisor || (f.default_divisor && f.default_divisor > 1)),
+  }));
+  const tableMetrics: Record<string, { enabled?: boolean; oid?: string }> = {};
+  for (const f of fields) {
+    tableMetrics[f.key] = { enabled: metrics[f.key]?.enabled, oid: metrics[f.key]?.oid };
+  }
+  return (
+    <OltMetricsOidTable
+      title={title}
+      description={description}
+      fields={oidFields}
+      metrics={tableMetrics}
+      expandedKey={expandedKey}
+      onToggleExpand={onToggleExpand}
+      onToggleEnabled={(key, enabled) => onSetMetric(key, { enabled })}
+      onOidChange={(key, oid) => onSetMetric(key, { oid })}
+      idPrefix={idPrefix}
+      defaultEnabled={false}
+      renderExpanded={(field) => {
+        const cat = fields.find((f) => f.key === field.key);
+        if (!cat) return null;
+        const m = metrics[field.key] ?? {};
+        if (m.enabled !== true) {
+          return (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
+              Active a métrica para configurar tipo de coleta e divisor.
+            </p>
+          );
+        }
+        const modes = cat.collect_modes?.length ? cat.collect_modes : ["snmp_get", "snmp_walk"];
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="field" style={{ margin: 0, maxWidth: 360 }}>
+              <label style={{ fontSize: 11 }}>Tipo de coleta</label>
+              <select
+                className="input"
+                style={{ fontSize: 12, padding: "4px 8px" }}
+                value={m.collect_mode ?? cat.default_mode}
+                onChange={(e) => onSetMetric(field.key, { collect_mode: e.target.value })}
+              >
+                {modes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {modeLabels[mode] || COLLECT_METHODS.find((x) => x.value === mode)?.label || mode}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {(cat.show_divisor || cat.default_divisor) && (
+              <div className="field" style={{ margin: 0, maxWidth: 200 }}>
+                <label style={{ fontSize: 11 }}>
+                  Divisor de saída
+                  {cat.default_divisor && cat.default_divisor > 1 ? (
+                    <span style={{ color: "var(--muted)", fontWeight: 400 }}> (padrão: {cat.default_divisor})</span>
+                  ) : null}
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  step={1}
+                  style={{ fontSize: 12 }}
+                  placeholder={cat.default_divisor ? String(cat.default_divisor) : "1"}
+                  value={m.value_divisor ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    onSetMetric(field.key, {
+                      value_divisor: v === "" ? undefined : Math.max(1, parseInt(v, 10) || 1),
+                    });
+                  }}
+                />
+              </div>
+            )}
+            {(cat.walk_target === "interfaces" || cat.section === "optical") && (
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: 0 }}>
+                {cat.section === "optical"
+                  ? cat.key === "optical_table"
+                    ? "Use «Tabela SFP parseada» para um walk único com RX/TX/temp/voltagem por porta."
+                    : "«Coluna SFP (derivada)» usa a tabela completa; «SNMP WALK» coleta só esta coluna."
+                  : cat.key === "if_oper_status" || cat.key === "if_admin_status"
+                    ? "«IF-MIB status (parse)» devolve up/down por ifIndex; «SNMP WALK» devolve vars brutos."
+                    : "Destino: snapshot de interfaces (ciclo IF-MIB)"}
+              </p>
+            )}
+          </div>
+        );
+      }}
+    />
+  );
+}
+
+function AdvancedStepsEditor({
+  steps,
+  setSteps,
+}: {
+  steps: MikrotikCollectionStep[];
+  setSteps: (steps: MikrotikCollectionStep[]) => void;
+}) {
+  return (
+    <>
+      <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+        Walks ou GETs adicionais além do catálogo. Cada passo activo exige OID.
+      </p>
+      {steps.map((step, idx) => (
+        <div key={step.id || idx} className="card" style={{ marginBottom: 8, padding: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label style={{ fontSize: 11 }}>Método</label>
+              <select
+                className="input"
+                value={step.method}
+                onChange={(e) => {
+                  const next = [...steps];
+                  next[idx] = { ...step, method: e.target.value };
+                  setSteps(next);
+                }}
+              >
+                <option value="snmp_walk">SNMP WALK</option>
+                <option value="snmp_get">SNMP GET</option>
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label style={{ fontSize: 11 }}>OID</label>
+              <input
+                className="input"
+                style={{ fontFamily: "monospace", fontSize: 12 }}
+                value={step.oid ?? ""}
+                onChange={(e) => {
+                  const next = [...steps];
+                  next[idx] = { ...step, oid: e.target.value };
+                  setSteps(next);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setSteps(steps.filter((_, i) => i !== idx))}
+            >
+              Remover
+            </button>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn btn--ghost"
+        style={{ fontSize: 12 }}
+        onClick={() =>
+          setSteps([...steps, { id: `step_${Date.now()}`, method: "snmp_walk", enabled: true, oid: "" }])
+        }
+      >
+        + Adicionar passo
+      </button>
+    </>
+  );
+}
+
+export const MikrotikCollectionPanel = forwardRef<MikrotikCollectionHandle, Props>(function MikrotikCollectionPanel(
+  {
+    embedded,
+    variant = "page",
+    activeSection,
+    apiPath = "/api/v1/settings/mikrotik-collection",
+    queryKey = "mikrotik-collection",
+    saveSuccessMessage = "Perfil MikroTik guardado.",
+    loadingLabel = "A carregar perfil MikroTik…",
+    onSaved,
+    onPendingChange,
+  },
+  ref,
+) {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<MikrotikMetricsForm>({});
@@ -122,6 +358,8 @@ export function MikrotikCollectionPanel({
     Object.fromEntries(SECTION_ORDER.map((s) => [s, false])),
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [expandedMetricKey, setExpandedMetricKey] = useState<string | null>(null);
+  const isModal = variant === "modal";
 
   const config = useQuery({
     queryKey: [queryKey],
@@ -140,42 +378,125 @@ export function MikrotikCollectionPanel({
 
   const stats = useMemo(() => countEnabled(metrics, catalog), [metrics, catalog]);
 
+  const bySection = useMemo(
+    () =>
+      SECTION_ORDER.map((section) => ({
+        section,
+        label: sectionLabels[section] || section,
+        fields: catalog.filter((c) => c.section === section),
+      })).filter((g) => g.fields.length > 0),
+    [catalog, sectionLabels],
+  );
+
   const patch = useMutation({
     mutationFn: () =>
       apiFetch<{ ok: boolean; message?: string }>(apiPath, {
         method: "PATCH",
         json: { metrics, collection_steps: steps },
       }),
+    onMutate: () => onPendingChange?.(true),
+    onSettled: () => onPendingChange?.(false),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: [queryKey] });
       toastOk(pushToast, data.message || saveSuccessMessage);
+      onSaved?.();
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar."),
   });
 
-  if (config.isLoading) return <p>{loadingLabel}</p>;
-  if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
+  function reloadFromServer() {
+    if (!config.data) return;
+    setMetrics(mergeMetricsFromApi(config.data.metrics, config.data.catalog));
+    setSteps(Array.isArray(config.data.collection_steps) ? config.data.collection_steps : []);
+  }
 
-  const bySection = SECTION_ORDER.map((section) => ({
-    section,
-    label: sectionLabels[section] || section,
-    fields: catalog.filter((c) => c.section === section),
-  })).filter((g) => g.fields.length > 0);
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: () => patch.mutate(),
+      isPending: patch.isPending,
+      reloadFromServer,
+    }),
+    [patch.isPending, metrics, steps, config.data],
+  );
 
   function toggleSection(section: string) {
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }
 
-  function setMetric(key: string, patch: Partial<MikrotikMetricDef>) {
+  function setMetric(key: string, patchMetric: Partial<MikrotikMetricDef>) {
     setMetrics((prev) => ({
       ...prev,
-      [key]: { ...prev[key], ...patch },
+      [key]: { ...prev[key], ...patchMetric },
     }));
+  }
+
+  if (config.isLoading) return <p>{loadingLabel}</p>;
+  if (config.isError) return <div className="msg msg--err">{(config.error as Error).message}</div>;
+
+  if (isModal) {
+    const section = activeSection || "geral";
+    if (section === "geral") {
+      return (
+        <div className="olt-profile-modal__section">
+          <h3 className="olt-profile-modal__section-title">Geral</h3>
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+            Configure o que o monitoramento deve coletar em equipamentos MikroTik/RouterOS. Apenas métricas{" "}
+            <strong>activas</strong> com <strong>OID preenchido</strong> entram na coleta.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12 }}>
+            <span>
+              Métricas activas: <strong>{stats.enabled}</strong>
+            </span>
+            {stats.missingOid > 0 && (
+              <span style={{ color: "var(--warn, #b45309)" }}>
+                Sem OID: <strong>{stats.missingOid}</strong>
+              </span>
+            )}
+          </div>
+          {stats.enabled === 0 && (
+            <div className="msg msg--off" style={{ marginTop: 12, fontSize: 12 }}>
+              Nenhuma métrica activa. Active pelo menos um campo nas secções à esquerda.
+            </div>
+          )}
+          {stats.missingOid > 0 && (
+            <div className="msg msg--warn" style={{ marginTop: 12, fontSize: 12 }}>
+              {stats.missingOid} métrica(s) activa(s) sem OID — o sistema não tentará colectá-las até preencher o OID.
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (section === "advanced") {
+      return (
+        <div className="olt-profile-modal__section">
+          <h3 className="olt-profile-modal__section-title">Avançado</h3>
+          <AdvancedStepsEditor steps={steps} setSteps={setSteps} />
+        </div>
+      );
+    }
+    const group = bySection.find((g) => g.section === section);
+    if (!group) return null;
+    return (
+      <div className="olt-profile-modal__section">
+        <MetricFieldsGrid
+          title={group.label}
+          description={`Métricas SNMP — ${group.label}. Active o switch e preencha o OID.`}
+          entity={group.label}
+          fields={group.fields}
+          metrics={metrics}
+          modeLabels={modeLabels}
+          onSetMetric={setMetric}
+          expandedKey={expandedMetricKey}
+          onToggleExpand={(key) => setExpandedMetricKey((cur) => (cur === key ? null : key))}
+          idPrefix={`mk-${queryKey}`}
+        />
+      </div>
+    );
   }
 
   return (
     <div style={{ marginTop: embedded ? 0 : 8 }}>
-
       <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — MikroTik</h2>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -240,140 +561,19 @@ export function MikrotikCollectionPanel({
               </span>
             </button>
             {open && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-                  gap: 8,
-                  padding: 12,
-                }}
-              >
-                {fields.map((field) => {
-                  const m = metrics[field.key] ?? {};
-                  const enabled = m.enabled === true;
-                  const oidMissing = enabled && !m.oid?.trim();
-                  const modes = field.collect_modes?.length
-                    ? field.collect_modes
-                    : ["snmp_get", "snmp_walk"];
-                  return (
-                    <div
-                      key={field.key}
-                      className="card"
-                      style={{
-                        margin: 0,
-                        padding: "10px 12px",
-                        background: "var(--surface-2, rgba(0,0,0,0.04))",
-                        borderColor: oidMissing ? "var(--warn, #f59e0b)" : undefined,
-                      }}
-                    >
-                      <div className="row" style={{ alignItems: "center", gap: 6, marginBottom: 8 }}>
-                        <label
-                          style={{
-                            fontWeight: 600,
-                            margin: 0,
-                            fontSize: 13,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            flex: 1,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={enabled}
-                            onChange={(e) => setMetric(field.key, { enabled: e.target.checked })}
-                          />
-                          {field.label}
-                          {field.unit ? (
-                            <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>
-                              ({field.unit})
-                            </span>
-                          ) : null}
-                        </label>
-                        <InfoHint label={field.label}>{field.description}</InfoHint>
-                      </div>
-                      {enabled && (
-                        <>
-                          <div className="field" style={{ margin: "0 0 6px" }}>
-                            <label style={{ fontSize: 11 }}>Tipo de coleta</label>
-                            <select
-                              className="input"
-                              style={{ fontSize: 12, padding: "4px 8px" }}
-                              value={m.collect_mode ?? field.default_mode}
-                              onChange={(e) => setMetric(field.key, { collect_mode: e.target.value })}
-                            >
-                              {modes.map((mode) => (
-                                <option key={mode} value={mode}>
-                                  {modeLabels[mode] || COLLECT_METHODS.find((x) => x.value === mode)?.label || mode}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="field" style={{ margin: "0 0 6px" }}>
-                            <label style={{ fontSize: 11 }}>
-                              OID {m.collect_mode === "snmp_get" ? "(GET)" : "(walk raiz)"}
-                            </label>
-                            <input
-                              className="input"
-                              style={{
-                                fontSize: 12,
-                                fontFamily: "monospace",
-                                borderColor: oidMissing ? "var(--warn, #f59e0b)" : undefined,
-                              }}
-                              placeholder={field.placeholder}
-                              value={m.oid ?? ""}
-                              onChange={(e) => setMetric(field.key, { oid: e.target.value })}
-                            />
-                            {oidMissing && (
-                              <p style={{ fontSize: 10, color: "var(--warn, #b45309)", margin: "4px 0 0" }}>
-                                OID em falta — coleta desactivada para este campo
-                              </p>
-                            )}
-                          </div>
-                          {(field.show_divisor || field.default_divisor) && (
-                            <div className="field" style={{ margin: "6px 0 0" }}>
-                              <label style={{ fontSize: 11 }}>
-                                Divisor de saída
-                                {field.default_divisor && field.default_divisor > 1 ? (
-                                  <span style={{ color: "var(--muted)", fontWeight: 400 }}> (padrão: {field.default_divisor})</span>
-                                ) : null}
-                              </label>
-                              <input
-                                className="input"
-                                type="number"
-                                min={1}
-                                step={1}
-                                style={{ fontSize: 12, maxWidth: 120 }}
-                                placeholder={field.default_divisor ? String(field.default_divisor) : "1"}
-                                value={m.value_divisor ?? ""}
-                                onChange={(e) => {
-                                  const v = e.target.value.trim();
-                                  setMetric(field.key, {
-                                    value_divisor: v === "" ? undefined : Math.max(1, parseInt(v, 10) || 1),
-                                  });
-                                }}
-                              />
-                              <p style={{ fontSize: 10, color: "var(--muted)", margin: "4px 0 0" }}>
-                                Ex.: SNMP 237 com divisor 10 → 23,7 · RX -7637 com divisor 1000 → -7,637 dBm
-                              </p>
-                            </div>
-                          )}
-                          {(field.walk_target === "interfaces" || field.section === "optical") && (
-                            <p style={{ fontSize: 10, color: "var(--muted)", margin: "6px 0 0" }}>
-                              {field.section === "optical"
-                                ? field.key === "optical_table"
-                                  ? "Use «Tabela SFP parseada» para um walk único com RX/TX/temp/voltagem por porta."
-                                  : "«Coluna SFP (derivada)» usa a tabela completa; «SNMP WALK» coleta só esta coluna."
-                                : field.key === "if_oper_status" || field.key === "if_admin_status"
-                                  ? "«IF-MIB status (parse)» devolve up/down por ifIndex; «SNMP WALK» devolve vars brutos."
-                                  : "Destino: snapshot de interfaces (ciclo IF-MIB)"}
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+              <div style={{ padding: 12 }}>
+                <MetricFieldsGrid
+                  title={label}
+                  description={`Métricas SNMP — ${label}.`}
+                  entity={label}
+                  fields={fields}
+                  metrics={metrics}
+                  modeLabels={modeLabels}
+                  onSetMetric={setMetric}
+                  expandedKey={expandedMetricKey}
+                  onToggleExpand={(key) => setExpandedMetricKey((cur) => (cur === key ? null : key))}
+                  idPrefix={`mk-page-${queryKey}`}
+                />
               </div>
             )}
           </div>
@@ -384,63 +584,7 @@ export function MikrotikCollectionPanel({
         <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
           Passos SNMP extra (avançado)
         </summary>
-        <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-          Walks ou GETs adicionais além do catálogo. Cada passo activo exige OID.
-        </p>
-        {steps.map((step, idx) => (
-          <div key={step.id || idx} className="card" style={{ marginBottom: 8, padding: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 11 }}>Método</label>
-                <select
-                  className="input"
-                  value={step.method}
-                  onChange={(e) => {
-                    const next = [...steps];
-                    next[idx] = { ...step, method: e.target.value };
-                    setSteps(next);
-                  }}
-                >
-                  <option value="snmp_walk">SNMP WALK</option>
-                  <option value="snmp_get">SNMP GET</option>
-                </select>
-              </div>
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 11 }}>OID</label>
-                <input
-                  className="input"
-                  style={{ fontFamily: "monospace", fontSize: 12 }}
-                  value={step.oid ?? ""}
-                  onChange={(e) => {
-                    const next = [...steps];
-                    next[idx] = { ...step, oid: e.target.value };
-                    setSteps(next);
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setSteps(steps.filter((_, i) => i !== idx))}
-              >
-                Remover
-              </button>
-            </div>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="btn btn--ghost"
-          style={{ fontSize: 12 }}
-          onClick={() =>
-            setSteps([
-              ...steps,
-              { id: `step_${Date.now()}`, method: "snmp_walk", enabled: true, oid: "" },
-            ])
-          }
-        >
-          + Adicionar passo
-        </button>
+        <AdvancedStepsEditor steps={steps} setSteps={setSteps} />
       </details>
 
       <div style={{ marginTop: 16, display: "flex", gap: 8, alignItems: "center" }}>
@@ -451,4 +595,4 @@ export function MikrotikCollectionPanel({
       </div>
     </div>
   );
-}
+});
