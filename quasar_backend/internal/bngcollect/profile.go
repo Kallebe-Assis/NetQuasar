@@ -41,9 +41,10 @@ func LoadGlobalProfile(ctx context.Context, pool *pgxpool.Pool) Profile {
 }
 
 // ProfileWithCollectMode restringe métricas activas conforme o modo do passo de monitoramento.
-// Modos: totals (logins), health (saúde+sistema), system, full (perfil global, sem walks PPPoE).
+// Modos: totals, health, system, monitoring (sistema+saúde+totais), full.
 func ProfileWithCollectMode(p Profile, mode string) Profile {
-	allowed := sectionsForCollectMode(strings.ToLower(strings.TrimSpace(mode)))
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	allowed := sectionsForCollectMode(mode)
 	if allowed == nil {
 		return p
 	}
@@ -52,6 +53,10 @@ func ProfileWithCollectMode(p Profile, mode string) Profile {
 		def := p.Metrics[e.Key]
 		if !allowed[e.Section] {
 			def.Enabled = false
+		} else if mode == "monitoring" {
+			// Linha-base BNG: tentar todos os escalares configurados de sistema,
+			// saúde e totais uma vez por ciclo. Walks de interfaces/sessões ficam fora.
+			def.Enabled = true
 		}
 		p.Metrics[e.Key] = def
 	}
@@ -60,6 +65,8 @@ func ProfileWithCollectMode(p Profile, mode string) Profile {
 
 func sectionsForCollectMode(mode string) map[string]bool {
 	switch mode {
+	case "monitoring":
+		return map[string]bool{"system": true, "health": true, "subscribers": true}
 	case "totals", "subscribers":
 		return map[string]bool{"subscribers": true}
 	case "health":

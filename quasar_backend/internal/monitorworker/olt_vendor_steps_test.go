@@ -37,3 +37,23 @@ func TestPeriodicCollectionSteps_skipsTelnetOnPartial(t *testing.T) {
 		}
 	}
 }
+
+func TestPeriodicCollectionSteps_addsMetricsForBaseline(t *testing.T) {
+	enabled := true
+	steps := periodicCollectionSteps(oltcollect.Profile{
+		Steps: []oltcollect.Step{{Method: oltcollect.MethodVsolOnuCollect, Enabled: &enabled}},
+		OnuMetrics: oltcollect.OnuMetricsConfig{
+			oltcollect.MetricStatus:     {Enabled: true, OID: "status"},
+			oltcollect.MetricPonTxPower: {Enabled: true, OID: "pon-tx"},
+		},
+	}, "VSOL", "baseline")
+	found := false
+	for _, step := range steps {
+		if step.Method == oltcollect.MethodOnuMetricsCollect {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("linha-base deve incluir onu_metrics_collect")
+	}
+}

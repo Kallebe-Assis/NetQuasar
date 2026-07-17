@@ -51,12 +51,11 @@ func DefaultPipelineSteps() []PipelineStep {
 	return []PipelineStep{
 		{ID: "ping-all", Kind: StepKindPing, Enabled: true, Scope: StepScope{Target: "all"}},
 		{ID: "telemetry-all", Kind: StepKindTelemetry, Enabled: true, Scope: StepScope{Target: "all"}},
-		{ID: "bng-subscribers", Kind: StepKindBng, Enabled: true, Scope: StepScope{Target: "category", Category: "bng"}, Options: StepOptions{BngMode: "totals"}},
+		{ID: "bng-monitoring", Kind: StepKindBng, Enabled: true, Scope: StepScope{Target: "category", Category: "bng"}, Options: StepOptions{BngMode: "monitoring"}},
 		{ID: "mikrotik-if", Kind: StepKindMikrotik, Enabled: true, Scope: StepScope{Target: "category", Category: "mikrotik"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "switch-if", Kind: StepKindSwitch, Enabled: true, Scope: StepScope{Target: "category", Category: "switch"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "olt-if", Kind: StepKindInterfacesOLT, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}},
-		{ID: "olt-pon-status", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "pon_status"}},
-		{ID: "olt-onu-counts", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "onu_counts"}},
+		{ID: "olt-baseline", Kind: StepKindOltOnu, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "baseline"}},
 		{ID: "olt-onu-full", Kind: StepKindOltOnu, Enabled: false, Scope: StepScope{Target: "category", Category: "olt"}, Options: StepOptions{OltOnuMode: "full"}},
 	}
 }
@@ -141,7 +140,61 @@ func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep,
 	if len(steps) == 0 {
 		return DefaultPipelineSteps(), nil
 	}
-	return ensureOltTierPipelineSteps(ensureBngPipelineStep(steps)), nil
+	return ensureMonitoringBaselineSteps(ensureOltTierPipelineSteps(ensureBngPipelineStep(steps))), nil
+}
+
+// ensureMonitoringBaselineSteps garante uma tentativa do conjunto mínimo em
+// todo ciclo completo, inclusive em instalações com pipeline antigo/customizado.
+func ensureMonitoringBaselineSteps(steps []PipelineStep) []PipelineStep {
+	out := append([]PipelineStep(nil), steps...)
+	ensure := func(kind, id string, scope StepScope, options StepOptions) {
+		for i := range out {
+			if out[i].Kind != kind {
+				continue
+			}
+			out[i].Enabled = true
+			out[i].Scope = scope
+			if options.BngMode != "" {
+				out[i].Options.BngMode = options.BngMode
+			}
+			if options.MikrotikMode != "" {
+				out[i].Options.MikrotikMode = options.MikrotikMode
+			}
+			return
+		}
+		out = append(out, PipelineStep{ID: id, Kind: kind, Enabled: true, Scope: scope, Options: options})
+	}
+
+	all := StepScope{Target: "all"}
+	ensure(StepKindPing, "ping-all", all, StepOptions{})
+	ensure(StepKindTelemetry, "telemetry-all", all, StepOptions{})
+	ensure(StepKindBng, "bng-monitoring", StepScope{Target: "category", Category: "bng"}, StepOptions{BngMode: "monitoring"})
+	ensure(StepKindMikrotik, "mikrotik-if", StepScope{Target: "category", Category: "mikrotik"}, StepOptions{MikrotikMode: "full"})
+	ensure(StepKindSwitch, "switch-if", StepScope{Target: "category", Category: "switch"}, StepOptions{MikrotikMode: "full"})
+
+	baselineFound := false
+	for i := range out {
+		if out[i].Kind != StepKindOltOnu {
+			continue
+		}
+		mode := NormalizeOltOnuMode(out[i].Options.OltOnuMode)
+		if mode == "baseline" {
+			out[i].Enabled = true
+			out[i].Scope = StepScope{Target: "category", Category: "olt"}
+			baselineFound = true
+		} else if mode == "pon_status" || mode == "onu_counts" || mode == "status_only" || mode == "status_rx" {
+			// A linha-base substitui os tiers leves duplicados; coleta full continua opcional.
+			out[i].Enabled = false
+		}
+	}
+	if !baselineFound {
+		out = append(out, PipelineStep{
+			ID: "olt-baseline", Kind: StepKindOltOnu, Enabled: true,
+			Scope:   StepScope{Target: "category", Category: "olt"},
+			Options: StepOptions{OltOnuMode: "baseline"},
+		})
+	}
+	return out
 }
 
 func hasPipelineKind(steps []PipelineStep, kind string) bool {
@@ -163,6 +216,11 @@ func EnsureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 	return ensureBngPipelineStep(steps)
 }
 
+// EnsureMonitoringBaselineSteps expõe a linha-base obrigatória para API/UI.
+func EnsureMonitoringBaselineSteps(steps []PipelineStep) []PipelineStep {
+	return ensureMonitoringBaselineSteps(steps)
+}
+
 // ensureBngPipelineStep insere passo BNG após telemetria quando ausente (instalações anteriores à migração 070).
 func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 	if hasPipelineKind(steps, StepKindBng) {
@@ -170,7 +228,7 @@ func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 	}
 	bng := PipelineStep{
 		ID: "bng-subscribers", Kind: StepKindBng, Enabled: true,
-		Scope: StepScope{Target: "category", Category: "bng"},
+		Scope:   StepScope{Target: "category", Category: "bng"},
 		Options: StepOptions{BngMode: "totals"},
 	}
 	for i, s := range steps {

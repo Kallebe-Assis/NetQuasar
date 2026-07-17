@@ -357,6 +357,8 @@ function mergeLivePppoeSession(cached: PppoeSession, live: PppoeSession): PppoeS
   merged.login = keep(live.login, cached.login);
   merged.index = keep(live.index, cached.index);
   merged.ipv4 = keep(live.ipv4, cached.ipv4);
+  merged.ipv6 = keep(live.ipv6, cached.ipv6);
+  merged.ipv6_pd = keep(live.ipv6_pd, cached.ipv6_pd);
   merged.mac = keep(live.mac, cached.mac);
   merged.vlan = keep(live.vlan, cached.vlan);
   merged.auth_state = keep(live.auth_state, cached.auth_state);

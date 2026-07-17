@@ -64,6 +64,23 @@ func TestOctetStringToUTF8_ipv6Binary(t *testing.T) {
 	}
 }
 
+func TestOctetStringToUTF8_ipv6TrailingZeros(t *testing.T) {
+	// 2804:014c:0005:abcd:: — zeros finais fazem parte do endereço
+	b := []byte{0x28, 0x04, 0x01, 0x4c, 0x00, 0x05, 0xab, 0xcd, 0, 0, 0, 0, 0, 0, 0, 0}
+	got := octetStringToUTF8(b)
+	want := "2804:14c:5:abcd::"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestBytesAsIPv6_unspecifiedEmpty(t *testing.T) {
+	got, ok := bytesAsIPv6(make([]byte, 16))
+	if ok || got != "" {
+		t.Fatalf("unspecified should be empty, got %q ok=%v", got, ok)
+	}
+}
+
 func TestTryDecodeColonHexASCII_interfaceName(t *testing.T) {
 	got, ok := TryDecodeColonHexASCII("63:6f:6d:62:6f:31")
 	if !ok || got != "combo1" {

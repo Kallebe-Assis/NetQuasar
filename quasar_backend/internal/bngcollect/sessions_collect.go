@@ -63,7 +63,7 @@ func FetchSessionDetailMaps(ctx context.Context, host, community string, profile
 
 	vars, _ := probing.SNMPGetMany(ctx, host, community, "2c", timeout, 1, oids, sessionGetOIDBatch)
 	suffix := "." + idx
-	for _, v := range vars {
+	applyVar := func(v probing.SNMPVar) {
 		key := keyByOID[v.OID]
 		if key == "" {
 			key = keyByOID[probing.NormalizeSNMPOID(v.OID)]
@@ -81,12 +81,38 @@ func FetchSessionDetailMaps(ctx context.Context, host, community string, profile
 			}
 		}
 		if key == "" {
-			continue
+			return
+		}
+		val := strings.TrimSpace(v.Value)
+		if !probing.SNMPValueUsable(val) {
+			return
 		}
 		if out[key] == nil {
 			out[key] = make(map[string]string)
 		}
-		out[key][idx] = strings.TrimSpace(v.Value)
+		out[key][idx] = val
+	}
+	for _, v := range vars {
+		applyVar(v)
+	}
+
+	// GET misto pode omitir IPV6-TC; pedir WAN/PD isolados quando faltarem.
+	var ipv6Retry []string
+	for _, key := range []string{"access_ipv6", "access_ipv6_pd"} {
+		if m := out[key]; m != nil && probing.SNMPValueUsable(m[idx]) {
+			continue
+		}
+		base := baseByKey[key]
+		if base == "" {
+			continue
+		}
+		ipv6Retry = append(ipv6Retry, base+"."+idx)
+	}
+	if len(ipv6Retry) > 0 {
+		retryVars, _ := probing.SNMPGetMany(ctx, host, community, "2c", timeout, 1, ipv6Retry, len(ipv6Retry))
+		for _, v := range retryVars {
+			applyVar(v)
+		}
 	}
 	return out
 }
@@ -298,8 +324,63 @@ func collectSessionsByIndex(ctx context.Context, host, community string, profile
 		}
 	}
 
+	// Huawei BNGs podem omitir colunas IPV6-TC em GETs grandes/mistos, embora o
+	// snmpwalk da mesma coluna funcione. Recolher WAN/PD uma vez por consulta
+	// completa garante IPv6 sem multiplicar pedidos por login.
+	for _, key := range []string{"access_ipv6", "access_ipv6_pd"} {
+		if ctx.Err() != nil {
+			break
+		}
+		base := metricBaseOID(profile, key)
+		vars, truncated, note := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+			Host: host, Community: community, RootOID: base, Version: "2c",
+			Timeout: 30 * time.Second, Retries: 1, MaxRows: maxSessionWalkRows,
+			MaxRepetitions: 10,
+		})
+		matched := mergeSessionColumnWalk(columnMaps, key, base, vars, idxToLogin)
+		out.Fields[key] = FieldResult{
+			Key: key, Label: key, CollectMode: ModeSNMPWalk, OID: base,
+			OK: matched > 0, RowCount: len(vars), Truncated: truncated, Error: note,
+		}
+		if matched > 0 {
+			out.Status.Collected++
+		} else if note != "" {
+			out.Status.Failed++
+		}
+	}
+
 	sessions := mergeSessionMaps(columnMaps)
 	sessions = ApplyLoginStripToSessions(sessions, stripSuffix)
 	out.Status.Collected += len(detailKeys)
 	return out, sessions
+}
+
+func mergeSessionColumnWalk(
+	columnMaps map[string]map[string]string,
+	key, base string,
+	vars []probing.SNMPVar,
+	knownIndices map[string]string,
+) int {
+	if columnMaps[key] == nil {
+		columnMaps[key] = make(map[string]string)
+	}
+	matched := 0
+	for _, v := range vars {
+		idx := extractIndexFromOID(v.OID, base)
+		if idx == "" {
+			continue
+		}
+		if len(knownIndices) > 0 {
+			if _, ok := knownIndices[idx]; !ok {
+				continue
+			}
+		}
+		value := strings.TrimSpace(v.Value)
+		if !probing.SNMPValueUsable(value) {
+			continue
+		}
+		columnMaps[key][idx] = value
+		matched++
+	}
+	return matched
 }

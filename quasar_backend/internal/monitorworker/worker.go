@@ -101,6 +101,9 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	if !pipelineDue {
 		return nil
 	}
+	// Um ciclo completo sempre inclui ao menos uma tentativa de ping. Se o ping
+	// periódico já estiver em curso, o lock evita duplicação e essa execução conta.
+	TryStartParallelPingCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "pipeline_baseline", Force: true})
 	if !TryLockMonitoringPipeline() {
 		if log != nil {
 			log.Debug().Msg("pipeline adiado: execução anterior ainda em curso")

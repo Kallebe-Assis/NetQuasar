@@ -26,10 +26,10 @@ const (
 const VSOLOnuPonIndexOID = "1.3.6.1.4.1.37950.1.1.6.1.1.1.1.1.1"
 
 const (
-	StatusModePonOnuSuffix      = "pon_onu_suffix"
-	StatusModeIfMibIndex        = "if_mib_index"
-	StatusModePonCounts         = "pon_online_offline"
-	StatusModeRxPowerThreshold  = "rx_power_threshold"
+	StatusModePonOnuSuffix     = "pon_onu_suffix"
+	StatusModeIfMibIndex       = "if_mib_index"
+	StatusModePonCounts        = "pon_online_offline"
+	StatusModeRxPowerThreshold = "rx_power_threshold"
 )
 
 // DefaultOfflineRxDbm limiar dBm (≤ valor ⇒ ONU offline). -70 cobre típico -80 em ZTE offline.
@@ -37,15 +37,15 @@ const DefaultOfflineRxDbm = -70.0
 
 // OnuMetricDef uma métrica SNMP (tabela → snmpwalk → sufixo .PON.ONU).
 type OnuMetricDef struct {
-	Enabled         bool   `json:"enabled"`
-	OID             string `json:"oid"`
-	ValueDivisor    int    `json:"value_divisor,omitempty"`
-	OnlineValues    []int  `json:"online_values,omitempty"`
-	OfflineValues   []int  `json:"offline_values,omitempty"`
-	StatusMode      string `json:"status_mode,omitempty"`
-	IfDescrOID      string `json:"ifdescr_oid,omitempty"`
-	IfNameOID       string `json:"ifname_oid,omitempty"`
-	IfOperOID       string `json:"ifoper_oid,omitempty"`
+	Enabled         bool    `json:"enabled"`
+	OID             string  `json:"oid"`
+	ValueDivisor    int     `json:"value_divisor,omitempty"`
+	OnlineValues    []int   `json:"online_values,omitempty"`
+	OfflineValues   []int   `json:"offline_values,omitempty"`
+	StatusMode      string  `json:"status_mode,omitempty"`
+	IfDescrOID      string  `json:"ifdescr_oid,omitempty"`
+	IfNameOID       string  `json:"ifname_oid,omitempty"`
+	IfOperOID       string  `json:"ifoper_oid,omitempty"`
 	OnlineCountOID  string  `json:"online_count_oid,omitempty"`
 	OfflineCountOID string  `json:"offline_count_oid,omitempty"`
 	OfflineRxDbm    float64 `json:"offline_rx_dbm,omitempty"`
@@ -207,7 +207,7 @@ func (c OnuMetricsConfig) HasAnyEnabled() bool {
 }
 
 // FilterOnuMetricsByMode reduz métricas para coleta periódica simplificada.
-// Modos: full | status_only | status_rx | pon_status | onu_counts
+// Modos: full | baseline | status_only | status_rx | pon_status | onu_counts
 func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" || mode == "full" {
@@ -228,6 +228,9 @@ func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 		}
 	}
 	switch mode {
+	case "baseline":
+		// Linha-base obrigatória do ciclo: estado de cada ONU e estado/TX das PONs.
+		enable(MetricStatus, MetricPonStatus, MetricPonTxPower)
 	case "pon_status":
 		enable(MetricPonStatus)
 	case "onu_counts":
@@ -245,7 +248,7 @@ func FilterOnuMetricsByMode(c OnuMetricsConfig, mode string) OnuMetricsConfig {
 // IsPartialOnuCollectMode indica coleta leve (sem detalhe ONU / telnet).
 func IsPartialOnuCollectMode(mode string) bool {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "pon_status", "onu_counts", "status_only", "status_rx":
+	case "baseline", "pon_status", "onu_counts", "status_only", "status_rx":
 		return true
 	default:
 		return false

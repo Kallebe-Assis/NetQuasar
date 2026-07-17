@@ -605,6 +605,48 @@
     grid-template-columns: 1fr;
   }
 
+  .mon-cfg__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mon-cfg__grid {
+    grid-template-columns: 1fr;
+  }
+  .mon-cfg__mode-grid {
+    grid-template-columns: 1fr;
+  }
+  .mon-cfg__footer-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mon-cfg__pipe-item {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "grip num body badge"
+      "grip num body freq";
+  }
+  .mon-cfg__grip { grid-area: grip; }
+  .mon-cfg__pipe-num { grid-area: num; }
+  .mon-cfg__pipe-icon { display: none; }
+  .mon-cfg__pipe-body { grid-area: body; }
+  .mon-cfg__badge { grid-area: badge; justify-self: end; }
+  .mon-cfg__freq { grid-area: freq; justify-self: end; }
+
+  .mon-cfg__pipe-edit > .mon-cfg__pipe-item {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "grip num body badge"
+      "grip num body freq"
+      "actions actions actions actions";
+  }
+  .mon-cfg__pipe-actions {
+    grid-area: actions;
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 4px;
+  }
+  .mon-cfg__pipe-options {
+    grid-template-columns: 1fr;
+  }
+
   .pipeline-step-card__row {
     gap: 6px 8px;
   }
@@ -732,6 +774,22 @@
 @media (max-width: 1023px) {
   .leaflet-container {
     min-height: 280px;
+  }
+}
+
+@media (max-width: 520px) {
+  .mon-cfg__stats {
+    grid-template-columns: 1fr;
+  }
+  .mon-cfg__footer-links {
+    grid-template-columns: 1fr;
+  }
+  .mon-cfg__header-actions {
+    width: 100%;
+  }
+  .mon-cfg__header-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 }
 

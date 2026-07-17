@@ -217,31 +217,31 @@ func (s *Server) monitoringState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{
-		"is_running":                 running,
-		"monitoring_mode":            mode,
-		"available_modes":            []string{monitorworker.ModeSimplePing, monitorworker.ModeFull},
-		"last_started_at":            started,
-		"last_stopped_at":            stopped,
-		"last_internet_check_at":     lastCheck,
-		"last_internet_check_ok":     lastOK,
-		"last_internet_check_detail": json.RawMessage(detail),
-		"last_cycle_at":                      lastCycle,
-		"last_latency_cycle_at":              lastLatency,
-		"last_telemetry_cycle_at":           lastTelemetry,
-		"last_interface_snapshot_cycle_at":  lastIface,
-		"last_olt_if_derived_cycle_at":       lastOlt,
-		"last_bng_cycle_at":                  lastBng,
-		"last_pipeline_cycle_at":             lastPipeline,
-		"last_cycle_ok_count":        okC,
-		"last_cycle_fail_count":      failC,
-		"current_activity":           activity,
-		"activity_started_at":        activityStarted,
-		"activity_updated_at":        activityUpdated,
-		"last_activity":              lastActivity,
-		"last_activity_finished_at":  lastActivityFinished,
-		"runtime_updated_at":         runtimeUpdated,
-		"last_alerts_change_at":      lastAlertsChange,
-		"persistencia":               "O monitoramento é estado no servidor (Postgres + worker); não depende da tela aberta no cliente.",
+		"is_running":                       running,
+		"monitoring_mode":                  mode,
+		"available_modes":                  []string{monitorworker.ModeSimplePing, monitorworker.ModeFull},
+		"last_started_at":                  started,
+		"last_stopped_at":                  stopped,
+		"last_internet_check_at":           lastCheck,
+		"last_internet_check_ok":           lastOK,
+		"last_internet_check_detail":       json.RawMessage(detail),
+		"last_cycle_at":                    lastCycle,
+		"last_latency_cycle_at":            lastLatency,
+		"last_telemetry_cycle_at":          lastTelemetry,
+		"last_interface_snapshot_cycle_at": lastIface,
+		"last_olt_if_derived_cycle_at":     lastOlt,
+		"last_bng_cycle_at":                lastBng,
+		"last_pipeline_cycle_at":           lastPipeline,
+		"last_cycle_ok_count":              okC,
+		"last_cycle_fail_count":            failC,
+		"current_activity":                 activity,
+		"activity_started_at":              activityStarted,
+		"activity_updated_at":              activityUpdated,
+		"last_activity":                    lastActivity,
+		"last_activity_finished_at":        lastActivityFinished,
+		"runtime_updated_at":               runtimeUpdated,
+		"last_alerts_change_at":            lastAlertsChange,
+		"persistencia":                     "O monitoramento é estado no servidor (Postgres + worker); não depende da tela aberta no cliente.",
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -328,58 +328,60 @@ func (s *Server) getMonitoringIntervals(w http.ResponseWriter, r *http.Request) 
 	if len(steps) == 0 {
 		steps = monitorworker.DefaultPipelineSteps()
 	} else {
-		steps = monitorworker.EnsureOltTierPipelineSteps(monitorworker.EnsureBngPipelineStep(steps))
+		steps = monitorworker.EnsureMonitoringBaselineSteps(
+			monitorworker.EnsureOltTierPipelineSteps(monitorworker.EnsureBngPipelineStep(steps)),
+		)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ping_seconds":                    ps,
-		"telemetry_seconds":               telSec,
-		"interface_snapshot_seconds":      ifaceSec,
-		"olt_if_derived_pon_seconds":      oltDerivedSec,
-		"olt_pon_status_seconds":          oltPonStatusSec,
-		"olt_onu_counts_seconds":          oltOnuCountsSec,
-		"olt_full_collect_seconds":        oltFullCollectSec,
-		"olt_full_collect_schedule":       oltFullSchedule,
-		"pipeline_cycle_seconds":          pipelineSec,
-		"telemetry_minutes":               tm,
-		"ping_timeout_ms":                 pto,
-		"telemetry_timeout_ms":            telTimeout,
-		"interface_snapshot_timeout_ms":   ifaceTimeout,
-		"olt_if_derived_pon_timeout_ms":   oltTimeout,
-		"olt_onu_telnet_timeout_ms":         oltOnuTelnetTimeout,
-		"mikrotik_timeout_ms":             mikrotikTimeout,
-		"bng_timeout_ms":                  bngTimeout,
-		"icmp_payload_bytes":              icmpPB,
-		"offline_ping_fail_threshold":     offTh,
-		"uptime_restart_alert_minutes":    uptimeRestart,
-		"ping_parallel":                   pingParallel,
-		"pipeline_steps":                  steps,
+		"ping_seconds":                  ps,
+		"telemetry_seconds":             telSec,
+		"interface_snapshot_seconds":    ifaceSec,
+		"olt_if_derived_pon_seconds":    oltDerivedSec,
+		"olt_pon_status_seconds":        oltPonStatusSec,
+		"olt_onu_counts_seconds":        oltOnuCountsSec,
+		"olt_full_collect_seconds":      oltFullCollectSec,
+		"olt_full_collect_schedule":     oltFullSchedule,
+		"pipeline_cycle_seconds":        pipelineSec,
+		"telemetry_minutes":             tm,
+		"ping_timeout_ms":               pto,
+		"telemetry_timeout_ms":          telTimeout,
+		"interface_snapshot_timeout_ms": ifaceTimeout,
+		"olt_if_derived_pon_timeout_ms": oltTimeout,
+		"olt_onu_telnet_timeout_ms":     oltOnuTelnetTimeout,
+		"mikrotik_timeout_ms":           mikrotikTimeout,
+		"bng_timeout_ms":                bngTimeout,
+		"icmp_payload_bytes":            icmpPB,
+		"offline_ping_fail_threshold":   offTh,
+		"uptime_restart_alert_minutes":  uptimeRestart,
+		"ping_parallel":                 pingParallel,
+		"pipeline_steps":                steps,
 	})
 }
 
 func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		PingSeconds                   *int                           `json:"ping_seconds"`
-		TelemetryMinutes              *int                           `json:"telemetry_minutes"`
-		TelemetrySeconds              *int                           `json:"telemetry_seconds"`
-		InterfaceSnapshotSeconds      *int                           `json:"interface_snapshot_seconds"`
-		OltIfDerivedPonSeconds        *int                           `json:"olt_if_derived_pon_seconds"`
-		OltPonStatusSeconds           *int                           `json:"olt_pon_status_seconds"`
-		OltOnuCountsSeconds           *int                           `json:"olt_onu_counts_seconds"`
-		OltFullCollectSeconds         *int                           `json:"olt_full_collect_seconds"`
-		OltFullCollectSchedule        *string                        `json:"olt_full_collect_schedule"`
-		PipelineCycleSeconds          *int                           `json:"pipeline_cycle_seconds"`
-		PingTimeoutMs                 *int                           `json:"ping_timeout_ms"`
-		TelemetryTimeoutMs            *int                           `json:"telemetry_timeout_ms"`
-		InterfaceSnapshotTimeoutMs    *int                           `json:"interface_snapshot_timeout_ms"`
-		OltIfDerivedPonTimeoutMs      *int                           `json:"olt_if_derived_pon_timeout_ms"`
-		OltOnuTelnetTimeoutMs         *int                           `json:"olt_onu_telnet_timeout_ms"`
-		MikrotikTimeoutMs             *int                           `json:"mikrotik_timeout_ms"`
-		BngTimeoutMs                  *int                           `json:"bng_timeout_ms"`
-		IcmpPayloadBytes              *int                           `json:"icmp_payload_bytes"`
-		OfflinePingFailThreshold      *int                           `json:"offline_ping_fail_threshold"`
-		UptimeRestartAlertMinutes     *int                           `json:"uptime_restart_alert_minutes"`
-		PipelineSteps                 *[]monitorworker.PipelineStep  `json:"pipeline_steps"`
-		PingParallel                  *bool                          `json:"ping_parallel"`
+		PingSeconds                *int                          `json:"ping_seconds"`
+		TelemetryMinutes           *int                          `json:"telemetry_minutes"`
+		TelemetrySeconds           *int                          `json:"telemetry_seconds"`
+		InterfaceSnapshotSeconds   *int                          `json:"interface_snapshot_seconds"`
+		OltIfDerivedPonSeconds     *int                          `json:"olt_if_derived_pon_seconds"`
+		OltPonStatusSeconds        *int                          `json:"olt_pon_status_seconds"`
+		OltOnuCountsSeconds        *int                          `json:"olt_onu_counts_seconds"`
+		OltFullCollectSeconds      *int                          `json:"olt_full_collect_seconds"`
+		OltFullCollectSchedule     *string                       `json:"olt_full_collect_schedule"`
+		PipelineCycleSeconds       *int                          `json:"pipeline_cycle_seconds"`
+		PingTimeoutMs              *int                          `json:"ping_timeout_ms"`
+		TelemetryTimeoutMs         *int                          `json:"telemetry_timeout_ms"`
+		InterfaceSnapshotTimeoutMs *int                          `json:"interface_snapshot_timeout_ms"`
+		OltIfDerivedPonTimeoutMs   *int                          `json:"olt_if_derived_pon_timeout_ms"`
+		OltOnuTelnetTimeoutMs      *int                          `json:"olt_onu_telnet_timeout_ms"`
+		MikrotikTimeoutMs          *int                          `json:"mikrotik_timeout_ms"`
+		BngTimeoutMs               *int                          `json:"bng_timeout_ms"`
+		IcmpPayloadBytes           *int                          `json:"icmp_payload_bytes"`
+		OfflinePingFailThreshold   *int                          `json:"offline_ping_fail_threshold"`
+		UptimeRestartAlertMinutes  *int                          `json:"uptime_restart_alert_minutes"`
+		PipelineSteps              *[]monitorworker.PipelineStep `json:"pipeline_steps"`
+		PingParallel               *bool                         `json:"ping_parallel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -581,28 +583,28 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 		return
 	}
 	payload := map[string]any{
-		"ping_seconds":                    ps,
-		"telemetry_seconds":               telSec,
-		"interface_snapshot_seconds":      ifaceSec,
-		"olt_if_derived_pon_seconds":      oltDerivedSec,
-		"olt_pon_status_seconds":          oltPonStatusSec,
-		"olt_onu_counts_seconds":          oltOnuCountsSec,
-		"olt_full_collect_seconds":        oltFullCollectSec,
-		"olt_full_collect_schedule":       oltFullSchedule,
-		"pipeline_cycle_seconds":          pipelineSec,
-		"telemetry_minutes":               tm,
-		"ping_timeout_ms":                 pto,
-		"telemetry_timeout_ms":            telTimeout,
-		"interface_snapshot_timeout_ms":   ifaceTimeout,
-		"olt_if_derived_pon_timeout_ms":   oltTimeout,
-		"olt_onu_telnet_timeout_ms":         oltOnuTelnetTimeout,
-		"mikrotik_timeout_ms":             mikrotikTimeout,
-		"bng_timeout_ms":                  bngTimeout,
-		"icmp_payload_bytes":              icmpPB,
-		"offline_ping_fail_threshold":     offTh,
-		"uptime_restart_alert_minutes":    uptimeRestart,
-		"ping_parallel":                   pingParallel,
-		"pipeline_steps":                  json.RawMessage(stepsJSON),
+		"ping_seconds":                  ps,
+		"telemetry_seconds":             telSec,
+		"interface_snapshot_seconds":    ifaceSec,
+		"olt_if_derived_pon_seconds":    oltDerivedSec,
+		"olt_pon_status_seconds":        oltPonStatusSec,
+		"olt_onu_counts_seconds":        oltOnuCountsSec,
+		"olt_full_collect_seconds":      oltFullCollectSec,
+		"olt_full_collect_schedule":     oltFullSchedule,
+		"pipeline_cycle_seconds":        pipelineSec,
+		"telemetry_minutes":             tm,
+		"ping_timeout_ms":               pto,
+		"telemetry_timeout_ms":          telTimeout,
+		"interface_snapshot_timeout_ms": ifaceTimeout,
+		"olt_if_derived_pon_timeout_ms": oltTimeout,
+		"olt_onu_telnet_timeout_ms":     oltOnuTelnetTimeout,
+		"mikrotik_timeout_ms":           mikrotikTimeout,
+		"bng_timeout_ms":                bngTimeout,
+		"icmp_payload_bytes":            icmpPB,
+		"offline_ping_fail_threshold":   offTh,
+		"uptime_restart_alert_minutes":  uptimeRestart,
+		"ping_parallel":                 pingParallel,
+		"pipeline_steps":                json.RawMessage(stepsJSON),
 	}
 	s.appendAuditLog(r.Context(), "monitoring_intervals", "1", "patch", s.actorFromRequest(r), nil, payload)
 	writeJSON(w, http.StatusOK, payload)
@@ -624,8 +626,8 @@ func (s *Server) getMonitoringSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"vps_latency_offset_ms":      vps,
-		"internet_check_targets":     json.RawMessage(raw),
+		"vps_latency_offset_ms":     vps,
+		"internet_check_targets":    json.RawMessage(raw),
 		"internet_check_timeout_ms": timeout,
 	})
 }

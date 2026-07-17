@@ -12,6 +12,8 @@ import (
 // NormalizeOltOnuMode normaliza o modo de coleta ONU do pipeline.
 func NormalizeOltOnuMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "baseline":
+		return "baseline"
 	case "pon_status":
 		return "pon_status"
 	case "onu_counts":
@@ -31,7 +33,7 @@ func oltTierRuntimeColumn(mode string) string {
 	switch NormalizeOltOnuMode(mode) {
 	case "pon_status":
 		return "last_olt_pon_status_at"
-	case "onu_counts", "status_only", "status_rx":
+	case "baseline", "onu_counts", "status_only", "status_rx":
 		return "last_olt_onu_counts_at"
 	default:
 		return "last_olt_full_collect_at"
@@ -42,7 +44,7 @@ func oltTierIntervalSeconds(cfg intervalConfig, mode string) int {
 	switch NormalizeOltOnuMode(mode) {
 	case "pon_status":
 		return cfg.OltPonStatusSeconds
-	case "onu_counts", "status_only", "status_rx":
+	case "baseline", "onu_counts", "status_only", "status_rx":
 		return cfg.OltOnuCountsSeconds
 	default:
 		return cfg.OltFullCollectSeconds
@@ -56,6 +58,11 @@ func oltOnuStepDue(ctx context.Context, pool *pgxpool.Pool, cfg intervalConfig, 
 		return true
 	}
 	mode = NormalizeOltOnuMode(mode)
+	if mode == "baseline" {
+		// A linha-base faz parte de todo ciclo completo, independentemente dos
+		// intervalos dos tiers opcionais.
+		return true
+	}
 	col := oltTierRuntimeColumn(mode)
 	var last *time.Time
 	_ = pool.QueryRow(ctx, `SELECT `+col+` FROM monitoring_runtime WHERE id=1`).Scan(&last)

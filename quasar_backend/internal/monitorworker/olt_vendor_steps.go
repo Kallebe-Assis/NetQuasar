@@ -10,6 +10,21 @@ import (
 func periodicCollectionSteps(profile oltcollect.Profile, brand, onuCollectMode string) []oltcollect.Step {
 	steps := oltcollect.EffectiveCollectionSteps(profile)
 	_ = brand
+	if NormalizeOltOnuMode(onuCollectMode) == "baseline" && profile.OnuMetrics.HasAnyEnabled() {
+		hasMetrics := false
+		for _, step := range steps {
+			if step.Method == oltcollect.MethodOnuMetricsCollect {
+				hasMetrics = true
+				break
+			}
+		}
+		if !hasMetrics {
+			enabled := true
+			steps = append(steps, oltcollect.Step{
+				ID: "monitoring_baseline_metrics", Method: oltcollect.MethodOnuMetricsCollect, Enabled: &enabled,
+			})
+		}
+	}
 	if !oltcollect.IncludesTelnetOnuCollectMode(onuCollectMode) {
 		return steps
 	}

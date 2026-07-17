@@ -49,7 +49,7 @@ func OverlayPartialPonSnapshot(prev, cur []map[string]any, mode string) []map[st
 
 func isPartialOltMode(mode string) bool {
 	switch mode {
-	case "pon_status", "onu_counts", "status_only", "status_rx":
+	case "baseline", "pon_status", "onu_counts", "status_only", "status_rx":
 		return true
 	default:
 		return false
@@ -59,6 +59,13 @@ func isPartialOltMode(mode string) bool {
 func overlayPonRowPartial(prev, cur map[string]any, mode string) map[string]any {
 	out := cloneMap(prev)
 	switch mode {
+	case "baseline":
+		// Linha-base: status ONU/PON e TX da PON; preserva RX/serial/modelo anteriores.
+		copyPonKeys(out, cur,
+			"oper_status", "admin_status", "if_oper_status", "status", "pon_status", "up", "link",
+			"onu_online", "onu_offline", "onu_total", "onu_status_unknown", "source_slice",
+			"tx_dbm", "pon_tx_dbm",
+		)
 	case "pon_status":
 		copyPonKeys(out, cur, "oper_status", "admin_status", "if_oper_status", "status", "pon_status", "up", "link")
 	case "onu_counts":

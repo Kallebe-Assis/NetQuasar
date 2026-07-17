@@ -39,3 +39,22 @@ func TestOverlayPartialPonSnapshot_updatesCounts(t *testing.T) {
 		t.Fatalf("rx_dbm lost: %v", out[0]["rx_dbm"])
 	}
 }
+
+func TestOverlayPartialPonSnapshot_baselineUpdatesTxKeepsRx(t *testing.T) {
+	prev := []map[string]any{
+		{"id": "01", "pon": 1, "onu_online": 10, "rx_dbm": -18.5, "tx_dbm": 3.1, "oper_status": 1},
+	}
+	cur := []map[string]any{
+		{"id": "01", "pon": 1, "onu_online": 9, "oper_status": 1, "tx_dbm": 3.4, "status": "up"},
+	}
+	out := OverlayPartialPonSnapshot(prev, cur, "baseline")
+	if out[0]["onu_online"] != 9 {
+		t.Fatalf("onu_online=%v", out[0]["onu_online"])
+	}
+	if out[0]["tx_dbm"] != 3.4 {
+		t.Fatalf("tx_dbm=%v", out[0]["tx_dbm"])
+	}
+	if out[0]["rx_dbm"] != -18.5 {
+		t.Fatalf("rx_dbm lost: %v", out[0]["rx_dbm"])
+	}
+}

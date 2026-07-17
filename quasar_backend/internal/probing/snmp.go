@@ -219,6 +219,11 @@ func octetStringToUTF8(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
+	// IPV6-TC Huawei / OCTET STRING(16): zeros finais são parte do endereço (::).
+	// Interpretar antes de aparar NULs, senão 2804:x:x:x:: vira len≠16 e cai em hex.
+	if ip, ok := bytesAsIPv6(b); ok {
+		return ip
+	}
 	for len(b) > 0 && b[len(b)-1] == 0 {
 		b = b[:len(b)-1]
 	}
@@ -234,9 +239,6 @@ func octetStringToUTF8(b []byte) string {
 		return string(b)
 	}
 	if ip, ok := bytesAsIPv4(b); ok {
-		return ip
-	}
-	if ip, ok := bytesAsIPv6(b); ok {
 		return ip
 	}
 	// Nomes de interface (ex.: «combo1», «ether1») podem ter exactamente 6 octetos ASCII —
@@ -332,11 +334,11 @@ func bytesAsIPv4(b []byte) (string, bool) {
 }
 
 func bytesAsIPv6(b []byte) (string, bool) {
-	b = trimTrailingNulls(append([]byte(nil), b...))
+	// Não aparar NULs: em IPv6 fixo de 16 octetos, zeros finais representam ::.
 	if len(b) != 16 {
 		return "", false
 	}
-	ip := net.IP(b)
+	ip := net.IP(append([]byte(nil), b...))
 	if ip.IsUnspecified() {
 		return "", false
 	}

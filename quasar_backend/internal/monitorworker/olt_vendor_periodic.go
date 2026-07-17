@@ -11,6 +11,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
+	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 	"github.com/rs/zerolog"
 )
 
@@ -54,9 +55,16 @@ func CollectOltVendorPeriodic(
 		return out
 	}
 
-	var prevPonsRaw []byte
-	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, deviceID).Scan(&prevPonsRaw)
+	var prevPonsRaw, prevSummaryRaw []byte
+	_ = pool.QueryRow(ctx, `
+		SELECT COALESCE(pons::text,'[]'), COALESCE(summary::text,'{}')
+		FROM olt_snapshots WHERE device_id=$1
+	`, deviceID).Scan(&prevPonsRaw, &prevSummaryRaw)
 	prevMaps := oltifderive.PonsJSONToMaps(prevPonsRaw)
+	var prevSummary map[string]any
+	if len(prevSummaryRaw) > 0 {
+		_ = json.Unmarshal(prevSummaryRaw, &prevSummary)
+	}
 
 	maxPonsVal := 0
 	if maxPons != nil && *maxPons > 0 {
@@ -140,7 +148,25 @@ func CollectOltVendorPeriodic(
 	}
 	if oltcollect.IsPartialOnuCollectMode(onuCollectMode) && len(prevMaps) > 0 {
 		pons = oltifderive.OverlayPartialPonSnapshot(prevMaps, pons, modeNorm)
-		oltifderive.StripPartialSummaryKeys(execSt.Summary, modeNorm)
+		if modeNorm == "baseline" {
+			// Actualiza status de cada ONU e preserva serial/RX/modelo do snapshot anterior.
+			prevOnu := oltcollect.OnuRowsFromSummary(prevSummary)
+			freshOnu := oltcollect.OnuRowsFromSummary(execSt.Summary)
+			if len(prevOnu) > 0 && len(freshOnu) > 0 {
+				merged := vsolparse.MergeOnuRowsTelemetry(prevOnu, freshOnu)
+				arr := make([]any, 0, len(merged))
+				for _, r := range merged {
+					arr = append(arr, r)
+				}
+				execSt.Summary["vsol_onu_rows"] = arr
+				execSt.Summary["vsol_onu_count"] = len(merged)
+			} else {
+				// Sem linhas novas: não sobrescrever detalhe ONU existente no merge JSONB.
+				oltifderive.StripPartialSummaryKeys(execSt.Summary, modeNorm)
+			}
+		} else {
+			oltifderive.StripPartialSummaryKeys(execSt.Summary, modeNorm)
+		}
 	}
 	oltifderive.ApplyPonOperStatusAll(pons)
 	if !incomplete && !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {

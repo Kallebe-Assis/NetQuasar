@@ -87,17 +87,8 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			sctx, scancel := context.WithTimeout(ctx, cfg.telemetryTimeout())
 			defer scancel()
 
-			invEmptyBefore, invQErr := snmpInventoryEmpty(sctx, pool, row.id)
-			if invQErr != nil {
-				invEmptyBefore = true
-			}
-			if invEmptyBefore {
-				_, invErr := snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
-				if invErr != nil && log != nil {
-					log.Warn().Err(invErr).Str("device", row.id.String()).Msg("telemetry_sweep inventário")
-				}
-			}
-
+			// Telemetria mínima vem antes de inventário/discovery auxiliar para
+			// não perder CPU, memória, temperatura e uptime por timeout.
 			c, telErr := telemetryengine.CollectAndStore(sctx, pool, row.id, strings.TrimSpace(row.ip), comm)
 			snmpOK := telErr == nil && c.OK
 			healthStatus := "ok"
@@ -273,15 +264,18 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 			defer scancel()
 			t0 := time.Now()
 
-			if ph != InterfacePhaseOLT {
-				invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
-				if invEmptyBefore {
-					_, _ = snmpdiscovery.EnsureFreshInventory(sctx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
-				}
-			}
-
+			// A coleta IF-MIB/óptica é a finalidade desta fase e deve ocorrer
+			// antes de qualquer inventário auxiliar.
 			CollectInterfaceSnapshotWorker(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm,
 				row.category, row.brand, row.model, row.description)
+			if ph != InterfacePhaseOLT && sctx.Err() == nil {
+				invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
+				if invEmptyBefore {
+					invCtx, invCancel := context.WithTimeout(sctx, 15*time.Second)
+					_, _ = snmpdiscovery.EnsureFreshInventory(invCtx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
+					invCancel()
+				}
+			}
 			lastIfaceByDevice[row.id] = time.Now()
 			NudgeMonitoringRuntimeRefresh(sctx, pool)
 			if ph == InterfacePhaseOLT {
