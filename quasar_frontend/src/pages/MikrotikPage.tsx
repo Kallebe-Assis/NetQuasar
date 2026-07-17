@@ -37,6 +37,9 @@ function isMikrotik(d: DeviceRow): boolean {
 }
 
 function inferIfaceType(r: MikrotikIfRow): string {
+  const custom = String(r.custom_type ?? "").trim().toLowerCase();
+  if (custom === "sfp") return "SFP";
+  if (custom === "ether") return "Ether";
   const n = String(r.if_name ?? r.display_name ?? r.descr ?? "").toLowerCase();
   if (n.includes("wlan") || n.includes("wifi")) return "Wireless";
   if (n.includes("sfp")) return "SFP";
@@ -44,6 +47,11 @@ function inferIfaceType(r: MikrotikIfRow): string {
   if (n.includes("pppoe")) return "PPPoE";
   if (n.includes("vlan")) return "VLAN";
   return "Ether";
+}
+
+function interfaceDescription(r: MikrotikIfRow): string {
+  const custom = String(r.custom_description ?? "").trim();
+  return custom || EM_DASH;
 }
 
 function ifaceStatus(r: MikrotikIfRow): "up" | "down" | "other" {
@@ -262,7 +270,7 @@ export function MikrotikPage() {
       if (trafficFilter === "with" && !hasTraffic) return false;
       if (trafficFilter === "without" && hasTraffic) return false;
       if (!q) return true;
-      const hay = `${r.if_index} ${r.display_name ?? ""} ${r.if_name ?? ""} ${r.descr ?? ""} ${type}`.toLowerCase();
+      const hay = `${r.if_index} ${r.display_name ?? ""} ${r.if_name ?? ""} ${r.descr ?? ""} ${r.custom_description ?? ""} ${type}`.toLowerCase();
       return hay.includes(q);
     });
   }, [table, search, statusFilter, typeFilter, trafficFilter]);
@@ -434,6 +442,7 @@ export function MikrotikPage() {
             <tr>
               <th>Idx</th>
               <th>Nome</th>
+              <th>Descrição</th>
               <th>Tipo</th>
               <th>Status</th>
               <th>TX</th>
@@ -448,6 +457,7 @@ export function MikrotikPage() {
               <tr key={r.if_index}>
                 <td className="mono">{r.if_index}</td>
                 <td>{ifDisplayName(r)}</td>
+                <td>{interfaceDescription(r)}</td>
                 <td>{inferIfaceType(r)}</td>
                 <td>
                   <span className={`mk-noc-dot ${ifaceStatus(r) === "up" ? "mk-noc-dot--up" : "mk-noc-dot--down"}`} /> {ifaceStatus(r)}

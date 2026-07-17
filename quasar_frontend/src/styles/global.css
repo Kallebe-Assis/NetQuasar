@@ -389,7 +389,8 @@ h2 {
 
 /* Ferramentas de rede — layout por painel */
 .tools-page {
-  max-width: 1100px;
+  width: 100%;
+  min-width: 0;
 }
 .tools-page__lead {
   margin: 0 0 1rem;
@@ -503,7 +504,8 @@ h2 {
 
 /* --- Página Alertas --- */
 .alerts-page {
-  max-width: 1400px;
+  width: 100%;
+  min-width: 0;
 }
 .alerts-page__lead {
   color: var(--muted);

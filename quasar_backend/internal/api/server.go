@@ -400,6 +400,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Use(s.requireAdminMiddleware)
 				r.Post("/devices/{id}/refresh", s.refreshDeviceInterfaces)
 				r.Post("/devices/{id}/realtime", s.realtimeDeviceInterfaces)
+				r.Put("/devices/{id}/metadata", s.putDeviceInterfaceMetadata)
 			})
 		})
 

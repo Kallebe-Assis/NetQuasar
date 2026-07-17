@@ -14,7 +14,12 @@ export type MikrotikIfRow = {
   if_index: number;
   descr?: string;
   if_name?: string;
+  if_alias?: string;
+  if_type?: number;
   display_name?: string;
+  custom_description?: string;
+  custom_type?: "ether" | "sfp" | string;
+  metadata_if_name?: string;
   sfp?: boolean;
   tx_dbm?: number;
   rx_dbm?: number;

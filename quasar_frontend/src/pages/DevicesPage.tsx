@@ -12,6 +12,7 @@ import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { DeviceEditBackupTab } from "../components/device/DeviceEditBackupTab";
 import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistoricoTab";
+import { DeviceEditInterfacesTab } from "../components/device/DeviceEditInterfacesTab";
 import { DeviceEditMonitoramentoTab } from "../components/device/DeviceEditMonitoramentoTab";
 
 type Device = {
@@ -1021,6 +1022,12 @@ export function DevicesPage() {
 
   const formIsBridge = networkIsBridge(form.network_status);
   const formIsOlt = (form.category ?? "").trim() === "OLT";
+  const formIsMikrotik =
+    (form.category ?? "").trim().toLowerCase() === "mikrotik" ||
+    (form.brand ?? "").trim().toLowerCase() === "mikrotik";
+  const formIsSwitch = (form.category ?? "").trim().toLowerCase() === "switch";
+  const formIsBng = !!form.bng_enabled;
+  const formSupportsIfaceMetadata = formIsMikrotik || formIsSwitch || formIsBng;
 
   return (
     <>
@@ -1400,9 +1407,22 @@ export function DevicesPage() {
             {editTab === "interfaces" && (
               <>
                 {save.isError && <div className="msg msg--err">{(save.error as Error).message}</div>}
-                {!formIsOlt ? (
+                {formSupportsIfaceMetadata ? (
+                  modal === "edit" && editingId ? (
+                    <DeviceEditInterfacesTab
+                      deviceId={editingId}
+                      canMutate={canMutate}
+                      onClose={() => setModal(null)}
+                    />
+                  ) : (
+                    <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                      Salve o equipamento antes de coletar e descrever suas interfaces.
+                    </p>
+                  )
+                ) : !formIsOlt ? (
                   <p style={{ color: "var(--muted)", fontSize: 13 }}>
-                    A aba Interfaces (PONs) aplica-se apenas a equipamentos da categoria <strong>OLT</strong>.
+                    A edição de interfaces está disponível para <strong>MikroTik</strong>, <strong>Switch</strong>,{" "}
+                    equipamentos com <strong>BNG</strong> activo e <strong>OLT</strong>.
                   </p>
                 ) : (form.max_pons ?? 0) <= 0 ? (
                   <p style={{ color: "var(--muted)", fontSize: 13 }}>
@@ -1481,19 +1501,21 @@ export function DevicesPage() {
                     </div>
                   </>
                 )}
-                <div className="row" style={{ marginTop: 12 }}>
-                  <button type="button" className="btn" onClick={() => setModal(null)}>
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    disabled={save.isPending || !form.description?.trim() || !formIsOlt}
-                    onClick={() => save.mutate()}
-                  >
-                    Salvar
-                  </button>
-                </div>
+                {formIsOlt && (
+                  <div className="row" style={{ marginTop: 12 }}>
+                    <button type="button" className="btn" onClick={() => setModal(null)}>
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      disabled={save.isPending || !form.description?.trim()}
+                      onClick={() => save.mutate()}
+                    >
+                      Salvar
+                    </button>
+                  </div>
+                )}
               </>
             )}
 

@@ -37,6 +37,9 @@ function isSwitch(d: DeviceRow): boolean {
 }
 
 function inferIfaceType(r: MikrotikIfRow): string {
+  const custom = String(r.custom_type ?? "").trim().toLowerCase();
+  if (custom === "sfp") return "SFP";
+  if (custom === "ether") return "Ethernet";
   const n = String(r.if_name ?? r.display_name ?? r.descr ?? "").toLowerCase();
   if (n.includes("port-channel") || n.includes("portchannel")) return "Port-Channel";
   if (n.includes("mgmt")) return "Mgmt";
@@ -44,6 +47,13 @@ function inferIfaceType(r: MikrotikIfRow): string {
   if (n.includes("ethernet") || n.startsWith("eth")) return "Ethernet";
   if (n.includes("sfp")) return "SFP";
   return "Outros";
+}
+
+function interfaceDescription(r: MikrotikIfRow): string {
+  const custom = String(r.custom_description ?? "").trim();
+  if (custom) return custom;
+  const alias = String(r.if_alias ?? "").trim();
+  return alias || EM_DASH;
 }
 
 function ifaceStatus(r: MikrotikIfRow): "up" | "down" | "other" {
@@ -262,7 +272,7 @@ export function SwitchPage() {
       if (trafficFilter === "with" && !hasTraffic) return false;
       if (trafficFilter === "without" && hasTraffic) return false;
       if (!q) return true;
-      const hay = `${r.if_index} ${r.display_name ?? ""} ${r.if_name ?? ""} ${r.descr ?? ""} ${type}`.toLowerCase();
+      const hay = `${r.if_index} ${r.display_name ?? ""} ${r.if_name ?? ""} ${r.descr ?? ""} ${r.if_alias ?? ""} ${r.custom_description ?? ""} ${type}`.toLowerCase();
       return hay.includes(q);
     });
   }, [table, search, statusFilter, typeFilter, trafficFilter]);
@@ -441,6 +451,7 @@ export function SwitchPage() {
             <tr>
               <th>Idx</th>
               <th>Nome</th>
+              <th>Descrição</th>
               <th>Tipo</th>
               <th>Status</th>
               <th>VLAN(s)</th>
@@ -456,6 +467,7 @@ export function SwitchPage() {
               <tr key={r.if_index}>
                 <td className="mono">{r.if_index}</td>
                 <td>{ifDisplayName(r)}</td>
+                <td>{interfaceDescription(r)}</td>
                 <td>{inferIfaceType(r)}</td>
                 <td>
                   <span className={`mk-noc-dot ${ifaceStatus(r) === "up" ? "mk-noc-dot--up" : "mk-noc-dot--down"}`} /> {ifaceStatus(r)}

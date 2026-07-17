@@ -726,6 +726,8 @@ func buildInterfaceMonitorPayload(ifaces []byte, collectedAt *time.Time, prevIfa
 			"if_index":       r.IfIndex,
 			"descr":          r.Descr,
 			"if_name":        r.IfName,
+			"if_alias":       r.IfAlias,
+			"if_type":        r.IfType,
 			"display_name":   r.DisplayName,
 			"speed_bps":      r.Speed,
 			"admin_status":   snmpifparse.AdminStatusLabel(r.AdminStatus),

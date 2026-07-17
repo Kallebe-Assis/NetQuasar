@@ -35,9 +35,13 @@ func WalkOnuTable(ctx context.Context, host, community, rootOID string, budget t
 	}
 
 	t0 := time.Now()
-	walkVars, truncated, note := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+	reqTO := 8 * time.Second
+	wCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), walkTO)
+	defer cancel()
+	walkVars, truncated, note := probing.SNMPWalk(wCtx, probing.SNMPWalkParams{
 		Host: host, Port: 161, Community: community, RootOID: rootOID,
-		Version: "2c", Timeout: walkTO, Retries: 1, MaxRows: snmpWalkMaxRows,
+		Version: "2c", Timeout: reqTO, Retries: 1, MaxRows: snmpWalkMaxRows,
+		MaxRepetitions: 10,
 	})
 	vars = normalizeWalkVarsForBase(walkVars, rootOID)
 	elapsed := time.Since(t0).Milliseconds()

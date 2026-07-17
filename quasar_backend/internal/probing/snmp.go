@@ -50,14 +50,17 @@ type SNMPWalkParams struct {
 	Version   string // "2c" | "1"
 	Timeout   time.Duration
 	Retries   int
-	MaxRows    int
-	OnProgress func(rowCount int)
+	MaxRows   int
+	// MaxRepetitions para GET-BULK (v2c). 0 = default seguro para OLTs lentas.
+	MaxRepetitions uint32
+	OnProgress     func(rowCount int)
 }
 
 // SNMPWalkStopSentinel indica paragem intencional do walk (ex.: login encontrado).
 var SNMPWalkStopSentinel = errors.New("snmp walk: stopped")
 
-const snmpBulkMaxRepetitions = 50
+// Default conservador: OLTs VSOL/ZTE falham com GET-BULK grande (timeout ~45s · walk vazio).
+const snmpBulkMaxRepetitions = 10
 
 func setupGoSNMP(ctx context.Context, p SNMPWalkParams) (*gosnmp.GoSNMP, time.Duration, error) {
 	host := strings.TrimSpace(p.Host)
@@ -66,10 +69,10 @@ func setupGoSNMP(ctx context.Context, p SNMPWalkParams) (*gosnmp.GoSNMP, time.Du
 	}
 	reqTimeout := p.Timeout
 	if reqTimeout <= 0 {
-		reqTimeout = 30 * time.Second
+		reqTimeout = 8 * time.Second
 	}
 	// Timeout por pedido SNMP (não o tempo total do walk — isso vem do ctx).
-	const maxReqTimeout = 45 * time.Second
+	const maxReqTimeout = 15 * time.Second
 	if reqTimeout > maxReqTimeout {
 		reqTimeout = maxReqTimeout
 	}
@@ -82,6 +85,13 @@ func setupGoSNMP(ctx context.Context, p SNMPWalkParams) (*gosnmp.GoSNMP, time.Du
 	if p.Retries > 2 {
 		p.Retries = 2
 	}
+	maxRep := p.MaxRepetitions
+	if maxRep == 0 {
+		maxRep = snmpBulkMaxRepetitions
+	}
+	if maxRep > 50 {
+		maxRep = 50
+	}
 	comm := strings.TrimSpace(p.Community)
 	if comm == "" {
 		comm = "public"
@@ -93,7 +103,7 @@ func setupGoSNMP(ctx context.Context, p SNMPWalkParams) (*gosnmp.GoSNMP, time.Du
 		Timeout:        reqTimeout,
 		Retries:        p.Retries,
 		Context:        ctx,
-		MaxRepetitions: snmpBulkMaxRepetitions,
+		MaxRepetitions: maxRep,
 	}
 	switch strings.ToLower(strings.TrimSpace(p.Version)) {
 	case "1", "v1":

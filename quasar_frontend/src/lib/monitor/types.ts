@@ -20,9 +20,16 @@ export type MonitorDeviceKPIs = {
 
 export type MonitorInterfaceRow = {
   if_index: number;
-  name: string;
+  name?: string;
+  if_name?: string;
+  descr?: string;
+  if_alias?: string;
+  if_type?: number;
   display_name?: string;
   type?: string;
+  custom_description?: string;
+  custom_type?: string;
+  metadata_if_name?: string;
   admin_status?: string;
   oper_status?: string;
   in_bps?: number;

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   BarChart3,
+  Cable,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -29,6 +30,9 @@ import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
 import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
+import { EM_DASH } from "../lib/formatDisplay";
+import { formatBitrate } from "../lib/formatBitrate";
+import { ifDisplayName, type MikrotikIfRow } from "../lib/mikrotikNocData";
 import {
   BNG_SESSION_DISPLAY_LIMITS,
   BNG_SESSION_REFRESH_MODE_KEY,
@@ -305,14 +309,43 @@ type TrafficRateSnapshot = {
   sampled_at?: string;
 };
 
-type BngTab = "overview" | "relatorio" | "auth" | "sessions";
+type BngTab = "overview" | "relatorio" | "interfaces" | "auth" | "sessions";
 
 const BNG_TABS: Array<{ id: BngTab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "relatorio", label: "Relatório", icon: BarChart3 },
+  { id: "interfaces", label: "Interfaces", icon: Cable },
   { id: "auth", label: "Autenticações", icon: KeyRound },
   { id: "sessions", label: "Sessões PPPoE", icon: Users },
 ];
+
+function bngIfaceStatus(r: MikrotikIfRow): "up" | "down" | "other" {
+  const s = String(r.oper_status ?? "").toLowerCase();
+  if (s === "up") return "up";
+  if (s === "down") return "down";
+  return "other";
+}
+
+function bngIfaceType(r: MikrotikIfRow): string {
+  const custom = String(r.custom_type ?? "").trim().toLowerCase();
+  if (custom === "sfp") return "SFP";
+  if (custom === "ether") return "Ether";
+  const n = String(r.if_name ?? r.display_name ?? r.descr ?? "").toLowerCase();
+  if (n.includes("virtual-template") || n.includes("ppp")) return "PPP";
+  if (n.includes("loopback") || n.includes("null")) return "Loopback";
+  if (n.includes("vlan") || /\.\d+$/.test(n)) return "VLAN";
+  if (n.includes("gigabit") || n.includes("ethernet") || n.startsWith("eth")) return "Ethernet";
+  return "Outros";
+}
+
+function bngIfaceDescription(r: MikrotikIfRow): string {
+  const custom = String(r.custom_description ?? "").trim();
+  return custom || EM_DASH;
+}
+
+function bngIfaceAlias(r: MikrotikIfRow): string {
+  return String(r.if_alias ?? "").trim() || EM_DASH;
+}
 
 function mergeLivePppoeSession(cached: PppoeSession, live: PppoeSession): PppoeSession {
   const merged: PppoeSession = { ...cached, ...live };
@@ -1382,6 +1415,8 @@ export function BngPage() {
   const [detailLogin, setDetailLogin] = useState<string | null>(null);
   const [collectProgress, setCollectProgress] = useState<BngCollectProgress | null>(null);
   const [pppoeOnlineOverride, setPppoeOnlineOverride] = useState<number | null>(null);
+  const [ifaceSearch, setIfaceSearch] = useState("");
+  const [ifaceStatusFilter, setIfaceStatusFilter] = useState<"all" | "up" | "down">("all");
 
   const devices = useQuery({
     queryKey: ["bng-devices"],
@@ -1418,6 +1453,41 @@ export function BngPage() {
     placeholderData: keepPreviousData,
     queryFn: () => apiFetch<SessionReportResponse>(`/api/v1/bng/devices/${selectedId}/sessions/report`),
     refetchInterval: tab === "relatorio" ? 60_000 : false,
+  });
+
+  const iface = useQuery({
+    queryKey: ["bng-if", selectedId],
+    enabled: !!selectedId && tab === "interfaces",
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      apiFetch<{
+        device_id: string;
+        collected_at?: string;
+        interface_table?: MikrotikIfRow[];
+        interface_count?: number;
+        walk_truncated?: boolean;
+        walk_note?: string;
+        note?: string;
+      }>(`/api/v1/interfaces/devices/${selectedId}`),
+  });
+
+  const refreshIf = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{
+        device_id: string;
+        collected_at?: string;
+        interface_table?: MikrotikIfRow[];
+        interface_count?: number;
+        walk_truncated?: boolean;
+        walk_note?: string;
+        note?: string;
+      }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} }),
+    onSuccess: (data, id) => {
+      if (data?.device_id) qc.setQueryData(["bng-if", id], data);
+      else qc.invalidateQueries({ queryKey: ["bng-if", id] });
+      toastOk(pushToast, "Interfaces atualizadas via SNMP.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao coletar interfaces."),
   });
 
   const authRecords = useQuery({
@@ -1647,6 +1717,19 @@ export function BngPage() {
   const selectedDevice = rows.find((d) => d.id === selectedId) ?? null;
   const infra = sessionReport.data?.infrastructure;
 
+  const ifaceTable = useMemo(() => iface.data?.interface_table ?? [], [iface.data?.interface_table]);
+  const ifaceRowsFiltered = useMemo(() => {
+    const q = ifaceSearch.trim().toLowerCase();
+    return ifaceTable.filter((r) => {
+      const status = bngIfaceStatus(r);
+      if (ifaceStatusFilter !== "all" && status !== ifaceStatusFilter) return false;
+      if (!q) return true;
+      const type = bngIfaceType(r);
+      const hay = `${r.if_index} ${r.display_name ?? ""} ${r.if_name ?? ""} ${r.descr ?? ""} ${r.if_alias ?? ""} ${r.custom_description ?? ""} ${type}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [ifaceTable, ifaceSearch, ifaceStatusFilter]);
+
   const overviewInitialLoading = !!selectedId && tab === "overview" && !overview.data && overview.isLoading;
 
   if (devices.isLoading) return <p>A carregar equipamentos BNG…</p>;
@@ -1689,6 +1772,7 @@ export function BngPage() {
       <div className="page-heading" style={{ marginBottom: 8 }}>
         <h1>BNG</h1>
         {tab === "sessions" && <PageCountPill label="Sessões" count={filteredSessions.length} />}
+        {tab === "interfaces" && <PageCountPill label="Interfaces" count={ifaceRowsFiltered.length} />}
       </div>
 
       {rows.length === 0 ? (
@@ -1766,6 +1850,98 @@ export function BngPage() {
                   />
                 ))}
               </div>
+            </div>
+          )}
+
+          {tab === "interfaces" && (
+            <div className="mk-noc-panel" style={{ padding: 14 }}>
+              <div className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  className="input"
+                  style={{ flex: "1 1 220px", fontSize: 12 }}
+                  placeholder="Pesquisar interface, alias ou descrição"
+                  value={ifaceSearch}
+                  onChange={(e) => setIfaceSearch(e.target.value)}
+                />
+                <select
+                  className="select"
+                  style={{ fontSize: 12 }}
+                  value={ifaceStatusFilter}
+                  onChange={(e) => setIfaceStatusFilter(e.target.value as "all" | "up" | "down")}
+                >
+                  <option value="all">Status: todos</option>
+                  <option value="up">Up</option>
+                  <option value="down">Down</option>
+                </select>
+                <button
+                  type="button"
+                  className="mk-noc-btn"
+                  disabled={!selectedId || refreshIf.isPending || !canMutate}
+                  onClick={() => selectedId && refreshIf.mutate(selectedId)}
+                >
+                  <RefreshCw size={14} className={refreshIf.isPending ? "spin" : ""} />
+                  {refreshIf.isPending ? "Coletando…" : "Atualizar coleta"}
+                </button>
+                {iface.data?.collected_at && (
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Últ. coleta {formatBngDateTime(iface.data.collected_at)}
+                  </span>
+                )}
+              </div>
+              {(iface.data?.walk_truncated || /truncad/i.test(String(iface.data?.walk_note ?? iface.data?.note ?? ""))) && (
+                <div className="msg msg--warn" style={{ fontSize: 12, marginBottom: 8 }}>
+                  Coleta SNMP truncada — aumente o timeout em Configurações → Alertas.
+                </div>
+              )}
+              {iface.isLoading && !iface.data ? (
+                <p style={{ color: "var(--muted)" }}>A carregar interfaces…</p>
+              ) : iface.isError ? (
+                <div className="msg msg--err">{(iface.error as Error).message}</div>
+              ) : ifaceTable.length === 0 ? (
+                <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                  Ainda não há interfaces coletadas. Clique em <strong>Atualizar coleta</strong>.
+                </p>
+              ) : (
+                <div className="table-wrap" style={{ maxHeight: "min(70vh, 640px)", overflow: "auto" }}>
+                  <table className="mk-noc-table">
+                    <thead>
+                      <tr>
+                        <th>Idx</th>
+                        <th>Nome</th>
+                        <th>Alias (SNMP)</th>
+                        <th>Descrição</th>
+                        <th>Tipo</th>
+                        <th>Status</th>
+                        <th>TX</th>
+                        <th>RX</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ifaceRowsFiltered.map((r) => {
+                        const status = bngIfaceStatus(r);
+                        return (
+                          <tr key={r.if_index}>
+                            <td className="mono">{r.if_index}</td>
+                            <td>{ifDisplayName(r)}</td>
+                            <td>{bngIfaceAlias(r)}</td>
+                            <td>{bngIfaceDescription(r)}</td>
+                            <td>{bngIfaceType(r)}</td>
+                            <td>
+                              <span className={`mk-noc-dot ${status === "up" ? "mk-noc-dot--up" : "mk-noc-dot--down"}`} />{" "}
+                              {status}
+                            </td>
+                            <td className="mono">{formatBitrate(r.out_bps)}</td>
+                            <td className="mono">{formatBitrate(r.in_bps)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
+                A descrição personalizada edita-se em Equipamentos → Interfaces. O alias vem do ifAlias do BNG.
+              </p>
             </div>
           )}
 

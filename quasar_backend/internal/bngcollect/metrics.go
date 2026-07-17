@@ -35,10 +35,11 @@ type CatalogEntry struct {
 }
 
 var SectionLabels = map[string]string{
-	"system":  "Sistema / inventário",
-	"health":  "Saúde do equipamento",
+	"system":      "Sistema / inventário",
+	"health":      "Saúde do equipamento",
 	"subscribers": "Totais de logins (escalares)",
-	"pppoe":   "Sessões PPPoE (walk — pesado)",
+	"interfaces":  "Interfaces (IF-MIB)",
+	"pppoe":       "Sessões PPPoE (walk — pesado)",
 }
 
 // MetricCatalog catálogo de métricas BNG (Huawei AAA / NE8000 por defeito).
@@ -58,6 +59,21 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "ipv4_online", Section: "subscribers", Label: "IPv4 online", Description: "hwTotalIPv4OnlineNum.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.14.1.15.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, Recommended: true},
 	{Key: "ipv6_online", Section: "subscribers", Label: "IPv6 online", Description: "hwTotalIPv6OnlineNum.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.14.1.16.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, Recommended: true},
 	{Key: "dual_stack_online", Section: "subscribers", Label: "Dual-stack (v4+v6)", Description: "hwTotalDualStackOnlineNum.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.14.1.17.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, Recommended: true},
+
+	// Interfaces — IF-MIB (confirmado em Huawei NE8000 / snmpwalk)
+	{Key: "if_descr", Section: "interfaces", Label: "Nome (ifDescr)", Description: "IF-MIB ifDescr — nome da interface (ex.: GigabitEthernet0/1/8.1000).", Placeholder: "1.3.6.1.2.1.2.2.1.2", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_type", Section: "interfaces", Label: "Tipo (ifType)", Description: "IF-MIB ifType — ethernetCsmacd(6), l2vlan(135), ppp(23), softwareLoopback(24), etc.", Placeholder: "1.3.6.1.2.1.2.2.1.3", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_oper_status", Section: "interfaces", Label: "Status operacional (ifOperStatus)", Description: "Estado da interface: up(1), down(2), etc.", Placeholder: "1.3.6.1.2.1.2.2.1.8", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_last_change", Section: "interfaces", Label: "Última mudança (ifLastChange)", Description: "Timeticks desde o boot até à última mudança de estado operacional.", Placeholder: "1.3.6.1.2.1.2.2.1.9", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk},
+	{Key: "if_in_octets", Section: "interfaces", Label: "Recebimento Rx (ifInOctets)", Description: "Contador 32-bit de octets recebidos. Preferir ifHCInOctets (ifXTable) quando disponível.", Placeholder: "1.3.6.1.2.1.2.2.1.10", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_in_ucast_pkts", Section: "interfaces", Label: "Pacotes Rx (ifInUcastPkts)", Description: "Pacotes unicast recebidos.", Placeholder: "1.3.6.1.2.1.2.2.1.11", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk},
+	{Key: "if_in_errors", Section: "interfaces", Label: "Erros Rx (ifInErrors)", Description: "Erros de recebimento.", Placeholder: "1.3.6.1.2.1.2.2.1.14", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk},
+	{Key: "if_out_octets", Section: "interfaces", Label: "Transmissão Tx (ifOutOctets)", Description: "Contador 32-bit de octets transmitidos. Preferir ifHCOutOctets (ifXTable) quando disponível.", Placeholder: "1.3.6.1.2.1.2.2.1.16", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_out_ucast_pkts", Section: "interfaces", Label: "Pacotes Tx (ifOutUcastPkts)", Description: "Pacotes unicast transmitidos.", Placeholder: "1.3.6.1.2.1.2.2.1.17", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk},
+	{Key: "if_out_errors", Section: "interfaces", Label: "Erros Tx (ifOutErrors)", Description: "Erros de transmissão.", Placeholder: "1.3.6.1.2.1.2.2.1.20", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk},
+	{Key: "if_alias", Section: "interfaces", Label: "Alias / descrição (ifAlias)", Description: "IF-MIB ifAlias — descrição configurada no equipamento (ex.: PPPoE-OLT-VSOL-01).", Placeholder: "1.3.6.1.2.1.31.1.1.1.18", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_x_table", Section: "interfaces", Label: "IF-MIB estendido (ifXTable)", Description: "Walk ifXTable — ifName, ifAlias e contadores 64-bit (ifHCInOctets / ifHCOutOctets). Usado no monitor de interfaces.", Placeholder: "1.3.6.1.2.1.31.1.1.1", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
+	{Key: "if_mib_table", Section: "interfaces", Label: "IF-MIB (ifTable)", Description: "Walk ifTable completo — descrição, tipo, status e contadores por interface.", Placeholder: "1.3.6.1.2.1.2.2.1", CollectModes: []string{ModeSNMPWalk}, DefaultMode: ModeSNMPWalk, Recommended: true},
 
 	{Key: "access_login", Section: "pppoe", Label: "Login (hwAccessUserName)", Description: "Walk coluna de utilizadores — hwAccessTable.", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.3", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
 	{Key: "access_ipv4", Section: "pppoe", Label: "IPv4 (hwAccessIPAddress)", Description: "Endereço IPv4 por sessão (CGNAT ou público).", Placeholder: "1.3.6.1.4.1.2011.5.2.1.15.1.15", CollectModes: []string{ModeSNMPWalk, ModeAccessSessions}, DefaultMode: ModeSNMPWalk},
@@ -146,6 +162,9 @@ func (m MetricsConfig) Normalize() MetricsConfig {
 
 func HasEnabledMetrics(m MetricsConfig) bool {
 	for _, e := range MetricCatalog {
+		if e.Section == "pppoe" || e.Section == "interfaces" {
+			continue
+		}
 		if def, ok := m[e.Key]; ok && def.Enabled && strings.TrimSpace(def.OID) != "" {
 			return true
 		}
@@ -163,6 +182,25 @@ func SessionWalkKeys() []string {
 	}
 }
 
+// InterfaceWalkKeys OIDs IF-MIB — usados no monitor de interfaces (não no ciclo periódico de totais).
+func InterfaceWalkKeys() []string {
+	return []string{
+		"if_descr", "if_type", "if_oper_status", "if_last_change",
+		"if_in_octets", "if_in_ucast_pkts", "if_in_errors",
+		"if_out_octets", "if_out_ucast_pkts", "if_out_errors",
+		"if_alias", "if_x_table", "if_mib_table",
+	}
+}
+
 func PeriodicTotalKeys() []string {
 	return []string{"total_online", "pppoe_online", "ipv4_online", "ipv6_online", "dual_stack_online"}
+}
+
+func isInterfaceWalkKey(key string) bool {
+	for _, k := range InterfaceWalkKeys() {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }

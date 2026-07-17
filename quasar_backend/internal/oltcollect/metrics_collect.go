@@ -51,6 +51,9 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	if totalBudget <= 0 {
 		totalBudget = 100 * time.Second
 	}
+	if totalBudget < 60*time.Second {
+		totalBudget = 60 * time.Second
+	}
 	weight := func(metric string) int {
 		switch metric {
 		case MetricRxPower, MetricTxPower, MetricPonRxPower, MetricPonTxPower, MetricPonVoltage, MetricPonCurrent, MetricPonTemp, MetricTemperature:
@@ -102,21 +105,36 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 			mapNameOID = o
 		}
 	}
-	ponByIfIndex := loadPonIfIndexMap(ctx, host, community, 20*time.Second, mapDescrOID, mapNameOID)
+
+	// Orçamento global: cada walk usa tempo restante (não fatias estáticas que somam > deadline).
+	deadline := time.Now().Add(totalBudget)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	preloadBudget := 20 * time.Second
+	if left := time.Until(deadline); left > 0 && left < preloadBudget+30*time.Second {
+		preloadBudget = left / 4
+		if preloadBudget < 8*time.Second {
+			preloadBudget = 8 * time.Second
+		}
+	}
+	ponByIfIndex := loadPonIfIndexMap(ctx, host, community, preloadBudget, mapDescrOID, mapNameOID)
 	onuPonByOnu := map[int]int{}
 	if needsVsolOnuPonIndex(metrics) {
-		onuPonByOnu = loadOnuPonIndexMap(ctx, host, community, 12*time.Second)
+		onuMapBudget := 12 * time.Second
+		if left := time.Until(deadline); left > 0 && left < onuMapBudget+20*time.Second {
+			onuMapBudget = left / 5
+			if onuMapBudget < 6*time.Second {
+				onuMapBudget = 6 * time.Second
+			}
+		}
+		onuPonByOnu = loadOnuPonIndexMap(ctx, host, community, onuMapBudget)
 	}
 
+	remainingWeight := totalWeight
 	for _, key := range keys {
 		def := metrics[key]
-		perWalk := (totalBudget * time.Duration(weight(key))) / time.Duration(totalWeight)
-		if perWalk < 12*time.Second {
-			perWalk = 12 * time.Second
-		}
-		if perWalk > 120*time.Second {
-			perWalk = 120 * time.Second
-		}
+		left := time.Until(deadline)
 		base := probing.NormalizeSNMPOID(def.OID)
 		if key == MetricStatus && strings.EqualFold(def.StatusMode, StatusModeIfMibIndex) && strings.TrimSpace(base) == "" {
 			base = probing.NormalizeSNMPOID(def.IfOperOID)
@@ -128,6 +146,36 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 			base = probing.NormalizeSNMPOID(def.OnlineCountOID)
 		}
 		entry := map[string]any{"metric": key, "oid": base, "status": "ok"}
+		if left < 8*time.Second {
+			entry["status"] = "empty"
+			entry["note"] = "orçamento esgotado — métricas anteriores consumiram o tempo"
+			entry["elapsed_ms"] = 0
+			entry["var_count"] = 0
+			walkLog = append(walkLog, entry)
+			remainingWeight -= weight(key)
+			if remainingWeight < 0 {
+				remainingWeight = 0
+			}
+			continue
+		}
+		w := weight(key)
+		if remainingWeight <= 0 {
+			remainingWeight = w
+		}
+		perWalk := (left * time.Duration(w)) / time.Duration(remainingWeight)
+		if perWalk < 10*time.Second {
+			perWalk = 10 * time.Second
+		}
+		if perWalk > 90*time.Second {
+			perWalk = 90 * time.Second
+		}
+		if margin := left - 2*time.Second; perWalk > margin && margin > 0 {
+			perWalk = margin
+		}
+		remainingWeight -= w
+		if remainingWeight < 0 {
+			remainingWeight = 0
+		}
 		t0 := time.Now()
 		var vars []probing.SNMPVar
 		var trunc bool
@@ -437,9 +485,16 @@ func snmpWalkMetric(ctx context.Context, host, community, base string, budget ti
 	if !needsMetricRetry(metricKey, trunc, note, len(vars)) {
 		return vars, trunc, note
 	}
-	retryBudget := budget + budget/2
-	if retryBudget > 90*time.Second {
-		retryBudget = 90 * time.Second
+	// Só retenta se ainda houver margem no orçamento global (evita roubar métricas seguintes).
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) < 15*time.Second {
+		return vars, trunc, note
+	}
+	retryBudget := budget / 2
+	if retryBudget < 12*time.Second {
+		retryBudget = 12 * time.Second
+	}
+	if retryBudget > 30*time.Second {
+		retryBudget = 30 * time.Second
 	}
 	vars2, trunc2, note2 := doSNMPWalk(ctx, host, community, base, retryBudget)
 	if len(vars2) > len(vars) {
@@ -460,11 +515,20 @@ func snmpWalkMetric(ctx context.Context, host, community, base string, budget ti
 }
 
 func doSNMPWalk(ctx context.Context, host, community, base string, budget time.Duration) ([]probing.SNMPVar, bool, string) {
-	wCtx, cancel := context.WithTimeout(ctx, budget)
+	if budget <= 0 {
+		budget = 30 * time.Second
+	}
+	// Timeout por PDU curto: se Timeout≈budget, um único GET-BULK lento consome tudo (~45s · walk vazio).
+	reqTO := 8 * time.Second
+	if budget < 20*time.Second {
+		reqTO = 5 * time.Second
+	}
+	wCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 	return probing.SNMPWalk(wCtx, probing.SNMPWalkParams{
 		Host: host, Port: 161, Community: community, RootOID: base,
-		Version: "2c", Timeout: budget, Retries: 1, MaxRows: 25000,
+		Version: "2c", Timeout: reqTO, Retries: 1, MaxRows: 25000,
+		MaxRepetitions: 10,
 	})
 }
 

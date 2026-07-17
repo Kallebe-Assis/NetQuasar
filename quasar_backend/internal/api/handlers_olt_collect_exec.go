@@ -183,11 +183,13 @@ func (s *Server) oltStepOnuMetricsCollect(ctx context.Context, st *oltCollectExe
 	}
 	budget := 300 * time.Second
 	if dl, ok := ctx.Deadline(); ok {
-		if left := time.Until(dl) - 2*time.Second; left > 10*time.Second && left < budget {
+		if left := time.Until(dl) - 2*time.Second; left > 30*time.Second && left < budget {
 			budget = left
 		}
 	}
-	sum, pons, _, err := oltcollect.CollectOnuMetrics(ctx, st.Host, st.Community, metrics, budget, st.MaxPons)
+	mctx, mcancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	defer mcancel()
+	sum, pons, _, err := oltcollect.CollectOnuMetrics(mctx, st.Host, st.Community, metrics, budget, st.MaxPons)
 	if err != nil {
 		return err
 	}

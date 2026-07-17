@@ -46,7 +46,7 @@ type BngCollectionOptions = {
   uplink_interfaces?: string[];
 };
 
-const SECTION_ORDER = ["system", "health", "subscribers", "pppoe"];
+const SECTION_ORDER = ["system", "health", "subscribers", "interfaces", "pppoe"];
 
 type EditSection = "geral" | (typeof SECTION_ORDER)[number] | "extras";
 
@@ -83,6 +83,7 @@ function countEnabled(metrics: BngMetricsForm, catalog: CatalogEntry[]) {
   let missingOid = 0;
   let recommendedOn = 0;
   for (const e of catalog) {
+    if (e.section === "pppoe" || e.section === "interfaces") continue;
     const m = metrics[e.key];
     if (m?.enabled) {
       enabled++;
@@ -453,8 +454,9 @@ export function BngCollectionPanel() {
                     <h3 className="olt-profile-modal__section-title">Geral</h3>
                     <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
                       O monitoramento periódico coleta métricas <strong>activas</strong> com OID preenchido. Totais de
-                      logins entram no ciclo de telemetria — o equipamento precisa de telemetria e BNG activos. A
-                      secção «Sessões PPPoE» é só para consulta manual (não active walks no ciclo automático).
+                      logins entram no ciclo de telemetria — o equipamento precisa de telemetria e BNG activos. As
+                      secções «Interfaces» e «Sessões PPPoE» são só para consulta/monitor sob demanda (não active walks
+                      no ciclo automático).
                     </p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, fontSize: 12, alignItems: "center" }}>
                       <span>

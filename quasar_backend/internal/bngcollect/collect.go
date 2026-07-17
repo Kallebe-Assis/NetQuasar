@@ -122,7 +122,8 @@ func collectInternal(ctx context.Context, host, community string, profile Profil
 					break
 				}
 			}
-			if isSession {
+			if isSession || isInterfaceWalkKey(entry.Key) {
+				// Sessões PPPoE e IF-MIB: só sob demanda (consulta / monitor de interfaces).
 				continue
 			}
 		}

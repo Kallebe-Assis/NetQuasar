@@ -6,14 +6,14 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 )
 
-func TestPeriodicCollectionSteps_prependsWalkForVsolMetrics(t *testing.T) {
+func TestPeriodicCollectionSteps_doesNotPrependWalkForVsolMetrics(t *testing.T) {
 	steps := periodicCollectionSteps(oltcollect.Profile{
 		Steps: []oltcollect.Step{{Method: oltcollect.MethodOnuMetricsCollect}},
 	}, "VSOL", "full")
-	if len(steps) != 2 {
-		t.Fatalf("expected 2 steps, got %d", len(steps))
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step (sem walk duplicado), got %d", len(steps))
 	}
-	if steps[0].Method != oltcollect.MethodOnuSNMPWalk || steps[1].Method != oltcollect.MethodOnuMetricsCollect {
+	if steps[0].Method != oltcollect.MethodOnuMetricsCollect {
 		t.Fatalf("unexpected steps: %+v", steps)
 	}
 }

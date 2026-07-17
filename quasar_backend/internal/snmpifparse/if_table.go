@@ -13,6 +13,7 @@ import (
 var (
 	reIfMib   = regexp.MustCompile(`^\.?1\.3\.6\.1\.2\.1\.2\.2\.1\.(\d+)\.(\d+)$`)
 	reIfName  = regexp.MustCompile(`^\.?1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.1\.(\d+)$`)
+	reIfAlias = regexp.MustCompile(`^\.?1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.18\.(\d+)$`)
 	reIfHCIn  = regexp.MustCompile(`^\.?1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.6\.(\d+)$`)
 	reIfHCOut = regexp.MustCompile(`^\.?1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.10\.(\d+)$`)
 )
@@ -22,6 +23,8 @@ type IfRow struct {
 	IfIndex     int    `json:"if_index"`
 	Descr       string `json:"descr"`
 	IfName      string `json:"if_name"`
+	IfAlias     string `json:"if_alias"`
+	IfType      int    `json:"if_type"`
 	DisplayName string `json:"display_name"`
 	Speed       int64  `json:"speed"`
 	AdminStatus int    `json:"admin_status"`
@@ -63,6 +66,7 @@ func pickDisplayName(ifName, descr string) string {
 func BuildIfTable(vars []probing.SNMPVar) []IfRow {
 	byIdx := map[int]map[int]string{}
 	ifName := map[int]string{}
+	ifAlias := map[int]string{}
 	hcIn := map[int]int64{}
 	hcOut := map[int]int64{}
 	hcInSeen := map[int]struct{}{}
@@ -91,6 +95,13 @@ func BuildIfTable(vars []probing.SNMPVar) []IfRow {
 			}
 			continue
 		}
+		if m := reIfAlias.FindStringSubmatch(oid); m != nil {
+			idx, _ := strconv.Atoi(m[1])
+			if idx > 0 {
+				ifAlias[idx] = val
+			}
+			continue
+		}
 		if m := reIfHCIn.FindStringSubmatch(oid); m != nil {
 			idx, _ := strconv.Atoi(m[1])
 			if idx > 0 {
@@ -113,6 +124,9 @@ func BuildIfTable(vars []probing.SNMPVar) []IfRow {
 		all[ix] = struct{}{}
 	}
 	for ix := range ifName {
+		all[ix] = struct{}{}
+	}
+	for ix := range ifAlias {
 		all[ix] = struct{}{}
 	}
 	for ix := range hcIn {
@@ -146,10 +160,13 @@ func BuildIfTable(vars []probing.SNMPVar) []IfRow {
 		}
 		nm := probing.NormalizeIFLabel(ifName[idx])
 		ds := probing.NormalizeIFLabel(c[2])
+		al := probing.NormalizeIFLabel(ifAlias[idx])
 		row := IfRow{
 			IfIndex:     idx,
 			Descr:       ds,
 			IfName:      nm,
+			IfAlias:     al,
+			IfType:      int(parseInt64(c[3])),
 			DisplayName: pickDisplayName(nm, ds),
 			Speed:       parseInt64(c[5]),
 			AdminStatus: int(parseInt64(c[7])),

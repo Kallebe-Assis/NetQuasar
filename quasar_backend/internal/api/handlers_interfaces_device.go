@@ -110,6 +110,10 @@ func (s *Server) listDeviceInterfaces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
+	if err := enrichInterfaceTableMetadata(r.Context(), s.DB(), id, payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
 	out := map[string]any{"device_id": id, "collected_at": useAt.UTC().Format(time.RFC3339), "interfaces": json.RawMessage(useRaw)}
 	if useAt != collected {
 		out["note"] = "último snapshot estava parcial; exibindo snapshot anterior mais completo"
@@ -221,6 +225,10 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	payload := buildInterfaceMonitorPayload(b, &collectedAt, latestBeforeInsertRaw, latestBeforeInsertAt)
 	if isSwitch {
 		enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
+	}
+	if err := enrichInterfaceTableMetadata(r.Context(), s.DB(), id, payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
 	}
 	if isMikrotik || isSwitch {
 		if tab, ok := payload["interface_table"].([]map[string]any); ok {
@@ -348,6 +356,10 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 	payload := buildInterfaceMonitorPayload(latestRaw, latestAt, nil, nil)
 	if isSwitch {
 		enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
+	}
+	if err := enrichInterfaceTableMetadata(r.Context(), s.DB(), id, payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
 	}
 	tab, _ := payload["interface_table"].([]map[string]any)
 	if len(tab) == 0 {
