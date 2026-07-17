@@ -120,35 +120,39 @@ func ComposeSystemReport(title string, payload map[string]any) string {
 	cols, _ := payload["columns"].([]string)
 	rows, _ := payload["rows"].([][]string)
 	if !wroteGroups && len(cols) > 0 && len(rows) > 0 {
-		sb.WriteString(fmt.Sprintf("\nDetalhes (%d linha(s))\n", len(rows)))
-		limit := 40
-		for i, row := range rows {
-			if i >= limit {
-				sb.WriteString(fmt.Sprintf("… e mais %d linha(s)\n", len(rows)-limit))
-				break
+		if isOnuPerPonColumns(cols) {
+			writeOnuPerPonCompact(&sb, cols, rows)
+		} else {
+			sb.WriteString(fmt.Sprintf("\nDetalhes (%d linha(s))\n", len(rows)))
+			limit := 40
+			for i, row := range rows {
+				if i >= limit {
+					sb.WriteString(fmt.Sprintf("… e mais %d linha(s)\n", len(rows)-limit))
+					break
+				}
+				sb.WriteString(fmt.Sprintf("\n%d) ", i+1))
+				parts := make([]string, 0, len(row))
+				for j, cell := range row {
+					col := ""
+					if j < len(cols) {
+						col = cols[j]
+					}
+					cell = strings.TrimSpace(cell)
+					if cell == "" {
+						continue
+					}
+					if col == "Última coleta" && strings.Contains(cell, "T") {
+						cell = FormatGeneratedAt(cell)
+					}
+					if col != "" {
+						parts = append(parts, fmt.Sprintf("%s: %s", col, cell))
+					} else {
+						parts = append(parts, cell)
+					}
+				}
+				sb.WriteString(strings.Join(parts, "\n   "))
+				sb.WriteString("\n")
 			}
-			sb.WriteString(fmt.Sprintf("\n%d) ", i+1))
-			parts := make([]string, 0, len(row))
-			for j, cell := range row {
-				col := ""
-				if j < len(cols) {
-					col = cols[j]
-				}
-				cell = strings.TrimSpace(cell)
-				if cell == "" {
-					continue
-				}
-				if col == "Última coleta" && strings.Contains(cell, "T") {
-					cell = FormatGeneratedAt(cell)
-				}
-				if col != "" {
-					parts = append(parts, fmt.Sprintf("%s: %s", col, cell))
-				} else {
-					parts = append(parts, cell)
-				}
-			}
-			sb.WriteString(strings.Join(parts, "\n   "))
-			sb.WriteString("\n")
 		}
 	}
 
@@ -324,5 +328,39 @@ func writeBngLoginAverages(sb *strings.Builder, av map[string]any) {
 				sb.WriteString(fmt.Sprintf("  %s: %v\n", metricLabels[k], v))
 			}
 		}
+	}
+}
+
+func isOnuPerPonColumns(cols []string) bool {
+	if len(cols) < 6 {
+		return false
+	}
+	return cols[0] == "OLT" && cols[1] == "PON" && cols[3] == "Total" && cols[4] == "Online" && cols[5] == "Offline"
+}
+
+// writeOnuPerPonCompact — uma linha por PON (evita mensagem Telegram > 4096).
+func writeOnuPerPonCompact(sb *strings.Builder, cols []string, rows [][]string) {
+	_ = cols
+	sb.WriteString(fmt.Sprintf("\nDetalhes (%d porta(s) PON)\n", len(rows)))
+	curOLT := ""
+	for _, row := range rows {
+		if len(row) < 6 {
+			continue
+		}
+		olt := strings.TrimSpace(row[0])
+		pon := strings.TrimSpace(row[1])
+		name := strings.TrimSpace(row[2])
+		total, on, off := strings.TrimSpace(row[3]), strings.TrimSpace(row[4]), strings.TrimSpace(row[5])
+		if olt != curOLT {
+			curOLT = olt
+			sb.WriteString("\n")
+			sb.WriteString(olt)
+			sb.WriteString("\n")
+		}
+		label := pon
+		if name != "" && name != pon {
+			label = fmt.Sprintf("%s (%s)", pon, name)
+		}
+		sb.WriteString(fmt.Sprintf("• PON %s: %s total · %s on · %s off\n", label, total, on, off))
 	}
 }

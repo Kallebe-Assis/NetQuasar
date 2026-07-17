@@ -49,12 +49,17 @@ export function trafficHistoryFromInterfaces(
   ts = Date.now(),
 ): Record<number, Array<{ ts: number; tx: number; rx: number }>> {
   let next = { ...prev };
+  let changed = false;
   for (const r of rows) {
     const rx = Number(r.in_bps ?? NaN);
     const tx = Number(r.out_bps ?? NaN);
     if (!Number.isFinite(rx) || !Number.isFinite(tx)) continue;
-    const arr = [...(next[r.if_index] ?? []), { ts, tx, rx }];
-    next[r.if_index] = arr.slice(-MAX_HISTORY);
+    const prevArr = next[r.if_index] ?? [];
+    const last = prevArr[prevArr.length - 1];
+    // Evita gráfico “a andar” com o mesmo valor do cache.
+    if (last && last.tx === tx && last.rx === rx) continue;
+    next[r.if_index] = [...prevArr, { ts, tx, rx }].slice(-MAX_HISTORY);
+    changed = true;
   }
-  return next;
+  return changed ? next : prev;
 }

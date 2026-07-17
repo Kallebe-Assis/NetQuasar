@@ -212,6 +212,13 @@ function telnetPerInterfaceRows(metrics: Record<string, unknown> | undefined): M
     { metricKey: "telnet_sfp_bias_current", field: "sfp-tx-bias-current" },
     { metricKey: "telnet_sfp_vendor", field: "sfp-vendor-name" },
   ];
+  const put = (iface: string, patch: Record<string, unknown>) => {
+    for (const alias of nxosIfAliases(iface)) {
+      const existing = map.get(alias) ?? { interface: alias };
+      Object.assign(existing, patch, { interface: alias });
+      map.set(alias, existing);
+    }
+  };
   for (const { metricKey, field } of mergeKeys) {
     const fr = telnetField(metrics, metricKey);
     if (!fr?.ok || !Array.isArray(fr.value)) continue;
@@ -219,17 +226,37 @@ function telnetPerInterfaceRows(metrics: Record<string, unknown> | undefined): M
       const row = item as Record<string, unknown>;
       const iface = str(row.interface);
       if (!iface) continue;
-      const existing = map.get(iface) ?? { interface: iface };
+      const patch: Record<string, unknown> = {};
       const val = row[field];
-      if (val != null) existing[field] = val;
+      if (val != null) patch[field] = val;
       if (metricKey === "telnet_sfp_vendor") {
-        if (row["sfp-vendor-part-number"] != null) existing["sfp-vendor-part-number"] = row["sfp-vendor-part-number"];
-        if (row["sfp-serial"] != null) existing["sfp-serial"] = row["sfp-serial"];
+        if (row["sfp-vendor-part-number"] != null) patch["sfp-vendor-part-number"] = row["sfp-vendor-part-number"];
+        if (row["sfp-serial"] != null) patch["sfp-serial"] = row["sfp-serial"];
       }
-      map.set(iface, existing);
+      put(iface, patch);
     }
   }
   return map;
+}
+
+/** Aliases Eth1/23 ↔ Ethernet1/23 e Po1 ↔ port-channel1 para cruzar SNMP/CLI. */
+function nxosIfAliases(name: string): string[] {
+  const n = name.trim();
+  if (!n) return [];
+  const out = new Set<string>([n]);
+  const low = n.toLowerCase();
+  if (low.startsWith("ethernet")) {
+    out.add("Eth" + n.slice("Ethernet".length));
+    out.add("Ethernet" + n.slice("Ethernet".length));
+  } else if (low.startsWith("eth") && !low.startsWith("ether")) {
+    out.add("Ethernet" + n.slice(3));
+    out.add(n);
+  } else if (low.startsWith("port-channel")) {
+    out.add("Po" + n.slice("port-channel".length));
+  } else if (/^po\d+/i.test(n)) {
+    out.add("port-channel" + n.slice(2));
+  }
+  return [...out];
 }
 
 function formatDbmFromRaw(v: unknown): string {
@@ -410,33 +437,64 @@ export function buildMikrotikSfpPanels(
   const ifaceByName = new Map<string, MikrotikIfRow>();
   for (const r of ifaces) {
     const names = [r.if_name, r.display_name, r.descr].map((n) => str(n).toLowerCase()).filter(Boolean);
-    for (const n of names) ifaceByName.set(n, r);
+    for (const n of names) {
+      ifaceByName.set(n, r);
+      for (const alias of nxosIfAliases(n)) {
+        ifaceByName.set(alias.toLowerCase(), r);
+      }
+    }
   }
+
+  const preferDbm = (telnet: unknown, snmp?: number): string => {
+    const fromTelnet = formatDbmFromRaw(telnet);
+    if (fromTelnet !== EM_DASH) return fromTelnet;
+    return formatDbm(snmp);
+  };
 
   const panelFromRow = (ifaceName: string, row: Record<string, unknown>, iface?: MikrotikIfRow): MikrotikSfpPanel => {
     const online = iface ? String(iface.oper_status ?? "").toLowerCase() === "up" : true;
-    const txFromSnmp = iface?.tx_dbm;
-    const rxFromSnmp = iface?.rx_dbm;
-    const txTelnet = row["sfp-tx-power"];
-    const rxTelnet = row["sfp-rx-power"];
     return {
       name: ifaceName,
       online,
       temperatureC: formatTempFromRaw(row["sfp-temperature"]),
       voltageV: formatVoltageFromRaw(row["sfp-supply-voltage"]),
       txBiasMa: formatBiasFromRaw(row["sfp-tx-bias-current"]),
-      txDbm: txTelnet != null ? formatDbmFromRaw(txTelnet) : formatDbm(txFromSnmp),
-      rxDbm: rxTelnet != null ? formatDbmFromRaw(rxTelnet) : formatDbm(rxFromSnmp),
+      txDbm: preferDbm(row["sfp-tx-power"], iface?.tx_dbm),
+      rxDbm: preferDbm(row["sfp-rx-power"], iface?.rx_dbm),
       vendor: str(row["sfp-vendor-name"]) || EM_DASH,
       model: str(row["sfp-vendor-part-number"]) || EM_DASH,
       serial: str(row["sfp-serial"]) || EM_DASH,
     };
   };
 
+  // Preferir interfaces SFP com TX/RX SNMP do snapshot; enriquecer com telnet quando existir.
+  const sfpIfaces = ifaces.filter((r) => r.sfp || /sfp/i.test(String(r.if_name ?? r.display_name ?? r.descr ?? "")));
+  const withSnmpPower = sfpIfaces.filter((r) => r.tx_dbm != null || r.rx_dbm != null);
+  if (withSnmpPower.length > 0) {
+    return withSnmpPower.slice(0, 8).map((r) => {
+      const name = String(r.display_name ?? r.if_name ?? r.descr ?? `if${r.if_index}`);
+      const telnet =
+        telnetRows.get(name) ??
+        telnetRows.get(String(r.if_name ?? "")) ??
+        nxosIfAliases(name).map((a) => telnetRows.get(a)).find(Boolean) ??
+        {};
+      return panelFromRow(name, telnet, r);
+    });
+  }
+
   if (telnetRows.size > 0) {
-    return [...telnetRows.entries()].map(([ifaceName, row]) =>
-      panelFromRow(ifaceName, row, ifaceByName.get(ifaceName.toLowerCase())),
-    );
+    const seen = new Set<string>();
+    const panels: MikrotikSfpPanel[] = [];
+    for (const [ifaceName, row] of telnetRows.entries()) {
+      const canon = nxosIfAliases(ifaceName)[0] ?? ifaceName;
+      if (seen.has(canon.toLowerCase())) continue;
+      seen.add(canon.toLowerCase());
+      const iface =
+        ifaceByName.get(ifaceName.toLowerCase()) ??
+        nxosIfAliases(ifaceName).map((a) => ifaceByName.get(a.toLowerCase())).find(Boolean);
+      panels.push(panelFromRow(canon, row, iface));
+    }
+    return panels;
   }
 
   const optical = snmpField(metrics, "optical_table")?.optical_ports ?? [];
@@ -455,7 +513,6 @@ export function buildMikrotikSfpPanels(
     }));
   }
 
-  const sfpIfaces = ifaces.filter((r) => r.sfp || /sfp/i.test(String(r.if_name ?? r.display_name ?? "")));
   return sfpIfaces.slice(0, 4).map((r) => ({
     name: String(r.display_name ?? r.if_name ?? r.descr ?? `if${r.if_index}`),
     online: String(r.oper_status ?? "").toLowerCase() === "up",

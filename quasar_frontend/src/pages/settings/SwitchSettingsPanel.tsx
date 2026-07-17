@@ -21,11 +21,13 @@ export function SwitchSettingsPanel() {
           queryKey="switch-collection"
           saveSuccessMessage="Perfil Switch guardado."
           loadingLabel="A carregar perfil Switch…"
+          brand="switch"
         />
       ) : (
         <MikrotikTelnetProfilesPanel
           apiBase="/api/v1/settings/switch-telnet-profiles"
           queryKey="switch-telnet-profiles"
+          brand="switch"
         />
       )}
     </div>

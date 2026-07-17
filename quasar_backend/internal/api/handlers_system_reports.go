@@ -114,7 +114,7 @@ func (s *Server) systemReportTelegram(w http.ResponseWriter, r *http.Request) {
 	}
 	title, _ := payload["title"].(string)
 	text := reporttelegram.ComposeSystemReport(title, payload)
-	if err := telegramclient.SendMessage(r.Context(), cfg, text); err != nil {
+	if err := telegramclient.SendMessageChunks(r.Context(), cfg, text); err != nil {
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
 		return
 	}

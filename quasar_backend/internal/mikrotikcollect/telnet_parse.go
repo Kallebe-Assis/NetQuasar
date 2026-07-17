@@ -365,6 +365,14 @@ func parseTelnetOutputForIface(parser, output, iface string) any {
 		return parseInterfaceRecords(output)
 	case "wireless_detail", "wifiwave2_detail":
 		return parseWirelessRecords(output)
+	case "nxos_system_uptime":
+		return ParseNxosSystemUptime(output)
+	case "nxos_hostname":
+		return ParseNxosHostname(output)
+	case "nxos_interface_status":
+		return ParseNxosInterfaceStatus(output)
+	case "nxos_transceiver":
+		return ExtractNxosTransceiverField(output, field)
 	default:
 		return map[string]any{"raw": output}
 	}

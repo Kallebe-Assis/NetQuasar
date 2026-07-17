@@ -17,7 +17,7 @@ func OnuOnlineFromSta(st int) bool {
 	return st == 1
 }
 
-// FormatUptimeDisplay sysUpTime (ticks) ou texto VSOL.
+// FormatUptimeDisplay sysUpTime (ticks) ou texto VSOL → formato compacto (ex.: 41d 08h 29m).
 func FormatUptimeDisplay(raw string) string {
 	raw = strings.TrimSpace(raw)
 	raw = strings.Trim(raw, `"`)
@@ -25,7 +25,10 @@ func FormatUptimeDisplay(raw string) string {
 		return ""
 	}
 	if ticks, err := strconv.ParseUint(raw, 10, 64); err == nil {
-		return formatSysUpTimeTicks(ticks)
+		return formatDurationSeconds(ticks / 100)
+	}
+	if sec, ok := vsolUptimeTextToSeconds(raw); ok && sec > 0 {
+		return formatDurationSeconds(uint64(sec))
 	}
 	if looksLikeVsolUptimeText(raw) {
 		return raw
@@ -41,7 +44,10 @@ func looksLikeVsolUptimeText(s string) bool {
 }
 
 func formatSysUpTimeTicks(ticks uint64) string {
-	sec := ticks / 100
+	return formatDurationSeconds(ticks / 100)
+}
+
+func formatDurationSeconds(sec uint64) string {
 	const day = uint64(86400)
 	const hour = uint64(3600)
 	const min = uint64(60)

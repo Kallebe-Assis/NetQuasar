@@ -10,6 +10,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
@@ -32,7 +33,7 @@ type Params struct {
 	CurrJSON    []byte
 }
 
-// EvaluateAfterSnapshot aplica limiares SFP MikroTik e transições UP→DOWN de interface.
+// EvaluateAfterSnapshot aplica limiares SFP (SNMP MikroTik + Telnet Switch/MikroTik) e transições UP→DOWN.
 func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, p Params) {
 	if pool == nil || len(p.CurrJSON) == 0 {
 		return
@@ -41,8 +42,10 @@ func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 	desc := strings.TrimSpace(p.DeviceDesc)
 	currVars := snapshotwalk.VarsFromJSON(p.CurrJSON)
 
-	if isMikrotik(p.Category, p.Brand, p.Model, p.DeviceDesc) {
-		evaluateMikrotikSFP(ctx, pool, log, p.DeviceID, desc, host, currVars)
+	mk := isMikrotik(p.Category, p.Brand, p.Model, p.DeviceDesc)
+	sw := strings.EqualFold(strings.TrimSpace(p.Category), "switch")
+	if mk || sw {
+		evaluateOpticalSFP(ctx, pool, log, p.DeviceID, desc, host, p.CurrJSON, currVars)
 	}
 
 	if len(p.PrevJSON) == 0 {
@@ -53,6 +56,9 @@ func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 }
 
 func isMikrotik(category, brand, model, description string) bool {
+	if strings.EqualFold(strings.TrimSpace(category), "switch") {
+		return false
+	}
 	hay := strings.ToLower(strings.TrimSpace(category) + " " + strings.TrimSpace(brand) + " " +
 		strings.TrimSpace(model) + " " + strings.TrimSpace(description))
 	return strings.Contains(hay, "mikrotik") || strings.Contains(hay, "routeros") ||
@@ -60,27 +66,60 @@ func isMikrotik(category, brand, model, description string) bool {
 		strings.Contains(hay, "chr")
 }
 
-func evaluateMikrotikSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
-	deviceID uuid.UUID, devDesc, host string, vars []probing.SNMPVar,
+func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
+	deviceID uuid.UUID, devDesc, host string, currJSON []byte, vars []probing.SNMPVar,
 ) {
-	if len(vars) == 0 {
-		return
-	}
 	ifRows := snmpifparse.BuildIfTable(vars)
 	optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, vars)
-	sfpEval := make([]alertthresholds.SfpInterfaceRow, 0, len(ifRows))
+	metaPorts := ifaceoptical.ParseMetaFromWalkJSON(currJSON)
+	if len(metaPorts) > 0 {
+		metaPorts = ifaceoptical.ResolveIfIndexes(metaPorts, ifRows)
+		optMap = ifaceoptical.MergeIntoOpticalMap(optMap, metaPorts)
+	}
+	if len(ifRows) == 0 && len(optMap) == 0 {
+		return
+	}
+	sfpEval := make([]alertthresholds.SfpInterfaceRow, 0, len(ifRows)+len(metaPorts))
+	seen := map[int]struct{}{}
 	for _, r := range ifRows {
 		op := optMap[r.IfIndex]
 		disp := strings.TrimSpace(r.DisplayName)
 		if disp == "" {
+			disp = strings.TrimSpace(r.IfName)
+		}
+		if disp == "" {
 			disp = fmt.Sprintf("if%d", r.IfIndex)
+		}
+		sfp := snmpmikrotik.IsSfpPort(r.DisplayName, r.Descr, op)
+		if !sfp && (op.TxDBm != nil || op.RxDBm != nil) {
+			sfp = true
 		}
 		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
 			IfIndex:     r.IfIndex,
 			DisplayName: disp,
-			Sfp:         snmpmikrotik.IsSfpPort(r.DisplayName, r.Descr, op),
+			Sfp:         sfp,
 			TxDBm:       copyFloatPtr(op.TxDBm),
 			RxDBm:       copyFloatPtr(op.RxDBm),
+		})
+		seen[r.IfIndex] = struct{}{}
+	}
+	for _, p := range metaPorts {
+		if p.IfIndex <= 0 {
+			continue
+		}
+		if _, ok := seen[p.IfIndex]; ok {
+			continue
+		}
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			name = fmt.Sprintf("if%d", p.IfIndex)
+		}
+		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
+			IfIndex:     p.IfIndex,
+			DisplayName: name,
+			Sfp:         true,
+			TxDBm:       copyFloatPtr(p.TxDBm),
+			RxDBm:       copyFloatPtr(p.RxDBm),
 		})
 	}
 	alertthresholds.EvaluateMikrotikSFPAfterSnapshot(ctx, pool, log, deviceID, devDesc, host, sfpEval)

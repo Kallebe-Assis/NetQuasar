@@ -77,6 +77,28 @@ func collectInterfaceSNMPWalks(ctx context.Context, pool *pgxpool.Pool, host, co
 					notes = append(notes, note)
 				}
 			}
+			// MikroTik: garantir walk óptico + nomes mesmo se o catálogo omitir.
+			if !useSwitchProfile {
+				walkMk, truncMk, noteMk := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+					Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
+					Version: "2c", Timeout: walkShareTimeout(total, 0.14, 10*time.Second, 45*time.Second),
+					Retries: 0, MaxRows: snmpMkOpticalMaxRows,
+				})
+				walkMkIf, truncMkIf, noteMkIf := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+					Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
+					Version: "2c", Timeout: walkShareTimeout(total, 0.12, 8*time.Second, 40*time.Second),
+					Retries: 0, MaxRows: snmpMkIfStatsMaxRows,
+				})
+				merged = append(merged, walkMk...)
+				merged = append(merged, walkMkIf...)
+				trunc = trunc || truncMk || truncMkIf
+				if noteMk != "" {
+					notes = append(notes, noteMk)
+				}
+				if noteMkIf != "" {
+					notes = append(notes, noteMkIf)
+				}
+			}
 			walkSen, truncSen, noteSen := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 				Host: host, Port: 161, Community: community, RootOID: "1.3.6.1.2.1.99.1.1.1.4",
 				Version: "2c", Timeout: walkShareTimeout(total, 0.08, 6*time.Second, 25*time.Second),

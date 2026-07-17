@@ -97,7 +97,28 @@ type Props = {
   onSaved?: (copied?: TelnetProfile) => void;
   onDeleted?: () => void;
   onPendingChange?: (pending: boolean) => void;
+  /** Textos da UI — "mikrotik" (RouterOS) ou "switch" (Cisco NX-OS). */
+  brand?: "mikrotik" | "switch";
 };
+
+const BRAND_COPY = {
+  mikrotik: {
+    title: "Coleta Telnet — MikroTik",
+    description:
+      "Perfis nomeados com comandos RouterOS para métricas que não vêm bem via SNMP: interfaces (MTU, status, banda), SFP (RX/TX), saúde (temperatura/voltagem), wireless (SSID, canal, protocolo) e uptime. Cada equipamento MikroTik pode usar um perfil diferente na página MikroTik; sem perfil atribuído usa o padrão.",
+    sectionPrefix: "Comandos RouterOS",
+    prePlaceholder: "/system resource print without-paging",
+    newProfileDefault: "Novo perfil",
+  },
+  switch: {
+    title: "Coleta Telnet — Switch (Cisco NX-OS)",
+    description:
+      "Perfis com comandos NX-OS / Nexus: show interface status, show system uptime e show interface transceiver details (RX/TX, temperatura, vendor). Use terminal length 0 nos pré-comandos. Atribua o perfil ao equipamento na página Switch.",
+    sectionPrefix: "Comandos NX-OS",
+    prePlaceholder: "terminal length 0",
+    newProfileDefault: "Cisco NX-OS",
+  },
+} as const;
 
 function TelnetMetricFieldsGrid({
   fields,
@@ -185,9 +206,11 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
       onSaved,
       onDeleted,
       onPendingChange,
+      brand = "mikrotik",
     },
     ref,
   ) {
+    const copy = BRAND_COPY[brand];
     const qc = useQueryClient();
     const { push: pushToast } = useAppToast();
     const [profileId, setProfileId] = useState("");
@@ -408,7 +431,7 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
                 style={{ fontFamily: "monospace", fontSize: 12, width: "100%" }}
                 value={preCommandsText}
                 onChange={(e) => setPreCommandsText(e.target.value)}
-                placeholder="/system resource print without-paging"
+                placeholder={copy.prePlaceholder}
               />
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.4 }}>
                 Executados após login e antes de cada comando de métrica (um por linha).
@@ -426,7 +449,7 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
         <div className="olt-profile-modal__section">
           <TelnetMetricFieldsGrid
             title={group.label}
-            description={`Comandos RouterOS — ${group.label}.`}
+            description={`${copy.sectionPrefix} — ${group.label}.`}
             entity={group.label}
             fields={group.fields}
             metrics={metrics}
@@ -442,12 +465,9 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
     return (
       <div>
         <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
-          <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta Telnet — MikroTik</h2>
+          <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>{copy.title}</h2>
           <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-            Perfis nomeados com comandos RouterOS para métricas que não vêm bem via SNMP: interfaces (MTU, status,
-            banda), SFP (RX/TX), saúde (temperatura/voltagem), wireless (SSID, canal, protocolo) e uptime. Cada
-            equipamento MikroTik pode usar um perfil diferente na página MikroTik; sem perfil atribuído usa o{" "}
-            <strong>padrão</strong>.
+            {copy.description}
           </p>
           {!telnetReady && (
             <div className="msg msg--warn" style={{ marginTop: 10, fontSize: 12 }}>
@@ -600,7 +620,7 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
                 <div style={{ padding: 12 }}>
                   <TelnetMetricFieldsGrid
                     title={label}
-                    description={`Comandos RouterOS — ${label}.`}
+                    description={`${copy.sectionPrefix} — ${label}.`}
                     entity={label}
                     fields={fields}
                     metrics={metrics}
@@ -629,7 +649,7 @@ export const MikrotikTelnetProfilesPanel = forwardRef<MikrotikTelnetProfilesHand
             style={{ fontFamily: "monospace", fontSize: 12, width: "100%" }}
             value={preCommandsText}
             onChange={(e) => setPreCommandsText(e.target.value)}
-            placeholder="/system resource print without-paging"
+            placeholder={copy.prePlaceholder}
           />
         </details>
 

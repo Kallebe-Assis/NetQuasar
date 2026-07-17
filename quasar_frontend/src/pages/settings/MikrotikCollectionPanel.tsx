@@ -137,7 +137,21 @@ type Props = {
   loadingLabel?: string;
   onSaved?: () => void;
   onPendingChange?: (pending: boolean) => void;
+  brand?: "mikrotik" | "switch";
 };
+
+const COLLECTION_BRAND = {
+  mikrotik: {
+    title: "Coleta SNMP — MikroTik",
+    blurb: "equipamentos MikroTik/RouterOS",
+    saveBtn: "Guardar perfil MikroTik",
+  },
+  switch: {
+    title: "Coleta SNMP — Switch",
+    blurb: "switches Cisco NX-OS / Nexus (IF-MIB, PROCESS-MIB, sensores)",
+    saveBtn: "Guardar perfil Switch",
+  },
+} as const;
 
 function collectModeTypeLabel(mode: string): string {
   const m = mode.toLowerCase();
@@ -347,9 +361,11 @@ export const MikrotikCollectionPanel = forwardRef<MikrotikCollectionHandle, Prop
     loadingLabel = "A carregar perfil MikroTik…",
     onSaved,
     onPendingChange,
+    brand = "mikrotik",
   },
   ref,
 ) {
+  const brandCopy = COLLECTION_BRAND[brand];
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [metrics, setMetrics] = useState<MikrotikMetricsForm>({});
@@ -441,7 +457,7 @@ export const MikrotikCollectionPanel = forwardRef<MikrotikCollectionHandle, Prop
         <div className="olt-profile-modal__section">
           <h3 className="olt-profile-modal__section-title">Geral</h3>
           <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-            Configure o que o monitoramento deve coletar em equipamentos MikroTik/RouterOS. Apenas métricas{" "}
+            Configure o que o monitoramento deve coletar em {brandCopy.blurb}. Apenas métricas{" "}
             <strong>activas</strong> com <strong>OID preenchido</strong> entram na coleta.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12 }}>
@@ -498,9 +514,9 @@ export const MikrotikCollectionPanel = forwardRef<MikrotikCollectionHandle, Prop
   return (
     <div style={{ marginTop: embedded ? 0 : 8 }}>
       <div className="card" style={{ padding: "12px 16px", marginBottom: 16 }}>
-        <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Coleta SNMP — MikroTik</h2>
+        <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>{brandCopy.title}</h2>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-          Configure o que o monitoramento deve coletar em equipamentos MikroTik/RouterOS. Apenas métricas{" "}
+          Configure o que o monitoramento deve coletar em {brandCopy.blurb}. Apenas métricas{" "}
           <strong>activas</strong> com <strong>OID preenchido</strong> entram na coleta. Campos activos sem OID são
           ignorados e reportados como dados em falta.
         </p>
@@ -590,7 +606,7 @@ export const MikrotikCollectionPanel = forwardRef<MikrotikCollectionHandle, Prop
       <div style={{ marginTop: 16, display: "flex", gap: 8, alignItems: "center" }}>
         <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate()}>
           <Save size={16} style={{ marginRight: 6, verticalAlign: "middle" }} />
-          {patch.isPending ? "A guardar…" : "Guardar perfil MikroTik"}
+          {patch.isPending ? "A guardar…" : brandCopy.saveBtn}
         </button>
       </div>
     </div>

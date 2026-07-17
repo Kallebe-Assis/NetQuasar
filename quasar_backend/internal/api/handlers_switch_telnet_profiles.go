@@ -19,8 +19,8 @@ func (s *Server) listSwitchTelnetProfiles(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"profiles": profiles,
-		"catalog":  mikrotikcollect.TelnetMetricCatalog,
-		"sections": mikrotikcollect.TelnetSectionLabels,
+		"catalog":  switchcollect.TelnetMetricCatalog,
+		"sections": switchcollect.TelnetSectionLabels,
 	})
 }
 
@@ -65,10 +65,10 @@ func (s *Server) createSwitchTelnetProfile(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusConflict, "CONFLICT", "já existe um perfil com este nome", nil)
 		return
 	}
-	metrics := body.Metrics.Normalize().MergeWithDefaults()
+	metrics := switchcollect.MergeTelnetMetrics(body.Metrics.Normalize())
 	pre := body.PreCommands
 	if pre == nil {
-		pre = []string{}
+		pre = switchcollect.DefaultTelnetPreCommands()
 	}
 	mb, _ := json.Marshal(metrics)
 	pb, _ := json.Marshal(pre)
@@ -113,10 +113,10 @@ func (s *Server) patchSwitchTelnetProfile(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	metrics := body.Metrics.Normalize().MergeWithDefaults()
+	metrics := switchcollect.MergeTelnetMetrics(body.Metrics.Normalize())
 	pre := body.PreCommands
 	if pre == nil {
-		pre = []string{}
+		pre = switchcollect.DefaultTelnetPreCommands()
 	}
 	mb, _ := json.Marshal(metrics)
 	pb, _ := json.Marshal(pre)

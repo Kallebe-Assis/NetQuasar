@@ -102,7 +102,7 @@ func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string
 		cfg, err := telegramclient.LoadConfig(ctx, pool, "reports")
 		if err != nil || !cfg.Ready() {
 			sendErr = fmt.Errorf("Telegram relatórios: %w", err)
-		} else if err := telegramclient.SendMessage(ctx, cfg, text); err != nil {
+		} else if err := telegramclient.SendMessageChunks(ctx, cfg, text); err != nil {
 			sendErr = err
 		}
 	}

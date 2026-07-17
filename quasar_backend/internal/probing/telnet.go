@@ -304,26 +304,73 @@ func (s *telnetSession) readUntilReady(total time.Duration) string {
 	deadline := time.Now().Add(total)
 	var out strings.Builder
 	read := 0
+	idleEmpty := 0
 	for time.Now().Before(deadline) && read < s.maxRead {
 		part := s.readChunk(400 * time.Millisecond)
 		if strings.TrimSpace(part) == "" {
+			idleEmpty++
+			// Sem dados novos: se já vimos prompt CLI no fim do buffer, termina.
+			if out.Len() > 0 && looksLikeCLIPrompt(out.String()) {
+				break
+			}
+			// Após algum conteúdo, idle prolongado ≈ fim (equipamento lento sem eco de prompt).
+			if out.Len() > 64 && idleEmpty >= 8 {
+				break
+			}
 			time.Sleep(80 * time.Millisecond)
 			continue
 		}
+		idleEmpty = 0
 		if out.Len() > 0 {
 			out.WriteByte('\n')
 		}
 		out.WriteString(part)
 		read += len(part)
-		chunk := strings.ToLower(part)
-		if promptWantsPassword(part) {
+		if promptWantsPassword(part) || promptWantsPassword(out.String()) {
 			break
 		}
-		if strings.Contains(chunk, "#") || strings.Contains(chunk, ">") || strings.Contains(chunk, "(config)") {
+		// Só trata #/> como prompt na ÚLTIMA linha — nunca a meio do eco "switch# show …".
+		if looksLikeCLIPrompt(out.String()) {
 			break
 		}
 	}
 	return out.String()
+}
+
+// looksLikeCLIPrompt detecta prompt no fim do buffer (Cisco #/> ou RouterOS "] >"),
+// sem falsos positivos em eco de comando ("switch# show …") nem em tabelas de saída.
+func looksLikeCLIPrompt(text string) bool {
+	text = strings.TrimRight(text, " \t\r\n")
+	if text == "" {
+		return false
+	}
+	if i := strings.LastIndexAny(text, "\n\r"); i >= 0 {
+		text = text[i+1:]
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || len(text) > 96 {
+		return false
+	}
+	low := strings.ToLower(text)
+	if strings.Contains(low, "password:") {
+		return false
+	}
+	// Linha de comando ecoada: "switch# show interface …" — NÃO é prompt de espera.
+	if strings.Contains(text, " ") {
+		// RouterOS: "[admin@host] >" ou "[admin@host] > "
+		if strings.HasSuffix(strings.TrimSpace(text), ">") && (strings.Contains(text, "]") || strings.Contains(text, "@")) {
+			return true
+		}
+		// Cisco config: "switch(config)#" / "switch(config-if)#"
+		if strings.Contains(low, "(config") && strings.HasSuffix(text, "#") {
+			return true
+		}
+		return false
+	}
+	if strings.HasSuffix(text, "#") || strings.HasSuffix(text, ">") {
+		return true
+	}
+	return false
 }
 
 func (s *telnetSession) sendLine(line string) (string, error) {
@@ -388,8 +435,8 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 	if maxRead <= 0 {
 		maxRead = 32768
 	}
-	if maxRead > 524288 {
-		maxRead = 524288
+	if maxRead > 2*1024*1024 {
+		maxRead = 2 * 1024 * 1024
 	}
 	if len(p.Commands) == 0 {
 		return TelnetRunScriptResult{OK: false, Note: note, Error: "nenhum comando"}
@@ -429,18 +476,28 @@ func TelnetRunScript(ctx context.Context, p TelnetRunScriptParams) TelnetRunScri
 		return TelnetRunScriptResult{OK: false, LatencyMs: lat, Error: err.Error(), Note: note}
 	}
 
-	res := execTelnetCommands(sess, p.Commands, commandReadWait(len(p.Commands)))
+	res := execTelnetCommands(sess, p.Commands, commandReadWait(len(p.Commands), timeout))
 	res.LatencyMs = lat
 	res.Note = note
 	_, _ = fmt.Fprintf(conn, "exit\r\n")
 	return res
 }
 
-func commandReadWait(nCommands int) time.Duration {
+func commandReadWait(nCommands int, sessionTimeout time.Duration) time.Duration {
+	// Comandos únicos (ex.: show interface transceiver details) precisam de leitura longa.
+	wait := 45 * time.Second
 	if nCommands > 8 {
-		return 3 * time.Second
+		wait = 8 * time.Second
+	} else if nCommands > 1 {
+		wait = 20 * time.Second
 	}
-	return 8 * time.Second
+	if sessionTimeout > 0 && sessionTimeout < wait {
+		wait = sessionTimeout
+	}
+	if wait < 8*time.Second {
+		wait = 8 * time.Second
+	}
+	return wait
 }
 
 // TelnetSessionHandle sessão telnet reutilizável (login e pré-comandos uma vez).
@@ -472,8 +529,8 @@ func OpenTelnetSession(ctx context.Context, p TelnetRunScriptParams) (*TelnetSes
 	if maxRead <= 0 {
 		maxRead = 32768
 	}
-	if maxRead > 524288 {
-		maxRead = 524288
+	if maxRead > 2*1024*1024 {
+		maxRead = 2 * 1024 * 1024
 	}
 	if dl, ok := ctx.Deadline(); ok {
 		if left := time.Until(dl); left > 0 && left < timeout {
@@ -563,7 +620,7 @@ func execTelnetCommands(sess *telnetSession, commands []string, readWait time.Du
 			break
 		}
 		out := sess.readUntilReady(readWait)
-		step := TelnetScriptStepResult{Command: cmd, OK: true, Output: trim(out, 120000)}
+		step := TelnetScriptStepResult{Command: cmd, OK: true, Output: trim(out, 500000)}
 		steps = append(steps, step)
 		if combined.Len() > 0 {
 			combined.WriteString("\n\n---\n\n")

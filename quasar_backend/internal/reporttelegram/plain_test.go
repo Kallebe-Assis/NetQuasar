@@ -1,6 +1,9 @@
 package reporttelegram
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestComposeSystemReportEquipmentByPop(t *testing.T) {
 	text := ComposeSystemReport("Equipamentos por POP", map[string]any{
@@ -45,6 +48,33 @@ func TestComposeSystemReportEquipmentByPop(t *testing.T) {
 	}
 }
 
+func TestComposeSystemReportOnuPerPonCompact(t *testing.T) {
+	rows := make([][]string, 0, 60)
+	for i := 1; i <= 30; i++ {
+		rows = append(rows, []string{"OLT-A", fmt.Sprintf("%d", i), fmt.Sprintf("PON%d", i), "64", "60", "4", "2026-06-05T12:30:00Z"})
+	}
+	for i := 1; i <= 30; i++ {
+		rows = append(rows, []string{"OLT-B", fmt.Sprintf("%d", i), "", "32", "30", "2", "2026-06-05T12:30:00Z"})
+	}
+	text := ComposeSystemReport("ONUs por PON", map[string]any{
+		"generated_at": "2026-06-05T12:30:00Z",
+		"columns":      []string{"OLT", "PON", "Nome PON", "Total", "Online", "Offline", "Snapshot"},
+		"rows":         rows,
+		"summary": map[string]any{
+			"Portas PON": 60,
+		},
+	})
+	if indexOf(text, "• PON 1 (PON1): 64 total · 60 on · 4 off") < 0 {
+		t.Fatalf("missing compact line: %q", text)
+	}
+	if indexOf(text, "OLT:") >= 0 {
+		t.Fatalf("should not use verbose per-field layout: %q", text)
+	}
+	if len(text) > 3900 {
+		t.Fatalf("compact report still too long: %d", len(text))
+	}
+}
+
 func TestComposeSystemReportPlainText(t *testing.T) {
 	text := ComposeSystemReport("Alertas ativos", map[string]any{
 		"generated_at": "2026-06-05T12:30:00Z",
@@ -62,13 +92,14 @@ func TestComposeSystemReportPlainText(t *testing.T) {
 	if text == "" {
 		t.Fatal("empty text")
 	}
-	if contains := func(s, sub string) bool { return len(s) >= len(sub) && (s == sub || len(sub) == 0 || indexOf(s, sub) >= 0) }; !contains(text, "Alertas ativos") {
+	if indexOf(text, "Alertas ativos") < 0 {
 		t.Fatalf("missing title: %q", text)
 	}
 	if indexOf(text, "<pre>") >= 0 || indexOf(text, "map[") >= 0 {
 		t.Fatalf("should be plain readable text: %q", text)
 	}
 }
+
 
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {

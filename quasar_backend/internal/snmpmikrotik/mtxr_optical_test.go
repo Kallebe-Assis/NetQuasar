@@ -91,17 +91,59 @@ func TestOpticalPowerByIfIndex_InterfaceStatsName(t *testing.T) {
 	}
 }
 
-func TestOpticalPowerByIfIndex_ObjectIndexHint(t *testing.T) {
+func TestOpticalPowerByIfIndex_Sfp1ShortName(t *testing.T) {
 	vars := []probing.SNMPVar{
-		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.1.3", Value: "7"},
-		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.2.3", Value: "weird"},
-		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.9.3", Value: "1000"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.2.1", Value: "sfpplus1"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.9.1", Value: "919"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.10.1", Value: "-823"},
 	}
 	rows := []snmpifparse.IfRow{
-		{IfIndex: 7, IfName: "sfp-sfpplus7", DisplayName: "sfp-sfpplus7", Descr: "sfp-sfpplus7"},
+		{IfIndex: 12, IfName: "sfp1", DisplayName: "sfp1", Descr: "sfp1"},
+		{IfIndex: 13, IfName: "ether1", DisplayName: "ether1", Descr: "ether1"},
 	}
 	m := OpticalPowerByIfIndex(rows, vars)
-	if p, ok := m[7]; !ok || p.TxDBm == nil || *p.TxDBm != 1.0 {
-		t.Fatalf("expected col1 mtxrOpticalIndex=7 to map to ifIndex 7, got %+v", m)
+	p := m[12]
+	if p.TxDBm == nil || *p.TxDBm != 0.919 || p.RxDBm == nil || *p.RxDBm != -0.823 {
+		t.Fatalf("expected tx/rx on sfp1 (if12), got %+v", p)
+	}
+}
+
+func TestOpticalPowerByIfIndex_ObjectIndexHintIgnoredWhenEther(t *testing.T) {
+	vars := []probing.SNMPVar{
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.1.1", Value: "1"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.2.1", Value: "sfp-sfpplus1"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.9.1", Value: "-325"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.10.1", Value: "-11791"},
+	}
+	rows := []snmpifparse.IfRow{
+		{IfIndex: 1, IfName: "ether1", DisplayName: "ether1", Descr: "ether1"},
+		{IfIndex: 12, IfName: "sfp-sfpplus1", DisplayName: "sfp-sfpplus1", Descr: "sfp-sfpplus1"},
+	}
+	m := OpticalPowerByIfIndex(rows, vars)
+	if _, ok := m[1]; ok {
+		t.Fatalf("must not attach optical to ether1 via objectIndexHint, got %+v", m[1])
+	}
+	p := m[12]
+	if p.TxDBm == nil || *p.TxDBm != -0.325 || p.RxDBm == nil || *p.RxDBm != -11.791 {
+		t.Fatalf("expected tx=-0.325 rx=-11.791 on if12, got %+v", p)
+	}
+}
+
+func TestOpticalPowerByIfIndex_UserWalkFullName(t *testing.T) {
+	vars := []probing.SNMPVar{
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.2.1", Value: "sfp-sfpplus1"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.6.1", Value: "43"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.7.1", Value: "3312"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.8.1", Value: "28"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.9.1", Value: "-325"},
+		{OID: "1.3.6.1.4.1.14988.1.1.19.1.1.10.1", Value: "-11791"},
+	}
+	rows := []snmpifparse.IfRow{
+		{IfIndex: 1, IfName: "sfp-sfpplus1", DisplayName: "sfp-sfpplus1", Descr: "sfp-sfpplus1"},
+	}
+	m := OpticalPowerByIfIndex(rows, vars)
+	p := m[1]
+	if p.TxDBm == nil || *p.TxDBm != -0.325 || p.RxDBm == nil || *p.RxDBm != -11.791 {
+		t.Fatalf("got %+v", p)
 	}
 }

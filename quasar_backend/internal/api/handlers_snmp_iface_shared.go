@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
@@ -710,11 +712,16 @@ func buildInterfaceMonitorPayload(ifaces []byte, collectedAt *time.Time, prevIfa
 	vars := walkJSONToSNMPVars(ifaces)
 	rows := snmpifparse.BuildIfTable(vars)
 	opt := snmpmikrotik.OpticalPowerByIfIndex(rows, vars)
+	metaPorts := ifaceoptical.ParseMetaFromWalkJSON(ifaces)
+	opt = ifaceoptical.ApplyPortsToOpticalMap(opt, metaPorts, rows)
 	rateByIf, dtSec := computeInterfaceTrafficRates(ifaces, collectedAt, prevIfaces, prevCollectedAt)
 	tab := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		op := opt[r.IfIndex]
 		sfp := snmpmikrotik.IsSfpPort(r.DisplayName, r.Descr, op)
+		if !sfp && (op.TxDBm != nil || op.RxDBm != nil) {
+			sfp = true
+		}
 		row := map[string]any{
 			"if_index":       r.IfIndex,
 			"descr":          r.Descr,
@@ -757,5 +764,78 @@ func buildInterfaceMonitorPayload(ifaces []byte, collectedAt *time.Time, prevIfa
 		out["traffic_prev_collected_at"] = prevCollectedAt.UTC().Format(time.RFC3339)
 	}
 	return out
+}
+
+// enrichInterfaceTableOpticalFromTelemetry preenche TX/RX dBm a partir da última coleta Telnet em telemetry_samples.
+func enrichInterfaceTableOpticalFromTelemetry(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, payload map[string]any) {
+	if pool == nil || payload == nil {
+		return
+	}
+	tab, ok := payload["interface_table"].([]map[string]any)
+	if !ok || len(tab) == 0 {
+		return
+	}
+	need := false
+	for _, row := range tab {
+		if row["tx_dbm"] == nil && row["rx_dbm"] == nil {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	ports := ifaceoptical.LoadPortsFromLatestTelemetry(ctx, pool, deviceID)
+	if len(ports) == 0 {
+		return
+	}
+	rows := make([]snmpifparse.IfRow, 0, len(tab))
+	for _, row := range tab {
+		idx, _ := row["if_index"].(int)
+		if idx == 0 {
+			if f, ok := row["if_index"].(float64); ok {
+				idx = int(f)
+			}
+		}
+		rows = append(rows, snmpifparse.IfRow{
+			IfIndex:     idx,
+			IfName:      strAny(row["if_name"]),
+			DisplayName: strAny(row["display_name"]),
+			Descr:       strAny(row["descr"]),
+		})
+	}
+	opt := ifaceoptical.ApplyPortsToOpticalMap(nil, ports, rows)
+	for _, row := range tab {
+		idx, _ := row["if_index"].(int)
+		if idx == 0 {
+			if f, ok := row["if_index"].(float64); ok {
+				idx = int(f)
+			}
+		}
+		op, ok := opt[idx]
+		if !ok {
+			continue
+		}
+		if row["tx_dbm"] == nil && op.TxDBm != nil {
+			row["tx_dbm"] = *op.TxDBm
+			row["sfp"] = true
+		}
+		if row["rx_dbm"] == nil && op.RxDBm != nil {
+			row["rx_dbm"] = *op.RxDBm
+			row["sfp"] = true
+		}
+	}
+}
+
+func strAny(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	default:
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
 }
 

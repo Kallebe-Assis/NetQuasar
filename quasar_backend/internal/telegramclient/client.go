@@ -58,6 +58,50 @@ func SendMessage(ctx context.Context, cfg Config, text string) error {
 	return err
 }
 
+// TelegramMaxMessageLen limite prático abaixo dos 4096 caracteres da API.
+const TelegramMaxMessageLen = 3900
+
+// SendMessageChunks envia texto longo em várias mensagens (corta em quebras de linha).
+func SendMessageChunks(ctx context.Context, cfg Config, text string) error {
+	for _, chunk := range SplitMessage(text, TelegramMaxMessageLen) {
+		if err := SendMessage(ctx, cfg, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SplitMessage parte texto em pedaços ≤ maxLen, preferindo cortes em "\n".
+func SplitMessage(text string, maxLen int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if maxLen <= 0 {
+		maxLen = TelegramMaxMessageLen
+	}
+	if len(text) <= maxLen {
+		return []string{text}
+	}
+	var out []string
+	for len(text) > 0 {
+		if len(text) <= maxLen {
+			out = append(out, text)
+			break
+		}
+		cut := strings.LastIndex(text[:maxLen], "\n")
+		if cut < maxLen/3 {
+			cut = maxLen
+		}
+		part := strings.TrimSpace(text[:cut])
+		if part != "" {
+			out = append(out, part)
+		}
+		text = strings.TrimSpace(text[cut:])
+	}
+	return out
+}
+
 // SendMessageWithParseMode envia texto; parseMode pode ser "" (texto simples), "HTML" ou "MarkdownV2".
 func SendMessageWithParseMode(ctx context.Context, cfg Config, text string, parseMode string) error {
 	_, err := SendMessageWithResult(ctx, cfg, text, SendOpts{ParseMode: parseMode})

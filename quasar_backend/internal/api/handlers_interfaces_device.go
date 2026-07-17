@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/interfacealerts"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
@@ -108,53 +109,12 @@ func (s *Server) listDeviceInterfaces(w http.ResponseWriter, r *http.Request) {
 			payload = prevPayload
 		}
 	}
+	enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
 	out := map[string]any{"device_id": id, "collected_at": useAt.UTC().Format(time.RFC3339), "interfaces": json.RawMessage(useRaw)}
 	if useAt != collected {
 		out["note"] = "último snapshot estava parcial; exibindo snapshot anterior mais completo"
 	}
-	// Se não houver tráfego calculado por delta de snapshots, tenta taxa instantânea por dupla amostragem SNMP.
-	if tab, ok := payload["interface_table"].([]map[string]any); ok && len(tab) > 0 {
-		hasRates := false
-		for _, row := range tab {
-			if _, ok := row["in_bps"]; ok {
-				hasRates = true
-				break
-			}
-		}
-		if !hasRates {
-			var ip, devComm string
-			_ = s.DB().QueryRow(r.Context(), `
-				SELECT coalesce(host(ip)::text,''), coalesce(snmp_community,'')
-				FROM devices WHERE id=$1
-			`, id).Scan(&ip, &devComm)
-			comm := strings.TrimSpace(devComm)
-			if comm == "" {
-				var defComm string
-				_ = s.DB().QueryRow(r.Context(), `SELECT coalesce(snmp_community,'') FROM settings_connection_defaults WHERE id=1`).Scan(&defComm)
-				comm = strings.TrimSpace(defComm)
-			}
-			host := strings.TrimSpace(ip)
-			if host != "" && comm != "" {
-				ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-				rates, dtSec := instantTrafficRatesByOID(ctx, host, comm, 2*time.Second)
-				cancel()
-				if len(rates) > 0 {
-					for _, row := range tab {
-						ifIdx, ok := row["if_index"].(int)
-						if !ok || ifIdx <= 0 {
-							continue
-						}
-						if rr, ok := rates[ifIdx]; ok {
-							row["in_bps"] = rr.InBps
-							row["out_bps"] = rr.OutBps
-						}
-					}
-					payload["traffic_interval_seconds"] = dtSec
-					payload["traffic_source"] = "snmp_oid_dual_sample"
-				}
-			}
-		}
-	}
+	// GET = só cache (último interface_snapshots). Taxa instantânea SNMP fica em /refresh ou /realtime.
 	for k, v := range payload {
 		out[k] = v
 	}
@@ -237,6 +197,14 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	if walkRes.Truncated {
 		arr = append(arr, map[string]any{"oid": "__netquasar.walk", "value": "truncated", "type": "meta"})
 	}
+	// Telnet interfaces/óptica (NX-OS transceiver / RouterOS SFP) — persistido no snapshot.
+	if isMikrotik || isSwitch {
+		telnetTO := 60 * time.Second
+		if ifRefreshTO > 0 && ifRefreshTO < telnetTO {
+			telnetTO = ifRefreshTO
+		}
+		arr = ifaceoptical.EnrichSnapshotArray(ctx, s.DB(), id, host, isSwitch, arr, telnetTO)
+	}
 	b, _ := json.Marshal(arr)
 	latestBeforeInsertRaw, latestBeforeInsertAt, _, _, loadPrevErr := loadLatestTwoInterfaceSnapshots(r.Context(), s.DB(), id)
 	if loadPrevErr != nil {
@@ -251,7 +219,10 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	}
 	ok := len(merged) > 0
 	payload := buildInterfaceMonitorPayload(b, &collectedAt, latestBeforeInsertRaw, latestBeforeInsertAt)
-	if isMikrotik {
+	if isSwitch {
+		enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
+	}
+	if isMikrotik || isSwitch {
 		if tab, ok := payload["interface_table"].([]map[string]any); ok {
 			needInstant := true
 			for _, row := range tab {
@@ -359,8 +330,10 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "community SNMP obrigatória", nil)
 		return
 	}
-	if !isLikelyMikrotikDevice(devCat, devBrand, devModel, devDesc) {
-		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "monitoramento em tempo real disponível apenas para MikroTik", nil)
+	isMikrotik := isLikelyMikrotikDevice(devCat, devBrand, devModel, devDesc)
+	isSwitch := strings.EqualFold(strings.TrimSpace(devCat), "switch")
+	if !isMikrotik && !isSwitch {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "monitoramento em tempo real disponível para MikroTik e Switch", nil)
 		return
 	}
 	latestRaw, latestAt, _, _, err := loadLatestTwoInterfaceSnapshots(r.Context(), s.DB(), id)
@@ -373,6 +346,9 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 		return
 	}
 	payload := buildInterfaceMonitorPayload(latestRaw, latestAt, nil, nil)
+	if isSwitch {
+		enrichInterfaceTableOpticalFromTelemetry(r.Context(), s.DB(), id, payload)
+	}
 	tab, _ := payload["interface_table"].([]map[string]any)
 	if len(tab) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -388,19 +364,22 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	host := strings.TrimSpace(*ip)
 	rates, dtSec := instantTrafficRatesByOID(ctx, host, community, 2*time.Second)
-	walkMk, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
-		Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: snmpMkOpticalMaxRows,
-	})
-	walkMkIf, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
-		Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
-		Version: "2c", Timeout: 12 * time.Second, Retries: 0, MaxRows: snmpMkIfStatsMaxRows,
-	})
-	parsedVars := append([]probing.SNMPVar{}, walkJSONToSNMPVars(latestRaw)...)
-	parsedVars = append(parsedVars, walkMk...)
-	parsedVars = append(parsedVars, walkMkIf...)
-	ifRows := snmpifparse.BuildIfTable(parsedVars)
-	optByIf := snmpmikrotik.OpticalPowerByIfIndex(ifRows, parsedVars)
+	var optByIf map[int]snmpmikrotik.OpticalPower
+	if isMikrotik {
+		walkMk, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+			Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultOpticalWalkRoot,
+			Version: "2c", Timeout: 14 * time.Second, Retries: 0, MaxRows: snmpMkOpticalMaxRows,
+		})
+		walkMkIf, _, _ := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+			Host: host, Port: 161, Community: community, RootOID: snmpmikrotik.DefaultInterfaceStatsNameWalkRoot,
+			Version: "2c", Timeout: 12 * time.Second, Retries: 0, MaxRows: snmpMkIfStatsMaxRows,
+		})
+		parsedVars := append([]probing.SNMPVar{}, walkJSONToSNMPVars(latestRaw)...)
+		parsedVars = append(parsedVars, walkMk...)
+		parsedVars = append(parsedVars, walkMkIf...)
+		ifRows := snmpifparse.BuildIfTable(parsedVars)
+		optByIf = snmpmikrotik.OpticalPowerByIfIndex(ifRows, parsedVars)
+	}
 	updates := make([]map[string]any, 0, len(tab))
 	for _, row := range tab {
 		ifIdx, ok := row["if_index"].(int)
@@ -421,6 +400,13 @@ func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request
 			if op.RxDBm != nil {
 				upd["rx_dbm"] = *op.RxDBm
 			}
+		}
+		// Switch: óptica vem do snapshot/telemetria Telnet — reenvia no realtime para a UI não perder.
+		if upd["tx_dbm"] == nil && row["tx_dbm"] != nil {
+			upd["tx_dbm"] = row["tx_dbm"]
+		}
+		if upd["rx_dbm"] == nil && row["rx_dbm"] != nil {
+			upd["rx_dbm"] = row["rx_dbm"]
 		}
 		updates = append(updates, upd)
 	}

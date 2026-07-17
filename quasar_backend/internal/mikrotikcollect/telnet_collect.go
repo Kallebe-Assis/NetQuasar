@@ -42,12 +42,20 @@ type telnetJob struct {
 
 // CollectTelnetMetrics executa comandos RouterOS conforme perfil telnet.
 func CollectTelnetMetrics(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration) TelnetCollectOutput {
+	return CollectTelnetMetricsWithCatalog(ctx, host, creds, profile, timeout, TelnetMetricCatalog)
+}
+
+// CollectTelnetMetricsWithCatalog igual a CollectTelnetMetrics, com catálogo explícito (ex.: NX-OS Switch).
+func CollectTelnetMetricsWithCatalog(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, catalog []TelnetCatalogEntry) TelnetCollectOutput {
 	out := TelnetCollectOutput{
 		Fields:      make(map[string]TelnetFieldResult),
 		ProfileID:   profile.ID.String(),
 		ProfileName: profile.Name,
 	}
-	if !HasEnabledTelnetMetrics(profile.Metrics) {
+	if catalog == nil {
+		catalog = TelnetMetricCatalog
+	}
+	if !hasEnabledTelnetMetricsInCatalog(profile.Metrics, catalog) {
 		out.Message = "nenhuma métrica telnet activa no perfil"
 		return out
 	}
@@ -64,7 +72,7 @@ func CollectTelnetMetrics(ctx context.Context, host string, creds TelnetCredenti
 		timeout = 45 * time.Second
 	}
 
-	globalJobs, scopedJobs := buildTelnetJobs(profile)
+	globalJobs, scopedJobs := buildTelnetJobsFromCatalog(profile, catalog)
 	cmdOutputs := map[string]probing.TelnetRunScriptResult{}
 
 	for _, j := range globalJobs {
@@ -82,7 +90,7 @@ func CollectTelnetMetrics(ctx context.Context, host string, creds TelnetCredenti
 					out.Fields[key] = TelnetFieldResult{
 						Key: key, Label: entry.Label, Command: j.command,
 						Parser: entry.Parser, OK: false,
-						Error:  "nenhuma interface encontrada para este scope",
+						Error:      "nenhuma interface encontrada para este scope",
 						ProfileName: profile.Name,
 					}
 					out.Failed++
@@ -119,7 +127,7 @@ func CollectTelnetMetrics(ctx context.Context, host string, creds TelnetCredenti
 					out.Fields[key] = TelnetFieldResult{
 						Key: key, Label: entry.Label, Command: j.command,
 						Parser: entry.Parser, OK: false,
-						Error:  "falha ao coletar por interface",
+						Error:      "falha ao coletar por interface",
 						ProfileName: profile.Name,
 					}
 					out.Failed++
@@ -141,20 +149,37 @@ func CollectTelnetMetrics(ctx context.Context, host string, creds TelnetCredenti
 	return out
 }
 
+func hasEnabledTelnetMetricsInCatalog(c TelnetMetricsConfig, catalog []TelnetCatalogEntry) bool {
+	for _, e := range catalog {
+		if def, ok := c[e.Key]; ok && def.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
 func buildTelnetJobs(profile TelnetProfile) (global []telnetJob, scoped []telnetJob) {
+	return buildTelnetJobsFromCatalog(profile, TelnetMetricCatalog)
+}
+
+func buildTelnetJobsFromCatalog(profile TelnetProfile, catalog []TelnetCatalogEntry) (global []telnetJob, scoped []telnetJob) {
 	type pending struct {
 		keys    []string
 		entries map[string]TelnetCatalogEntry
 	}
 	globalByCmd := map[string]*pending{}
 	scopedByCmd := map[string]*pending{}
+	catByKey := map[string]TelnetCatalogEntry{}
+	for _, e := range catalog {
+		catByKey[e.Key] = e
+	}
 
-	for _, entry := range TelnetMetricCatalog {
+	for _, entry := range catalog {
 		def, ok := profile.Metrics[entry.Key]
 		if !ok || !def.Enabled {
 			continue
 		}
-		cmd := profile.Metrics.CommandFor(entry.Key)
+		cmd := strings.TrimSpace(def.Command)
 		if cmd == "" {
 			cmd = entry.DefaultCommand
 		}
@@ -177,6 +202,7 @@ func buildTelnetJobs(profile TelnetProfile) (global []telnetJob, scoped []telnet
 	for cmd, p := range scopedByCmd {
 		scoped = append(scoped, telnetJob{keys: p.keys, entries: p.entries, command: cmd})
 	}
+	_ = catByKey
 	return global, scoped
 }
 
@@ -201,14 +227,20 @@ func runTelnetCommand(ctx context.Context, host string, creds TelnetCredentials,
 		Enable:       creds.Enable,
 		PreCommands:  profile.PreCommands,
 		Commands:     []string{command},
-		MaxReadBytes: 512 * 1024,
+		MaxReadBytes: 2 * 1024 * 1024,
 	})
 	cache[command] = res
 	return res
 }
 
 func discoverInterfacesForScope(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, scoped []telnetJob, cache map[string]probing.TelnetRunScriptResult, out *TelnetCollectOutput) []interfaceDiscovery {
-	listCmd := profile.Metrics.CommandFor("telnet_if_list")
+	listCmd := ""
+	if def, ok := profile.Metrics["telnet_if_list"]; ok && strings.TrimSpace(def.Command) != "" {
+		listCmd = strings.TrimSpace(def.Command)
+	}
+	if listCmd == "" {
+		listCmd = profile.Metrics.CommandFor("telnet_if_list")
+	}
 	if listCmd == "" {
 		if e, ok := catalogEntryForKey("telnet_if_list"); ok {
 			listCmd = e.DefaultCommand
@@ -216,11 +248,16 @@ func discoverInterfacesForScope(ctx context.Context, host string, creds TelnetCr
 			listCmd = "/interface print without-paging"
 		}
 	}
+	_ = scoped
 	res := runTelnetCommand(ctx, host, creds, profile, timeout, listCmd, cache)
 	if !res.OK {
 		return nil
 	}
-	return DiscoverInterfacesFromPrint(res.Output)
+	ifaces := DiscoverInterfacesFromPrint(res.Output)
+	if len(ifaces) == 0 {
+		ifaces = DiscoverInterfacesFromNxosStatus(res.Output)
+	}
+	return ifaces
 }
 
 func filterInterfacesForScope(ifaces []interfaceDiscovery, scope string) []string {
@@ -275,18 +312,48 @@ func applyTelnetJobResult(out *TelnetCollectOutput, key string, entry TelnetCata
 	}
 	fr.OK = true
 	fr.RawOutput = raw
-	fr.Value = parseTelnetOutput(entry.Parser, raw)
+	// TelnetRunScript prefixa "$ <cmd>\n" — remove para o parser NX-OS/RouterOS.
+	parseIn := stripTelnetScriptEcho(raw, command)
+	fr.Value = parseTelnetOutput(entry.Parser, parseIn)
 	out.Fields[key] = fr
 	out.Collected++
 }
 
+func stripTelnetScriptEcho(raw, command string) string {
+	raw = strings.TrimSpace(raw)
+	command = strings.TrimSpace(command)
+	if raw == "" {
+		return raw
+	}
+	lines := strings.Split(raw, "\n")
+	if len(lines) == 0 {
+		return raw
+	}
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "$ ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(first, "$ "))
+		if command == "" || strings.EqualFold(rest, command) || strings.HasPrefix(strings.ToLower(rest), strings.ToLower(command)) {
+			return strings.TrimSpace(strings.Join(lines[1:], "\n"))
+		}
+	}
+	return raw
+}
+
 // CollectTelnetInterfaceMetrics atalho para métricas de interface/optical/wireless activas.
 func CollectTelnetInterfaceMetrics(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration) TelnetCollectOutput {
+	return CollectTelnetInterfaceMetricsWithCatalog(ctx, host, creds, profile, timeout, TelnetMetricCatalog)
+}
+
+// CollectTelnetInterfaceMetricsWithCatalog igual, com catálogo explícito (ex.: NX-OS Switch).
+func CollectTelnetInterfaceMetricsWithCatalog(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, catalog []TelnetCatalogEntry) TelnetCollectOutput {
+	if catalog == nil {
+		catalog = TelnetMetricCatalog
+	}
 	filtered := TelnetProfile{
 		ID: profile.ID, Name: profile.Name, PreCommands: profile.PreCommands,
 		Metrics: make(TelnetMetricsConfig),
 	}
-	for _, e := range TelnetMetricCatalog {
+	for _, e := range catalog {
 		if e.Section != "interfaces" && e.Section != "optical" && e.Section != "wireless" {
 			continue
 		}
@@ -294,5 +361,5 @@ func CollectTelnetInterfaceMetrics(ctx context.Context, host string, creds Telne
 			filtered.Metrics[e.Key] = def
 		}
 	}
-	return CollectTelnetMetrics(ctx, host, creds, filtered, timeout)
+	return CollectTelnetMetricsWithCatalog(ctx, host, creds, filtered, timeout, catalog)
 }

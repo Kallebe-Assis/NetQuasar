@@ -283,7 +283,8 @@ export function MikrotikPage() {
     queryKey: ["mikrotik-if", sel ?? ""],
     canMutate,
     onTable: (rows) => setLiveTable(rows as MikrotikIfRow[]),
-    enabled: !!sel,
+    enabled: !!sel && !realtimeOn,
+    snmpAutoRefresh: false,
   });
 
   useEffect(() => {
@@ -298,10 +299,10 @@ export function MikrotikPage() {
     if (!realtimeOn || !sel) return;
     const intervalMs = Math.max(1500, Number(realtimeMs) || 3000);
     const timer = window.setInterval(() => {
-      if (!realtimeTick.isPending) realtimeTick.mutate(sel);
+      realtimeTick.mutate(sel);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [realtimeOn, realtimeMs, sel, realtimeTick]);
+  }, [realtimeOn, realtimeMs, sel, realtimeTick.mutate]);
 
   useEffect(() => {
     setRealtimeOn(false);

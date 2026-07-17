@@ -10,7 +10,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 )
 
-// TelnetProfile perfil telnet para Switch (RouterOS / CLI compatível).
+// TelnetProfile perfil telnet para Switch (Cisco NX-OS).
 type TelnetProfile = mikrotikcollect.TelnetProfile
 
 func LoadTelnetProfileByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (TelnetProfile, error) {
@@ -23,11 +23,14 @@ func LoadTelnetProfileByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID
 	if err != nil {
 		return TelnetProfile{}, err
 	}
-	p.Metrics = mikrotikcollect.DefaultTelnetMetrics()
-	if parsed := mikrotikcollect.ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
-		p.Metrics = parsed.MergeWithDefaults()
+	p.Metrics = DefaultTelnetMetrics()
+	if parsed := ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
+		p.Metrics = MergeTelnetMetrics(parsed)
 	}
 	p.PreCommands = mikrotikcollect.ParseTelnetPreCommands(preRaw)
+	if len(p.PreCommands) == 0 {
+		p.PreCommands = DefaultTelnetPreCommands()
+	}
 	return p, nil
 }
 
@@ -42,19 +45,22 @@ func LoadDefaultTelnetProfile(ctx context.Context, pool *pgxpool.Pool) TelnetPro
 		LIMIT 1
 	`).Scan(&p.ID, &p.Name, &metricsRaw, &preRaw, &p.IsDefault, &p.UpdatedAt)
 	if err != nil {
-		return TelnetProfile{Name: "Padrão", Metrics: mikrotikcollect.DefaultTelnetMetrics()}
+		return TelnetProfile{Name: "Cisco NX-OS", Metrics: DefaultTelnetMetrics(), PreCommands: DefaultTelnetPreCommands()}
 	}
-	p.Metrics = mikrotikcollect.DefaultTelnetMetrics()
-	if parsed := mikrotikcollect.ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
-		p.Metrics = parsed.MergeWithDefaults()
+	p.Metrics = DefaultTelnetMetrics()
+	if parsed := ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
+		p.Metrics = MergeTelnetMetrics(parsed)
 	}
 	p.PreCommands = mikrotikcollect.ParseTelnetPreCommands(preRaw)
+	if len(p.PreCommands) == 0 {
+		p.PreCommands = DefaultTelnetPreCommands()
+	}
 	return p
 }
 
 func LoadTelnetProfileForDevice(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) TelnetProfile {
 	if pool == nil {
-		return TelnetProfile{Name: "Padrão", Metrics: mikrotikcollect.DefaultTelnetMetrics()}
+		return TelnetProfile{Name: "Cisco NX-OS", Metrics: DefaultTelnetMetrics(), PreCommands: DefaultTelnetPreCommands()}
 	}
 	var profileID *uuid.UUID
 	_ = pool.QueryRow(ctx, `
@@ -85,11 +91,14 @@ func ListTelnetProfiles(ctx context.Context, pool *pgxpool.Pool) ([]TelnetProfil
 		if err := rows.Scan(&p.ID, &p.Name, &metricsRaw, &preRaw, &p.IsDefault, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
-		p.Metrics = mikrotikcollect.DefaultTelnetMetrics()
-		if parsed := mikrotikcollect.ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
-			p.Metrics = parsed.MergeWithDefaults()
+		p.Metrics = DefaultTelnetMetrics()
+		if parsed := ParseTelnetMetrics(metricsRaw); len(parsed) > 0 {
+			p.Metrics = MergeTelnetMetrics(parsed)
 		}
 		p.PreCommands = mikrotikcollect.ParseTelnetPreCommands(preRaw)
+		if len(p.PreCommands) == 0 {
+			p.PreCommands = DefaultTelnetPreCommands()
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

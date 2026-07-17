@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
 import { MikrotikNocDashboard, type MikrotikNocSection } from "../components/MikrotikNocDashboard";
+import { VlanCell } from "../components/VlanCell";
 import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
@@ -282,7 +283,8 @@ export function SwitchPage() {
     queryKey: ["switch-if", selectedId ?? ""],
     canMutate,
     onTable: (rows) => setLiveTable(rows as MikrotikIfRow[]),
-    enabled: !!selectedId,
+    enabled: !!selectedId && !realtimeOn,
+    snmpAutoRefresh: false,
   });
 
   useEffect(() => {
@@ -307,10 +309,10 @@ export function SwitchPage() {
     if (!realtimeOn || !selectedId) return;
     const intervalMs = Math.max(1500, Number(realtimeMs) || 3000);
     const timer = window.setInterval(() => {
-      if (!realtimeTick.isPending) realtimeTick.mutate(selectedId);
+      realtimeTick.mutate(selectedId);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [realtimeOn, realtimeMs, selectedId, realtimeTick]);
+  }, [realtimeOn, realtimeMs, selectedId, realtimeTick.mutate]);
 
   useEffect(() => {
     setRealtimeOn(false);
@@ -458,8 +460,8 @@ export function SwitchPage() {
                 <td>
                   <span className={`mk-noc-dot ${ifaceStatus(r) === "up" ? "mk-noc-dot--up" : "mk-noc-dot--down"}`} /> {ifaceStatus(r)}
                 </td>
-                <td className="mono" style={{ fontSize: 11, maxWidth: 220, whiteSpace: "normal" }}>
-                  {r.vlan_label ?? (r.vlans?.length ? r.vlans.join(", ") : EM_DASH)}
+                <td>
+                  <VlanCell mode={r.vlan_mode} vlans={r.vlans} vlanLabel={r.vlan_label} maxVisible={5} />
                 </td>
                 <td className="mono">{formatBitrate(r.out_bps)}</td>
                 <td className="mono">{formatBitrate(r.in_bps)}</td>
@@ -574,6 +576,7 @@ export function SwitchPage() {
                 className="btn btn--primary"
                 onClick={() => {
                   setRealtimeMs(Math.max(1500, Number(realtimeDraft) || 3000));
+                  if (cachedTable.length > 0) setLiveTable(cachedTable);
                   setRealtimeOn(true);
                   setRealtimeModalOpen(false);
                 }}

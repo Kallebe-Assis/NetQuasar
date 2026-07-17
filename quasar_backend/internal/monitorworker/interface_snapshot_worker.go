@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/interfacealerts"
 	"github.com/rs/zerolog"
 )
@@ -25,7 +26,7 @@ func workerLikelySwitch(category string) bool {
 	return strings.EqualFold(strings.TrimSpace(category), "switch")
 }
 
-// CollectInterfaceSnapshotWorker grava interface_snapshots e avalia alertas SFP / interface DOWN.
+// CollectInterfaceSnapshotWorker grava interface_snapshots (SNMP + Telnet óptico) e avalia alertas SFP / interface DOWN.
 func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, host, community string, cat, brand, model, description string) {
 	if pool == nil || strings.TrimSpace(host) == "" || strings.TrimSpace(community) == "" {
 		return
@@ -60,6 +61,16 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	}
 	if walkRes.Truncated {
 		arr = append(arr, map[string]any{"oid": "__netquasar.walk", "value": "truncated", "type": "meta"})
+	}
+	if isMk || isSwitch {
+		telnetTO := 60 * time.Second
+		if total > 0 && total/3 < telnetTO {
+			telnetTO = total / 3
+			if telnetTO < 20*time.Second {
+				telnetTO = 20 * time.Second
+			}
+		}
+		arr = ifaceoptical.EnrichSnapshotArray(ctx, pool, deviceID, h, isSwitch, arr, telnetTO)
 	}
 	currRaw, err := json.Marshal(arr)
 	if err != nil {

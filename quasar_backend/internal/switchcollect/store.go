@@ -30,7 +30,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	}
 	telnetProfile := LoadTelnetProfileForDevice(ctx, pool, deviceID)
 	telnetOut := mikrotikcollect.TelnetCollectOutput{}
-	if mikrotikcollect.HasEnabledTelnetMetrics(telnetProfile.Metrics) {
+	if HasEnabledTelnetMetrics(telnetProfile.Metrics) {
 		creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, pool, deviceID)
 		telnetTO := timeout * 3
 		if telnetTO < 30*time.Second {
@@ -39,7 +39,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 		if telnetTO > 120*time.Second {
 			telnetTO = 120 * time.Second
 		}
-		telnetOut = mikrotikcollect.CollectTelnetMetrics(ctx, host, creds, telnetProfile, telnetTO)
+		telnetOut = mikrotikcollect.CollectTelnetMetricsWithCatalog(ctx, host, creds, telnetProfile, telnetTO, TelnetMetricCatalog)
 	}
 	b, err := buildTelemetryMetricsJSON(telemetry, snmpVars, telnetOut)
 	if err != nil {

@@ -14,7 +14,8 @@ import (
 // ObjectIndex (índice da linha) «não está relacionado» com números da consola (MIB); por isso
 // cruzamos com mtxrInterfaceStatsName (…14.1.1.2), que em RouterOS coincide com o ifName.
 
-var reMtxrSfpDigits = regexp.MustCompile(`^sfp(\d+)$`)
+var reMtxrSfpDigits = regexp.MustCompile(`(?i)^sfp(?:plus)?(\d+)$`)
+var reMtxrAnySfpDigits = regexp.MustCompile(`(?i)(?:sfp(?:plus)?|qsfp|xfp)(\d+)`)
 
 const (
 	// Walk direto na mtxrOpticalTable (evita truncar em subárvores irmãs antes de chegar TX/RX).
@@ -111,10 +112,16 @@ func mtxrNameCandidates(label string) []string {
 		return nil
 	}
 	var cands []string
-	cands = append(cands, "sfp-"+label)
+	cands = append(cands, label, "sfp-"+label)
 	cands = append(cands, "sfp-sfp"+strings.TrimPrefix(label, "sfp"))
 	if m := reMtxrSfpDigits.FindStringSubmatch(label); m != nil {
-		cands = append(cands, "sfp-sfpplus"+m[1])
+		n := m[1]
+		cands = append(cands,
+			"sfp-sfpplus"+n,
+			"sfpplus"+n,
+			"sfp"+n,
+			"sfp-"+n,
+		)
 	}
 	seen := map[string]struct{}{}
 	var uniq []string
@@ -131,6 +138,38 @@ func mtxrNameCandidates(label string) []string {
 		uniq = append(uniq, c)
 	}
 	return uniq
+}
+
+// matchSfpDigitToIfIndex associa sfp5 / sfpplus5 a um único ifName SFP com o mesmo número.
+func matchSfpDigitToIfIndex(label string, rows []snmpifparse.IfRow) (int, bool) {
+	m := reMtxrAnySfpDigits.FindStringSubmatch(strings.ToLower(trimSNMPDisplayString(label)))
+	if m == nil {
+		return 0, false
+	}
+	n := m[1]
+	digitRE := regexp.MustCompile(`(?i)(?:sfp(?:plus)?|qsfp|xfp)` + regexp.QuoteMeta(n) + `(?:\D|$)`)
+	var hits []int
+	seen := map[int]struct{}{}
+	for _, r := range rows {
+		for _, h := range []string{r.IfName, r.DisplayName, r.Descr} {
+			hn := strings.ToLower(strings.TrimSpace(h))
+			if hn == "" || (!strings.Contains(hn, "sfp") && !strings.Contains(hn, "qsfp") && !strings.Contains(hn, "xfp")) {
+				continue
+			}
+			if !digitRE.MatchString(hn) {
+				continue
+			}
+			if _, ok := seen[r.IfIndex]; ok {
+				continue
+			}
+			seen[r.IfIndex] = struct{}{}
+			hits = append(hits, r.IfIndex)
+		}
+	}
+	if len(hits) == 1 {
+		return hits[0], true
+	}
+	return 0, false
 }
 
 func matchExactIfName(full string, rows []snmpifparse.IfRow) (int, bool) {
@@ -201,13 +240,8 @@ func parseStatsIfNameByInstance(vars []probing.SNMPVar) map[int]string {
 }
 
 func resolveMtxrToIfIndex(mtxrIdx int, mod *mtxrModule, statsName map[int]string, rows []snmpifparse.IfRow) (int, bool) {
-	if mod.objectIndexHint > 0 {
-		for _, r := range rows {
-			if r.IfIndex == mod.objectIndexHint {
-				return mod.objectIndexHint, true
-			}
-		}
-	}
+	// Preferir nome (mtxrInterfaceStatsName / mtxrOpticalName) — objectIndexHint da MIB
+	// «não está relacionado» com ifIndex e costuma mapear TX/RX para a porta errada.
 	if full, ok := statsName[mtxrIdx]; ok && full != "" {
 		if i, ok2 := matchExactIfName(full, rows); ok2 {
 			return i, true
@@ -215,6 +249,20 @@ func resolveMtxrToIfIndex(mtxrIdx int, mod *mtxrModule, statsName map[int]string
 	}
 	if i, ok := matchMtxrLabelToIfIndex(mod.name, rows); ok {
 		return i, true
+	}
+	if i, ok := matchSfpDigitToIfIndex(mod.name, rows); ok {
+		return i, true
+	}
+	if mod.objectIndexHint > 0 {
+		for _, r := range rows {
+			if r.IfIndex != mod.objectIndexHint {
+				continue
+			}
+			// Só aceitar hint se a interface parecer SFP / óptica.
+			if LooksLikeSfpInterface(r.DisplayName, r.Descr) || LooksLikeSfpInterface(r.IfName, "") {
+				return mod.objectIndexHint, true
+			}
+		}
 	}
 	if mod.name == "" {
 		for _, r := range rows {
