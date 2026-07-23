@@ -11,6 +11,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifacemeta"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
@@ -44,15 +45,16 @@ func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 
 	mk := isMikrotik(p.Category, p.Brand, p.Model, p.DeviceDesc)
 	sw := strings.EqualFold(strings.TrimSpace(p.Category), "switch")
+	customs := ifacemeta.LoadCustomDescriptionsByIndex(ctx, pool, p.DeviceID)
 	if mk || sw {
-		evaluateOpticalSFP(ctx, pool, log, p.DeviceID, desc, host, p.CurrJSON, currVars)
+		evaluateOpticalSFP(ctx, pool, log, p.DeviceID, desc, host, p.CurrJSON, currVars, customs)
 	}
 
 	if len(p.PrevJSON) == 0 {
 		return
 	}
 	prevVars := snapshotwalk.VarsFromJSON(p.PrevJSON)
-	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Category, p.Source, prevVars, currVars)
+	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Category, p.Source, prevVars, currVars, customs)
 }
 
 func isMikrotik(category, brand, model, description string) bool {
@@ -67,7 +69,7 @@ func isMikrotik(category, brand, model, description string) bool {
 }
 
 func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
-	deviceID uuid.UUID, devDesc, host string, currJSON []byte, vars []probing.SNMPVar,
+	deviceID uuid.UUID, devDesc, host string, currJSON []byte, vars []probing.SNMPVar, customs map[int]string,
 ) {
 	ifRows := snmpifparse.BuildIfTable(vars)
 	optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, vars)
@@ -83,10 +85,8 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 	seen := map[int]struct{}{}
 	for _, r := range ifRows {
 		op := optMap[r.IfIndex]
-		disp := strings.TrimSpace(r.DisplayName)
-		if disp == "" {
-			disp = strings.TrimSpace(r.IfName)
-		}
+		baseName := snmpifparse.PreferIfaceName(r.IfName, r.DisplayName, r.Descr, r.IfIndex)
+		disp := snmpifparse.FormatAlertIfaceLabel(baseName, r.IfAlias, customs[r.IfIndex])
 		if disp == "" {
 			disp = fmt.Sprintf("if%d", r.IfIndex)
 		}
@@ -95,11 +95,14 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 			sfp = true
 		}
 		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
-			IfIndex:     r.IfIndex,
-			DisplayName: disp,
-			Sfp:         sfp,
-			TxDBm:       copyFloatPtr(op.TxDBm),
-			RxDBm:       copyFloatPtr(op.RxDBm),
+			IfIndex:            r.IfIndex,
+			DisplayName:        disp,
+			IfName:             baseName,
+			IfAlias:            strings.TrimSpace(r.IfAlias),
+			CustomDescription:  customs[r.IfIndex],
+			Sfp:                sfp,
+			TxDBm:              copyFloatPtr(op.TxDBm),
+			RxDBm:              copyFloatPtr(op.RxDBm),
 		})
 		seen[r.IfIndex] = struct{}{}
 	}
@@ -114,12 +117,15 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 		if name == "" {
 			name = fmt.Sprintf("if%d", p.IfIndex)
 		}
+		disp := snmpifparse.FormatAlertIfaceLabel(name, "", customs[p.IfIndex])
 		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
-			IfIndex:     p.IfIndex,
-			DisplayName: name,
-			Sfp:         true,
-			TxDBm:       copyFloatPtr(p.TxDBm),
-			RxDBm:       copyFloatPtr(p.RxDBm),
+			IfIndex:           p.IfIndex,
+			DisplayName:       disp,
+			IfName:            name,
+			CustomDescription: customs[p.IfIndex],
+			Sfp:               true,
+			TxDBm:             copyFloatPtr(p.TxDBm),
+			RxDBm:             copyFloatPtr(p.RxDBm),
 		})
 	}
 	alertthresholds.EvaluateMikrotikSFPAfterSnapshot(ctx, pool, log, deviceID, devDesc, host, sfpEval)
@@ -127,7 +133,7 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 
 func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	deviceID uuid.UUID, devDesc, host, category, source string,
-	prevVars, currVars []probing.SNMPVar,
+	prevVars, currVars []probing.SNMPVar, customs map[int]string,
 ) {
 	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "iface_down_count", category)
 	if !ok {
@@ -156,17 +162,21 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 			if sev == "ok" {
 				continue
 			}
-			name := strings.TrimSpace(r.DisplayName)
-			if name == "" {
-				name = fmt.Sprintf("if%d", r.IfIndex)
+			baseName := snmpifparse.PreferIfaceName(r.IfName, r.DisplayName, r.Descr, r.IfIndex)
+			custom := customs[r.IfIndex]
+			label := snmpifparse.FormatAlertIfaceLabel(baseName, r.IfAlias, custom)
+			if label == "" {
+				label = fmt.Sprintf("if%d", r.IfIndex)
 			}
-			msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN.", devDesc, host, name)
+			msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN.", devDesc, host, label)
 			meta := alertnotify.WithStatusTransition(map[string]any{
-				"source":       src,
-				"if_index":     r.IfIndex,
-				"display_name": name,
-				"if_name":      name,
-				"key":          key,
+				"source":             src,
+				"if_index":           r.IfIndex,
+				"display_name":       label,
+				"if_name":            baseName,
+				"if_alias":           strings.TrimSpace(r.IfAlias),
+				"custom_description": custom,
+				"key":                key,
 			}, "interface_up", "interface_down", nil)
 			res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
 				DeviceID: deviceID, Severity: sev, AlertType: alertTypeIfaceDown,

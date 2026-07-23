@@ -49,7 +49,7 @@ func TestTelegramMonitoringBlocksOltOnuDrop(t *testing.T) {
 		},
 	)
 	for _, want := range []string{
-		"🟡 QUEDA DE ONUs",
+		"🟡 ALERTA QUEDA DE ONUs",
 		"PON 08",
 		"Queda de 5 ONUs",
 		"50%",
@@ -62,16 +62,39 @@ func TestTelegramMonitoringBlocksOltOnuDrop(t *testing.T) {
 }
 
 func TestTelegramMonitoringHeaderInterfaceDown(t *testing.T) {
-	h := monitoringHeader("WARNING", "Interface DOWN (mudança de estado)", "interface eth1 mudou de UP para DOWN.", "interface_down_transition")
-	if h != "🔴 INTERFACE DOWN" {
+	h := monitoringHeader("WARNING", "Interface DOWN (mudança de estado)", "interface eth1 mudou de UP para DOWN.", "interface_down_transition", nil)
+	if h != "🔴 ALERTA INTERFACE" {
 		t.Fatalf("got %q", h)
 	}
 }
 
 func TestTelegramMonitoringHeaderOnuRise(t *testing.T) {
-	h := monitoringHeader("INFO", "Subida de ONUs online — PON", "PON 04 — subida de 3 ONUs", "olt_onu_rise")
+	h := monitoringHeader("INFO", "Subida de ONUs online — PON", "PON 04 — subida de 3 ONUs", "olt_onu_rise", nil)
 	if h != "🟢 SUBIDA DE ONUs" {
 		t.Fatalf("got %q", h)
+	}
+}
+
+func TestTelegramMonitoringHeadersByType(t *testing.T) {
+	cases := []struct {
+		alertType string
+		title     string
+		message   string
+		meta      map[string]any
+		want      string
+	}{
+		{"latency_high", "Latência elevada", "latência 320 ms", nil, "🟡 ALERTA LATÊNCIA"},
+		{"olt_onu_drop", "Queda de ONUs", "PON 01 — queda", nil, "🟡 ALERTA QUEDA DE ONUs"},
+		{"bng_subscriber_drop", "Queda de logins", "PPPoE caiu", nil, "🟡 ALERTA QUEDA DE PPPoE"},
+		{"telemetry_threshold", "CPU elevada", "cpu 95%", map[string]any{"metric_id": "cpu_usage"}, "🟡 ALERTA CPU"},
+		{"telemetry_threshold", "Memória", "memória 90%", map[string]any{"metric_id": "memory_usage"}, "🟡 ALERTA MEMÓRIA"},
+		{"telemetry_threshold", "Temperatura", "temp 78", map[string]any{"metric_id": "temperature"}, "🟡 ALERTA TEMPERATURA"},
+	}
+	for _, c := range cases {
+		got := monitoringHeader("WARNING", c.title, c.message, c.alertType, c.meta)
+		if got != c.want {
+			t.Fatalf("%s: got %q want %q", c.alertType, got, c.want)
+		}
 	}
 }
 

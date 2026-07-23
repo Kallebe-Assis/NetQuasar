@@ -99,14 +99,14 @@ func incidentTarget(incident string) string {
 	if m := regexp.MustCompile(`(?i)\bpon\s+([a-z0-9_\/.\-]+)`).FindStringSubmatch(incident); len(m) >= 2 {
 		return "PON " + strings.TrimSpace(m[1])
 	}
-	// Mikrotik SFP: "interface sfp-sfpplus1 — potência SFP …" (nome pode ter @ + etc.)
+	// Aceita "interface ether1 (Uplink) mudou…" ou "interface ether1 — potência…"
 	if m := regexp.MustCompile(`(?i)\binterface\s+(.+?)\s+[—\-]\s*potência`).FindStringSubmatch(incident); len(m) >= 2 {
 		return "Interface " + strings.TrimSpace(m[1])
 	}
-	if m := regexp.MustCompile(`(?i)\binterface\s+(\S+)\s+mudou`).FindStringSubmatch(incident); len(m) >= 2 {
+	if m := regexp.MustCompile(`(?i)\binterface\s+(.+?)\s+mudou`).FindStringSubmatch(incident); len(m) >= 2 {
 		return "Interface " + strings.TrimSpace(m[1])
 	}
-	if m := regexp.MustCompile(`(?i)\binterface\s+([a-z0-9_\/.@+\-]+)`).FindStringSubmatch(incident); len(m) >= 2 {
+	if m := regexp.MustCompile(`(?i)\binterface\s+([a-z0-9_\/.@+\-]+(?:\s*\([^)]+\))?)`).FindStringSubmatch(incident); len(m) >= 2 {
 		return "Interface " + strings.TrimSpace(m[1])
 	}
 	if strings.Contains(low, "sfp") {
@@ -115,30 +115,102 @@ func incidentTarget(incident string) string {
 	return ""
 }
 
-func monitoringHeader(level, title, message, alertType string) string {
+// interfaceTargetFromMeta preferê display_name / custom_description do meta do alerta.
+func interfaceTargetFromMeta(meta map[string]any, message string) string {
+	disp := strings.TrimSpace(metaString(meta, "display_name"))
+	if disp != "" {
+		return "Interface " + disp
+	}
+	name := strings.TrimSpace(metaString(meta, "if_name"))
+	custom := strings.TrimSpace(metaString(meta, "custom_description"))
+	alias := strings.TrimSpace(metaString(meta, "if_alias"))
+	desc := custom
+	if desc == "" {
+		desc = alias
+	}
+	if name != "" && desc != "" && !strings.EqualFold(name, desc) {
+		return "Interface " + name + " (" + desc + ")"
+	}
+	if name != "" {
+		return "Interface " + name
+	}
+	if desc != "" {
+		return "Interface " + desc
+	}
+	return incidentTarget(message)
+}
+
+func monitoringHeader(level, title, message, alertType string, meta map[string]any) string {
 	_ = level
 	at := strings.TrimSpace(alertType)
 	low := strings.ToLower(strings.TrimSpace(title + " " + message))
+	metricID := strings.ToLower(strings.TrimSpace(metaString(meta, "metric_id")))
+
 	switch at {
-	case "interface_down_transition":
-		return "🔴 INTERFACE DOWN"
+	case "interface_down_transition", "interface_down":
+		return "🔴 ALERTA INTERFACE"
 	case "ping_unreachable":
 		return "🔴 EQUIPAMENTO OFFLINE"
+	case "latency_high", "latency_degraded":
+		return "🟡 ALERTA LATÊNCIA"
 	case "olt_onu_rise":
 		return "🟢 SUBIDA DE ONUs"
 	case "olt_onu_drop":
-		return "🟡 QUEDA DE ONUs"
+		return "🟡 ALERTA QUEDA DE ONUs"
+	case "bng_subscriber_drop":
+		return "🟡 ALERTA QUEDA DE PPPoE"
+	case "mikrotik_sfp_tx", "mikrotik_sfp_rx", "olt_onu_rx", "olt_onu_tx", "olt_onu_optical":
+		return "🟡 ALERTA ÓPTICA"
+	case "uptime_restart_low":
+		return "🟡 ALERTA REINÍCIO"
+	case "telemetry_threshold":
+		return telemetryAlertHeader(metricID, title, message)
+	case "cpu_high":
+		return "🟡 ALERTA CPU"
+	case "memory_high":
+		return "🟡 ALERTA MEMÓRIA"
+	case "temperature_high", "temperature_low":
+		return "🟡 ALERTA TEMPERATURA"
 	}
+
 	if strings.Contains(low, "offline") || strings.Contains(low, "sem resposta") || strings.Contains(low, "inalcan") {
 		return "🔴 EQUIPAMENTO OFFLINE"
 	}
 	if strings.Contains(low, "interface") && strings.Contains(low, "down") {
-		return "🔴 INTERFACE DOWN"
+		return "🔴 ALERTA INTERFACE"
+	}
+	if strings.Contains(low, "latên") || strings.Contains(low, "latenc") {
+		return "🟡 ALERTA LATÊNCIA"
+	}
+	if strings.Contains(low, "pppoe") || strings.Contains(low, "login") {
+		return "🟡 ALERTA QUEDA DE PPPoE"
+	}
+	if strings.Contains(low, "queda") && strings.Contains(low, "onu") {
+		return "🟡 ALERTA QUEDA DE ONUs"
 	}
 	if strings.Contains(low, "subida") && strings.Contains(low, "onu") {
 		return "🟢 SUBIDA DE ONUs"
 	}
+	if h := telemetryAlertHeader(metricID, title, message); h != "🟡 ALERTA TELEMETRIA" {
+		return h
+	}
 	return "🟡 ALERTA TELEMETRIA"
+}
+
+func telemetryAlertHeader(metricID, title, message string) string {
+	hay := strings.ToLower(strings.TrimSpace(metricID + " " + title + " " + message))
+	switch {
+	case strings.Contains(hay, "cpu"):
+		return "🟡 ALERTA CPU"
+	case strings.Contains(hay, "mem"):
+		return "🟡 ALERTA MEMÓRIA"
+	case strings.Contains(hay, "temp"):
+		return "🟡 ALERTA TEMPERATURA"
+	case strings.Contains(hay, "latên") || strings.Contains(hay, "latenc"):
+		return "🟡 ALERTA LATÊNCIA"
+	default:
+		return "🟡 ALERTA TELEMETRIA"
+	}
 }
 
 func resolutionHeader(alertType, title, detail string) string {
@@ -612,7 +684,7 @@ func telegramMonitoringBlocks(level, title, message string, equipFallback string
 }
 
 func telegramMonitoringBlocksWithContext(level, title, message string, equipFallback string, ipFallback string, alertType string, meta map[string]any) string {
-	header := monitoringHeader(level, title, message, alertType)
+	header := monitoringHeader(level, title, message, alertType, meta)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
 	if strings.TrimSpace(equipFallback) != "" {
 		eq = strings.TrimSpace(equipFallback)
@@ -653,6 +725,13 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
 	case "bng_subscriber_drop":
 		parts = appendBngSubscriberDropTelegramLines(parts, meta, title, inc)
+	case "interface_down_transition", "interface_down", "mikrotik_sfp_tx", "mikrotik_sfp_rx":
+		if tgt := interfaceTargetFromMeta(meta, inc); tgt != "" {
+			parts = append(parts, "• "+tgt)
+		}
+		if val != "-" && (alertType == "mikrotik_sfp_tx" || alertType == "mikrotik_sfp_rx") {
+			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
+		}
 	default:
 		if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
 			parts = append(parts, "• "+tgt)

@@ -108,19 +108,35 @@ export function alertEquipmentPrimary(type: string | null | undefined, deviceNam
     return false;
   }
 
-  /** Nome SNMP / lógico da porta (sem o equipamento). */
+  /** Nome SNMP / lógico da porta (com descrição custom ou alias quando existir). */
   function resolveIfaceLabel(): string {
     const display = m?.display_name;
-    if (typeof display === "string" && display.trim() && !looksLikeIpOrOnlyDigits(display)) return display.trim();
-    const ifName = m?.if_name;
-    if (typeof ifName === "string" && ifName.trim() && !looksLikeIpOrOnlyDigits(ifName)) return ifName.trim();
+    if (typeof display === "string" && display.trim() && !looksLikeIpOrOnlyDigits(display)) {
+      return display.trim();
+    }
+    const ifName =
+      typeof m?.if_name === "string" && m.if_name.trim() && !looksLikeIpOrOnlyDigits(m.if_name)
+        ? m.if_name.trim()
+        : "";
+    const custom =
+      typeof m?.custom_description === "string" && m.custom_description.trim()
+        ? m.custom_description.trim()
+        : "";
+    const alias =
+      typeof m?.if_alias === "string" && m.if_alias.trim() ? m.if_alias.trim() : "";
+    const desc = custom || alias;
+    if (ifName && desc && desc.toLowerCase() !== ifName.toLowerCase()) {
+      return `${ifName} (${desc})`;
+    }
+    if (ifName) return ifName;
+    if (desc && !looksLikeIpOrOnlyDigits(desc)) return desc;
     const ifIdx = m?.if_index;
     if (typeof ifIdx === "number" && Number.isFinite(ifIdx)) return `ifIndex ${Math.round(ifIdx)}`;
     const sfpIf = msgStr.match(/\binterface\s+(.+?)\s+[—\-]\s*potência/i);
     if (sfpIf?.[1]?.trim() && !looksLikeIpOrOnlyDigits(sfpIf[1])) return sfpIf[1].trim();
-    const mudouIf = msgStr.match(/\binterface\s+(\S+)\s+mudou/i);
-    if (mudouIf?.[1] && !looksLikeIpOrOnlyDigits(mudouIf[1])) return mudouIf[1];
-    const loose = msgStr.match(/\binterface\s+([a-z0-9_\/.@+-]+)/i);
+    const mudouIf = msgStr.match(/\binterface\s+(.+?)\s+mudou/i);
+    if (mudouIf?.[1]?.trim() && !looksLikeIpOrOnlyDigits(mudouIf[1])) return mudouIf[1].trim();
+    const loose = msgStr.match(/\binterface\s+([a-z0-9_\/.@+-]+(?:\s*\([^)]+\))?)/i);
     if (loose?.[1] && !looksLikeIpOrOnlyDigits(loose[1])) return loose[1];
     return "";
   }

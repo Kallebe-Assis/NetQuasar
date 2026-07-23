@@ -77,6 +77,18 @@ func VerifyAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, a
 	out.StillActive = !resolved
 	out.Resolved = resolved
 
+	// Collector (ex.: snapshot de interfaces) pode ter fechado o alerta antes.
+	if !alertStillOpen(ctx, pool, alertID) {
+		out.Resolved = true
+		out.StillActive = false
+		if out.Summary == "" {
+			out.Summary = "Problema normalizado na recoleta."
+		}
+		verifyStore := map[string]any{"summary": out.Summary, "resolved": true, "collected": collected, "at": time.Now().UTC().Format(time.RFC3339)}
+		alertignore.PatchVerifyResult(ctx, pool, ignoreID, row.DeviceID, row.AlertType, row.MetaKey, verifyStore)
+		return out, nil
+	}
+
 	if resolved {
 		closeMeta := map[string]any{"resolved": "verify_normalized", "source": "alert_verify", "verify": collected}
 		if rv := formatResolvedValueText(row.AlertType, collected); rv != "" {
@@ -127,19 +139,57 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	case "ping_unreachable":
 		return verifyPing(ctx, pool, row)
 	case "latency_high":
-		return verifyLatency(ctx, pool, row)
+		return verifyLatencyLive(ctx, pool, row)
 	case "telemetry_threshold":
-		return verifyTelemetry(ctx, pool, row)
+		extra := map[string]any{}
+		if err := refreshTelemetryForDevice(ctx, pool, row.DeviceID); err != nil {
+			extra["refresh_error"] = err.Error()
+		} else {
+			extra["refreshed"] = true
+		}
+		resolved, summary, collected, patch = verifyTelemetry(ctx, pool, row)
+		for k, v := range extra {
+			collected[k] = v
+		}
+		return resolved, summary, collected, patch
 	case "uptime_restart_low":
-		return verifyUptimeRestartLow(ctx, pool, row)
+		extra := map[string]any{}
+		if err := refreshTelemetryForDevice(ctx, pool, row.DeviceID); err != nil {
+			extra["refresh_error"] = err.Error()
+		} else {
+			extra["refreshed"] = true
+		}
+		resolved, summary, collected, patch = verifyUptimeRestartLow(ctx, pool, row)
+		for k, v := range extra {
+			collected[k] = v
+		}
+		return resolved, summary, collected, patch
 	case "olt_onu_drop", "olt_onu_rise":
-		return verifyOltOnuDelta(ctx, pool, row)
+		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
+		resolved, summary, collected, patch = verifyOltOnuDelta(ctx, pool, row)
+		collected["refreshed"] = true
+		return resolved, summary, collected, patch
 	case "bng_subscriber_drop":
-		return verifyBngSubscriberDrop(ctx, pool, row)
+		extra := map[string]any{}
+		if err := refreshBngCollect(ctx, pool, row.DeviceID); err != nil {
+			extra["refresh_error"] = err.Error()
+		} else {
+			extra["refreshed"] = true
+		}
+		resolved, summary, collected, patch = verifyBngSubscriberDrop(ctx, pool, row)
+		for k, v := range extra {
+			collected[k] = v
+		}
+		return resolved, summary, collected, patch
 	case "olt_onu_rx", "olt_onu_tx":
-		return verifyOltOnuOptical(ctx, pool, row)
+		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
+		resolved, summary, collected, patch = verifyOltOnuOptical(ctx, pool, row)
+		collected["refreshed"] = true
+		return resolved, summary, collected, patch
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
 		return verifySfp(ctx, pool, log, row)
+	case "interface_down_transition", "interface_down":
+		return verifyInterfaceDown(ctx, pool, log, row)
 	default:
 		_ = log
 		collected["note"] = "verificação genérica via cache"
@@ -445,15 +495,16 @@ func verifySfp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, row
 	collected := map[string]any{}
 	wantRx := row.AlertType == "mikrotik_sfp_rx"
 	ifIndex := metaIfIndex(row.Meta)
-	dbm, snapAt := loadSfpDbmFromSnapshot(ctx, pool, row.DeviceID, ifIndex, wantRx)
-	if dbm == nil && ifIndex > 0 {
-		host, comm, cat, brand, model, desc := loadDeviceSnmpFields(ctx, pool, row.DeviceID)
-		if host != "" && comm != "" {
-			monitorworker.CollectInterfaceSnapshotWorker(ctx, pool, log, row.DeviceID, host, comm, cat, brand, model, desc)
-			collected["snapshot_refreshed"] = true
-			dbm, snapAt = loadSfpDbmFromSnapshot(ctx, pool, row.DeviceID, ifIndex, wantRx)
-		}
+	// Sempre recolectar interfaces/óptica do equipamento.
+	host, comm, cat, brand, model, desc := loadDeviceSnmpFields(ctx, pool, row.DeviceID)
+	if host != "" && comm != "" {
+		monitorworker.CollectInterfaceSnapshotWorker(ctx, pool, log, row.DeviceID, host, comm, cat, brand, model, desc)
+		collected["snapshot_refreshed"] = true
 	}
+	if !alertStillOpen(ctx, pool, row.ID) {
+		return true, "Potência óptica SFP dentro do limiar.", collected, nil
+	}
+	dbm, snapAt := loadSfpDbmFromSnapshot(ctx, pool, row.DeviceID, ifIndex, wantRx)
 	if snapAt != "" {
 		collected["snapshot_at"] = snapAt
 	}

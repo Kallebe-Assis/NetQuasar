@@ -22,11 +22,14 @@ const (
 
 // SfpInterfaceRow dados por interface após colheita SNMP.
 type SfpInterfaceRow struct {
-	IfIndex     int
-	DisplayName string
-	Sfp         bool
-	TxDBm       *float64
-	RxDBm       *float64
+	IfIndex           int
+	DisplayName       string
+	IfName            string
+	IfAlias           string
+	CustomDescription string
+	Sfp               bool
+	TxDBm             *float64
+	RxDBm             *float64
 }
 
 type thresholdMetric struct {
@@ -159,37 +162,43 @@ func EvaluateMikrotikSFPAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, l
 			continue
 		}
 		if row.TxDBm != nil && (txRule.HasWarning || txRule.HasCritical) {
-			syncSfpAlert(ctx, pool, log, deviceID, desc, ip, alertTypeSfpTx, row.IfIndex, row.DisplayName, "TX", *row.TxDBm, txRule)
+			syncSfpAlert(ctx, pool, log, deviceID, desc, ip, alertTypeSfpTx, row, "TX", *row.TxDBm, txRule)
 		} else {
 			closeSfpAlert(ctx, pool, log, deviceID, alertTypeSfpTx, row.IfIndex)
 		}
 		if row.RxDBm != nil && (rxRule.HasWarning || rxRule.HasCritical) {
-			syncSfpAlert(ctx, pool, log, deviceID, desc, ip, alertTypeSfpRx, row.IfIndex, row.DisplayName, "RX", *row.RxDBm, rxRule)
+			syncSfpAlert(ctx, pool, log, deviceID, desc, ip, alertTypeSfpRx, row, "RX", *row.RxDBm, rxRule)
 		} else {
 			closeSfpAlert(ctx, pool, log, deviceID, alertTypeSfpRx, row.IfIndex)
 		}
 	}
 }
 
-func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, desc, ip, alertType string, ifIndex int, ifName, label string, v float64, rule thresholdMetric) {
+func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, desc, ip, alertType string, row SfpInterfaceRow, label string, v float64, rule thresholdMetric) {
 	sev := evalOne(v, rule)
-	ifLabel := strings.TrimSpace(ifName)
+	ifLabel := strings.TrimSpace(row.DisplayName)
 	if ifLabel == "" {
-		ifLabel = fmt.Sprintf("if%d", ifIndex)
+		ifLabel = fmt.Sprintf("if%d", row.IfIndex)
+	}
+	baseName := strings.TrimSpace(row.IfName)
+	if baseName == "" {
+		baseName = ifLabel
 	}
 	base := map[string]any{
-		"source":       "interface_snapshot",
-		"if_index":     ifIndex,
-		"display_name": ifLabel,
-		"if_name":      ifLabel,
-		"key":          ifLabel,
-		"metric":       label,
-		"dbm":          v,
-		"value":        v,
-		"value_text":   fmt.Sprintf("%.3f dBm", v),
+		"source":             "interface_snapshot",
+		"if_index":           row.IfIndex,
+		"display_name":       ifLabel,
+		"if_name":            baseName,
+		"if_alias":           strings.TrimSpace(row.IfAlias),
+		"custom_description": strings.TrimSpace(row.CustomDescription),
+		"key":                ifLabel,
+		"metric":             label,
+		"dbm":                v,
+		"value":              v,
+		"value_text":         fmt.Sprintf("%.3f dBm", v),
 	}
 	if sev == "ok" {
-		closeSfpAlert(ctx, pool, log, deviceID, alertType, ifIndex)
+		closeSfpAlert(ctx, pool, log, deviceID, alertType, row.IfIndex)
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): interface %s — potência SFP %s %.3f dBm (severidade: %s).",
@@ -198,14 +207,14 @@ func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, 
 	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
 		DeviceID: deviceID, Severity: sev, AlertType: alertType,
 		Message: msg, IP: ip, DeviceName: desc, Meta: meta,
-		Match: alertstore.Match{Kind: alertstore.MatchIfIndex, IfIndex: ifIndex},
+		Match: alertstore.Match{Kind: alertstore.MatchIfIndex, IfIndex: row.IfIndex},
 	}, &alertstore.NotifyCreate{
 		Log: log, Level: strings.ToUpper(sev), Headline: "Potência óptica SFP",
 	})
 	if err != nil && log != nil {
 		log.Error().Err(err).Str("device", deviceID.String()).Str("alert_type", alertType).Msg("alertstore SFP")
 	} else if res.Created && log != nil {
-		log.Warn().Str("device", deviceID.String()).Str("alert_type", alertType).Int("if_index", ifIndex).Msg("alerta SFP: aberto")
+		log.Warn().Str("device", deviceID.String()).Str("alert_type", alertType).Int("if_index", row.IfIndex).Msg("alerta SFP: aberto")
 	}
 }
 

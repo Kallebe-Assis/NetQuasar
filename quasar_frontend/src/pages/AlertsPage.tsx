@@ -220,17 +220,25 @@ export function AlertsPage() {
 
   const verifyAll = useMutation({
     mutationFn: async () => {
-      await apiFetch<{ ok: boolean; closed_ping_count?: number; verified_count?: number; resolved_count?: number }>(
-        "/api/v1/alerts/verify-all",
-        { method: "POST", json: {} },
-      );
+      const res = await apiFetch<{
+        ok: boolean;
+        closed_ping_count?: number;
+        verified_count?: number;
+        resolved_count?: number;
+      }>("/api/v1/alerts/verify-all", { method: "POST", json: {}, timeoutMs: 15 * 60_000 });
       await active.refetch();
       await incidents.refetch();
       await resolved24h.refetch();
+      return res;
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       void invalidateAlertListQueries(qc);
-      pushToast({ tone: "ok", text: "Alertas verificados e lista actualizada." });
+      const verified = res?.verified_count ?? 0;
+      const resolved = res?.resolved_count ?? 0;
+      pushToast({
+        tone: "ok",
+        text: `Verificação concluída: ${verified} alerta(s) reavaliado(s), ${resolved} normalizado(s).`,
+      });
     },
     onError: (e: unknown) => {
       pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao verificar alertas." });
@@ -249,7 +257,8 @@ export function AlertsPage() {
   });
 
   const verifyOneMut = useMutation({
-    mutationFn: (alertId: string) => apiFetch<VerifyResult>(`/api/v1/alerts/${alertId}/verify`, { method: "POST", json: {} }),
+    mutationFn: (alertId: string) =>
+      apiFetch<VerifyResult>(`/api/v1/alerts/${alertId}/verify`, { method: "POST", json: {}, timeoutMs: 5 * 60_000 }),
     onSuccess: (res) => {
       void invalidateAlertListQueries(qc);
       pushToast({
@@ -462,13 +471,13 @@ export function AlertsPage() {
               type="button"
               className="btn btn--primary"
               disabled={verifyAll.isPending}
-              title="Recalcula estado no servidor (ping, limiares, OLT…) e actualiza a lista"
+              title="Recolecta dados ao vivo (ping, interfaces, OLT, BNG…) e reavalia cada alerta activo"
               onClick={() => verifyAll.mutate()}
             >
               {verifyAll.isPending ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <Loader2 size={16} className="map-refresh-spin" aria-hidden />
-                  A verificar…
+                  A recolectar e verificar…
                 </span>
               ) : (
                 "Verificar alertas"
@@ -479,6 +488,12 @@ export function AlertsPage() {
             </button>
           </div>
           {verifyAll.isError && <div className="msg msg--err margin-bottom mb-12">{(verifyAll.error as Error).message}</div>}
+          {verifyAll.isPending ? (
+            <div className="msg" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              <Loader2 size={18} className="map-refresh-spin" aria-hidden />
+              A recolectar dados de cada alerta activo (ping, interfaces, OLT, BNG…). Isto pode demorar alguns minutos.
+            </div>
+          ) : null}
 
           <div className="alerts-panel">
             <div className="alerts-panel__head">
