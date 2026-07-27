@@ -3,6 +3,7 @@ package monitorworker
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
@@ -53,56 +54,71 @@ func RunBngSweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, m
 
 	eligible, processed, okN, failN, skipN := 0, 0, 0, 0, 0
 	timeout := cfg.bngTimeout()
+	var ctrMu sync.Mutex
+	limit := sweepConcurrency()
 
-	for _, row := range devices {
+	forEachLimited(ctx, len(devices), limit, func(i int) {
+		row := devices[i]
 		if !row.bngEnabled {
+			ctrMu.Lock()
 			skipN++
-			continue
+			ctrMu.Unlock()
+			return
 		}
 		comm := resolveSNMPCommunity(row, defCommunity)
 		if comm == "" {
+			ctrMu.Lock()
 			skipN++
-			continue
+			ctrMu.Unlock()
+			return
 		}
+		ctrMu.Lock()
 		eligible++
+		ctrMu.Unlock()
 
 		unlock := snmpdevicelock.Acquire(row.id)
-		func() {
-			defer unlock()
-			processed++
-			sctx, scancel := context.WithTimeout(ctx, timeout)
-			defer scancel()
+		defer unlock()
+		ctrMu.Lock()
+		processed++
+		ctrMu.Unlock()
+		sctx, scancel := context.WithTimeout(ctx, timeout)
+		defer scancel()
 
-			out, telErr := bngcollect.CollectAndStorePeriodicMode(sctx, pool, row.id, strings.TrimSpace(row.ip), comm, timeout, bngMode)
-			snmpOK := telErr == nil && out.Status.Collected > 0
-			if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
-				snmpOK = false
+		out, telErr := bngcollect.CollectAndStorePeriodicMode(sctx, pool, row.id, strings.TrimSpace(row.ip), comm, timeout, bngMode)
+		snmpOK := telErr == nil && out.Status.Collected > 0
+		if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
+			snmpOK = false
+		}
+		if snmpOK {
+			ctrMu.Lock()
+			okN++
+			ctrMu.Unlock()
+			alertthresholds.EvaluateBngSubscriberDropAlerts(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), "monitoring_bng")
+			NudgeMonitoringRuntimeRefresh(sctx, pool)
+		} else {
+			ctrMu.Lock()
+			failN++
+			ctrMu.Unlock()
+			if telErr != nil && log != nil {
+				log.Warn().Err(telErr).Str("device", row.id.String()).Str("host", strings.TrimSpace(row.ip)).Msg("coleta BNG falhou")
 			}
-			if snmpOK {
-				okN++
-				alertthresholds.EvaluateBngSubscriberDropAlerts(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), "monitoring_bng")
-				NudgeMonitoringRuntimeRefresh(sctx, pool)
-			} else {
-				failN++
-				if telErr != nil && log != nil {
-					log.Warn().Err(telErr).Str("device", row.id.String()).Str("host", strings.TrimSpace(row.ip)).Msg("coleta BNG falhou")
-				}
-			}
-		}()
-	}
+		}
+	})
 
 	if log != nil && eligible > 0 {
-		log.Info().Int("eligible", eligible).Int("processed", processed).Str("mode", bngMode).Str("source", src).Msg("ciclo BNG concluído")
+		log.Info().Int("eligible", eligible).Int("processed", processed).Str("mode", bngMode).Str("source", src).
+			Int("concurrency", limit).Msg("ciclo BNG concluído")
 	}
 
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugBng, "run", map[string]any{
-		"source":    src,
-		"mode":      bngMode,
-		"eligible":  eligible,
-		"processed": processed,
-		"ok":        okN,
-		"failed":    failN,
-		"skipped":   skipN,
+		"source":      src,
+		"mode":        bngMode,
+		"eligible":    eligible,
+		"processed":   processed,
+		"ok":          okN,
+		"failed":      failN,
+		"skipped":     skipN,
+		"concurrency": limit,
 	})
 
 	_, err = pool.Exec(ctx, `

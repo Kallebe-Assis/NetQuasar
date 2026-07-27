@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,18 +48,21 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 	setActivity(ctx, pool, "Requisitando ICMP/TCP nos equipamentos (ciclo latência)")
 	defer setActivity(ctx, pool, "")
 
-	okN, failN := 0, 0
+	var okN, failN atomic.Int32
+	var recoveredMu sync.Mutex
 	recoveredPing := make(map[uuid.UUID]int64)
+	limit := sweepConcurrency()
 
-	for _, row := range devices {
+	forEachLimited(ctx, len(devices), limit, func(i int) {
+		row := devices[i]
 		if ctx.Err() != nil {
-			break
+			return
 		}
 		id := row.id
 		host := strings.TrimSpace(row.ip)
 		description := row.description
 		if host == "" {
-			continue
+			return
 		}
 
 		WithDeviceProbeRowLock(id, func() {
@@ -73,8 +78,6 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			`, id).Scan(&streak, &latHighStreak, &prevLatMs)
 
 			pctx, cancel := context.WithTimeout(ctx, perProbe+300*time.Millisecond)
-			devLabel := monitoringDeviceLabel(description, host)
-			setActivity(ctx, pool, fmt.Sprintf("ICMP/TCP [latência] · %s", devLabel))
 			probe := probing.HostReachability(pctx, host, "443", icmpPart, tcpPart, cfg.ICMPPayloadBytes)
 			cancel()
 
@@ -106,15 +109,17 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				InsertPingUnreachableIfNewForMonitoredDevice(ctx, pool, log, id, description, host, probe, src)
 			}
 			if probeReachOK {
+				recoveredMu.Lock()
 				recoveredPing[id] = lat
+				recoveredMu.Unlock()
 			}
 			latHighStreakAfter := EvaluateLatencyHighAlerts(ctx, pool, log, id, row.category, description, host, probeReachOK, lat, prevLatMs.Int64, latHighStreak, cfg.latencyConsecutiveRequired())
 
 			overallOK := compositeProbeOK(mode, reachOK, snmpPrev)
 			if overallOK {
-				okN++
+				okN.Add(1)
 			} else {
-				failN++
+				failN.Add(1)
 			}
 
 			dj, jerr := json.Marshal(detail)
@@ -183,7 +188,7 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				NudgeMonitoringRuntimeRefresh(ctx, pool)
 			}
 		})
-	}
+	})
 
 	resolvePingUnreachableForDevices(ctx, pool, log, recoveredPing)
 	repairMissingPingUnreachableAlerts(ctx, pool, log, cfg.alertConsecutiveRequired())
@@ -196,16 +201,18 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			last_cycle_fail_count = $2,
 			updated_at = now()
 		WHERE id = 1
-	`, okN, failN)
+	`, int(okN.Load()), int(failN.Load()))
 	if log != nil {
-		log.Info().Str("cycle", "latency").Str("mode", mode).Int("ok", okN).Int("fail", failN).Msg("ciclo latência")
+		log.Info().Str("cycle", "latency").Str("mode", mode).Int("ok", int(okN.Load())).Int("fail", int(failN.Load())).
+			Int("concurrency", limit).Msg("ciclo latência")
 	}
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugLatency, "run", map[string]any{
-		"source": src,
-		"mode":   mode,
-		"ok":     okN,
-		"fail":   failN,
-		"total":  len(devices),
+		"source":       src,
+		"mode":         mode,
+		"ok":           int(okN.Load()),
+		"fail":         int(failN.Load()),
+		"total":        len(devices),
+		"concurrency":  limit,
 	})
 	return err
 }

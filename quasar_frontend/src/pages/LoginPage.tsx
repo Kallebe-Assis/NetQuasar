@@ -13,14 +13,23 @@ import {
   markClientConfigured,
   markSessionReady,
   saveAuthToken,
+  savePermissionProfileId,
   saveUserDisplayLabel,
+  saveUserPermissions,
   saveUserRole,
 } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 
 type SetupStatus = { database_configured?: boolean };
 
-type AuthLoginResponse = { token?: string; email?: string; display_name?: string; role?: string };
+type AuthLoginResponse = {
+  token?: string;
+  email?: string;
+  display_name?: string;
+  role?: string;
+  permissions?: string[];
+  permission_profile_id?: string;
+};
 
 /** Duração mínima do ecrã de loading após requisição de login (ms). */
 const LOGIN_SPLASH_MIN_MS = 2000;
@@ -64,6 +73,8 @@ export function LoginPage() {
       }
       saveAuthToken(t);
       saveUserRole(typeof data?.role === "string" ? data.role : "admin");
+      saveUserPermissions(Array.isArray(data?.permissions) ? data.permissions : data?.role === "admin" ? ["*"] : []);
+      savePermissionProfileId(typeof data?.permission_profile_id === "string" ? data.permission_profile_id : null);
       const display =
         typeof data?.display_name === "string" && data.display_name.trim()
           ? data.display_name.trim()

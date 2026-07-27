@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { ActionMenu } from "../components/ActionMenu";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
-import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
+import { apiUrl, can, getStoredApiKey, isAdminUser } from "../lib/auth";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
@@ -394,7 +394,7 @@ function validatePonInterfacesForm(form: Partial<Device>): string | null {
 }
 
 export function DevicesPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("devices.manage") || can("devices.collect");
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const focusEditId = searchParams.get("focus");

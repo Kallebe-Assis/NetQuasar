@@ -105,7 +105,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/olt-collect-readiness", s.monitoringOltCollectReadiness)
 			r.Get("/nightly-collection", s.getNightlyCollectionSettings)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("monitoring.control", "*"))
 				r.Post("/start", s.monitoringStart)
 				r.Post("/stop", s.monitoringStop)
 				r.Post("/reload-devices", s.monitoringReloadDevices)
@@ -122,7 +122,10 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/ui-appearance", s.getUIAppearance)
 			r.Get("/connection/defaults", s.getConnectionDefaults)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware(
+					"settings.system", "settings.monitoring", "settings.notifications",
+					"settings.users", "settings.permissions", "*",
+				))
 				r.Patch("/monitoring-intervals", s.patchMonitoringIntervals)
 				r.Patch("/monitoring", s.patchMonitoringSettings)
 				r.Patch("/ui-appearance", s.patchUIAppearance)
@@ -141,6 +144,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/users/{id}", s.getUser)
 				r.Patch("/users/{id}", s.patchUser)
 				r.Delete("/users/{id}", s.deleteUser)
+				r.Get("/permissions", s.listPermissionCatalog)
+				r.Get("/permission-profiles", s.listPermissionProfiles)
+				r.Post("/permission-profiles", s.createPermissionProfile)
+				r.Get("/permission-profiles/{id}", s.getPermissionProfile)
+				r.Patch("/permission-profiles/{id}", s.patchPermissionProfile)
+				r.Delete("/permission-profiles/{id}", s.deletePermissionProfile)
 				r.Patch("/connection/defaults", s.patchConnectionDefaults)
 				r.Get("/olt-vendors", s.listOltVendors)
 				r.Get("/olt-vendors/catalog", s.getOltModelsCatalog)
@@ -198,7 +207,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}/contacts", s.listPopContacts)
 			r.Get("/{id}", s.getPop)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("pops.manage", "*"))
 				r.Post("/", s.createPop)
 				r.Patch("/{id}", s.patchPop)
 				r.Delete("/{id}", s.deletePop)
@@ -217,7 +226,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}/status", s.deviceStatusStub)
 			r.Get("/{id}", s.getDevice)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("devices.manage", "devices.collect", "devices.backup", "*"))
 				r.Post("/", s.createDevice)
 				r.Post("/import/csv", s.importDevicesCSV)
 				r.Post("/{id}/checks", s.deviceChecks)
@@ -244,13 +253,14 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/network/splice-boxes", s.listNetworkSpliceBoxes)
 			r.Get("/network/splice-boxes/{id}", s.getNetworkSpliceBox)
 			r.Get("/network/cables", s.listNetworkCables)
+			r.Get("/network/cables/{id}", s.getNetworkCable)
 			r.Get("/network/poles", s.listNetworkPoles)
 			r.Get("/aggregates", s.commercialAggregates)
 			r.Get("/totals-history", s.commercialTotalsHistory)
 			r.Get("/comparison", s.commercialMonthComparison)
 			r.Get("/reports/export", s.commercialReportsExport)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("commercial.manage", "connections.manage", "*"))
 				r.Post("/localities", s.createLocality)
 				r.Patch("/localities/{id}", s.patchLocality)
 				r.Delete("/localities/{id}", s.deleteLocality)
@@ -289,7 +299,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Route("/maintenance", func(r chi.Router) {
 			r.Get("/windows", s.listMaintenanceWindows)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("alerts.manage", "*"))
 				r.Post("/windows", s.createMaintenanceWindow)
 				r.Patch("/windows/{id}", s.patchMaintenanceWindow)
 			})
@@ -307,7 +317,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/suppressions", s.listSuppressions)
 			r.Get("/suppressions/{id}", s.getSuppression)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("alerts.verify", "alerts.manage", "*"))
 				r.Post("/incidents/reconcile", s.incidentsReconcile)
 				r.Post("/revalidate", s.alertsRevalidate)
 				r.Post("/verify-all", s.alertsVerifyAll)
@@ -324,7 +334,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/", s.listAlertRules)
 			r.Get("/{id}", s.getAlertRule)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("alerts.manage", "*"))
 				r.Post("/", s.createAlertRule)
 				r.Patch("/{id}", s.patchAlertRule)
 				r.Delete("/{id}", s.deleteAlertRule)
@@ -346,7 +356,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Post("/{id}/run-all", s.integrationRunAll)
 			r.Post("/{id}/requests/{requestId}/run", s.integrationRunRequest)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("integrations.manage", "*"))
 				r.Post("/", s.createIntegration)
 				r.Patch("/{id}", s.patchIntegration)
 				r.Delete("/{id}", s.deleteIntegration)
@@ -379,7 +389,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/history", s.pingHistory)
 			r.Get("/devices/{id}/run", s.pingRunDevice)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("devices.collect", "*"))
 				r.Post("/devices/{id}/run", s.pingRunDevice)
 			})
 		})
@@ -388,7 +398,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}/latest", s.telemetryLatest)
 			r.Get("/history", s.telemetryHistory)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("devices.collect", "mikrotik.collect", "switch.collect", "*"))
 				r.Post("/devices/{id}/collect", s.telemetryCollect)
 			})
 		})
@@ -397,7 +407,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}", s.listDeviceInterfaces)
 			r.Get("/history", s.interfacesHistory)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("devices.collect", "mikrotik.collect", "switch.collect", "*"))
 				r.Post("/devices/{id}/refresh", s.refreshDeviceInterfaces)
 				r.Post("/devices/{id}/realtime", s.realtimeDeviceInterfaces)
 				r.Put("/devices/{id}/metadata", s.putDeviceInterfaceMetadata)
@@ -411,7 +421,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/reports/history", s.getOLTReportsHistory)
 			r.Post("/onu-search", s.searchOLTOnus)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("olt.collect", "olt.onu_manage", "*"))
 				r.Post("/devices/{id}/refresh", s.refreshOLTDevice)
 				r.Post("/devices/{id}/snmp-debug", s.postOLTSnmpDebug)
 				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
@@ -426,7 +436,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 
 		r.Route("/snmp-walk", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("tools.execute", "devices.collect", "*"))
 				r.Post("/devices/{id}/run", s.snmpWalkDeviceRun)
 				r.Get("/devices/{id}/jobs/{jobId}", s.snmpWalkJobGet)
 				r.Get("/devices/{id}/candidates", s.snmpWalkCandidates)
@@ -452,7 +462,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/traffic/users", s.bngTrafficUsers)
 			r.Get("/stats/summary", s.bngStatsSummary)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("bng.collect", "*"))
 				r.Post("/devices/{id}/sessions/collect", s.bngDeviceSessionsCollect)
 				r.Post("/devices/{id}/collect", s.bngDeviceCollect)
 			})
@@ -468,7 +478,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/system/{id}", s.systemReportData)
 			r.Get("/system/{id}/csv", s.systemReportCSV)
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdminMiddleware)
+				r.Use(s.requirePermissionMiddleware("reports.send", "reports.manage", "*"))
 				r.Post("/system/{id}/telegram", s.systemReportTelegram)
 			})
 		})

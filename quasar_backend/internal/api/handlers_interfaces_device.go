@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/interfacealerts"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
@@ -263,6 +264,15 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		}
 		// Snapshot OLT/PON só via refresh manual (perfil em Definições).
 	}
+	pppoeCount := -1
+	if isMikrotik && s.DB() != nil {
+		// A aba PPPoE vive da telemetria: aproveitar o walk IF-MIB deste refresh.
+		if n, errPPP := mikrotikcollect.SyncPPPoEFromInterfaceWalk(ctx, s.DB(), id, merged); errPPP != nil {
+			s.Log.Warn().Err(errPPP).Str("device", id.String()).Msg("sync PPPoE após refresh de interfaces")
+		} else {
+			pppoeCount = n
+		}
+	}
 	if s.DB() != nil {
 		interfacealerts.EvaluateAfterSnapshot(ctx, s.DB(), &s.Log, interfacealerts.Params{
 			DeviceID:   id,
@@ -284,18 +294,22 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		"ok": ok, "timeout_ms": ifRefreshTO.Milliseconds(), "snmp_rows": len(merged), "interface_count": ifaceCount,
 		"walk_truncated": walkRes.Truncated,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"device_id":        id,
-		"collected_at":     collectedAt.UTC().Format(time.RFC3339),
-		"ok":               ok,
-		"walk_note":        note,
-		"walk_truncated":   walkRes.Truncated,
-		"interface_count":  ifaceCount,
-		"snmp_rows":        len(merged),
-		"interfaces":       json.RawMessage(b),
-		"interface_table":  payload["interface_table"],
-		"optical_sensors":  payload["optical_sensors"],
-	})
+	resp := map[string]any{
+		"device_id":       id,
+		"collected_at":    collectedAt.UTC().Format(time.RFC3339),
+		"ok":              ok,
+		"walk_note":       note,
+		"walk_truncated":  walkRes.Truncated,
+		"interface_count": ifaceCount,
+		"snmp_rows":       len(merged),
+		"interfaces":      json.RawMessage(b),
+		"interface_table": payload["interface_table"],
+		"optical_sensors": payload["optical_sensors"],
+	}
+	if pppoeCount >= 0 {
+		resp["pppoe_session_count"] = pppoeCount
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) realtimeDeviceInterfaces(w http.ResponseWriter, r *http.Request) {

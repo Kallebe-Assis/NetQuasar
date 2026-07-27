@@ -87,6 +87,24 @@ function formatHistoryAxisTime(iso: string, days: number): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Escala Y próxima dos valores (evita eixo 0→máx quando a série oscila só no topo). */
+function sessionsHistoryYDomain(values: number[]): [number, number] {
+  const nums = values.filter((v) => Number.isFinite(v));
+  if (nums.length === 0) return [0, 1];
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const span = Math.max(1, max - min);
+  const pad = Math.max(span * 0.25, min * 0.08, 10);
+  let lo = Math.max(0, min - pad);
+  let hi = max + Math.max(span * 0.15, max * 0.02, 5);
+  const mag = Math.max(hi - lo, 1);
+  const roundBase = mag >= 1000 ? 100 : mag >= 100 ? 50 : 10;
+  lo = Math.max(0, Math.floor(lo / roundBase) * roundBase);
+  hi = Math.ceil(hi / roundBase) * roundBase;
+  if (hi <= lo) hi = lo + roundBase;
+  return [lo, hi];
+}
+
 export function BngOverviewPanel(props: Props) {
   const cpuPct = parsePercentValue(props.fields?.cpu_usage);
   const memPct = parsePercentValue(props.fields?.memory_usage);
@@ -104,6 +122,14 @@ export function BngOverviewPanel(props: Props) {
       total: p.total_online ?? 0,
     }));
   }, [props.historySamples, props.historyDays]);
+
+  const sessionsYDomain = useMemo(() => {
+    const vals: number[] = [];
+    for (const row of trafficChart) {
+      vals.push(row.pppoe, row.total);
+    }
+    return sessionsHistoryYDomain(vals);
+  }, [trafficChart]);
 
   const topPools = (props.ipv4Pools ?? [])
     .filter((p) => (p.used_percent ?? 0) > 0 || (p.used_ips ?? 0) > 0)
@@ -222,7 +248,13 @@ export function BngOverviewPanel(props: Props) {
                   </defs>
                   <CartesianGrid stroke="var(--mk-chart-grid)" vertical={false} />
                   <XAxis dataKey="t" tick={{ fill: "var(--muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis
+                    tick={{ fill: "var(--muted)", fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                    domain={sessionsYDomain}
+                  />
                   <Tooltip
                     contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11 }}
                   />

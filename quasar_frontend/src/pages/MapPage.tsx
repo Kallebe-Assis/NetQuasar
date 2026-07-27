@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
+import { MapInfraSidePanel, parseInfraMapId } from "../components/MapInfraSidePanel";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { INFRA_MAP_KIND_LABELS, isInfraMapKind, type InfraMapKind } from "../lib/mapInfrastructureIcons";
@@ -53,6 +54,8 @@ type Point = {
   markerColor?: string | null;
   display_number?: number;
   mapLabel?: string;
+  splitter?: string | null;
+  fiber_color?: string | null;
 };
 
 type ConnectionPoint = {
@@ -75,6 +78,8 @@ type InfrastructurePoint = {
   point_type: InfraMapKind;
   id_prefix?: string;
   color?: string;
+  splitter?: string | null;
+  fiber_color?: string | null;
 };
 
 type PointDetail = Point & {
@@ -166,10 +171,15 @@ export function MapPage() {
   const [flyKey, setFlyKey] = useState(0);
   const [mapToast, setMapToast] = useState<{ ok: boolean; text: string } | null>(null);
   const [showConnections, setShowConnections] = useState(false);
-  const [showInfrastructure, setShowInfrastructure] = useState(false);
+  const [showCtos, setShowCtos] = useState(true);
+  const [showCables, setShowCables] = useState(true);
+  const [showExtraInfra, setShowExtraInfra] = useState(false);
   const [showEquipment, setShowEquipment] = useState(true);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [infraPanelOpen, setInfraPanelOpen] = useState(false);
+  const [autoOpenSplitter, setAutoOpenSplitter] = useState(false);
+  const [autoOpenCableFibers, setAutoOpenCableFibers] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -284,9 +294,20 @@ export function MapPage() {
     placeholderData: keepPreviousData,
   });
 
+  const infraKinds = useMemo(() => {
+    const kinds: string[] = [];
+    if (showCtos) kinds.push("ctos");
+    if (showCables) kinds.push("cables");
+    if (showExtraInfra) kinds.push("splice_boxes", "poles", "projects");
+    return kinds;
+  }, [showCtos, showCables, showExtraInfra]);
+
+  const showInfrastructure = infraKinds.length > 0;
+
   const infraPts = useQuery({
     queryKey: [
       "map-infrastructure-points",
+      infraKinds.join(","),
       mapBounds?.minLat,
       mapBounds?.maxLat,
       mapBounds?.minLng,
@@ -295,7 +316,7 @@ export function MapPage() {
     ],
     queryFn: () => {
       const params = new URLSearchParams();
-      params.set("kinds", "ctos,splice_boxes,cables,poles,projects");
+      params.set("kinds", infraKinds.join(","));
       if (mapBounds) {
         params.set("min_lat", String(mapBounds.minLat));
         params.set("max_lat", String(mapBounds.maxLat));
@@ -345,19 +366,24 @@ export function MapPage() {
     const infraRaw = showInfrastructure && Array.isArray(infraPts.data?.points) ? infraPts.data.points : [];
     const infra: Point[] = infraRaw
       .filter((p) => isInfraMapKind(p.point_type))
-      .map((p) => ({
-        id: `infra-${p.point_type}-${p.id}`,
-        description: p.point_type === "cto" ? p.description : p.id_prefix ? `${p.id_prefix} ${p.display_number} — ${p.description}` : p.description,
-        category: INFRA_MAP_KIND_LABELS[p.point_type],
-        lat: Number(p.lat),
-        lng: Number(p.lng),
-        status: "infra",
-        point_type: p.point_type,
-        mapKind: p.point_type,
-        markerColor: p.color ?? null,
-        display_number: p.display_number,
-        mapLabel: p.point_type === "cto" ? p.description : undefined,
-      }));
+      .map((p) => {
+        const splitterLabel = p.point_type === "cto" && p.splitter ? String(p.splitter).trim() : "";
+        return {
+          id: `infra-${p.point_type}-${p.id}`,
+          description: p.point_type === "cto" ? p.description : p.id_prefix ? `${p.id_prefix} ${p.display_number} — ${p.description}` : p.description,
+          category: p.point_type === "cto" ? "CTO" : INFRA_MAP_KIND_LABELS[p.point_type],
+          lat: Number(p.lat),
+          lng: Number(p.lng),
+          status: p.point_type === "cto" ? splitterLabel || "—" : "infra",
+          point_type: p.point_type,
+          mapKind: p.point_type,
+          markerColor: p.color ?? null,
+          display_number: p.display_number,
+          mapLabel: p.point_type === "cto" ? p.description : undefined,
+          splitter: p.splitter ?? null,
+          fiber_color: p.fiber_color ?? null,
+        };
+      });
     return [...equip, ...conn, ...infra];
   }, [equipPoints, connPts.data?.points, infraPts.data?.points, showConnections, showEquipment, showInfrastructure]);
 
@@ -400,6 +426,7 @@ export function MapPage() {
         mapKind: p.mapKind,
         markerColor: p.markerColor,
         mapLabel: p.mapLabel,
+        splitter: p.splitter ?? null,
       })),
     [displayedPoints],
   );
@@ -408,7 +435,14 @@ export function MapPage() {
     (id: string, fly = true) => {
       setDetailFallback(null);
       setSelId(id);
-      setDetailModalOpen(true);
+      const infra = parseInfraMapId(id);
+      if (infra) {
+        setInfraPanelOpen(true);
+        setDetailModalOpen(false);
+      } else {
+        setInfraPanelOpen(false);
+        setDetailModalOpen(true);
+      }
       userPickedTab.current = true;
       setView("mapa");
       const p = displayedPoints.find((x) => x.id === id);
@@ -445,9 +479,21 @@ export function MapPage() {
       setSelId(row.map_id);
       userPickedTab.current = true;
       setView("mapa");
-      if (row.kind === "login") setShowConnections(true);
-      else if (row.kind === "equipment") setShowEquipment(true);
-      else setShowInfrastructure(true);
+      if (row.kind === "login") {
+        setShowConnections(true);
+        setInfraPanelOpen(false);
+        setDetailModalOpen(true);
+      } else if (row.kind === "equipment") {
+        setShowEquipment(true);
+        setInfraPanelOpen(false);
+        setDetailModalOpen(true);
+      } else {
+        if (row.kind === "cto") setShowCtos(true);
+        else if (row.kind === "cable") setShowCables(true);
+        else setShowExtraInfra(true);
+        setInfraPanelOpen(true);
+        setDetailModalOpen(false);
+      }
       setFlyTo({ lat: row.lat, lng: row.lng, zoom: 17 });
       setFlyKey((k) => k + 1);
     },
@@ -483,10 +529,10 @@ export function MapPage() {
     let n = 0;
     if (popId) n++;
     if (category) n++;
-    if (!showEquipment || showConnections || showInfrastructure) n++;
+    if (!showEquipment || showConnections || !showCtos || !showCables || showExtraInfra) n++;
     if (displayMode !== "cluster") n++;
     return n;
-  }, [popId, category, showEquipment, showConnections, showInfrastructure, displayMode]);
+  }, [popId, category, showEquipment, showConnections, showCtos, showCables, showExtraInfra, displayMode]);
 
   const listPageCount = Math.max(1, Math.ceil(displayedPoints.length / MAP_LIST_PAGE_SIZE));
   const safeListPage = Math.min(listPage, listPageCount - 1);
@@ -504,7 +550,7 @@ export function MapPage() {
   useEffect(() => {
     setFitBoundsVersion((v) => v + 1);
     setListPage(0);
-  }, [popId, category, showConnections, showEquipment, showInfrastructure]);
+  }, [popId, category, showConnections, showEquipment, showCtos, showCables, showExtraInfra]);
 
   useEffect(() => {
     setListPage(0);
@@ -555,10 +601,10 @@ export function MapPage() {
           Mapa
           <InfoHint label="Como usar o mapa">
             <p>
-              Equipamentos com coordenadas (inclui posição herdada do POP quando o equipamento não tem lat/lon próprias), conexões de clientes
-              com coordenadas cadastradas em <strong>Clientes → Conexões</strong>, e infraestrutura (CTOs, emendas, cabos, postes e projetos).
+              Equipamentos com coordenadas, CTOs e cabos da área visível (viewport), e opcionalmente logins ou outra
+              infraestrutura. O cadastro completo fica em <strong>Mapa → Conexões</strong>.
             </p>
-            <p>Seleccione um ponto no mapa ou use a pesquisa. Filtros avançados no ícone de filtro.</p>
+            <p>Seleccione uma CTO para abrir o painel lateral (localização e edição). Filtros no ícone de filtro.</p>
           </InfoHint>
         </h1>
         <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
@@ -686,10 +732,14 @@ export function MapPage() {
         onCategory={setCategory}
         showEquipment={showEquipment}
         onShowEquipment={setShowEquipment}
+        showCtos={showCtos}
+        onShowCtos={setShowCtos}
+        showCables={showCables}
+        onShowCables={setShowCables}
         showConnections={showConnections}
         onShowConnections={setShowConnections}
-        showInfrastructure={showInfrastructure}
-        onShowInfrastructure={setShowInfrastructure}
+        showExtraInfra={showExtraInfra}
+        onShowExtraInfra={setShowExtraInfra}
         equipColorDraft={equipColorDraft}
         onEquipColorDraft={setEquipColorDraft}
         connColorDraft={connColorDraft}
@@ -705,12 +755,12 @@ export function MapPage() {
       />
 
       <MapDetailModal
-        open={detailModalOpen}
+        open={detailModalOpen && !isInfraPoint}
         onClose={() => setDetailModalOpen(false)}
         selId={selId}
         selPoint={selPoint}
         isConnPoint={isConnPoint}
-        isInfraPoint={isInfraPoint}
+        isInfraPoint={false}
         detailLoading={detail.isLoading}
         detailError={detail.error as Error | null}
         detail={detail.data ?? null}
@@ -805,22 +855,77 @@ export function MapPage() {
             </div>
           ) : (
             <MapSectionErrorBoundary>
-              <div style={{ position: "relative", zIndex: 0, isolation: "isolate" }}>
-                <EquipmentMap
-                  points={mapPoints}
-                  displayMode={displayMode}
-                  mapHeight="min(72vh, 720px)"
-                  mapColors={mapColors}
-                  connectionClusterForced={connectionClusterForced}
-                  highlightedId={selId}
-                  onSelectDevice={(id) => {
-                    if (id) openPointDetail(id);
-                  }}
-                  flyTo={flyTo}
-                  flyKey={flyKey}
-                  fitBoundsVersion={fitBoundsVersion}
-                  onBoundsChange={onMapBoundsChange}
-                />
+              <div className={`map-workspace${infraPanelOpen && isInfraPoint ? " map-workspace--with-panel" : ""}`}>
+                <div className="map-workspace__map">
+                  <EquipmentMap
+                    points={mapPoints}
+                    displayMode={displayMode}
+                    mapHeight="min(72vh, 720px)"
+                    mapColors={mapColors}
+                    connectionClusterForced={connectionClusterForced}
+                    highlightedId={selId}
+                    onSelectDevice={(id) => {
+                      if (id) openPointDetail(id);
+                    }}
+                    onOpenSplitter={(id) => {
+                      if (!id) return;
+                      setAutoOpenSplitter(true);
+                      openPointDetail(id);
+                    }}
+                    onOpenCableFibers={(id) => {
+                      if (!id) return;
+                      setAutoOpenCableFibers(true);
+                      openPointDetail(id);
+                    }}
+                    flyTo={flyTo}
+                    flyKey={flyKey}
+                    fitBoundsVersion={fitBoundsVersion}
+                    onBoundsChange={onMapBoundsChange}
+                  />
+                </div>
+                {infraPanelOpen && isInfraPoint ? (
+                  <MapInfraSidePanel
+                    open
+                    mapId={selId}
+                    autoOpenSplitter={autoOpenSplitter}
+                    onSplitterAutoOpened={() => setAutoOpenSplitter(false)}
+                    autoOpenCableFibers={autoOpenCableFibers}
+                    onCableFibersAutoOpened={() => setAutoOpenCableFibers(false)}
+                    fallback={
+                      selPoint
+                        ? {
+                            description: selPoint.description,
+                            lat: Number(selPoint.lat),
+                            lng: Number(selPoint.lng),
+                            category: selPoint.category,
+                            splitter: selPoint.splitter,
+                          }
+                        : null
+                    }
+                    onClose={() => {
+                      setInfraPanelOpen(false);
+                      setAutoOpenSplitter(false);
+                      setAutoOpenCableFibers(false);
+                      setSelId(null);
+                    }}
+                    onSaved={(next) => {
+                      setMapToast({ ok: true, text: "CTO actualizada." });
+                      setFlyTo({ lat: next.lat, lng: next.lng, zoom: 17 });
+                      setFlyKey((k) => k + 1);
+                      if (selId) {
+                        setDetailFallback({
+                          id: selId,
+                          description: next.description,
+                          category: "CTO",
+                          lat: next.lat,
+                          lng: next.lng,
+                          status: "infra",
+                          mapKind: "cto",
+                        });
+                      }
+                    }}
+                  />
+                ) : null}
               </div>
             </MapSectionErrorBoundary>
           )}

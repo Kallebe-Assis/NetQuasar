@@ -19,10 +19,14 @@ type Props = {
   onCategory: (v: string) => void;
   showEquipment: boolean;
   onShowEquipment: (v: boolean) => void;
+  showCtos: boolean;
+  onShowCtos: (v: boolean) => void;
+  showCables: boolean;
+  onShowCables: (v: boolean) => void;
   showConnections: boolean;
   onShowConnections: (v: boolean) => void;
-  showInfrastructure: boolean;
-  onShowInfrastructure: (v: boolean) => void;
+  showExtraInfra: boolean;
+  onShowExtraInfra: (v: boolean) => void;
   equipColorDraft: string;
   onEquipColorDraft: (v: string) => void;
   connColorDraft: string;
@@ -113,6 +117,20 @@ export function MapFilterModal(props: Props) {
             </label>
             <label className="toggle">
               <span className="toggle__track">
+                <input type="checkbox" role="switch" className="toggle__input" checked={props.showCtos} onChange={(e) => props.onShowCtos(e.target.checked)} />
+                <span className="toggle__thumb" aria-hidden />
+              </span>
+              <span className="toggle__label">CTOs (viewport)</span>
+            </label>
+            <label className="toggle">
+              <span className="toggle__track">
+                <input type="checkbox" role="switch" className="toggle__input" checked={props.showCables} onChange={(e) => props.onShowCables(e.target.checked)} />
+                <span className="toggle__thumb" aria-hidden />
+              </span>
+              <span className="toggle__label">Cabos (viewport)</span>
+            </label>
+            <label className="toggle">
+              <span className="toggle__track">
                 <input type="checkbox" role="switch" className="toggle__input" checked={props.showConnections} onChange={(e) => props.onShowConnections(e.target.checked)} />
                 <span className="toggle__thumb" aria-hidden />
               </span>
@@ -120,10 +138,10 @@ export function MapFilterModal(props: Props) {
             </label>
             <label className="toggle">
               <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showInfrastructure} onChange={(e) => props.onShowInfrastructure(e.target.checked)} />
+                <input type="checkbox" role="switch" className="toggle__input" checked={props.showExtraInfra} onChange={(e) => props.onShowExtraInfra(e.target.checked)} />
                 <span className="toggle__thumb" aria-hidden />
               </span>
-              <span className="toggle__label">Infraestrutura</span>
+              <span className="toggle__label">Postes / emendas / projetos</span>
             </label>
           </div>
 

@@ -1,4 +1,5 @@
 export const FIBER_COLORS = [
+  "Desconhecido",
   "Verde",
   "Amarelo",
   "Branco",
@@ -65,6 +66,15 @@ export type NetworkCto = {
   project_label?: string | null;
   locality_id?: string | null;
   locality_name?: string | null;
+  splitter_ports?: Array<{
+    port: number;
+    color?: string;
+    color_hex?: string;
+    label?: string;
+    status?: string;
+    note?: string;
+    destination?: string;
+  }> | null;
 };
 
 export type NetworkSpliceBox = {
@@ -78,6 +88,29 @@ export type NetworkSpliceBox = {
   notes?: string | null;
   project_id?: string | null;
   project_label?: string | null;
+  /** emenda | distribuicao */
+  box_model?: string | null;
+  splitter?: string | null;
+  fiber_color?: string | null;
+  splitter_ports?: Array<{
+    port: number;
+    color?: string;
+    color_hex?: string;
+    label?: string;
+    status?: string;
+    note?: string;
+    destination?: string;
+  }> | null;
+  splice_pairs?: Array<{
+    port: number;
+    left_color?: string;
+    left_color_hex?: string;
+    right_color?: string;
+    right_color_hex?: string;
+    status?: string;
+    note?: string;
+    destination?: string;
+  }> | null;
 };
 
 export type NetworkCable = {
@@ -91,6 +124,15 @@ export type NetworkCable = {
   project_label?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  fiber_ports?: Array<{
+    port: number;
+    color?: string;
+    color_hex?: string;
+    label?: string;
+    status?: string;
+    note?: string;
+    destination?: string;
+  }> | null;
 };
 
 export type NetworkPole = {

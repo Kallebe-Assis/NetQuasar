@@ -4,7 +4,7 @@ import { apiFetch } from "../lib/api";
 import { errorMessageFromUnknown } from "../lib/apiErrors";
 import { useAppToast } from "../lib/appToast";
 import { copyTextToClipboard } from "../lib/clipboard";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
 import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
 import { queryKeys } from "../lib/queryKeys";
@@ -67,7 +67,7 @@ function validateCoords(lat: number | null, lon: number | null): string | null {
 }
 
 export function PopsPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("pops.manage");
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const list = useQuery({

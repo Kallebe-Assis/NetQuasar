@@ -15,7 +15,7 @@ import {
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
-import { apiUrl, getStoredApiKey, isAdminUser } from "../lib/auth";
+import { apiUrl, getStoredApiKey, can, isAdminUser } from "../lib/auth";
 import { formatAlertDateTimePt } from "../lib/alertLabels";
 import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
 import { useFloatingMenu } from "../hooks/useFloatingMenu";
@@ -97,7 +97,7 @@ function seededYearMonth(): string {
 }
 
 export function CommercialPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("commercial.manage");
   const { push: pushToast } = useAppToast();
   const notify = useCallback(
     (text: string, ok = true) => {

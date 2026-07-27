@@ -6,7 +6,7 @@ import { MikrotikNocDashboard, type MikrotikNocSection } from "../components/Mik
 import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm, formatSnmpDisplayText } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -93,7 +93,7 @@ function MiniTrafficChart({ points }: { points: Array<{ ts: number; tx: number; 
 }
 
 export function MikrotikPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("mikrotik.collect") || can("devices.collect");
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const [telCollecting, setTelCollecting] = useState(false);
@@ -193,12 +193,17 @@ export function MikrotikPage() {
         interface_count?: number;
         walk_truncated?: boolean;
         walk_note?: string;
+        pppoe_session_count?: number;
       }>(`/api/v1/interfaces/devices/${id}/refresh`, { method: "POST", json: {} }),
     onSuccess: (data, id) => {
       if (data?.device_id) qc.setQueryData(["mikrotik-if", id], data);
       qc.invalidateQueries({ queryKey: ["mikrotik-if", id] });
+      // O backend deriva as sessões PPPoE do mesmo walk IF-MIB deste refresh.
+      qc.invalidateQueries({ queryKey: ["mikrotik-tel", id] });
       const n = data.interface_count ?? data.interface_table?.length;
-      toastOk(pushToast, typeof n === "number" ? `Interfaces actualizadas (${n}).` : "Interfaces actualizadas.");
+      const ppp = data.pppoe_session_count;
+      const base = typeof n === "number" ? `Interfaces actualizadas (${n}).` : "Interfaces actualizadas.";
+      toastOk(pushToast, typeof ppp === "number" ? `${base} PPPoE: ${ppp} sessão(ões).` : base);
     },
     onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
   });

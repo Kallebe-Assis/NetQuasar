@@ -20,6 +20,8 @@ export type MapPoint = {
   markerColor?: string | null;
   /** Etiqueta curta no pin (ex.: descrição da CTO). */
   mapLabel?: string | null;
+  /** Splitter da CTO (ex.: 1x8), para popup. */
+  splitter?: string | null;
 };
 
 /** Agrupado (grelha por tipo), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
@@ -252,15 +254,59 @@ function CloseSpiderOnMapClick({ active, onClose }: { active: boolean; onClose: 
 }
 
 function devicePopupBody(p: MapPoint, displayMode: MapDisplayMode) {
+  const isCto = p.mapKind === "cto";
+  const splitter = (p.splitter ?? "").trim();
+  const meta = isCto
+    ? splitter
+      ? `CTO · ${splitter}`
+      : "CTO"
+    : p.category === p.status
+      ? p.category
+      : `${p.category} · ${p.status}`;
   return (
     <>
       <strong>{p.description}</strong>
       <div style={{ fontSize: 12 }}>
-        {p.category} · {p.status}
+        {meta}
         {displayMode === "status" ? <span style={{ color: "var(--muted)" }}> · Vista online/offline</span> : null}
         {p.ip ? <div className="mono">{p.ip}</div> : null}
       </div>
     </>
+  );
+}
+
+function MapPointPopupActions({
+  p,
+  onSelectDevice,
+  onOpenSplitter,
+  onOpenCableFibers,
+}: {
+  p: MapPoint;
+  onSelectDevice?: (id: string) => void;
+  onOpenSplitter?: (id: string) => void;
+  onOpenCableFibers?: (id: string) => void;
+}) {
+  const showSplitter = !!(onOpenSplitter && p.mapKind === "cto");
+  const showCableFibers = !!(onOpenCableFibers && p.mapKind === "cable");
+  if (!onSelectDevice && !showSplitter && !showCableFibers) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+      {onSelectDevice ? (
+        <button type="button" className="btn" onClick={() => onSelectDevice(p.id)}>
+          Ver detalhe
+        </button>
+      ) : null}
+      {showSplitter ? (
+        <button type="button" className="btn btn--primary" onClick={() => onOpenSplitter!(p.id)}>
+          Splitter
+        </button>
+      ) : null}
+      {showCableFibers ? (
+        <button type="button" className="btn btn--primary" onClick={() => onOpenCableFibers!(p.id)}>
+          Fibras
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -487,6 +533,8 @@ function ClusterCellMarkers({
   runSpiderOpen,
   stopSpiderAnim,
   onSelectDevice,
+  onOpenSplitter,
+  onOpenCableFibers,
   displayMode,
   colors,
   highlightedId,
@@ -500,6 +548,8 @@ function ClusterCellMarkers({
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
   onSelectDevice?: (id: string) => void;
+  onOpenSplitter?: (id: string) => void;
+  onOpenCableFibers?: (id: string) => void;
   displayMode: MapDisplayMode;
   colors: MapColors;
   highlightedId?: string | null;
@@ -512,11 +562,7 @@ function ClusterCellMarkers({
       <Marker position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
         <Popup>
           {devicePopupBody(p, displayMode)}
-          {onSelectDevice && (
-            <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(p.id)}>
-              Ver detalhe
-            </button>
-          )}
+          <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
         </Popup>
       </Marker>
     );
@@ -571,11 +617,7 @@ function ClusterCellMarkers({
             <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
-                {onSelectDevice && (
-                  <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(p.id)}>
-                    Ver detalhe
-                  </button>
-                )}
+                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
               </Popup>
             </Marker>
           );
@@ -587,11 +629,7 @@ function ClusterCellMarkers({
               <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
-                  {onSelectDevice && (
-                    <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(m.id)}>
-                      Ver detalhe
-                    </button>
-                  )}
+                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
                 </Popup>
               </Marker>
             );
@@ -638,6 +676,8 @@ function ClusterMarkersByView({
   points,
   displayMode,
   onSelectDevice,
+  onOpenSplitter,
+  onOpenCableFibers,
   spider,
   setSpider,
   spiderRef,
@@ -649,6 +689,8 @@ function ClusterMarkersByView({
   points: MapPoint[];
   displayMode: MapDisplayMode;
   onSelectDevice?: (id: string) => void;
+  onOpenSplitter?: (id: string) => void;
+  onOpenCableFibers?: (id: string) => void;
   spider: SpiderState;
   setSpider: (s: SpiderState) => void;
   spiderRef: MutableRefObject<SpiderState>;
@@ -700,6 +742,8 @@ function ClusterMarkersByView({
           runSpiderOpen={runSpiderOpen}
           stopSpiderAnim={stopSpiderAnim}
           onSelectDevice={onSelectDevice}
+          onOpenSplitter={onOpenSplitter}
+          onOpenCableFibers={onOpenCableFibers}
           displayMode={displayMode}
           colors={colors}
           highlightedId={highlightedId}
@@ -776,6 +820,8 @@ function ScatterMarkersLayer({
   runSpiderOpen,
   stopSpiderAnim,
   onSelectDevice,
+  onOpenSplitter,
+  onOpenCableFibers,
   colors,
   keyPrefix,
   highlightedId,
@@ -788,6 +834,8 @@ function ScatterMarkersLayer({
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
   onSelectDevice?: (id: string) => void;
+  onOpenSplitter?: (id: string) => void;
+  onOpenCableFibers?: (id: string) => void;
   colors: MapColors;
   keyPrefix: string;
   highlightedId?: string | null;
@@ -804,11 +852,7 @@ function ScatterMarkersLayer({
             <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
-                {onSelectDevice && (
-                  <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(p.id)}>
-                    Ver detalhe
-                  </button>
-                )}
+                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
               </Popup>
             </Marker>
           );
@@ -821,11 +865,7 @@ function ScatterMarkersLayer({
               <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
-                  {onSelectDevice && (
-                    <button type="button" className="btn" style={{ marginTop: 6 }} onClick={() => onSelectDevice(m.id)}>
-                      Ver detalhe
-                    </button>
-                  )}
+                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
                 </Popup>
               </Marker>
             );
@@ -855,6 +895,8 @@ export function EquipmentMap({
   points,
   displayMode,
   onSelectDevice,
+  onOpenSplitter,
+  onOpenCableFibers,
   flyTo,
   flyKey,
   fitBoundsVersion,
@@ -867,6 +909,10 @@ export function EquipmentMap({
   points: MapPoint[];
   displayMode: MapDisplayMode;
   onSelectDevice?: (id: string) => void;
+  /** Abre o modal de splitter da CTO (popup do mapa). */
+  onOpenSplitter?: (id: string) => void;
+  /** Abre o modal de fibras do cabo (popup do mapa). */
+  onOpenCableFibers?: (id: string) => void;
   flyTo: { lat: number; lng: number; zoom?: number } | null;
   flyKey: number;
   fitBoundsVersion: number;
@@ -959,6 +1005,8 @@ export function EquipmentMap({
           points={valid}
           displayMode={displayMode}
           onSelectDevice={onSelectDevice}
+          onOpenSplitter={onOpenSplitter}
+          onOpenCableFibers={onOpenCableFibers}
           spider={spider}
           setSpider={setSpider}
           spiderRef={spiderRef}
@@ -980,6 +1028,8 @@ export function EquipmentMap({
             runSpiderOpen={runSpiderOpen}
             stopSpiderAnim={stopSpiderAnim}
             onSelectDevice={onSelectDevice}
+            onOpenSplitter={onOpenSplitter}
+            onOpenCableFibers={onOpenCableFibers}
             colors={colors}
             keyPrefix="eq"
             highlightedId={highlightedId}
@@ -989,6 +1039,8 @@ export function EquipmentMap({
               points={connValid}
               displayMode={displayMode}
               onSelectDevice={onSelectDevice}
+              onOpenSplitter={onOpenSplitter}
+              onOpenCableFibers={onOpenCableFibers}
               spider={spider}
               setSpider={setSpider}
               spiderRef={spiderRef}
@@ -1007,6 +1059,8 @@ export function EquipmentMap({
               runSpiderOpen={runSpiderOpen}
               stopSpiderAnim={stopSpiderAnim}
               onSelectDevice={onSelectDevice}
+              onOpenSplitter={onOpenSplitter}
+              onOpenCableFibers={onOpenCableFibers}
               colors={colors}
               keyPrefix="conn"
               highlightedId={highlightedId}

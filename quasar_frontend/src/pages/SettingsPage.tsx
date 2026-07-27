@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Blend, ClockFading, Cpu, Filter, Plus, Sun, ThermometerSun } from "lucide-react";
+import { Blend, ClockFading, Cpu, Filter, Plus, Shield, Sun, ThermometerSun } from "lucide-react";
 import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -18,6 +18,8 @@ import { BngCollectionPanel } from "./settings/BngCollectionPanel";
 import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
 import { DatabaseCleanupButton } from "./settings/DatabaseCleanupModal";
 import { OltVendorsPanel } from "./settings/OltVendorsPanel";
+import { PermissionProfilesModal } from "./settings/PermissionProfilesModal";
+import type { PermissionProfile } from "../lib/permissions";
 import { formatBRPhoneDisplay, normalizeBRPhoneForApi, validateBRPhoneMessage } from "../lib/brPhone";
 
 type SettingsTab =
@@ -521,40 +523,62 @@ type UserRow = {
   phone?: string | null;
   role: string;
   is_active?: boolean;
+  permission_profile_id?: string | null;
+  permission_profile_name?: string | null;
+  permission_profile_slug?: string | null;
 };
 
 function UsersPanel() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["settings-users"], queryFn: () => apiFetch<{ users: UserRow[] }>("/api/v1/settings/users") });
+  const profiles = useQuery({
+    queryKey: ["permission-profiles"],
+    queryFn: () => apiFetch<{ profiles: PermissionProfile[] }>("/api/v1/settings/permission-profiles"),
+    staleTime: 30_000,
+  });
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "viewer">("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [profilesOpen, setProfilesOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "viewer">("viewer");
+  const [profileId, setProfileId] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [eName, setEName] = useState("");
   const [eEmail, setEEmail] = useState("");
   const [ePhone, setEPhone] = useState("");
   const [ePass, setEPass] = useState("");
-  const [eRole, setERole] = useState<"admin" | "viewer">("viewer");
+  const [eProfileId, setEProfileId] = useState("");
   const [confirmAction, setConfirmAction] = useState<null | { type: "delete" | "activate" | "deactivate"; user: UserRow }>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const { push: pushToast } = useAppToast();
   const [userCreateErr, setUserCreateErr] = useState("");
 
+  const profileOptions = profiles.data?.profiles ?? [];
+  const defaultUserProfileId = useMemo(
+    () => profileOptions.find((p) => p.slug === "user")?.id ?? profileOptions[0]?.id ?? "",
+    [profileOptions],
+  );
+
+  useEffect(() => {
+    if (!profileId && defaultUserProfileId) setProfileId(defaultUserProfileId);
+  }, [profileId, defaultUserProfileId]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (list.data?.users ?? []).filter((u) => {
       const active = u.is_active !== false;
-      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (roleFilter !== "all") {
+        const slug = u.permission_profile_slug ?? (u.role === "admin" ? "admin" : "user");
+        if (slug !== roleFilter && u.permission_profile_id !== roleFilter) return false;
+      }
       if (statusFilter === "active" && !active) return false;
       if (statusFilter === "inactive" && active) return false;
       if (!q) return true;
-      const hay = `${u.display_name} ${u.email} ${u.phone ?? ""} ${u.role}`.toLowerCase();
+      const hay = `${u.display_name} ${u.email} ${u.phone ?? ""} ${u.role} ${u.permission_profile_name ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
   }, [list.data?.users, search, roleFilter, statusFilter]);
@@ -568,7 +592,7 @@ function UsersPanel() {
           email: email.trim(),
           phone: normalizeBRPhoneForApi(phone),
           password,
-          role,
+          permission_profile_id: profileId || undefined,
         },
       }),
     onSuccess: () => {
@@ -578,7 +602,7 @@ function UsersPanel() {
       setEmail("");
       setPhone("");
       setPassword("");
-      setRole("viewer");
+      setProfileId(defaultUserProfileId);
       setCreateOpen(false);
       toastOk(pushToast, "Utilizador criado com sucesso.");
     },
@@ -587,11 +611,12 @@ function UsersPanel() {
 
   const patch = useMutation({
     mutationFn: () => {
-      const body: Record<string, string> = { role: eRole };
+      const body: Record<string, string> = {};
       if (eName.trim()) body.display_name = eName.trim();
       if (eEmail.trim()) body.email = eEmail.trim();
       body.phone = normalizeBRPhoneForApi(ePhone);
       if (ePass) body.password = ePass;
+      if (eProfileId) body.permission_profile_id = eProfileId;
       return apiFetch(`/api/v1/settings/users/${editId}`, { method: "PATCH", json: body });
     },
     onSuccess: () => {
@@ -633,6 +658,9 @@ function UsersPanel() {
     onError: (err) => toastErr(pushToast, err, "Falha ao remover utilizador."),
   });
 
+  const profileLabel = (u: UserRow) =>
+    u.permission_profile_name || (u.role === "admin" ? "Administrador" : "Usuário");
+
   if (list.isLoading) return <p>A carregar…</p>;
   if (list.isError) {
     const ae = list.error as ApiError;
@@ -645,7 +673,7 @@ function UsersPanel() {
   return (
     <>
       <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px", maxWidth: 720 }}>
-        Gestão de acessos. Novos usuários só podem ser criados aqui (não existe registo público).
+        Gestão de acessos e perfis de permissão. Novos usuários só podem ser criados aqui (não existe registo público).
       </p>
 
       <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end", marginBottom: 12 }}>
@@ -661,16 +689,15 @@ function UsersPanel() {
         <button
           type="button"
           className={`btn btn--icon-menu${filtersOpen || roleFilter !== "all" || statusFilter !== "all" ? " btn--primary" : ""}`}
-          title={
-            roleFilter !== "all" || statusFilter !== "all"
-              ? "Filtros activos"
-              : "Filtros"
-          }
+          title={roleFilter !== "all" || statusFilter !== "all" ? "Filtros activos" : "Filtros"}
           aria-label="Filtros"
           aria-pressed={filtersOpen}
           onClick={() => setFiltersOpen((v) => !v)}
         >
           <Filter size={16} aria-hidden />
+        </button>
+        <button type="button" className="btn" onClick={() => setProfilesOpen(true)}>
+          <Shield size={16} aria-hidden /> Perfis de permissão
         </button>
         <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}>
           <Plus size={16} aria-hidden /> Novo usuário
@@ -688,12 +715,15 @@ function UsersPanel() {
             paddingTop: 4,
           }}
         >
-          <div className="field" style={{ margin: 0, minWidth: 160 }}>
-            <label style={{ fontSize: 11 }}>Nível</label>
-            <select className="input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}>
+          <div className="field" style={{ margin: 0, minWidth: 180 }}>
+            <label style={{ fontSize: 11 }}>Perfil</label>
+            <select className="input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
               <option value="all">Todos</option>
-              <option value="admin">Administrador</option>
-              <option value="viewer">Visitante</option>
+              {profileOptions.map((p) => (
+                <option key={p.id} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="field" style={{ margin: 0, minWidth: 160 }}>
@@ -718,7 +748,7 @@ function UsersPanel() {
               <th>Nome</th>
               <th>E-mail</th>
               <th>Telefone</th>
-              <th>Nível</th>
+              <th>Perfil</th>
               <th>Estado</th>
               <th style={{ width: 56 }} />
             </tr>
@@ -738,7 +768,7 @@ function UsersPanel() {
                     <td>{u.display_name}</td>
                     <td className="mono">{u.email}</td>
                     <td className="mono">{formatBRPhoneDisplay(u.phone)}</td>
-                    <td>{u.role === "admin" ? "Administrador" : "Visitante"}</td>
+                    <td>{profileLabel(u)}</td>
                     <td>
                       <span className={active ? "badge badge--ok" : "badge"}>{active ? "Activo" : "Inactivo"}</span>
                     </td>
@@ -754,7 +784,11 @@ function UsersPanel() {
                               setEName(u.display_name);
                               setEEmail(u.email);
                               setEPhone(u.phone ?? "");
-                              setERole(u.role === "admin" ? "admin" : "viewer");
+                              setEProfileId(
+                                u.permission_profile_id ||
+                                  profileOptions.find((p) => p.slug === (u.role === "admin" ? "admin" : "user"))?.id ||
+                                  "",
+                              );
                               setEPass("");
                             },
                           },
@@ -802,10 +836,14 @@ function UsersPanel() {
                 <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label>Nível</label>
-                <select className="input" value={role} onChange={(e) => setRole(e.target.value as "admin" | "viewer")}>
-                  <option value="viewer">Visitante (viewer)</option>
-                  <option value="admin">Administrador</option>
+                <label>Perfil de permissão</label>
+                <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+                  {profileOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.is_system ? " (sistema)" : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -828,6 +866,10 @@ function UsersPanel() {
                   }
                   if (!displayName.trim() || !email.trim() || !password) {
                     setUserCreateErr("Preencha nome, e-mail, telefone e palavra-passe.");
+                    return;
+                  }
+                  if (!profileId) {
+                    setUserCreateErr("Seleccione um perfil de permissão.");
                     return;
                   }
                   create.mutate();
@@ -862,10 +904,14 @@ function UsersPanel() {
                 <input className="input" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} />
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label>Nível</label>
-                <select className="input" value={eRole} onChange={(e) => setERole(e.target.value as "admin" | "viewer")}>
-                  <option value="viewer">Visitante (viewer)</option>
-                  <option value="admin">Administrador</option>
+                <label>Perfil de permissão</label>
+                <select className="input" value={eProfileId} onChange={(e) => setEProfileId(e.target.value)}>
+                  {profileOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.is_system ? " (sistema)" : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -935,9 +981,12 @@ function UsersPanel() {
           </div>
         </div>
       )}
+
+      <PermissionProfilesModal open={profilesOpen} onClose={() => setProfilesOpen(false)} />
     </>
   );
 }
+
 
 type AlertThresholdMetric = {
   id: string;

@@ -15,6 +15,7 @@ import (
 )
 
 var networkFiberColors = []string{
+	"Desconhecido",
 	"Verde", "Amarelo", "Branco", "Azul", "Vermelho", "Violeta",
 	"Marrom", "Rosa", "Preto", "Cinza", "Laranja", "Aqua (Turquesa)",
 }
@@ -496,9 +497,10 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	var projectID, localityID *uuid.UUID
 	var needsMaintenance bool
 	var lat, lon *float64
+	var splitterPorts []byte
 	var created, updated time.Time
 	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &splitter, &transmitter, &fiberColor, &notes,
-		&needsMaintenance, &projectID, &localityID, &created, &updated)
+		&needsMaintenance, &projectID, &localityID, &splitterPorts, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -508,13 +510,23 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	}
 	setOptionalStr(m, "splitter", splitter)
 	setOptionalStr(m, "transmitter", transmitter)
-	setOptionalStr(m, "fiber_color", fiberColor)
+	if fiberColor != nil && strings.TrimSpace(*fiberColor) != "" {
+		m["fiber_color"] = strings.TrimSpace(*fiberColor)
+	} else {
+		m["fiber_color"] = "Desconhecido"
+	}
 	setOptionalStr(m, "notes", notes)
 	if lat != nil {
 		m["latitude"] = *lat
 	}
 	if lon != nil {
 		m["longitude"] = *lon
+	}
+	if len(splitterPorts) > 0 && string(splitterPorts) != "null" {
+		var ports any
+		if json.Unmarshal(splitterPorts, &ports) == nil {
+			m["splitter_ports"] = ports
+		}
 	}
 	if projectID != nil {
 		m["project_id"] = *projectID
@@ -532,7 +544,7 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 }
 
 const networkCtoSelect = `id, display_number, description, latitude, longitude, splitter, transmitter, fiber_color, notes,
-	needs_maintenance, project_id, locality_id, created_at, updated_at`
+	needs_maintenance, project_id, locality_id, splitter_ports, created_at, updated_at`
 
 func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -639,12 +651,16 @@ func (s *Server) createNetworkCto(w http.ResponseWriter, r *http.Request) {
 	if body.NeedsMaintenance != nil {
 		needsMaint = *body.NeedsMaintenance
 	}
+	fiberColor := "Desconhecido"
+	if body.FiberColor != nil && strings.TrimSpace(*body.FiberColor) != "" {
+		fiberColor = strings.TrimSpace(*body.FiberColor)
+	}
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
 		INSERT INTO network_ctos (description, latitude, longitude, splitter, transmitter, fiber_color, notes, needs_maintenance, project_id, locality_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, display_number`,
-		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), trimPtr(body.Transmitter), trimPtr(body.FiberColor),
+		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), trimPtr(body.Transmitter), fiberColor,
 		trimPtr(body.Notes), needsMaint, projectID, localityID,
 	).Scan(&id, &displayNumber)
 	if err != nil {
@@ -701,6 +717,25 @@ func networkCtoPatch(body map[string]json.RawMessage) ([]string, []any, int, err
 			_ = json.Unmarshal(raw, &v)
 			sets = append(sets, fld.col+" = $"+strconv.Itoa(n))
 			args = append(args, trimPtr(v))
+			n++
+		}
+	}
+	if raw, ok := body["splitter_ports"]; ok {
+		// Aceita null ou array JSON; valida estrutura mínima.
+		if string(raw) == "null" {
+			sets = append(sets, "splitter_ports = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var ports []map[string]any
+			if err := json.Unmarshal(raw, &ports); err != nil {
+				return nil, nil, 0, errors.New("splitter_ports inválido")
+			}
+			if len(ports) > 128 {
+				return nil, nil, 0, errors.New("splitter_ports: máximo 128 portas")
+			}
+			sets = append(sets, "splitter_ports = $"+strconv.Itoa(n)+"::jsonb")
+			args = append(args, string(raw))
 			n++
 		}
 	}
@@ -821,19 +856,39 @@ type networkSpliceBoxInput struct {
 	Notes            *string  `json:"notes"`
 	ProjectID        *string  `json:"project_id"`
 	ProjectNumber    *int     `json:"project_number"`
+	BoxModel         *string  `json:"box_model"`
+	Splitter         *string  `json:"splitter"`
+	FiberColor       *string  `json:"fiber_color"`
+}
+
+func normalizeSpliceBoxModel(v string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "emenda":
+		return "emenda", true
+	case "distribuicao", "distribuição":
+		return "distribuicao", true
+	default:
+		return "", false
+	}
 }
 
 func (in *networkSpliceBoxInput) validate() error {
 	if strings.TrimSpace(in.Description) == "" {
 		return errors.New("description obrigatória")
 	}
-	if in.FiberCount != nil && *in.FiberCount < 0 {
+	if in.FiberCount != nil && (*in.FiberCount < 0 || *in.FiberCount > 144) {
 		return errors.New("fiber_count inválida")
+	}
+	if in.BoxModel != nil {
+		if _, ok := normalizeSpliceBoxModel(*in.BoxModel); !ok {
+			return errors.New("box_model inválido (emenda ou distribuicao)")
+		}
 	}
 	return validateCoords(in.Latitude, in.Longitude)
 }
 
-const networkSpliceSelect = `id, display_number, description, latitude, longitude, fiber_count, needs_maintenance, notes, project_id, created_at, updated_at`
+const networkSpliceSelect = `id, display_number, description, latitude, longitude, fiber_count, needs_maintenance, notes, project_id,
+	box_model, splitter, fiber_color, splitter_ports, splice_pairs, created_at, updated_at`
 
 func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
@@ -844,16 +899,25 @@ func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(d
 	var projectID *uuid.UUID
 	var needsMaintenance bool
 	var lat, lon *float64
+	var boxModel string
+	var splitter, fiberColor *string
+	var splitterPorts, splicePairs []byte
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &fiberCount, &needsMaintenance, &notes, &projectID, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &fiberCount, &needsMaintenance, &notes, &projectID,
+		&boxModel, &splitter, &fiberColor, &splitterPorts, &splicePairs, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
 	m := map[string]any{
 		"id": id, "display_number": displayNumber, "description": description,
 		"needs_maintenance": needsMaintenance, "created_at": created, "updated_at": updated,
+		"box_model": boxModel,
 	}
 	setOptionalStr(m, "notes", notes)
+	setOptionalStr(m, "splitter", splitter)
+	if fiberColor != nil && strings.TrimSpace(*fiberColor) != "" {
+		m["fiber_color"] = strings.TrimSpace(*fiberColor)
+	}
 	if fiberCount != nil {
 		m["fiber_count"] = *fiberCount
 	}
@@ -862,6 +926,18 @@ func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(d
 	}
 	if lon != nil {
 		m["longitude"] = *lon
+	}
+	if len(splitterPorts) > 0 && string(splitterPorts) != "null" {
+		var ports any
+		if json.Unmarshal(splitterPorts, &ports) == nil {
+			m["splitter_ports"] = ports
+		}
+	}
+	if len(splicePairs) > 0 && string(splicePairs) != "null" {
+		var pairs any
+		if json.Unmarshal(splicePairs, &pairs) == nil {
+			m["splice_pairs"] = pairs
+		}
 	}
 	if projectID != nil {
 		m["project_id"] = *projectID
@@ -953,12 +1029,19 @@ func (s *Server) createNetworkSpliceBox(w http.ResponseWriter, r *http.Request) 
 	if body.NeedsMaintenance != nil {
 		needsMaint = *body.NeedsMaintenance
 	}
+	boxModel := "emenda"
+	if body.BoxModel != nil {
+		if m, ok := normalizeSpliceBoxModel(*body.BoxModel); ok {
+			boxModel = m
+		}
+	}
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_splice_boxes (description, latitude, longitude, fiber_count, needs_maintenance, notes, project_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, display_number`,
+		INSERT INTO network_splice_boxes (description, latitude, longitude, fiber_count, needs_maintenance, notes, project_id, box_model, splitter, fiber_color)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, display_number`,
 		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, body.FiberCount, needsMaint, trimPtr(body.Notes), projectID,
+		boxModel, trimPtr(body.Splitter), trimPtr(body.FiberColor),
 	).Scan(&id, &displayNumber)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -996,7 +1079,7 @@ func networkSplicePatch(body map[string]json.RawMessage) ([]string, []any, int, 
 	if raw, ok := body["fiber_count"]; ok {
 		var v *int
 		_ = json.Unmarshal(raw, &v)
-		if v != nil && *v < 0 {
+		if v != nil && (*v < 0 || *v > 144) {
 			return nil, nil, 0, errors.New("fiber_count inválida")
 		}
 		sets = append(sets, "fiber_count = $"+strconv.Itoa(n))
@@ -1035,6 +1118,75 @@ func networkSplicePatch(body map[string]json.RawMessage) ([]string, []any, int, 
 		args = append(args, lat, lon)
 		n += 2
 	}
+	if raw, ok := body["box_model"]; ok {
+		var v string
+		_ = json.Unmarshal(raw, &v)
+		m, okm := normalizeSpliceBoxModel(v)
+		if !okm {
+			return nil, nil, 0, errors.New("box_model inválido (emenda ou distribuicao)")
+		}
+		sets = append(sets, "box_model = $"+strconv.Itoa(n))
+		args = append(args, m)
+		n++
+	}
+	if raw, ok := body["splitter"]; ok {
+		var v *string
+		_ = json.Unmarshal(raw, &v)
+		sets = append(sets, "splitter = $"+strconv.Itoa(n))
+		args = append(args, trimPtr(v))
+		n++
+	}
+	if raw, ok := body["fiber_color"]; ok {
+		var v *string
+		_ = json.Unmarshal(raw, &v)
+		if v == nil || strings.TrimSpace(*v) == "" {
+			sets = append(sets, "fiber_color = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else if c, okc := normalizeFiberColor(*v); okc {
+			sets = append(sets, "fiber_color = $"+strconv.Itoa(n))
+			args = append(args, c)
+			n++
+		} else {
+			return nil, nil, 0, errors.New("fiber_color inválida")
+		}
+	}
+	if raw, ok := body["splitter_ports"]; ok {
+		if string(raw) == "null" {
+			sets = append(sets, "splitter_ports = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var ports []map[string]any
+			if err := json.Unmarshal(raw, &ports); err != nil {
+				return nil, nil, 0, errors.New("splitter_ports inválido")
+			}
+			if len(ports) > 128 {
+				return nil, nil, 0, errors.New("splitter_ports: máximo 128 portas")
+			}
+			sets = append(sets, "splitter_ports = $"+strconv.Itoa(n)+"::jsonb")
+			args = append(args, string(raw))
+			n++
+		}
+	}
+	if raw, ok := body["splice_pairs"]; ok {
+		if string(raw) == "null" {
+			sets = append(sets, "splice_pairs = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var pairs []map[string]any
+			if err := json.Unmarshal(raw, &pairs); err != nil {
+				return nil, nil, 0, errors.New("splice_pairs inválido")
+			}
+			if len(pairs) > 144 {
+				return nil, nil, 0, errors.New("splice_pairs: máximo 144 pares")
+			}
+			sets = append(sets, "splice_pairs = $"+strconv.Itoa(n)+"::jsonb")
+			args = append(args, string(raw))
+			n++
+		}
+	}
 	return sets, args, n, nil
 }
 
@@ -1043,6 +1195,19 @@ func (s *Server) deleteNetworkSpliceBox(w http.ResponseWriter, r *http.Request) 
 }
 
 // --- Cables (estrutura inicial) ---
+
+func validateCableFiberCount(v *int) error {
+	if v == nil {
+		return nil
+	}
+	if *v < 0 {
+		return errors.New("fiber_count inválida")
+	}
+	if *v > 144 {
+		return errors.New("fiber_count: máximo 144 fibras")
+	}
+	return nil
+}
 
 type networkCableInput struct {
 	Description   string   `json:"description"`
@@ -1061,13 +1226,13 @@ func (in *networkCableInput) validate() error {
 		return errors.New("status inválido")
 	}
 	in.Status = st
-	if in.FiberCount != nil && *in.FiberCount < 0 {
-		return errors.New("fiber_count inválida")
+	if err := validateCableFiberCount(in.FiberCount); err != nil {
+		return err
 	}
 	return validateCoords(in.Latitude, in.Longitude)
 }
 
-const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, project_id, latitude, longitude, created_at, updated_at`
+const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, project_id, latitude, longitude, fiber_ports, created_at, updated_at`
 
 func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
@@ -1077,8 +1242,9 @@ func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest 
 	var fiberCount *int
 	var projectID *uuid.UUID
 	var lat, lon *float64
+	var fiberPorts []byte
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &projectID, &lat, &lon, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &projectID, &lat, &lon, &fiberPorts, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -1092,6 +1258,12 @@ func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest 
 	}
 	if lon != nil {
 		m["longitude"] = *lon
+	}
+	if len(fiberPorts) > 0 && string(fiberPorts) != "null" {
+		var ports any
+		if json.Unmarshal(fiberPorts, &ports) == nil {
+			m["fiber_ports"] = ports
+		}
 	}
 	if projectID != nil {
 		m["project_id"] = *projectID
@@ -1155,6 +1327,26 @@ func (s *Server) listNetworkCables(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"cables": list})
 }
 
+func (s *Server) getNetworkCable(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
+		return
+	}
+	row := s.DB().QueryRow(ctx, `SELECT `+networkCableSelect+` FROM network_cables WHERE id=$1`, id)
+	item, err := scanNetworkCable(s, ctx, row)
+	if err == pgx.ErrNoRows {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (s *Server) createNetworkCable(w http.ResponseWriter, r *http.Request) {
 	var body networkCableInput
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -1210,6 +1402,9 @@ func networkCablePatch(body map[string]json.RawMessage) ([]string, []any, int, e
 	if raw, ok := body["fiber_count"]; ok {
 		var v *int
 		_ = json.Unmarshal(raw, &v)
+		if err := validateCableFiberCount(v); err != nil {
+			return nil, nil, 0, err
+		}
 		sets = append(sets, "fiber_count = $"+strconv.Itoa(n))
 		args = append(args, v)
 		n++
@@ -1249,6 +1444,24 @@ func networkCablePatch(body map[string]json.RawMessage) ([]string, []any, int, e
 		sets = append(sets, "latitude = $"+strconv.Itoa(n), "longitude = $"+strconv.Itoa(n+1))
 		args = append(args, lat, lon)
 		n += 2
+	}
+	if raw, ok := body["fiber_ports"]; ok {
+		if string(raw) == "null" {
+			sets = append(sets, "fiber_ports = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var ports []map[string]any
+			if err := json.Unmarshal(raw, &ports); err != nil {
+				return nil, nil, 0, errors.New("fiber_ports inválido")
+			}
+			if len(ports) > 144 {
+				return nil, nil, 0, errors.New("fiber_ports: máximo 144 fibras")
+			}
+			sets = append(sets, "fiber_ports = $"+strconv.Itoa(n)+"::jsonb")
+			args = append(args, string(raw))
+			n++
+		}
 	}
 	return sets, args, n, nil
 }

@@ -603,7 +603,17 @@ func (s *Server) dashboardDataGaps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dashboardOltCapacity(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB().Query(r.Context(), `
+	ctx := r.Context()
+	refresh := strings.TrimSpace(r.URL.Query().Get("refresh")) == "1"
+	cacheKey := "netquasar:dashboard:olt-capacity"
+	if !refresh {
+		if cached := s.dashboardCacheGet(ctx, cacheKey); len(cached) > 0 {
+			writeDashboardCachedJSON(w, cached, true)
+			return
+		}
+	}
+
+	rows, err := s.DB().Query(ctx, `
 		SELECT d.id::text, d.description, o.updated_at, o.pons::text
 		FROM devices d
 		JOIN olt_snapshots o ON o.device_id = d.id
@@ -661,8 +671,12 @@ func (s *Server) dashboardOltCapacity(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	sort.Slice(pRows, func(i, j int) bool { return pRows[i].UsagePct > pRows[j].UsagePct })
+	// Limitar PONs no payload (UI tipicamente mostra top).
+	if len(pRows) > 40 {
+		pRows = pRows[:40]
+	}
 	trendRows := []map[string]any{}
-	dayRows, err := s.DB().Query(r.Context(), `
+	dayRows, err := s.DB().Query(ctx, `
 		SELECT (updated_at AT TIME ZONE 'UTC')::date::text AS day,
 			COALESCE(SUM((
 				SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_total'),''))::bigint,0))
@@ -682,7 +696,13 @@ func (s *Server) dashboardOltCapacity(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"olt_rows": oltRows, "pon_rows": pRows, "trend_7d": trendRows})
+	payload := map[string]any{"olt_rows": oltRows, "pon_rows": pRows, "trend_7d": trendRows}
+	if raw, err := json.Marshal(payload); err == nil {
+		s.dashboardCacheSet(ctx, cacheKey, raw)
+		writeDashboardCachedJSON(w, raw, false)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func toInt(v any) int {

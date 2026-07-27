@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Bolt,
   FileBarChart,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -23,35 +24,54 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { clearSession, getAuthToken, getStoredUserDisplayLabel, isAdminUser } from "../lib/auth";
+import { clearSession, getAuthToken, getStoredUserDisplayLabel, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { AppToastProvider } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
+import { ROUTE_VIEW_PERMISSION } from "../lib/permissions";
 import { APP_ROUTES } from "./routes";
 
 const SIDEBAR_COLLAPSED_KEY = "netquasar.sidebar.collapsed";
 const MOBILE_NAV_MQ = "(max-width: 1023px)";
 
-const nav: { to: string; label: string; icons: LucideIcon[] }[] = [
-  { to: APP_ROUTES.dashboard, label: "Dashboard", icons: [ChartPie] },
-  { to: APP_ROUTES.monitoring, label: "Monitoramento", icons: [ShieldCheck] },
-  { to: APP_ROUTES.realtime, label: "Tempo real", icons: [ClockCheck] },
-  { to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
-  { to: APP_ROUTES.pops, label: "POPs", icons: [Warehouse] },
-  { to: APP_ROUTES.devices, label: "Equipamentos", icons: [MonitorSmartphone] },
-  { to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
-  { to: APP_ROUTES.connections, label: "Conexões", icons: [Network] },
-  { to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
-  { to: APP_ROUTES.map, label: "Mapa", icons: [MapPin] },
-  { to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
-  { to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
-  { to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
-  { to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
-  { to: APP_ROUTES.bng, label: "BNG", icons: [Network] },
-  { to: APP_ROUTES.reports, label: "Relatórios", icons: [FileBarChart] },
-  { to: APP_ROUTES.settings, label: "Configurações", icons: [Bolt] },
+type NavLeaf = { kind: "link"; to: string; label: string; icons: LucideIcon[] };
+type NavGroup = {
+  kind: "group";
+  id: string;
+  label: string;
+  icons: LucideIcon[];
+  children: Array<{ to: string; label: string; icons: LucideIcon[] }>;
+};
+type NavEntry = NavLeaf | NavGroup;
+
+const nav: NavEntry[] = [
+  { kind: "link", to: APP_ROUTES.dashboard, label: "Dashboard", icons: [ChartPie] },
+  { kind: "link", to: APP_ROUTES.monitoring, label: "Monitoramento", icons: [ShieldCheck] },
+  { kind: "link", to: APP_ROUTES.realtime, label: "Tempo real", icons: [ClockCheck] },
+  { kind: "link", to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
+  { kind: "link", to: APP_ROUTES.pops, label: "POPs", icons: [Warehouse] },
+  { kind: "link", to: APP_ROUTES.devices, label: "Equipamentos", icons: [MonitorSmartphone] },
+  { kind: "link", to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
+  {
+    kind: "group",
+    id: "mapa",
+    label: "Mapa",
+    icons: [MapPin],
+    children: [
+      { to: APP_ROUTES.map, label: "Mapa", icons: [MapPin] },
+      { to: APP_ROUTES.connections, label: "Conexões", icons: [Network] },
+    ],
+  },
+  { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
+  { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
+  { kind: "link", to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
+  { kind: "link", to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
+  { kind: "link", to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
+  { kind: "link", to: APP_ROUTES.bng, label: "BNG", icons: [Network] },
+  { kind: "link", to: APP_ROUTES.reports, label: "Relatórios", icons: [FileBarChart] },
+  { kind: "link", to: APP_ROUTES.settings, label: "Configurações", icons: [Bolt] },
 ];
 
 const ICON_SZ = 16;
@@ -74,12 +94,50 @@ function useIsMobileNav() {
   return mobile;
 }
 
-function pageTitleForPath(pathname: string, items: typeof nav): string {
-  const exact = items.find((n) => n.to === pathname);
-  if (exact) return exact.label;
-  const sorted = [...items].sort((a, b) => b.to.length - a.to.length);
+function canViewRoute(to: string): boolean {
+  const perm = ROUTE_VIEW_PERMISSION[to];
+  if (!perm) return true;
+  if (to === APP_ROUTES.settings) {
+    return can("settings.view") || can("settings.users") || can("settings.permissions") || isAdminUser();
+  }
+  return can(perm) || isAdminUser();
+}
+
+function filterNav(entries: NavEntry[]): NavEntry[] {
+  const out: NavEntry[] = [];
+  for (const n of entries) {
+    if (n.kind === "link") {
+      if (canViewRoute(n.to)) out.push(n);
+      continue;
+    }
+    const children = n.children.filter((c) => canViewRoute(c.to));
+    if (children.length > 0) out.push({ ...n, children });
+  }
+  return out;
+}
+
+function pageTitleForPath(pathname: string, items: NavEntry[]): string {
+  for (const n of items) {
+    if (n.kind === "link" && n.to === pathname) return n.label;
+    if (n.kind === "group") {
+      const child = n.children.find((c) => c.to === pathname || pathname.startsWith(c.to + "/"));
+      if (child) return child.label;
+    }
+  }
+  const flat = items.flatMap((n) => (n.kind === "link" ? [n] : n.children));
+  const sorted = [...flat].sort((a, b) => b.to.length - a.to.length);
   const prefix = sorted.find((n) => pathname.startsWith(n.to + "/") || pathname === n.to);
   return prefix?.label ?? "NetQuasar";
+}
+
+function NavIcons({ icons, mobile }: { icons: LucideIcon[]; mobile: boolean }) {
+  return (
+    <span className={`sidebar__nav-icon${icons.length > 1 ? " sidebar__nav-icon--pair" : ""}`} aria-hidden>
+      {icons.map((Icon, i) => (
+        <Icon key={i} size={mobile ? ICON_SZ_MOBILE : ICON_SZ} strokeWidth={ICON_STROKE} className="sidebar__nav-icon__svg" />
+      ))}
+    </span>
+  );
 }
 
 export function ShellLayout() {
@@ -94,6 +152,7 @@ export function ShellLayout() {
       return false;
     }
   });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
@@ -163,8 +222,20 @@ export function ShellLayout() {
     indicatorText = `Finalizado: ${monState.data.last_activity}`;
   }
 
-  const navItems = isAdminUser() ? nav : nav.filter((n) => n.to !== APP_ROUTES.settings);
+  const navItems = useMemo(() => filterNav(nav), []);
   const pageTitle = useMemo(() => pageTitleForPath(location.pathname, navItems), [location.pathname, navItems]);
+
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const next = { ...prev };
+      for (const n of navItems) {
+        if (n.kind !== "group") continue;
+        const active = n.children.some((c) => location.pathname === c.to || location.pathname.startsWith(c.to + "/"));
+        if (active) next[n.id] = true;
+      }
+      return next;
+    });
+  }, [location.pathname, navItems]);
 
   const layoutClass = [
     "layout",
@@ -174,103 +245,142 @@ export function ShellLayout() {
     .filter(Boolean)
     .join(" ");
 
-  const sidebarClass = [
-    "sidebar",
-    !isMobileNav && sidebarCollapsed ? "sidebar--collapsed" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const sidebarClass = ["sidebar", !isMobileNav && sidebarCollapsed ? "sidebar--collapsed" : ""].filter(Boolean).join(" ");
 
   return (
     <AppToastProvider>
-    <div className={layoutClass}>
-      <header className="mobile-topbar" aria-label="Barra de navegação móvel">
-        <button
-          type="button"
-          className="mobile-topbar__menu"
-          aria-label={mobileNavOpen ? "Fechar menu" : "Abrir menu"}
-          aria-expanded={mobileNavOpen}
-          onClick={() => setMobileNavOpen((v) => !v)}
-        >
-          {mobileNavOpen ? <X size={22} strokeWidth={2} /> : <Menu size={22} strokeWidth={2} />}
-        </button>
-        <span className="mobile-topbar__title">{pageTitle}</span>
-        <span className="mobile-topbar__brand">NetQuasar</span>
-      </header>
+      <div className={layoutClass}>
+        <header className="mobile-topbar" aria-label="Barra de navegação móvel">
+          <button
+            type="button"
+            className="mobile-topbar__menu"
+            aria-label={mobileNavOpen ? "Fechar menu" : "Abrir menu"}
+            aria-expanded={mobileNavOpen}
+            onClick={() => setMobileNavOpen((v) => !v)}
+          >
+            {mobileNavOpen ? <X size={22} strokeWidth={2} /> : <Menu size={22} strokeWidth={2} />}
+          </button>
+          <span className="mobile-topbar__title">{pageTitle}</span>
+          <span className="mobile-topbar__brand">NetQuasar</span>
+        </header>
 
-      {isMobileNav && mobileNavOpen ? (
-        <button
-          type="button"
-          className="sidebar-backdrop"
-          aria-label="Fechar menu"
-          onClick={closeMobileNav}
-        />
-      ) : null}
+        {isMobileNav && mobileNavOpen ? (
+          <button type="button" className="sidebar-backdrop" aria-label="Fechar menu" onClick={closeMobileNav} />
+        ) : null}
 
-      <OnuReportGlobalToast />
-      {showIndicator ? (
-        <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
-          <span className="runtime-indicator__dot" />
-          <span className="runtime-indicator__txt">{indicatorText}</span>
-        </div>
-      ) : null}
-      <aside className={sidebarClass} aria-label="Menu principal">
-        <div className="sidebar__head">
-          <div className="sidebar__brand">NetQuasar</div>
-          {!isMobileNav ? (
+        <OnuReportGlobalToast />
+        {showIndicator ? (
+          <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
+            <span className="runtime-indicator__dot" />
+            <span className="runtime-indicator__txt">{indicatorText}</span>
+          </div>
+        ) : null}
+        <aside className={sidebarClass} aria-label="Menu principal">
+          <div className="sidebar__head">
+            <div className="sidebar__brand">NetQuasar</div>
+            {!isMobileNav ? (
+              <button
+                type="button"
+                className="sidebar__collapse-btn"
+                aria-label={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+                title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
+                onClick={() => setSidebarCollapsed((v) => !v)}
+              >
+                {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+              </button>
+            ) : null}
+          </div>
+          <div className="sidebar__nav-scroll">
+            <nav>
+              {navItems.map((n) => {
+                if (n.kind === "link") {
+                  return (
+                    <NavLink
+                      key={n.to}
+                      to={n.to}
+                      end={n.to === APP_ROUTES.integrations}
+                      className={({ isActive }) => (isActive ? "active" : "")}
+                      title={n.label}
+                      onClick={closeMobileNav}
+                    >
+                      <NavIcons icons={n.icons} mobile={isMobileNav} />
+                      <span className="sidebar__nav-label">{n.label}</span>
+                    </NavLink>
+                  );
+                }
+
+                const groupActive = n.children.some(
+                  (c) => location.pathname === c.to || location.pathname.startsWith(c.to + "/"),
+                );
+                const expanded = !!openGroups[n.id] || groupActive;
+
+                return (
+                  <div
+                    key={n.id}
+                    className={`sidebar__group${groupActive ? " sidebar__group--active" : ""}${expanded ? " is-expanded" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className={`sidebar__group-btn${expanded ? " is-open" : ""}${groupActive ? " is-active" : ""}`}
+                      title={n.label}
+                      aria-expanded={expanded}
+                      onClick={() => {
+                        if (sidebarCollapsed && !isMobileNav) {
+                          setSidebarCollapsed(false);
+                          setOpenGroups((p) => ({ ...p, [n.id]: true }));
+                          return;
+                        }
+                        setOpenGroups((p) => ({ ...p, [n.id]: !expanded }));
+                      }}
+                    >
+                      <NavIcons icons={n.icons} mobile={isMobileNav} />
+                      <span className="sidebar__nav-label">{n.label}</span>
+                      <ChevronDown size={14} className="sidebar__group-chevron" aria-hidden />
+                    </button>
+                    {!(sidebarCollapsed && !isMobileNav) ? (
+                      <div className={`sidebar__submenu${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
+                        <div className="sidebar__submenu-inner">
+                          {n.children.map((c) => (
+                            <NavLink
+                              key={c.to}
+                              to={c.to}
+                              tabIndex={expanded ? undefined : -1}
+                              className={({ isActive }) => `sidebar__sublink${isActive ? " active" : ""}`}
+                              title={c.label}
+                              onClick={closeMobileNav}
+                            >
+                              <NavIcons icons={c.icons} mobile={isMobileNav} />
+                              <span className="sidebar__nav-label">{c.label}</span>
+                            </NavLink>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </nav>
+          </div>
+          <div className="sidebar__foot">
+            <div className="sidebar__user" title="Sessão actual">
+              {getStoredUserDisplayLabel() || "Usuário"}
+            </div>
             <button
               type="button"
-              className="sidebar__collapse-btn"
-              aria-label={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
-              title={sidebarCollapsed ? "Expandir menu" : "Minimizar menu"}
-              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="btn sidebar__logout"
+              onClick={() => {
+                clearSession();
+                window.location.href = APP_ROUTES.login;
+              }}
             >
-              {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+              Sair
             </button>
-          ) : null}
-        </div>
-        <div className="sidebar__nav-scroll">
-          <nav>
-            {navItems.map((n) => (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                end={n.to === APP_ROUTES.integrations}
-                className={({ isActive }) => (isActive ? "active" : "")}
-                title={n.label}
-                onClick={closeMobileNav}
-              >
-                <span
-                  className={`sidebar__nav-icon${n.icons.length > 1 ? " sidebar__nav-icon--pair" : ""}`}
-                  aria-hidden
-                >
-                  {n.icons.map((Icon, i) => (
-                    <Icon
-                      key={i}
-                      size={isMobileNav ? ICON_SZ_MOBILE : ICON_SZ}
-                      strokeWidth={ICON_STROKE}
-                      className="sidebar__nav-icon__svg"
-                    />
-                  ))}
-                </span>
-                <span className="sidebar__nav-label">{n.label}</span>
-              </NavLink>
-            ))}
-          </nav>
-        </div>
-        <div className="sidebar__foot">
-          <div className="sidebar__user" title="Sessão actual">
-            {getStoredUserDisplayLabel() || "Usuário"}
           </div>
-          <button type="button" className="btn sidebar__logout" onClick={() => { clearSession(); window.location.href = APP_ROUTES.login; }}>
-            Sair
-          </button>
-        </div>
-      </aside>
-      <main className="main">
-        <Outlet />
-      </main>
-    </div>
+        </aside>
+        <main className="main">
+          <Outlet />
+        </main>
+      </div>
     </AppToastProvider>
   );
 }

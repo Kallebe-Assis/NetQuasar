@@ -5,7 +5,7 @@ import { PageCountPill } from "../components/PageCountPill";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
 import { AuditLogTable } from "../components/AuditLogTable";
 import { friendlyApiMessage } from "../lib/apiErrors";
@@ -303,7 +303,7 @@ function IconExternalLinkSubtle({ size = 16 }: { size?: number }) {
 }
 
 export function MonitoringPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("monitoring.control");
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const showPageToastRef = useRef<(ok: boolean, text: string) => void>(() => {});

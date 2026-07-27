@@ -1,9 +1,10 @@
 // Package monitorworker executa ciclos de sondagem enquanto monitoring_runtime.is_running = true,
 // independentemente de conexões HTTP do front (troca de tela não interrompe). Parar só via POST /monitoring/stop.
 //
-// O worker executa ping em paralelo (ping_seconds) quando ping_parallel=true (padrão).
-// Os restantes passos do pipeline correm em sequência (Configurações → Monitoramento).
-// são serializadas com WithDeviceProbeRowLock; SNMP por snmpdevicelock.
+// Ciclos leves em paralelo (cada um com o seu intervalo): ping, telemetria SNMP e BNG.
+// O pipeline sequencial fica para interfaces / OLT. Dentro de cada ciclo, vários equipamentos
+// são sondados em paralelo (DefaultSweepConcurrency); o mesmo device fica serializado
+// com WithDeviceProbeRowLock / snmpdevicelock.
 package monitorworker
 
 import (
@@ -81,7 +82,7 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 
 	runCtx := ActiveRunContext(ctx)
 
-	// Ping paralelo (intervalo ping_seconds) — não espera telemetria/OLT.
+	// Ping / telemetria / BNG em paralelo — não esperam o pipeline de interfaces/OLT.
 	if cfg.PingParallel || mode == ModeSimplePing {
 		TryStartParallelPingCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	}
@@ -89,7 +90,7 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		return nil
 	}
 
-	// Totais BNG (PPPoE online, etc.) em paralelo — intervalo telemetry_seconds.
+	TryStartParallelTelemetryCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 
 	var lastPipeline *time.Time
@@ -113,7 +114,12 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	go func(mode string, log *zerolog.Logger, skipPing bool, pipelineCtx context.Context) {
 		defer UnlockMonitoringPipeline()
 		l := log.With().Str("component", "monitor_worker").Str("cycle", "pipeline").Logger()
-		if err := RunConfiguredPipeline(pipelineCtx, pool, &l, mode, SweepOpts{Source: "worker", SkipPingInPipeline: skipPing}); err != nil {
+		if err := RunConfiguredPipeline(pipelineCtx, pool, &l, mode, SweepOpts{
+			Source:                  "worker",
+			SkipPingInPipeline:      skipPing,
+			SkipTelemetryInPipeline: true,
+			SkipBngInPipeline:       true,
+		}); err != nil {
 			l.Warn().Err(err).Msg("pipeline de monitoramento")
 		}
 	}(mode, log, cfg.PingParallel, runCtx)

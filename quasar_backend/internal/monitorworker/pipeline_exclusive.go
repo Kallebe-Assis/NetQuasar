@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// monitoringPipelineMu garante uma única sequência SNMP (telemetria → interfaces → PON)
-// em voo por processo — evita corridas entre passos pesados e POST /monitoring/cycles.
+// monitoringPipelineMu garante uma única sequência SNMP pesada (interfaces → OLT)
+// em voo por processo — ping/telemetria/BNG correm em ciclos paralelos dedicados.
 var monitoringPipelineMu sync.Mutex
 
 // telemetryCycleMu permite telemetria SNMP em paralelo ao pipeline de interfaces (walks pesados).

@@ -39,6 +39,16 @@ import {
   cableStatusLabel,
 } from "../../lib/networkInfrastructure";
 import {
+  buildDefaultSplicePairs,
+  buildDefaultSplitterPorts,
+  CABLE_FIBER_COUNTS,
+  isCableFiberCount,
+  type SplicePair,
+  type SplitterPort,
+} from "../../lib/fiberSplitter";
+import { CableFibersModal } from "../../components/CableFibersModal";
+import { SpliceBoxModal } from "../../components/SpliceBoxModal";
+import {
   CoordFields,
   FiberColorSelect,
   LocalitySelect,
@@ -225,6 +235,8 @@ export function InfrastructureTab({
     skipped: number;
   } | null>(null);
   const [mapPreview, setMapPreview] = useState<LocationMapPreview | null>(null);
+  const [cableFibersRow, setCableFibersRow] = useState<NetworkCable | null>(null);
+  const [spliceBoxRow, setSpliceBoxRow] = useState<NetworkSpliceBox | null>(null);
 
   const debouncedQ = useDebouncedValue(filters.q, 320);
   const filterKey = useMemo(
@@ -266,10 +278,10 @@ export function InfrastructureTab({
       notes: "",
     };
     if (variant === "cto") {
-      return { ...base, splitter: "", transmitter: "", fiber_color: "", locality_id: "" };
+      return { ...base, splitter: "", transmitter: "", fiber_color: "Desconhecido", locality_id: "" };
     }
     if (variant === "splice") {
-      return { ...base, fiber_count: "" };
+      return { ...base, fiber_count: "12", box_model: "emenda" };
     }
     if (variant === "cable") {
       return { ...base, cable_type: "", fiber_count: "", status: "ativo" };
@@ -289,10 +301,13 @@ export function InfrastructureTab({
     if (variant === "cto") {
       f.splitter = r.splitter ? normalizeSplitterInput(String(r.splitter)) ?? String(r.splitter) : "";
       f.transmitter = r.transmitter ? String(r.transmitter) : "";
-      f.fiber_color = r.fiber_color ? String(r.fiber_color) : "";
+      f.fiber_color = r.fiber_color ? String(r.fiber_color) : "Desconhecido";
       f.locality_id = r.locality_id ? String(r.locality_id) : "";
     }
-    if (variant === "splice" && r.fiber_count != null) f.fiber_count = String(r.fiber_count);
+    if (variant === "splice") {
+      if (r.fiber_count != null) f.fiber_count = String(r.fiber_count);
+      f.box_model = r.box_model === "distribuicao" ? "distribuicao" : "emenda";
+    }
     if (variant === "cable") {
       f.cable_type = r.cable_type ? String(r.cable_type) : "";
       f.fiber_count = r.fiber_count != null ? String(r.fiber_count) : "";
@@ -321,12 +336,13 @@ export function InfrastructureTab({
     if (variant === "cto") {
       payload.splitter = normalizeSplitterInput(String(form.splitter));
       payload.transmitter = String(form.transmitter).trim() || null;
-      payload.fiber_color = String(form.fiber_color).trim() || null;
+      payload.fiber_color = String(form.fiber_color).trim() || "Desconhecido";
       payload.locality_id = String(form.locality_id).trim() || null;
     }
     if (variant === "splice") {
       const fc = String(form.fiber_count).trim();
       payload.fiber_count = fc ? Number(fc) : null;
+      payload.box_model = String(form.box_model || "emenda");
     }
     if (variant === "cable") {
       payload.cable_type = String(form.cable_type).trim() || null;
@@ -578,6 +594,7 @@ export function InfrastructureTab({
               ) : null}
               {variant === "splice" ? (
                 <>
+                  <th>Modelo</th>
                   <th>Fibras</th>
                   <th>Manutenção</th>
                 </>
@@ -616,7 +633,7 @@ export function InfrastructureTab({
                     <>
                       <td>{formatSplitterDisplay(r.splitter as string | null)}</td>
                       <td>{(r.transmitter as string) ?? "—"}</td>
-                      <td>{(r.fiber_color as string) ?? "—"}</td>
+                      <td>{(r.fiber_color as string) || "Desconhecido"}</td>
                       <td>{(r.locality_name as string) ?? "—"}</td>
                       <td>
                         <MaintenanceStatusCell needsMaintenance={Boolean(r.needs_maintenance)} />
@@ -625,7 +642,12 @@ export function InfrastructureTab({
                   ) : null}
                   {variant === "splice" ? (
                     <>
-                      <td>{(r.fiber_count as number) ?? "—"}</td>
+                      <td>{r.box_model === "distribuicao" ? "Distribuição" : "Emenda"}</td>
+                      <td>
+                        {r.box_model === "distribuicao"
+                          ? formatSplitterDisplay(r.splitter as string | null | undefined)
+                          : ((r.fiber_count as number) ?? "—")}
+                      </td>
                       <td>
                         <MaintenanceStatusCell needsMaintenance={Boolean(r.needs_maintenance)} />
                       </td>
@@ -666,6 +688,26 @@ export function InfrastructureTab({
                           }
                         >
                           <MapPin size={15} />
+                        </button>
+                      ) : null}
+                      {variant === "cable" ? (
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          title="Configurar fibras"
+                          onClick={() => setCableFibersRow(r as NetworkCable)}
+                        >
+                          Fibras
+                        </button>
+                      ) : null}
+                      {variant === "splice" ? (
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          title="Configurar interior"
+                          onClick={() => setSpliceBoxRow(r as NetworkSpliceBox)}
+                        >
+                          Interior
                         </button>
                       ) : null}
                       {canMutate ? (
@@ -797,11 +839,38 @@ export function InfrastructureTab({
 
               {variant === "splice" ? (
                 <section className="conn-form-modal__section">
-                  <h3 className="conn-form-modal__section-title">Emenda</h3>
+                  <h3 className="conn-form-modal__section-title">Caixa de emenda</h3>
                   <div className="conn-form-modal__grid">
                     <div className="conn-form-modal__field">
+                      <span className="conn-form-modal__field-label">Modelo</span>
+                      <select
+                        className="input"
+                        value={String(form.box_model || "emenda")}
+                        onChange={(e) => setForm({ ...form, box_model: e.target.value })}
+                      >
+                        <option value="emenda">Emenda</option>
+                        <option value="distribuicao">Distribuição</option>
+                      </select>
+                    </div>
+                    <div className="conn-form-modal__field">
                       <span className="conn-form-modal__field-label">Quantidade de fibras</span>
-                      <input className="input" type="number" min={0} value={String(form.fiber_count)} onChange={(e) => setForm({ ...form, fiber_count: e.target.value })} />
+                      <select
+                        className="input"
+                        value={String(form.fiber_count)}
+                        onChange={(e) => setForm({ ...form, fiber_count: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {CABLE_FIBER_COUNTS.map((n) => (
+                          <option key={n} value={String(n)}>
+                            {n} fibras
+                          </option>
+                        ))}
+                        {form.fiber_count &&
+                        !isCableFiberCount(Number(form.fiber_count)) &&
+                        String(form.fiber_count).trim() !== "" ? (
+                          <option value={String(form.fiber_count)}>{String(form.fiber_count)} fibras (atual)</option>
+                        ) : null}
+                      </select>
                     </div>
                     <div className="conn-form-modal__field field--full">
                       <span className="conn-form-modal__field-label">Observações</span>
@@ -813,6 +882,20 @@ export function InfrastructureTab({
                         onChange={(v) => setForm({ ...form, needs_maintenance: v })}
                       />
                     </div>
+                    {editId ? (
+                      <div className="conn-form-modal__field field--full">
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => {
+                            const row = rows.find((x) => x.id === editId) as NetworkSpliceBox | undefined;
+                            if (row) setSpliceBoxRow(row);
+                          }}
+                        >
+                          Configurar interior
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               ) : null}
@@ -827,7 +910,23 @@ export function InfrastructureTab({
                     </div>
                     <div className="conn-form-modal__field">
                       <span className="conn-form-modal__field-label">Quantidade de fibras</span>
-                      <input className="input" type="number" min={0} value={String(form.fiber_count)} onChange={(e) => setForm({ ...form, fiber_count: e.target.value })} />
+                      <select
+                        className="input"
+                        value={String(form.fiber_count)}
+                        onChange={(e) => setForm({ ...form, fiber_count: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {CABLE_FIBER_COUNTS.map((n) => (
+                          <option key={n} value={String(n)}>
+                            {n} fibras
+                          </option>
+                        ))}
+                        {form.fiber_count &&
+                        !isCableFiberCount(Number(form.fiber_count)) &&
+                        String(form.fiber_count).trim() !== "" ? (
+                          <option value={String(form.fiber_count)}>{String(form.fiber_count)} fibras (atual)</option>
+                        ) : null}
+                      </select>
                     </div>
                     <div className="conn-form-modal__field">
                       <span className="conn-form-modal__field-label">Status</span>
@@ -839,6 +938,27 @@ export function InfrastructureTab({
                         ))}
                       </select>
                     </div>
+                    {editId ? (
+                      <div className="conn-form-modal__field field--full">
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => {
+                            const row = rows.find((r) => r.id === editId) as NetworkCable | undefined;
+                            if (row) {
+                              setCableFibersRow({
+                                ...row,
+                                fiber_count: String(form.fiber_count).trim()
+                                  ? Number(form.fiber_count)
+                                  : row.fiber_count,
+                              });
+                            }
+                          }}
+                        >
+                          Configurar fibras
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               ) : null}
@@ -985,6 +1105,92 @@ export function InfrastructureTab({
       ) : null}
 
       <LocationMapModal preview={mapPreview} onClose={() => setMapPreview(null)} />
+
+      {cableFibersRow ? (
+        <CableFibersModal
+          open
+          cableId={cableFibersRow.id}
+          cableName={cableFibersRow.description}
+          fiberCount={cableFibersRow.fiber_count}
+          ports={
+            cableFibersRow.fiber_ports && cableFibersRow.fiber_ports.length > 0
+              ? buildDefaultSplitterPorts(
+                  cableFibersRow.fiber_count && cableFibersRow.fiber_count > 0
+                    ? cableFibersRow.fiber_count
+                    : cableFibersRow.fiber_ports.length,
+                  cableFibersRow.fiber_ports.map((p) => ({
+                    port: Number(p.port) || 0,
+                    color: String(p.color ?? ""),
+                    color_hex: String(p.color_hex ?? "#64748b"),
+                    label: String(p.label ?? ""),
+                    status: (p.status as SplitterPort["status"]) || "livre",
+                    note: String(p.note ?? ""),
+                    destination: String(p.destination ?? ""),
+                  })),
+                )
+              : null
+          }
+          canEdit={canMutate}
+          onClose={() => setCableFibersRow(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: meta.queryKey });
+          }}
+        />
+      ) : null}
+
+      {spliceBoxRow ? (
+        <SpliceBoxModal
+          open
+          spliceId={spliceBoxRow.id}
+          spliceName={spliceBoxRow.description}
+          boxModel={spliceBoxRow.box_model}
+          fiberCount={spliceBoxRow.fiber_count}
+          splitter={spliceBoxRow.splitter}
+          feedFiberColor={spliceBoxRow.fiber_color}
+          ports={
+            spliceBoxRow.splitter_ports && spliceBoxRow.splitter_ports.length > 0
+              ? buildDefaultSplitterPorts(
+                  spliceBoxRow.fiber_count && spliceBoxRow.fiber_count > 0
+                    ? spliceBoxRow.fiber_count
+                    : spliceBoxRow.splitter_ports.length,
+                  spliceBoxRow.splitter_ports.map((p) => ({
+                    port: Number(p.port) || 0,
+                    color: String(p.color ?? ""),
+                    color_hex: String(p.color_hex ?? "#64748b"),
+                    label: String(p.label ?? ""),
+                    status: (p.status as SplitterPort["status"]) || "livre",
+                    note: String(p.note ?? ""),
+                    destination: String(p.destination ?? ""),
+                  })),
+                )
+              : null
+          }
+          pairs={
+            spliceBoxRow.splice_pairs && spliceBoxRow.splice_pairs.length > 0
+              ? buildDefaultSplicePairs(
+                  spliceBoxRow.fiber_count && spliceBoxRow.fiber_count > 0
+                    ? spliceBoxRow.fiber_count
+                    : spliceBoxRow.splice_pairs.length,
+                  spliceBoxRow.splice_pairs.map((p) => ({
+                    port: Number(p.port) || 0,
+                    left_color: String(p.left_color ?? ""),
+                    left_color_hex: String(p.left_color_hex ?? "#64748b"),
+                    right_color: String(p.right_color ?? ""),
+                    right_color_hex: String(p.right_color_hex ?? "#64748b"),
+                    status: (p.status as SplicePair["status"]) || "livre",
+                    note: String(p.note ?? ""),
+                    destination: String(p.destination ?? ""),
+                  })),
+                )
+              : null
+          }
+          canEdit={canMutate}
+          onClose={() => setSpliceBoxRow(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: meta.queryKey });
+          }}
+        />
+      ) : null}
     </>
   );
 }

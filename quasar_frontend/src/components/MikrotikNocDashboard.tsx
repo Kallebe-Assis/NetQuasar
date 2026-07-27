@@ -184,9 +184,6 @@ export function MikrotikNocDashboard(props: Props) {
             <strong>{softwareLabel}</strong> {sys.version}
           </span>
           <span>
-            <strong>Uptime</strong> {kpis.uptime}
-          </span>
-          <span>
             <strong>Últ. actualização</strong> {props.formatCollectedAt(props.collectedAt)}
           </span>
         </>

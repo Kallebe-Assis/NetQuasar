@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { APP_ROUTES } from "./routes";
 
-/** Redireciona visitantes (viewer) para o dashboard; só renderiza `children` para administradores. */
+/** Redireciona quem não tem acesso a configurações; admin e perfis com settings.* passam. */
 export function AdminOnly({ children }: { children: ReactNode }) {
-  if (!isAdminUser()) {
-    return <Navigate to={APP_ROUTES.dashboard} replace />;
+  if (isAdminUser() || can("settings.view") || can("settings.users") || can("settings.permissions") || can("integrations.manage")) {
+    return <>{children}</>;
   }
-  return <>{children}</>;
+  return <Navigate to={APP_ROUTES.dashboard} replace />;
 }

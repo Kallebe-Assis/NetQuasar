@@ -29,7 +29,7 @@ import { BngOverviewPanel } from "../components/BngOverviewPanel";
 import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
 import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { ifDisplayName, type MikrotikIfRow } from "../lib/mikrotikNocData";
@@ -1389,7 +1389,7 @@ function SessionDetailModal({
 }
 
 export function BngPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("bng.collect");
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [tab, setTab] = useState<BngTab>("overview");

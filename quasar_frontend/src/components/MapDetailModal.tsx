@@ -89,7 +89,7 @@ export function MapDetailModal(props: Props) {
               </tbody>
             </table>
             <p style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
-              <Link to="/connections">Ver em Conexões</Link>
+              <Link to="/connections">Ver em Mapa → Conexões</Link>
             </p>
           </div>
         )}
@@ -118,7 +118,7 @@ export function MapDetailModal(props: Props) {
               </tbody>
             </table>
             <p style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
-              <Link to="/connections">Ver em Conexões</Link>
+              <Link to="/connections">Ver em Mapa → Conexões</Link>
             </p>
           </div>
         )}

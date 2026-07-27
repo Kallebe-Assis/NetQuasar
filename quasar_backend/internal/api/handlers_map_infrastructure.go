@@ -121,9 +121,53 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	}
 
 	if kindSet["ctos"] {
-		if err := appendRows("network_ctos", "cto", "CTO", ""); err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-			return
+		if remaining > 0 {
+			q := `SELECT id, description, display_number, latitude, longitude, splitter, fiber_color
+				FROM network_ctos
+				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
+			args := []any{}
+			n := 1
+			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+			q += fmt.Sprintf(` ORDER BY display_number LIMIT $%d`, n)
+			args = append(args, remaining)
+			rows, err := s.DB().Query(ctx, q, args...)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			for rows.Next() {
+				var id uuid.UUID
+				var desc string
+				var displayNum int
+				var lat, lon float64
+				var splitter, fiberColor *string
+				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &splitter, &fiberColor); err != nil {
+					rows.Close()
+					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+					return
+				}
+				pt := map[string]any{
+					"id":             id.String(),
+					"description":    desc,
+					"display_number": displayNum,
+					"lat":            lat,
+					"lng":            lon,
+					"point_type":     "cto",
+					"id_prefix":      "CTO",
+				}
+				if splitter != nil && strings.TrimSpace(*splitter) != "" {
+					pt["splitter"] = strings.TrimSpace(*splitter)
+				}
+				if fiberColor != nil && strings.TrimSpace(*fiberColor) != "" {
+					pt["fiber_color"] = strings.TrimSpace(*fiberColor)
+				}
+				pts = append(pts, pt)
+				remaining--
+				if remaining <= 0 {
+					break
+				}
+			}
+			rows.Close()
 		}
 	}
 	if kindSet["splice_boxes"] {

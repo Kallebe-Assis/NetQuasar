@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,32 +44,30 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 	var defCommunity *string
 	_ = pool.QueryRow(ctx, `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&defCommunity)
 
-	eligible := 0
-	processed := 0
-	okN := 0
-	failN := 0
-	skipN := 0
+	var ctr sweepCounters
+	limit := sweepConcurrency()
 
-	for _, row := range devices {
+	forEachLimited(ctx, len(devices), limit, func(i int) {
+		row := devices[i]
 		if !row.telemetryEnabled {
-			skipN++
+			ctr.addSkip()
 			recordTelemetryCycleOutcome(ctx, pool, row.id, src, telemetryCycleOutcome{
 				Skipped: true,
 				Reason:  "telemetria desativada no equipamento",
 			})
-			continue
+			return
 		}
 		if isBngDevice(row) {
-			skipN++
+			ctr.addSkip()
 			recordTelemetryCycleOutcome(ctx, pool, row.id, src, telemetryCycleOutcome{
 				Skipped: true,
 				Reason:  "coleta BNG no passo dedicado do pipeline",
 			})
-			continue
+			return
 		}
 		comm := resolveSNMPCommunity(row, defCommunity)
 		if comm == "" {
-			skipN++
+			ctr.addSkip()
 			recordTelemetryCycleOutcome(ctx, pool, row.id, src, telemetryCycleOutcome{
 				Skipped: true,
 				Reason:  "community SNMP não configurada",
@@ -76,104 +75,103 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 			patchProbeSNMPHealth(ctx, pool, row.id, ModeSimplePing, false, "failed",
 				"community SNMP não configurada",
 				probeDetailFromTelemetry(src, map[string]any{"ok": false, "skipped": true, "reason": "snmp_community_missing"}, nil))
-			continue
+			return
 		}
-		eligible++
+		ctr.addEligible()
 
 		unlock := snmpdevicelock.Acquire(row.id)
-		func() {
-			defer unlock()
-			processed++
-			sctx, scancel := context.WithTimeout(ctx, cfg.telemetryTimeout())
-			defer scancel()
+		defer unlock()
+		ctr.addProcessed()
+		sctx, scancel := context.WithTimeout(ctx, cfg.telemetryTimeout())
+		defer scancel()
 
-			// Telemetria mínima vem antes de inventário/discovery auxiliar para
-			// não perder CPU, memória, temperatura e uptime por timeout.
-			c, telErr := telemetryengine.CollectAndStore(sctx, pool, row.id, strings.TrimSpace(row.ip), comm)
-			snmpOK := telErr == nil && c.OK
-			healthStatus := "ok"
-			healthReason := ""
-			if telErr != nil {
-				failN++
-				healthStatus = "failed"
-				healthReason = strings.TrimSpace(telErr.Error())
-				recordTelemetryCycleOutcome(sctx, pool, row.id, src, telemetryCycleOutcome{
-					OK: false, Reason: healthReason,
-				})
-			} else if !c.OK {
-				failN++
-				healthStatus = "partial"
-				healthReason = strings.TrimSpace(c.SNMP.Error)
-				if healthReason == "" {
-					healthReason = "SNMP sem retorno útil"
-				}
+		// Telemetria mínima vem antes de inventário/discovery auxiliar para
+		// não perder CPU, memória, temperatura e uptime por timeout.
+		c, telErr := telemetryengine.CollectAndStore(sctx, pool, row.id, strings.TrimSpace(row.ip), comm)
+		snmpOK := telErr == nil && c.OK
+		healthStatus := "ok"
+		healthReason := ""
+		if telErr != nil {
+			ctr.addFail()
+			healthStatus = "failed"
+			healthReason = strings.TrimSpace(telErr.Error())
+			recordTelemetryCycleOutcome(sctx, pool, row.id, src, telemetryCycleOutcome{
+				OK: false, Reason: healthReason,
+			})
+		} else if !c.OK {
+			ctr.addFail()
+			healthStatus = "partial"
+			healthReason = strings.TrimSpace(c.SNMP.Error)
+			if healthReason == "" {
+				healthReason = "SNMP sem retorno útil"
 			}
-			if telErr == nil && c.Metrics != nil {
-				if mk, ok := c.Metrics["mikrotik_collection"]; ok {
-					if doc, ok := mk.(map[string]any); ok {
-						if st, ok := doc["status"].(map[string]any); ok {
-							if coll, _ := st["collected"].(float64); coll > 0 {
-								snmpOK = true
-							}
-						}
-					}
-				}
-				if bn, ok := c.Metrics["bng_collection"]; ok {
-					if doc, ok := bn.(map[string]any); ok {
-						if st, ok := doc["status"].(map[string]any); ok {
-							if coll, _ := st["collected"].(float64); coll > 0 {
-								snmpOK = true
-							}
+		}
+		if telErr == nil && c.Metrics != nil {
+			if mk, ok := c.Metrics["mikrotik_collection"]; ok {
+				if doc, ok := mk.(map[string]any); ok {
+					if st, ok := doc["status"].(map[string]any); ok {
+						if coll, _ := st["collected"].(float64); coll > 0 {
+							snmpOK = true
 						}
 					}
 				}
 			}
-			var snmpDetail any
-			if telErr != nil {
-				snmpDetail = map[string]any{"ok": false, "error": telErr.Error(), "source": "telemetryengine"}
-			} else {
-				snmpDetail = c.SNMP
-			}
-			var mikrotikDetail any
-			if telErr == nil && c.Metrics != nil {
-				mikrotikDetail = c.Metrics["mikrotik_collection"]
-			}
-			patchProbeSNMPHealth(sctx, pool, row.id, ModeSimplePing, snmpOK, healthStatus, healthReason,
-				probeDetailFromTelemetry(src, snmpDetail, mikrotikDetail))
-
-			if telErr == nil && c.Metrics != nil {
-				if mb, err := json.Marshal(c.Metrics); err == nil {
-					monitorview.PatchProbeKPIs(sctx, pool, row.id, mb, time.Now())
+			if bn, ok := c.Metrics["bng_collection"]; ok {
+				if doc, ok := bn.(map[string]any); ok {
+					if st, ok := doc["status"].(map[string]any); ok {
+						if coll, _ := st["collected"].(float64); coll > 0 {
+							snmpOK = true
+						}
+					}
 				}
 			}
+		}
+		var snmpDetail any
+		if telErr != nil {
+			snmpDetail = map[string]any{"ok": false, "error": telErr.Error(), "source": "telemetryengine"}
+		} else {
+			snmpDetail = c.SNMP
+		}
+		var mikrotikDetail any
+		if telErr == nil && c.Metrics != nil {
+			mikrotikDetail = c.Metrics["mikrotik_collection"]
+		}
+		patchProbeSNMPHealth(sctx, pool, row.id, ModeSimplePing, snmpOK, healthStatus, healthReason,
+			probeDetailFromTelemetry(src, snmpDetail, mikrotikDetail))
 
-			if snmpOK {
-				okN++
-				RunPostTelemetryAlertEval(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), comm, row.category, row.brand, row.model, c)
-				NudgeMonitoringRuntimeRefresh(sctx, pool)
-			} else if telErr != nil && log != nil {
-				log.Warn().Err(telErr).Str("device", row.id.String()).Str("host", strings.TrimSpace(row.ip)).
-					Msg("telemetria SNMP falhou")
+		if telErr == nil && c.Metrics != nil {
+			if mb, err := json.Marshal(c.Metrics); err == nil {
+				monitorview.PatchProbeKPIs(sctx, pool, row.id, mb, time.Now())
 			}
-		}()
-	}
+		}
 
-	if log != nil && eligible > 0 {
-		log.Info().Int("eligible", eligible).Int("processed", processed).Str("source", src).
-			Msg("ciclo telemetria SNMP concluído")
+		if snmpOK {
+			ctr.addOK()
+			RunPostTelemetryAlertEval(sctx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), comm, row.category, row.brand, row.model, c)
+			NudgeMonitoringRuntimeRefresh(sctx, pool)
+		} else if telErr != nil && log != nil {
+			log.Warn().Err(telErr).Str("device", row.id.String()).Str("host", strings.TrimSpace(row.ip)).
+				Msg("telemetria SNMP falhou")
+		}
+	})
+
+	if log != nil && ctr.eligible > 0 {
+		log.Info().Int("eligible", ctr.eligible).Int("processed", ctr.processed).Str("source", src).
+			Int("concurrency", limit).Msg("ciclo telemetria SNMP concluído")
 	}
-	if log != nil && eligible > processed {
-		log.Warn().Int("eligible", eligible).Int("processed", processed).
+	if log != nil && ctr.eligible > ctr.processed {
+		log.Warn().Int("eligible", ctr.eligible).Int("processed", ctr.processed).
 			Msg("ciclo telemetria incompleto (equipamentos não processados)")
 	}
 
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugTelemetry, "run", map[string]any{
-		"source":    src,
-		"eligible":  eligible,
-		"processed": processed,
-		"ok":        okN,
-		"failed":    failN,
-		"skipped":   skipN,
+		"source":      src,
+		"eligible":    ctr.eligible,
+		"processed":   ctr.processed,
+		"ok":          ctr.ok,
+		"failed":      ctr.fail,
+		"skipped":     ctr.skip,
+		"concurrency": limit,
 	})
 
 	_, err = pool.Exec(ctx, `
@@ -220,9 +218,10 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 
 	ph := strings.TrimSpace(strings.ToLower(opts.InterfacePhase))
 	oltEligible := 0
-	oltProcessed := 0
+	var oltProcessed atomicInt
 	ifaceAttempted := 0
 	ifaceSkipped := 0
+	var ifaceMu sync.Mutex
 	if ph == InterfacePhaseOLT {
 		for _, row := range devices {
 			if strings.EqualFold(strings.TrimSpace(row.category), "olt") && row.telemetryEnabled {
@@ -231,82 +230,91 @@ func RunInterfaceSnapshotSweep(ctx context.Context, pool *pgxpool.Pool, log *zer
 		}
 	}
 
-	for _, row := range devices {
+	limit := sweepConcurrency()
+	forEachLimited(ctx, len(devices), limit, func(i int) {
+		row := devices[i]
 		if !row.telemetryEnabled {
-			continue
+			return
 		}
 		if ph == InterfacePhaseMikrotik && !workerLikelyMikrotik(row.category, row.brand, row.model, row.description) {
-			continue
+			return
 		}
 		if ph == InterfacePhaseSwitch && !workerLikelySwitch(row.category) {
-			continue
+			return
 		}
 		if ph == InterfacePhaseOLT && !strings.EqualFold(strings.TrimSpace(row.category), "olt") {
-			continue
+			return
 		}
 		comm := resolveSNMPCommunity(row, defCommunity)
 		if comm == "" {
+			ifaceMu.Lock()
 			ifaceSkipped++
-			continue
+			ifaceMu.Unlock()
+			return
 		}
 
+		ifaceMu.Lock()
 		lastIf := lastIfaceByDevice[row.id]
+		ifaceMu.Unlock()
 		if !sweepShouldCollectDevice(opts, lastIf, ifaceDur) {
-			continue
+			return
 		}
 
 		unlock := snmpdevicelock.Acquire(row.id)
-		func() {
-			defer unlock()
-			ifaceAttempted++
-			perDeviceTimeout := cfg.interfaceTimeout(ph == InterfacePhaseOLT, ph == InterfacePhaseMikrotik)
-			sctx, scancel := context.WithTimeout(ctx, perDeviceTimeout)
-			defer scancel()
-			t0 := time.Now()
+		defer unlock()
+		ifaceMu.Lock()
+		ifaceAttempted++
+		ifaceMu.Unlock()
+		perDeviceTimeout := cfg.interfaceTimeout(ph == InterfacePhaseOLT, ph == InterfacePhaseMikrotik)
+		sctx, scancel := context.WithTimeout(ctx, perDeviceTimeout)
+		defer scancel()
+		t0 := time.Now()
 
-			// A coleta IF-MIB/óptica é a finalidade desta fase e deve ocorrer
-			// antes de qualquer inventário auxiliar.
-			CollectInterfaceSnapshotWorker(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm,
-				row.category, row.brand, row.model, row.description)
-			if ph != InterfacePhaseOLT && sctx.Err() == nil {
-				invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
-				if invEmptyBefore {
-					invCtx, invCancel := context.WithTimeout(sctx, 15*time.Second)
-					_, _ = snmpdiscovery.EnsureFreshInventory(invCtx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
-					invCancel()
-				}
+		// A coleta IF-MIB/óptica é a finalidade desta fase e deve ocorrer
+		// antes de qualquer inventário auxiliar.
+		CollectInterfaceSnapshotWorker(sctx, pool, log, row.id, strings.TrimSpace(row.ip), comm,
+			row.category, row.brand, row.model, row.description)
+		if ph != InterfacePhaseOLT && sctx.Err() == nil {
+			invEmptyBefore, _ := snmpInventoryEmpty(sctx, pool, row.id)
+			if invEmptyBefore {
+				invCtx, invCancel := context.WithTimeout(sctx, 15*time.Second)
+				_, _ = snmpdiscovery.EnsureFreshInventory(invCtx, pool, log, row.id, snmpdiscovery.DefaultInventoryMaxAge)
+				invCancel()
 			}
-			lastIfaceByDevice[row.id] = time.Now()
-			NudgeMonitoringRuntimeRefresh(sctx, pool)
-			if ph == InterfacePhaseOLT {
-				oltProcessed++
-				setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT) ["+strconv.Itoa(oltProcessed)+"/"+strconv.Itoa(oltEligible)+"]")
-				if log != nil {
-					log.Info().
-						Str("phase", "interfaces_olt").
-						Int("progress_done", oltProcessed).
-						Int("progress_total", oltEligible).
-						Str("device_id", row.id.String()).
-						Str("host", strings.TrimSpace(row.ip)).
-						Int64("timeout_ms", perDeviceTimeout.Milliseconds()).
-						Int64("device_collect_ms", time.Since(t0).Milliseconds()).
-						Msg("interface sweep OLT concluído")
-				}
+		}
+		ifaceMu.Lock()
+		lastIfaceByDevice[row.id] = time.Now()
+		ifaceMu.Unlock()
+		NudgeMonitoringRuntimeRefresh(sctx, pool)
+		if ph == InterfacePhaseOLT {
+			done := oltProcessed.inc()
+			setActivity(ctx, pool, "4/5 — Interfaces SNMP (OLT) ["+strconv.Itoa(done)+"/"+strconv.Itoa(oltEligible)+"]")
+			if log != nil {
+				log.Info().
+					Str("phase", "interfaces_olt").
+					Int("progress_done", done).
+					Int("progress_total", oltEligible).
+					Str("device_id", row.id.String()).
+					Str("host", strings.TrimSpace(row.ip)).
+					Int64("timeout_ms", perDeviceTimeout.Milliseconds()).
+					Int64("device_collect_ms", time.Since(t0).Milliseconds()).
+					Msg("interface sweep OLT concluído")
 			}
-		}()
-	}
+		}
+	})
 
 	_, err = pool.Exec(ctx, `
 		UPDATE monitoring_runtime SET last_interface_snapshot_cycle_at = now(), last_cycle_at = now(), updated_at = now()
 		WHERE id = 1
 	`)
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugInterfaces, "run", map[string]any{
-		"source":    src,
-		"phase":     ph,
-		"attempted": ifaceAttempted,
-		"skipped":   ifaceSkipped,
-		"olt_done":  oltProcessed,
-		"olt_total": oltEligible,
+		"source":      src,
+		"phase":       ph,
+		"attempted":   ifaceAttempted,
+		"skipped":     ifaceSkipped,
+		"olt_done":    oltProcessed.n,
+		"olt_total":   oltEligible,
+		"concurrency": limit,
 	})
 	return err
 }

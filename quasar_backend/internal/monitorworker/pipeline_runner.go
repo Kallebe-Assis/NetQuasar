@@ -10,7 +10,7 @@ import (
 )
 
 // RunConfiguredPipeline executa os passos configurados em sequência (cada um só inicia após o anterior terminar).
-// Com SkipPingInPipeline, passos «ping» são ignorados (correm em paralelo via TryStartParallelPingCycle).
+// Passos ping/telemetria/BNG podem ser saltados quando correm em ciclos paralelos dedicados.
 func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, opts SweepOpts) error {
 	if pool == nil {
 		return nil
@@ -39,6 +39,12 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		if opts.SkipPingInPipeline && step.Kind == StepKindPing {
 			continue
 		}
+		if opts.SkipTelemetryInPipeline && step.Kind == StepKindTelemetry {
+			continue
+		}
+		if opts.SkipBngInPipeline && step.Kind == StepKindBng {
+			continue
+		}
 		if mode == ModeSimplePing && step.Kind != StepKindPing {
 			continue
 		}
@@ -62,7 +68,8 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		stepOpts.Source = "pipeline"
 		stepOpts.PipelineStep = &step
 		stepOpts.ScopedDevices = devices
-		if step.Kind == StepKindOltOnu {
+		switch step.Kind {
+		case StepKindOltOnu:
 			// Cadência própria por modo (PON status / contagens / full).
 			stepOpts.Force = opts.Force
 			onuMode := "full"
@@ -77,7 +84,11 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 				}
 				continue
 			}
-		} else {
+		case StepKindMikrotik, StepKindSwitch, StepKindInterfacesOLT, StepKindInterfacesMikrotik, StepKindInterfacesSwitch:
+			// Respeitar interface_snapshot_seconds por equipamento (evita re-walk completo a cada pipeline).
+			stepOpts.Force = opts.Force
+		default:
+			// Telemetria/BNG/ping (quando ainda no pipeline) forçam o passo.
 			stepOpts.Force = true
 		}
 
@@ -104,11 +115,13 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		log.Info().Int("steps", total).Str("source", src).Msg("pipeline de monitoramento concluído")
 	}
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", "pipeline", "run", map[string]any{
-		"source":           src,
-		"steps":            total,
-		"force":            opts.Force,
-		"skip_ping":        opts.SkipPingInPipeline,
-		"ping_parallel":    opts.SkipPingInPipeline,
+		"source":         src,
+		"steps":          total,
+		"force":          opts.Force,
+		"skip_ping":      opts.SkipPingInPipeline,
+		"skip_telemetry": opts.SkipTelemetryInPipeline,
+		"skip_bng":       opts.SkipBngInPipeline,
+		"ping_parallel":  opts.SkipPingInPipeline,
 	})
 	return nil
 }

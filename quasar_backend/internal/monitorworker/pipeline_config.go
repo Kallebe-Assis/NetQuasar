@@ -127,6 +127,16 @@ func FirstEnabledBngStep(steps []PipelineStep) *PipelineStep {
 	return nil
 }
 
+// FirstEnabledTelemetryStep devolve o primeiro passo telemetria activo (scope para ciclo paralelo).
+func FirstEnabledTelemetryStep(steps []PipelineStep) *PipelineStep {
+	for i := range steps {
+		if steps[i].Enabled && steps[i].Kind == StepKindTelemetry {
+			return &steps[i]
+		}
+	}
+	return nil
+}
+
 func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep, error) {
 	if pool == nil {
 		return DefaultPipelineSteps(), nil

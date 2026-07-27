@@ -20,12 +20,16 @@ func RunBootstrapPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog.
 		return
 	}
 	TryStartParallelPingCycle(ctx, pool, log, ModeFull, cfg, SweepOpts{Source: "bootstrap", Force: true})
+	TryStartParallelTelemetryCycle(ctx, pool, log, ModeFull, cfg, SweepOpts{Source: "bootstrap", Force: true})
+	TryStartParallelBngCycle(ctx, pool, log, ModeFull, cfg, SweepOpts{Source: "bootstrap", Force: true})
 	LockMonitoringPipeline()
 	defer UnlockMonitoringPipeline()
 	if err := RunConfiguredPipeline(ctx, pool, log, ModeFull, SweepOpts{
-		Source:             "bootstrap",
-		Force:              true,
-		SkipPingInPipeline: cfg.PingParallel,
+		Source:                  "bootstrap",
+		Force:                   true,
+		SkipPingInPipeline:      cfg.PingParallel,
+		SkipTelemetryInPipeline: true,
+		SkipBngInPipeline:       true,
 	}); err != nil && log != nil {
 		log.Warn().Err(err).Msg("bootstrap pipeline")
 	}

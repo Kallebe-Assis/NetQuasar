@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/interfacealerts"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/rs/zerolog"
 )
 
@@ -84,6 +85,13 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 			log.Warn().Err(err).Str("device", deviceID.String()).Msg("interface_snapshots insert (worker)")
 		}
 		return
+	}
+
+	if isMk {
+		// Aba PPPoE lê da telemetria: manter alinhada com este walk de interfaces.
+		if _, errPPP := mikrotikcollect.SyncPPPoEFromInterfaceWalk(ctx, pool, deviceID, walkRes.Merged); errPPP != nil && log != nil {
+			log.Warn().Err(errPPP).Str("device", deviceID.String()).Msg("sync PPPoE no snapshot de interfaces")
+		}
 	}
 
 	interfacealerts.EvaluateAfterSnapshot(ctx, pool, log, interfacealerts.Params{

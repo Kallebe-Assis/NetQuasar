@@ -32,6 +32,10 @@ type SweepOpts struct {
 	ScopedDevices []pingableDeviceRow
 	// SkipPingInPipeline quando true, passos «ping» do pipeline são ignorados (correm em paralelo via ping_seconds).
 	SkipPingInPipeline bool
+	// SkipTelemetryInPipeline quando true, passos «telemetry» são ignorados (correm via TryStartParallelTelemetryCycle).
+	SkipTelemetryInPipeline bool
+	// SkipBngInPipeline quando true, passos «bng» são ignorados (correm via TryStartParallelBngCycle).
+	SkipBngInPipeline bool
 }
 
 // ErrSweepBusy indica que já existe uma execução do mesmo tipo em curso (evita SNMP/ICMP sobrepostos).

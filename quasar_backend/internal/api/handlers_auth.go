@@ -76,11 +76,26 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "TOKEN", err.Error(), nil)
 		return
 	}
-	s.appendAuditLog(r.Context(), "auth", id.String(), "login_success", displayName, nil, map[string]any{"email": email, "role": role})
-	writeJSON(w, http.StatusOK, map[string]any{
+	profileID, profileSlug, perms := s.resolveUserPermissions(r.Context(), id, role)
+	legacyRole := s.legacyRoleFromProfileSlug(profileSlug, perms)
+	if strings.EqualFold(role, "admin") {
+		legacyRole = "admin"
+		perms = []string{"*"}
+		profileSlug = "admin"
+	}
+	s.appendAuditLog(r.Context(), "auth", id.String(), "login_success", displayName, nil, map[string]any{
+		"email": email, "role": legacyRole, "profile": profileSlug,
+	})
+	out := map[string]any{
 		"token":         token,
 		"email":         email,
 		"display_name":  displayName,
-		"role":          role,
-	})
+		"role":          legacyRole,
+		"profile_slug":  profileSlug,
+		"permissions":   perms,
+	}
+	if profileID != nil {
+		out["permission_profile_id"] = profileID.String()
+	}
+	writeJSON(w, http.StatusOK, out)
 }

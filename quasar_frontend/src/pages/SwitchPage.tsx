@@ -7,7 +7,7 @@ import { VlanCell } from "../components/VlanCell";
 import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { DropdownMenu } from "../components/DropdownMenu";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -95,7 +95,7 @@ function MiniTrafficChart({ points }: { points: Array<{ ts: number; tx: number; 
 }
 
 export function SwitchPage() {
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("switch.collect") || can("devices.collect");
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const [telCollecting, setTelCollecting] = useState(false);

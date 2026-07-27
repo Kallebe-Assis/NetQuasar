@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
-import { isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import { invalidateDashboardAfterCollect } from "../lib/dashboardCache";
@@ -317,7 +317,7 @@ function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: O
 
 export function OltPage() {
   const [pageTab, setPageTab] = useState<OltPageTab>("equipamentos");
-  const canMutate = isAdminUser();
+  const canMutate = isAdminUser() || can("olt.collect") || can("olt.onu_manage");
   const qc = useQueryClient();
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const [sel, setSel] = useState<string | null>(null);

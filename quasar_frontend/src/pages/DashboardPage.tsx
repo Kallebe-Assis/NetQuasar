@@ -1,8 +1,9 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { RefreshCw } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DashboardPageLoader } from "../components/DashboardPageLoader";
+import { DeferredMount } from "../components/DeferredMount";
 import { InfoHint } from "../components/InfoHint";
 import {
   Bar,
@@ -163,13 +164,15 @@ function Section({
   );
 }
 
-function ChartBox({ h, children }: { h: number; children: React.ReactElement }) {
+function ChartBox({ h, children }: { h: number; children: ReactElement }) {
   return (
-    <div style={{ width: "100%", height: h, minHeight: h }}>
-      <ResponsiveContainer width="100%" height="100%">
-        {children}
-      </ResponsiveContainer>
-    </div>
+    <DeferredMount minHeight={h} placeholder={<div style={{ height: h, borderRadius: 8, background: "var(--panel2)", opacity: 0.55 }} />}>
+      <div style={{ width: "100%", height: h, minHeight: h }}>
+        <ResponsiveContainer width="100%" height="100%">
+          {children}
+        </ResponsiveContainer>
+      </div>
+    </DeferredMount>
   );
 }
 
@@ -187,6 +190,7 @@ export function DashboardPage() {
       apiFetch<DashboardAnalytics>(`/api/v1/dashboard/analytics?days=${days}`),
     ),
     ...pageCachedQueryOptions<DashboardAnalytics>(dashboardAnalyticsKey(days), DASHBOARD_STALE_MS, DASHBOARD_GC_MS),
+    placeholderData: keepPreviousData,
   });
 
   const topProbe = useQuery({
@@ -365,7 +369,7 @@ export function DashboardPage() {
       <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
         <label style={{ fontSize: 12, color: "var(--muted)" }}>
           Período (dias)
-          <select className="select" style={{ marginLeft: 8, minWidth: 100 }} value={days} onChange={(e) => setDays(Number(e.target.value) || 30)} title="Janela temporal das séries">
+          <select className="select" style={{ marginLeft: 8, minWidth: 100 }} value={days} onChange={(e) => setDays(Number(e.target.value) || DASHBOARD_DEFAULT_DAYS)} title="Janela temporal das séries">
             {[7, 14, 30, 60, 90].map((d) => (
               <option key={d} value={d}>
                 {d} dias

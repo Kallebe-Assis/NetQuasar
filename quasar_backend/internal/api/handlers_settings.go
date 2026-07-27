@@ -706,26 +706,9 @@ func bearerFromRequest(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 }
 
-// requireSettingsUsersAdmin exige JWT de administrador quando a API está em modo autenticado.
+// requireSettingsUsersAdmin exige permissão de gestão de usuários quando a API está autenticada.
 func (s *Server) requireSettingsUsersAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if !s.Cfg.RequireAuth() {
-		return true
-	}
-	raw := bearerFromRequest(r)
-	if raw == "" {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "sessão ausente", nil)
-		return false
-	}
-	_, _, role, err := parseUserJWT(s.Cfg, raw)
-	if err != nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "sessão inválida", nil)
-		return false
-	}
-	if role != "admin" {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "apenas administradores podem gerir usuários", nil)
-		return false
-	}
-	return true
+	return s.requirePermission(w, r, "settings.users", "settings.permissions", "*")
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -733,7 +716,11 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, display_name, email, phone, role, COALESCE(is_active, true) FROM users ORDER BY display_name
+		SELECT u.id, u.display_name, u.email, u.phone, u.role, COALESCE(u.is_active, true),
+			u.permission_profile_id, p.name, p.slug
+		FROM users u
+		LEFT JOIN permission_profiles p ON p.id = u.permission_profile_id
+		ORDER BY u.display_name
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -741,24 +728,38 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type u struct {
-		ID          uuid.UUID `json:"id"`
-		DisplayName string    `json:"display_name"`
-		Email       string    `json:"email"`
-		Phone       *string   `json:"phone"`
-		Role        string    `json:"role"`
-		IsActive    bool      `json:"is_active"`
+		ID                   uuid.UUID  `json:"id"`
+		DisplayName          string     `json:"display_name"`
+		Email                string     `json:"email"`
+		Phone                *string    `json:"phone"`
+		Role                 string     `json:"role"`
+		IsActive             bool       `json:"is_active"`
+		PermissionProfileID  *uuid.UUID `json:"permission_profile_id,omitempty"`
+		PermissionProfileName *string   `json:"permission_profile_name,omitempty"`
+		PermissionProfileSlug *string   `json:"permission_profile_slug,omitempty"`
 	}
 	var list []u
 	for rows.Next() {
 		var x u
 		var ph sql.NullString
-		if err := rows.Scan(&x.ID, &x.DisplayName, &x.Email, &ph, &x.Role, &x.IsActive); err != nil {
+		var pid *uuid.UUID
+		var pname, pslug sql.NullString
+		if err := rows.Scan(&x.ID, &x.DisplayName, &x.Email, &ph, &x.Role, &x.IsActive, &pid, &pname, &pslug); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		if ph.Valid {
 			s := ph.String
 			x.Phone = &s
+		}
+		x.PermissionProfileID = pid
+		if pname.Valid {
+			n := pname.String
+			x.PermissionProfileName = &n
+		}
+		if pslug.Valid {
+			sl := pslug.String
+			x.PermissionProfileSlug = &sl
 		}
 		list = append(list, x)
 	}
@@ -770,11 +771,12 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DisplayName string  `json:"display_name"`
-		Email       string  `json:"email"`
-		Phone       *string `json:"phone"`
-		Password    string  `json:"password"`
-		Role        string  `json:"role"`
+		DisplayName         string     `json:"display_name"`
+		Email               string     `json:"email"`
+		Phone               *string    `json:"phone"`
+		Password            string     `json:"password"`
+		Role                string     `json:"role"`
+		PermissionProfileID *uuid.UUID `json:"permission_profile_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -784,9 +786,12 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 422, "VALIDATION", "display_name, email, telefone e password são obrigatórios", nil)
 		return
 	}
-	if body.Role != "admin" && body.Role != "viewer" {
+	if body.Role != "" && body.Role != "admin" && body.Role != "viewer" {
 		writeErr(w, 422, "VALIDATION", "role deve ser admin ou viewer", nil)
 		return
+	}
+	if body.Role == "" && body.PermissionProfileID == nil {
+		body.Role = "viewer"
 	}
 	if body.Phone == nil || strings.TrimSpace(*body.Phone) == "" {
 		writeErr(w, 422, "VALIDATION", "telefone é obrigatório (DDD, 10 ou 11 dígitos)", nil)
@@ -797,6 +802,19 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 422, "VALIDATION", err.Error(), nil)
 		return
 	}
+	profileID, profileSlug, err := s.profileIDForRoleOrID(r.Context(), body.Role, body.PermissionProfileID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, 422, "VALIDATION", "perfil de permissão não encontrado", nil)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	role := "viewer"
+	if strings.EqualFold(profileSlug, "admin") {
+		role = "admin"
+	}
 	email := strings.ToLower(strings.TrimSpace(body.Email))
 	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -805,9 +823,9 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var id uuid.UUID
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO users (display_name, email, phone, password_hash, role)
-		VALUES ($1,$2,$3,$4,$5) RETURNING id
-	`, strings.TrimSpace(body.DisplayName), email, phoneNorm, string(hash), body.Role).Scan(&id)
+		INSERT INTO users (display_name, email, phone, password_hash, role, permission_profile_id)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
+	`, strings.TrimSpace(body.DisplayName), email, phoneNorm, string(hash), role, profileID).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 			writeErr(w, http.StatusConflict, "DUPLICATE", "e-mail já registado", nil)
@@ -817,9 +835,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.appendAuditLog(r.Context(), "user", id.String(), "create", s.actorFromRequest(r), nil, map[string]any{
-		"email": email, "role": body.Role, "display_name": strings.TrimSpace(body.DisplayName),
+		"email": email, "role": role, "display_name": strings.TrimSpace(body.DisplayName),
+		"permission_profile_id": profileID, "permission_profile_slug": profileSlug,
 	})
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "role": role, "permission_profile_id": profileID})
 }
 
 func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
@@ -835,9 +854,15 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 	var ph sql.NullString
 	var created time.Time
 	var isActive bool
+	var pid *uuid.UUID
+	var pname, pslug sql.NullString
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT display_name, email, phone, role, created_at, COALESCE(is_active, true) FROM users WHERE id=$1
-	`, id).Scan(&displayName, &email, &ph, &role, &created, &isActive)
+		SELECT u.display_name, u.email, u.phone, u.role, u.created_at, COALESCE(u.is_active, true),
+			u.permission_profile_id, p.name, p.slug
+		FROM users u
+		LEFT JOIN permission_profiles p ON p.id = u.permission_profile_id
+		WHERE u.id=$1
+	`, id).Scan(&displayName, &email, &ph, &role, &created, &isActive, &pid, &pname, &pslug)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
 		return
@@ -851,7 +876,7 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 		s := ph.String
 		phonePtr = &s
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"id":           id,
 		"display_name": displayName,
 		"email":        email,
@@ -859,7 +884,17 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 		"role":         role,
 		"is_active":    isActive,
 		"created_at":   created,
-	})
+	}
+	if pid != nil {
+		out["permission_profile_id"] = pid
+	}
+	if pname.Valid {
+		out["permission_profile_name"] = pname.String
+	}
+	if pslug.Valid {
+		out["permission_profile_slug"] = pslug.String
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
@@ -872,12 +907,13 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DisplayName *string `json:"display_name"`
-		Email       *string `json:"email"`
-		Phone       *string `json:"phone"`
-		Password    *string `json:"password"`
-		Role        *string `json:"role"`
-		IsActive    *bool   `json:"is_active"`
+		DisplayName         *string    `json:"display_name"`
+		Email               *string    `json:"email"`
+		Phone               *string    `json:"phone"`
+		Password            *string    `json:"password"`
+		Role                *string    `json:"role"`
+		IsActive            *bool      `json:"is_active"`
+		PermissionProfileID *uuid.UUID `json:"permission_profile_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -931,7 +967,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.DisplayName != nil || body.Email != nil || body.Phone != nil || body.Role != nil {
+	if body.DisplayName != nil || body.Email != nil || body.Phone != nil || body.Role != nil || body.PermissionProfileID != nil {
 		phoneProvided := body.Phone != nil
 		var phoneArg any
 		if body.Phone != nil {
@@ -947,15 +983,40 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 			}
 			phoneArg = norm
 		}
+		var roleArg any
+		var profileArg any
+		profileProvided := body.PermissionProfileID != nil || body.Role != nil
+		if profileProvided {
+			roleHint := ""
+			if body.Role != nil {
+				roleHint = *body.Role
+			}
+			pid, slug, err := s.profileIDForRoleOrID(r.Context(), roleHint, body.PermissionProfileID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					writeErr(w, 422, "VALIDATION", "perfil de permissão não encontrado", nil)
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			profileArg = pid
+			if strings.EqualFold(slug, "admin") {
+				roleArg = "admin"
+			} else {
+				roleArg = "viewer"
+			}
+		}
 		_, err = s.DB().Exec(r.Context(), `
 			UPDATE users SET
 				display_name = COALESCE($2::text, display_name),
 				email = COALESCE($3::text, email),
 				phone = CASE WHEN $4 THEN $5::text ELSE phone END,
 				role = COALESCE($6::text, role),
+				permission_profile_id = CASE WHEN $7 THEN $8::uuid ELSE permission_profile_id END,
 				updated_at = now()
 			WHERE id=$1
-		`, id, strPtrOrNil(body.DisplayName, true), emailPtrOrNil(body.Email), phoneProvided, phoneArg, strPtrOrNil(body.Role, true))
+		`, id, strPtrOrNil(body.DisplayName, true), emailPtrOrNil(body.Email), phoneProvided, phoneArg, roleArg, profileProvided, profileArg)
 		if err != nil {
 			if strings.Contains(err.Error(), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 				writeErr(w, http.StatusConflict, "DUPLICATE", "e-mail já registado", nil)
@@ -969,6 +1030,7 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 	// Resposta directa quando só se altera is_active (evita falhas laterais em getUser).
 	if body.IsActive != nil &&
 		body.DisplayName == nil && body.Email == nil && body.Phone == nil && body.Role == nil &&
+		body.PermissionProfileID == nil &&
 		(body.Password == nil || strings.TrimSpace(*body.Password) == "") {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id":        id,

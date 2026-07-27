@@ -1,3 +1,5 @@
+import { hasAnyPermission, hasPermission, type PermissionKey } from "./permissions";
+
 const K_BASE = "netquasar_api_base";
 const K_KEY = "netquasar_api_key";
 const K_READY = "netquasar_session_ready";
@@ -5,6 +7,8 @@ const K_CLIENT = "netquasar_client_configured";
 const K_AUTH = "netquasar_auth_token";
 const K_ROLE = "netquasar_user_role";
 const K_USER_LABEL = "netquasar_user_label";
+const K_PERMS = "netquasar_user_permissions";
+const K_PROFILE = "netquasar_permission_profile_id";
 
 /** Base da API sem barra final, ex.: http://localhost:8080 ou vazio (mesma origem + proxy Vite). */
 export function getApiBase(): string {
@@ -78,6 +82,8 @@ export function clearSession() {
   localStorage.removeItem(K_AUTH);
   localStorage.removeItem(K_ROLE);
   localStorage.removeItem(K_USER_LABEL);
+  localStorage.removeItem(K_PERMS);
+  localStorage.removeItem(K_PROFILE);
 }
 
 /** Nome ou e-mail mostrado na shell (gravado no login). */
@@ -107,9 +113,44 @@ export function getStoredUserRole(): "admin" | "viewer" | null {
   return null;
 }
 
-/** Visitante (viewer) — só leitura nas áreas restritas. */
+export function saveUserPermissions(perms: string[] | null | undefined) {
+  if (!perms || perms.length === 0) {
+    localStorage.removeItem(K_PERMS);
+    return;
+  }
+  localStorage.setItem(K_PERMS, JSON.stringify(perms));
+}
+
+export function getStoredUserPermissions(): string[] {
+  const raw = localStorage.getItem(K_PERMS);
+  if (!raw) {
+    // Compatibilidade: sessões antigas sem lista → admin tem tudo, viewer só leitura implícita via isAdminUser.
+    if (getStoredUserRole() === "admin") return ["*"];
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((x) => String(x));
+  } catch {
+    return [];
+  }
+}
+
+export function savePermissionProfileId(id: string | null | undefined) {
+  const t = String(id ?? "").trim();
+  if (t) localStorage.setItem(K_PROFILE, t);
+  else localStorage.removeItem(K_PROFILE);
+}
+
+export function getStoredPermissionProfileId(): string | null {
+  const t = localStorage.getItem(K_PROFILE)?.trim();
+  return t || null;
+}
+
+/** Visitante (viewer) — só leitura nas áreas restritas (legado). */
 export function isViewerUser(): boolean {
-  return getStoredUserRole() === "viewer";
+  return getStoredUserRole() === "viewer" && !hasPermission(getStoredUserPermissions(), "*");
 }
 
 /**
@@ -118,8 +159,30 @@ export function isViewerUser(): boolean {
  */
 export function isAdminUser(): boolean {
   if (!getAuthToken()) return false;
+  if (hasPermission(getStoredUserPermissions(), "*")) return true;
+  if (getStoredUserRole() === "admin") return true;
   if (isViewerUser()) return false;
-  return true;
+  // Sessão antiga sem role/perms.
+  if (!getStoredUserRole() && getStoredUserPermissions().length === 0) return true;
+  return false;
+}
+
+/** Verifica permissão unitária da sessão actual. */
+export function can(permission: PermissionKey | string): boolean {
+  if (!getAuthToken()) return false;
+  if (isAdminUser()) return true;
+  const perms = getStoredUserPermissions();
+  if (perms.length === 0) {
+    // Viewer legado sem lista: só leitura implícita não concede writes.
+    return false;
+  }
+  return hasPermission(perms, permission);
+}
+
+export function canAny(...permissions: Array<PermissionKey | string>): boolean {
+  if (!getAuthToken()) return false;
+  if (isAdminUser()) return true;
+  return hasAnyPermission(getStoredUserPermissions(), permissions);
 }
 
 export function apiUrl(path: string): string {

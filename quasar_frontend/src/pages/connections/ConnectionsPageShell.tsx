@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { isAdminUser } from "../../lib/auth";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { can, isAdminUser } from "../../lib/auth";
 import {
   countActiveFilters,
   type ConnectionsFilterState,
@@ -28,6 +29,14 @@ const TABS: Array<{ id: ConnectionsTabId; label: string }> = [
   { id: "projects", label: "Projetos" },
 ];
 
+const VALID_TABS = new Set<ConnectionsTabId>(TABS.map((t) => t.id));
+
+function tabFromSearch(raw: string | null): ConnectionsTabId | null {
+  if (!raw) return null;
+  const t = raw.trim().toLowerCase() as ConnectionsTabId;
+  return VALID_TABS.has(t) ? t : null;
+}
+
 const LOGIN_COLUMNS = [
   { id: "client_name", label: "Cliente" },
   { id: "login", label: "Login" },
@@ -40,16 +49,25 @@ const LOGIN_COLUMNS = [
 ];
 
 export function ConnectionsPageShell() {
-  const canMutate = isAdminUser();
-  const [tab, setTab] = useState<ConnectionsTabId>("logins");
+  const canMutate = isAdminUser() || can("connections.manage");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<ConnectionsTabId>(() => tabFromSearch(searchParams.get("tab")) ?? "logins");
   const [filters, setFilters] = useState<ConnectionsFilterState>(() => loadMapConnectionFilters());
   const [draftFilters, setDraftFilters] = useState<ConnectionsFilterState>(filters);
-  const [prefs, setPrefs] = useState<ConnectionsViewPrefs>(() => loadConnectionsPrefs("logins"));
+  const [prefs, setPrefs] = useState<ConnectionsViewPrefs>(() => loadConnectionsPrefs(tabFromSearch(searchParams.get("tab")) ?? "logins"));
   const [draftPrefs, setDraftPrefs] = useState<ConnectionsViewPrefs>(prefs);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useConnectionsLookups(true);
+
+  useEffect(() => {
+    const fromUrl = tabFromSearch(searchParams.get("tab"));
+    if (fromUrl && fromUrl !== tab) {
+      setTab(fromUrl);
+      setPrefs(loadConnectionsPrefs(fromUrl));
+    }
+  }, [searchParams]);
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters, tab), [filters, tab]);
 
@@ -78,6 +96,14 @@ export function ConnectionsPageShell() {
   function switchTab(next: ConnectionsTabId) {
     setTab(next);
     setPrefs(loadConnectionsPrefs(next));
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("tab", next);
+        return p;
+      },
+      { replace: true },
+    );
   }
 
   function applyFilters() {

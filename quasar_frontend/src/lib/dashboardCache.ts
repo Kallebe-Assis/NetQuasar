@@ -1,9 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import { wrapPageCachedQueryFn } from "./pageDataCache";
+import { removePageDataCache, wrapPageCachedQueryFn } from "./pageDataCache";
 
-export const DASHBOARD_DEFAULT_DAYS = 30;
-/** Cache longo: dados pré-carregados no login e reutilizados na página. */
+/** Janela mais leve por omissão — 7 dias em vez de 30. */
+export const DASHBOARD_DEFAULT_DAYS = 7;
+/** Cache longo no browser: reabre o dashboard instantaneamente. */
 export const DASHBOARD_STALE_MS = 30 * 60 * 1000;
 export const DASHBOARD_GC_MS = 60 * 60 * 1000;
 
@@ -14,9 +15,10 @@ export function dashboardAnalyticsKey(days: number) {
 export const dashboardTopLatencyKey = ["top-latency"] as const;
 export const dashboardOltCapacityKey = ["dashboard-olt-capacity"] as const;
 
-function dashAnalyticsFn(days: number) {
+function dashAnalyticsFn(days: number, refresh = false) {
+  const q = refresh ? `?days=${days}&refresh=1` : `?days=${days}`;
   return wrapPageCachedQueryFn(dashboardAnalyticsKey(days), () =>
-    apiFetch(`/api/v1/dashboard/analytics?days=${days}`),
+    apiFetch(`/api/v1/dashboard/analytics${q}`),
   );
 }
 
@@ -26,8 +28,9 @@ function dashTopLatencyFn() {
   );
 }
 
-function dashOltCapacityFn() {
-  return wrapPageCachedQueryFn(dashboardOltCapacityKey, () => apiFetch("/api/v1/dashboard/olt-capacity"));
+function dashOltCapacityFn(refresh = false) {
+  const q = refresh ? "?refresh=1" : "";
+  return wrapPageCachedQueryFn(dashboardOltCapacityKey, () => apiFetch(`/api/v1/dashboard/olt-capacity${q}`));
 }
 
 export async function prefetchDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT_DAYS): Promise<void> {
@@ -53,12 +56,15 @@ export async function prefetchDashboard(qc: QueryClient, days = DASHBOARD_DEFAUL
   ]);
 }
 
-/** Recarrega todas as fontes do dashboard (ignora cache). */
+/** Recarrega todas as fontes do dashboard (ignora cache browser + servidor). */
 export async function refreshDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT_DAYS): Promise<void> {
+  removePageDataCache(dashboardAnalyticsKey(days));
+  removePageDataCache(dashboardTopLatencyKey);
+  removePageDataCache(dashboardOltCapacityKey);
   await Promise.all([
     qc.fetchQuery({
       queryKey: dashboardAnalyticsKey(days),
-      queryFn: dashAnalyticsFn(days),
+      queryFn: dashAnalyticsFn(days, true),
       staleTime: DASHBOARD_STALE_MS,
     }),
     qc.fetchQuery({
@@ -68,7 +74,7 @@ export async function refreshDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT
     }),
     qc.fetchQuery({
       queryKey: dashboardOltCapacityKey,
-      queryFn: dashOltCapacityFn(),
+      queryFn: dashOltCapacityFn(true),
       staleTime: DASHBOARD_STALE_MS,
     }),
   ]);
