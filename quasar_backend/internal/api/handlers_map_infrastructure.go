@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -47,10 +49,41 @@ func infraMapBBoxSQL(hasBBox bool, n *int, args *[]any, minLat, maxLat, minLng, 
 	return clause
 }
 
+func infraMapProjectSQL(projectID *uuid.UUID, n *int, args *[]any) string {
+	if projectID == nil {
+		return ""
+	}
+	clause := fmt.Sprintf(` AND project_id = $%d`, *n)
+	*args = append(*args, *projectID)
+	*n++
+	return clause
+}
+
+func parseInfraMapProjectID(r *http.Request) (*uuid.UUID, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, errors.New("project_id inválido")
+	}
+	return &id, nil
+}
+
 func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	kinds := parseInfraMapKindsQuery(r)
 	minLat, maxLat, minLng, maxLng, hasBBox := parseMapBBoxQuery(r)
+	projectID, perr := parseInfraMapProjectID(r)
+	if perr != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", perr.Error(), nil)
+		return
+	}
+	// Com filtro de projeto: carregar tudo do projeto (sem bbox do viewport).
+	if projectID != nil {
+		hasBBox = false
+	}
 	zoom := parseMapZoomQuery(r)
 	limit := mapConnectionLimit(zoom, hasBBox)
 	if !hasBBox {
@@ -77,6 +110,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		args := []any{}
 		n := 1
 		q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+		q += infraMapProjectSQL(projectID, &n, &args)
 		q += fmt.Sprintf(` ORDER BY display_number LIMIT $%d`, n)
 		args = append(args, remaining)
 
@@ -128,6 +162,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			args := []any{}
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+			q += infraMapProjectSQL(projectID, &n, &args)
 			q += fmt.Sprintf(` ORDER BY display_number LIMIT $%d`, n)
 			args = append(args, remaining)
 			rows, err := s.DB().Query(ctx, q, args...)
@@ -176,11 +211,54 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if kindSet["cables"] {
-		if err := appendRows("network_cables", "cable", "Cabo", ""); err != nil {
+	if kindSet["cables"] && remaining > 0 {
+		q := `SELECT id, description, display_number, latitude, longitude, path
+			FROM network_cables
+			WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
+		args := []any{}
+		n := 1
+		q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+		q += infraMapProjectSQL(projectID, &n, &args)
+		q += fmt.Sprintf(` ORDER BY display_number LIMIT $%d`, n)
+		args = append(args, remaining)
+		rows, err := s.DB().Query(ctx, q, args...)
+		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
+		for rows.Next() {
+			var id uuid.UUID
+			var desc string
+			var displayNum int
+			var lat, lon float64
+			var pathRaw []byte
+			if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &pathRaw); err != nil {
+				rows.Close()
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			pt := map[string]any{
+				"id":             id.String(),
+				"description":    desc,
+				"display_number": displayNum,
+				"lat":            lat,
+				"lng":            lon,
+				"point_type":     "cable",
+				"id_prefix":      "Cabo",
+			}
+			if len(pathRaw) > 0 && string(pathRaw) != "null" {
+				var path any
+				if err := json.Unmarshal(pathRaw, &path); err == nil {
+					pt["path"] = path
+				}
+			}
+			pts = append(pts, pt)
+			remaining--
+			if remaining <= 0 {
+				break
+			}
+		}
+		rows.Close()
 	}
 	if kindSet["poles"] {
 		if err := appendRows("network_poles", "pole", "Poste", ""); err != nil {
@@ -189,7 +267,50 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if kindSet["projects"] {
-		if err := appendRows("network_projects", "project", "Projeto", `, color`); err != nil {
+		if projectID != nil {
+			if remaining > 0 {
+				q := `SELECT id, description, display_number, latitude, longitude, color
+					FROM network_projects
+					WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND id = $1`
+				args := []any{*projectID}
+				n := 2
+				q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+				q += fmt.Sprintf(` ORDER BY display_number LIMIT $%d`, n)
+				args = append(args, remaining)
+				rows, err := s.DB().Query(ctx, q, args...)
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+					return
+				}
+				for rows.Next() {
+					var id uuid.UUID
+					var desc string
+					var displayNum int
+					var lat, lon float64
+					var color *string
+					if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &color); err != nil {
+						rows.Close()
+						writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+						return
+					}
+					pt := map[string]any{
+						"id":             id.String(),
+						"description":    desc,
+						"display_number": displayNum,
+						"lat":            lat,
+						"lng":            lon,
+						"point_type":     "project",
+						"id_prefix":      "Projeto",
+					}
+					if color != nil && strings.TrimSpace(*color) != "" {
+						pt["color"] = strings.TrimSpace(*color)
+					}
+					pts = append(pts, pt)
+					remaining--
+				}
+				rows.Close()
+			}
+		} else if err := appendRows("network_projects", "project", "Projeto", `, color`); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}

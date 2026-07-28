@@ -4,6 +4,7 @@ import type { MapDisplayMode } from "./EquipmentMap";
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
 type Locality = { id: string; name: string };
+type ProjectOpt = { id: string; display_number: number; description: string };
 
 type Props = {
   open: boolean;
@@ -17,6 +18,9 @@ type Props = {
   popsError: boolean;
   category: string;
   onCategory: (v: string) => void;
+  projectId: string;
+  onProjectId: (v: string) => void;
+  projectsOptions: ProjectOpt[];
   showEquipment: boolean;
   onShowEquipment: (v: boolean) => void;
   showCtos: boolean;
@@ -25,14 +29,14 @@ type Props = {
   onShowCables: (v: boolean) => void;
   showConnections: boolean;
   onShowConnections: (v: boolean) => void;
-  showExtraInfra: boolean;
-  onShowExtraInfra: (v: boolean) => void;
-  equipColorDraft: string;
-  onEquipColorDraft: (v: string) => void;
-  connColorDraft: string;
-  onConnColorDraft: (v: string) => void;
-  onSaveColors: () => void;
-  saveColorsPending: boolean;
+  showSpliceBoxes: boolean;
+  onShowSpliceBoxes: (v: boolean) => void;
+  showPoles: boolean;
+  onShowPoles: (v: boolean) => void;
+  showProjects: boolean;
+  onShowProjects: (v: boolean) => void;
+  ctoColorByFeed: boolean;
+  onCtoColorByFeed: (v: boolean) => void;
   localities: Locality[];
   localityFlyId: string;
   onLocalityFlyId: (v: string) => void;
@@ -46,6 +50,26 @@ function IconFilter() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <path d="M4 6h16M7 12h10M10 18h4" strokeLinecap="round" />
     </svg>
+  );
+}
+
+function LayerToggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
+  return (
+    <label className="toggle">
+      <span className="toggle__track">
+        <input type="checkbox" role="switch" className="toggle__input" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="toggle__thumb" aria-hidden />
+      </span>
+      <span className="toggle__label">{label}</span>
+    </label>
   );
 }
 
@@ -81,6 +105,37 @@ export function MapFilterModal(props: Props) {
             </select>
           </label>
 
+          <label className="toggle">
+            <span className="toggle__track">
+              <input
+                type="checkbox"
+                role="switch"
+                className="toggle__input"
+                checked={props.ctoColorByFeed}
+                onChange={(e) => props.onCtoColorByFeed(e.target.checked)}
+              />
+              <span className="toggle__thumb" aria-hidden />
+            </span>
+            <span className="toggle__label">CTOs com cor da fibra de alimentação</span>
+          </label>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Projeto</span>
+            <select className="select" value={props.projectId} onChange={(e) => props.onProjectId(e.target.value)}>
+              <option value="">Todos os projetos</option>
+              {props.projectsOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  #{p.display_number} — {p.description}
+                </option>
+              ))}
+            </select>
+            {props.projectId ? (
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                O mapa aproxima-se do projeto e mostra apenas a sua infraestrutura (sem equipamentos/logins).
+              </span>
+            ) : null}
+          </label>
+
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>POP</span>
             <select className="select" value={props.popId} onChange={(e) => props.onPopId(e.target.value)} disabled={props.popsPending}>
@@ -108,55 +163,13 @@ export function MapFilterModal(props: Props) {
 
           <div style={{ display: "grid", gap: 8 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Camadas</span>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showEquipment} onChange={(e) => props.onShowEquipment(e.target.checked)} />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">Equipamentos</span>
-            </label>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showCtos} onChange={(e) => props.onShowCtos(e.target.checked)} />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">CTOs (viewport)</span>
-            </label>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showCables} onChange={(e) => props.onShowCables(e.target.checked)} />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">Cabos (viewport)</span>
-            </label>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showConnections} onChange={(e) => props.onShowConnections(e.target.checked)} />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">Logins no mapa</span>
-            </label>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input type="checkbox" role="switch" className="toggle__input" checked={props.showExtraInfra} onChange={(e) => props.onShowExtraInfra(e.target.checked)} />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">Postes / emendas / projetos</span>
-            </label>
-          </div>
-
-          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Cor equip.</span>
-              <input type="color" value={props.equipColorDraft} onChange={(e) => props.onEquipColorDraft(e.target.value)} style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--border)", borderRadius: 4 }} />
-            </label>
-            <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Cor login</span>
-              <input type="color" value={props.connColorDraft} onChange={(e) => props.onConnColorDraft(e.target.value)} style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--border)", borderRadius: 4 }} />
-            </label>
-            <button type="button" className="btn" disabled={props.saveColorsPending} onClick={props.onSaveColors}>
-              Salvar cores
-            </button>
+            <LayerToggle checked={props.showEquipment} onChange={props.onShowEquipment} label="Equipamentos" />
+            <LayerToggle checked={props.showCtos} onChange={props.onShowCtos} label="CTOs (viewport)" />
+            <LayerToggle checked={props.showCables} onChange={props.onShowCables} label="Cabos (viewport)" />
+            <LayerToggle checked={props.showSpliceBoxes} onChange={props.onShowSpliceBoxes} label="Caixas de emenda / foguete" />
+            <LayerToggle checked={props.showPoles} onChange={props.onShowPoles} label="Postes" />
+            <LayerToggle checked={props.showProjects} onChange={props.onShowProjects} label="Projetos" />
+            <LayerToggle checked={props.showConnections} onChange={props.onShowConnections} label="Logins no mapa" />
           </div>
 
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>

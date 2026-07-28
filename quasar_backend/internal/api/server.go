@@ -489,6 +489,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/map/infrastructure-points", s.mapInfrastructurePoints)
 		r.Get("/map/search", s.mapSearch)
 		r.Get("/map/locality-center", s.mapLocalityCenter)
+		r.Get("/map/project-center", s.mapProjectCenter)
 
 		r.Get("/overview/summary", s.overviewSummary)
 		r.Get("/overview/top-latency", s.overviewTopLatency)

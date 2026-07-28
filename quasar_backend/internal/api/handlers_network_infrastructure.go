@@ -67,6 +67,13 @@ func normalizeCableStatus(v string) (string, bool) {
 	return "", false
 }
 
+func requireNetworkProjectID(projectID *string) error {
+	if projectID == nil || strings.TrimSpace(*projectID) == "" {
+		return errors.New("project_id obrigatório")
+	}
+	return nil
+}
+
 func validateCoords(lat, lon *float64) error {
 	if (lat == nil) != (lon == nil) {
 		return errors.New("latitude e longitude devem ser preenchidas juntas")
@@ -479,6 +486,9 @@ func (in *networkCtoInput) validate() error {
 	if strings.TrimSpace(in.Description) == "" {
 		return errors.New("description obrigatória")
 	}
+	if err := requireNetworkProjectID(in.ProjectID); err != nil {
+		return err
+	}
 	if in.FiberColor != nil && strings.TrimSpace(*in.FiberColor) != "" {
 		c, ok := normalizeFiberColor(*in.FiberColor)
 		if !ok {
@@ -876,6 +886,9 @@ func (in *networkSpliceBoxInput) validate() error {
 	if strings.TrimSpace(in.Description) == "" {
 		return errors.New("description obrigatória")
 	}
+	if err := requireNetworkProjectID(in.ProjectID); err != nil {
+		return err
+	}
 	if in.FiberCount != nil && (*in.FiberCount < 0 || *in.FiberCount > 144) {
 		return errors.New("fiber_count inválida")
 	}
@@ -1210,14 +1223,15 @@ func validateCableFiberCount(v *int) error {
 }
 
 type networkCableInput struct {
-	Description   string   `json:"description"`
-	CableType     *string  `json:"cable_type"`
-	FiberCount    *int     `json:"fiber_count"`
-	Status        string   `json:"status"`
-	ProjectID     *string  `json:"project_id"`
-	ProjectNumber *int     `json:"project_number"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	Description   string           `json:"description"`
+	CableType     *string          `json:"cable_type"`
+	FiberCount    *int             `json:"fiber_count"`
+	Status        string           `json:"status"`
+	ProjectID     *string          `json:"project_id"`
+	ProjectNumber *int             `json:"project_number"`
+	Latitude      *float64         `json:"latitude"`
+	Longitude     *float64         `json:"longitude"`
+	Path          []map[string]any `json:"path"`
 }
 
 func (in *networkCableInput) validate() error {
@@ -1226,13 +1240,48 @@ func (in *networkCableInput) validate() error {
 		return errors.New("status inválido")
 	}
 	in.Status = st
+	if err := requireNetworkProjectID(in.ProjectID); err != nil {
+		return err
+	}
 	if err := validateCableFiberCount(in.FiberCount); err != nil {
 		return err
+	}
+	if len(in.Path) > 0 {
+		if len(in.Path) > 2000 {
+			return errors.New("path: máximo 2000 pontos")
+		}
+		// Se há trajeto e falta lat/lng, usa o primeiro ponto.
+		if in.Latitude == nil || in.Longitude == nil {
+			if lat, ok := asFloat(in.Path[0]["lat"]); ok {
+				if lng, ok2 := asFloat(in.Path[0]["lng"]); ok2 {
+					in.Latitude = &lat
+					in.Longitude = &lng
+				}
+			}
+		}
 	}
 	return validateCoords(in.Latitude, in.Longitude)
 }
 
-const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, project_id, latitude, longitude, fiber_ports, created_at, updated_at`
+func asFloat(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, project_id, latitude, longitude, fiber_ports, path, created_at, updated_at`
 
 func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
@@ -1242,9 +1291,9 @@ func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest 
 	var fiberCount *int
 	var projectID *uuid.UUID
 	var lat, lon *float64
-	var fiberPorts []byte
+	var fiberPorts, pathRaw []byte
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &projectID, &lat, &lon, &fiberPorts, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &projectID, &lat, &lon, &fiberPorts, &pathRaw, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -1263,6 +1312,12 @@ func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest 
 		var ports any
 		if json.Unmarshal(fiberPorts, &ports) == nil {
 			m["fiber_ports"] = ports
+		}
+	}
+	if len(pathRaw) > 0 && string(pathRaw) != "null" {
+		var path any
+		if json.Unmarshal(pathRaw, &path) == nil {
+			m["path"] = path
 		}
 	}
 	if projectID != nil {
@@ -1362,12 +1417,21 @@ func (s *Server) createNetworkCable(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
 		return
 	}
+	var pathJSON []byte
+	if len(body.Path) > 0 {
+		var err error
+		pathJSON, err = json.Marshal(body.Path)
+		if err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "path inválido", nil)
+			return
+		}
+	}
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_cables (description, cable_type, fiber_count, status, project_id, latitude, longitude)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, display_number`,
-		strings.TrimSpace(body.Description), trimPtr(body.CableType), body.FiberCount, body.Status, projectID, body.Latitude, body.Longitude,
+		INSERT INTO network_cables (description, cable_type, fiber_count, status, project_id, latitude, longitude, path)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, display_number`,
+		strings.TrimSpace(body.Description), trimPtr(body.CableType), body.FiberCount, body.Status, projectID, body.Latitude, body.Longitude, pathJSON,
 	).Scan(&id, &displayNumber)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -1445,6 +1509,24 @@ func networkCablePatch(body map[string]json.RawMessage) ([]string, []any, int, e
 		args = append(args, lat, lon)
 		n += 2
 	}
+	if raw, ok := body["path"]; ok {
+		if string(raw) == "null" {
+			sets = append(sets, "path = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var path []map[string]any
+			if err := json.Unmarshal(raw, &path); err != nil {
+				return nil, nil, 0, errors.New("path inválido")
+			}
+			if len(path) > 2000 {
+				return nil, nil, 0, errors.New("path: máximo 2000 pontos")
+			}
+			sets = append(sets, "path = $"+strconv.Itoa(n)+"::jsonb")
+			args = append(args, string(raw))
+			n++
+		}
+	}
 	if raw, ok := body["fiber_ports"]; ok {
 		if string(raw) == "null" {
 			sets = append(sets, "fiber_ports = $"+strconv.Itoa(n))
@@ -1484,6 +1566,12 @@ type networkPoleInput struct {
 }
 
 func (in *networkPoleInput) validate() error {
+	if strings.TrimSpace(in.Description) == "" {
+		return errors.New("description obrigatória")
+	}
+	if err := requireNetworkProjectID(in.ProjectID); err != nil {
+		return err
+	}
 	return validateCoords(in.Latitude, in.Longitude)
 }
 

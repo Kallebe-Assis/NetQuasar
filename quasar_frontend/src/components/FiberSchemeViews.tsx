@@ -133,10 +133,7 @@ function FiberMetaCard({
             <span className="splitter-scheme__k">Destino</span>
             <span className="splitter-scheme__v">{destinationLabel(destination)}</span>
           </div>
-          <div className="splitter-scheme__meta-row">
-            <span className="splitter-scheme__k">Observação</span>
-            <span className="splitter-scheme__v">{note?.trim() || "—"}</span>
-          </div>
+          {note?.trim() ? <div className="splitter-scheme__note">{note.trim()}</div> : null}
         </>
       )}
     </div>

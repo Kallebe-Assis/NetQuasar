@@ -72,6 +72,12 @@ type Props = {
   /** Abre o modal de fibras do cabo (popup do mapa). */
   autoOpenCableFibers?: boolean;
   onCableFibersAutoOpened?: () => void;
+  /** Abre o modal de emenda (caixa de emenda). */
+  autoOpenSplice?: boolean;
+  onSpliceAutoOpened?: () => void;
+  /** Abre directamente o formulário de edição (posição, etc.). */
+  autoOpenEdit?: boolean;
+  onEditAutoOpened?: () => void;
 };
 
 export function MapInfraSidePanel({
@@ -84,6 +90,10 @@ export function MapInfraSidePanel({
   onSplitterAutoOpened,
   autoOpenCableFibers = false,
   onCableFibersAutoOpened,
+  autoOpenSplice = false,
+  onSpliceAutoOpened,
+  autoOpenEdit = false,
+  onEditAutoOpened,
 }: Props) {
   const parsed = mapId ? parseInfraMapId(mapId) : null;
   const canEdit = isAdminUser() || can("connections.manage") || can("map.manage");
@@ -141,6 +151,18 @@ export function MapInfraSidePanel({
     setCableFibersOpen(true);
     onCableFibersAutoOpened?.();
   }, [open, autoOpenCableFibers, mapId, parsed?.kind, onCableFibersAutoOpened]);
+
+  useEffect(() => {
+    if (!open || !autoOpenSplice || parsed?.kind !== "splice_box") return;
+    setSpliceOpen(true);
+    onSpliceAutoOpened?.();
+  }, [open, autoOpenSplice, mapId, parsed?.kind, onSpliceAutoOpened]);
+
+  useEffect(() => {
+    if (!open || !autoOpenEdit || parsed?.kind !== "cto" || !canEdit) return;
+    setEditing(true);
+    onEditAutoOpened?.();
+  }, [open, autoOpenEdit, mapId, parsed?.kind, canEdit, onEditAutoOpened]);
 
   const splitterPorts = useMemo(() => {
     const n = parseSplitterOutputs(ctoQ.data?.splitter) ?? undefined;

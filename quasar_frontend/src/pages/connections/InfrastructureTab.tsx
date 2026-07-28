@@ -361,6 +361,7 @@ export function InfrastructureTab({
     mutationFn: async () => {
       const payload = formToPayload();
       if (!payload.description) throw new Error("Descrição obrigatória.");
+      if (!payload.project_id) throw new Error("Projeto obrigatório.");
       if (editId) {
         return apiFetch(`${meta.api}/${editId}`, { method: "PATCH", json: payload });
       }

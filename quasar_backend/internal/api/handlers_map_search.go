@@ -8,6 +8,69 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func (s *Server) mapProjectCenter(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "project_id inválido", nil)
+		return
+	}
+	ctx := r.Context()
+	var desc string
+	var displayNum int
+	err = s.DB().QueryRow(ctx, `SELECT description, display_number FROM network_projects WHERE id=$1`, id).Scan(&desc, &displayNum)
+	if err == pgx.ErrNoRows {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "projeto não encontrado", nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	var lat, lng *float64
+	err = s.DB().QueryRow(ctx, `
+		SELECT AVG(t.lat), AVG(t.lng)
+		FROM (
+			SELECT latitude AS lat, longitude AS lng FROM network_projects
+			 WHERE id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT latitude, longitude FROM network_ctos
+			 WHERE project_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT latitude, longitude FROM network_splice_boxes
+			 WHERE project_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT latitude, longitude FROM network_cables
+			 WHERE project_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT latitude, longitude FROM network_poles
+			 WHERE project_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+		) t
+	`, id).Scan(&lat, &lng)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if lat == nil || lng == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"project_id":     id.String(),
+			"description":    desc,
+			"display_number": displayNum,
+			"found":          false,
+			"note":           "Nenhuma coordenada neste projeto.",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":     id.String(),
+		"description":    desc,
+		"display_number": displayNum,
+		"found":          true,
+		"lat":            *lat,
+		"lng":            *lng,
+	})
+}
+
 func (s *Server) mapLocalityCenter(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimSpace(r.URL.Query().Get("locality_id"))
 	id, err := uuid.Parse(raw)

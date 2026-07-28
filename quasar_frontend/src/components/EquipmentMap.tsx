@@ -1,10 +1,15 @@
 import L from "leaflet";
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { infrastructurePinIcon, isInfraMapKind, type InfraMapKind } from "../lib/mapInfrastructureIcons";
+import { infrastructurePinIcon, isInfraMapKind, INFRA_MAP_KIND_LABELS, type InfraMapKind, type MapIconStyles, DEFAULT_MAP_ICON_STYLES } from "../lib/mapInfrastructureIcons";
+import { buildPinSvg, pinLayout } from "../lib/mapPinStyles";
 
 export type MapPointKind = "equipment" | "connection" | InfraMapKind;
+
+export type MapLatLng = { lat: number; lng: number };
+
+export type MapPlaceMode = "place" | "cable" | null;
 
 export type MapPoint = {
   id: string;
@@ -22,6 +27,8 @@ export type MapPoint = {
   mapLabel?: string | null;
   /** Splitter da CTO (ex.: 1x8), para popup. */
   splitter?: string | null;
+  /** Trajeto do cabo (vários pontos). */
+  path?: MapLatLng[] | null;
 };
 
 /** Agrupado (grelha por tipo), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
@@ -30,11 +37,15 @@ export type MapDisplayMode = "cluster" | "scatter" | "status";
 export type MapColors = {
   equipment: string;
   connection: string;
+  cto?: string;
+  splice_box?: string;
 };
 
 export const DEFAULT_MAP_COLORS: MapColors = {
   equipment: "#3388ff",
   connection: "#3b82f6",
+  cto: "#0D0663",
+  splice_box: "#d97706",
 };
 
 const STACK_MERGE_M = 22;
@@ -255,14 +266,17 @@ function CloseSpiderOnMapClick({ active, onClose }: { active: boolean; onClose: 
 
 function devicePopupBody(p: MapPoint, displayMode: MapDisplayMode) {
   const isCto = p.mapKind === "cto";
+  const isInfra = !!(p.mapKind && isInfraMapKind(p.mapKind));
   const splitter = (p.splitter ?? "").trim();
   const meta = isCto
     ? splitter
       ? `CTO · ${splitter}`
       : "CTO"
-    : p.category === p.status
-      ? p.category
-      : `${p.category} · ${p.status}`;
+    : isInfra
+      ? INFRA_MAP_KIND_LABELS[p.mapKind as InfraMapKind]
+      : p.category === p.status
+        ? p.category
+        : `${p.category} · ${p.status}`;
   return (
     <>
       <strong>{p.description}</strong>
@@ -275,37 +289,179 @@ function devicePopupBody(p: MapPoint, displayMode: MapDisplayMode) {
   );
 }
 
+function IconInfo() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}
+
+function IconSplitter() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M22 12A10 10 0 1 1 12 2" />
+      <path d="M22 2 12 12" />
+      <path d="M16 2h6v6" />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M10 3H8" />
+      <path d="m15.007 5.008 3.987 3.986" />
+      <path d="M20 15v4" />
+      <path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="M22 17h-4" />
+      <path d="M4 5v4" />
+      <path d="M6 7H2" />
+      <path d="M9 2v2" />
+    </svg>
+  );
+}
+
+function IconLocate() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="2" x2="5" y1="12" y2="12" />
+      <line x1="19" x2="22" y1="12" y2="12" />
+      <line x1="12" x2="12" y1="2" y2="5" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconFibers() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z" />
+      <path d="M17 21v-2" />
+      <path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10" />
+      <path d="M21 21v-2" />
+      <path d="M3 5V3" />
+      <path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z" />
+      <path d="M7 5V3" />
+    </svg>
+  );
+}
+
+function IconEmenda() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" />
+      <path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" />
+    </svg>
+  );
+}
+
+function MapPopupIconBtn({
+  title,
+  onClick,
+  children,
+  primary,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`map-popup-actions__btn${primary ? " map-popup-actions__btn--primary" : ""}`}
+      title={title}
+      aria-label={title}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function MapPointPopupActions({
   p,
   onSelectDevice,
   onOpenSplitter,
   onOpenCableFibers,
+  onOpenSplice,
+  onEditPosition,
+  onCopyCoords,
 }: {
   p: MapPoint;
   onSelectDevice?: (id: string) => void;
   onOpenSplitter?: (id: string) => void;
   onOpenCableFibers?: (id: string) => void;
+  onOpenSplice?: (id: string) => void;
+  onEditPosition?: (id: string) => void;
+  onCopyCoords?: (lat: number, lng: number) => void;
 }) {
-  const showSplitter = !!(onOpenSplitter && p.mapKind === "cto");
-  const showCableFibers = !!(onOpenCableFibers && p.mapKind === "cable");
-  if (!onSelectDevice && !showSplitter && !showCableFibers) return null;
+  const kind = p.mapKind;
+  const isInfra = !!(kind && isInfraMapKind(kind));
+  const isCto = kind === "cto";
+  const isCable = kind === "cable";
+  const isSplice = kind === "splice_box";
+  const showSplitter = !!(onOpenSplitter && isCto);
+  const showCableFibers = !!(onOpenCableFibers && isCable);
+  const showSplice = !!(onOpenSplice && isSplice);
+  const showEdit = !!(onEditPosition && isCto);
+  const showCoords = !!(onCopyCoords && isInfra && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+
+  if (isInfra) {
+    if (!onSelectDevice && !showSplitter && !showCableFibers && !showSplice && !showEdit && !showCoords) return null;
+    return (
+      <div className="map-popup-actions" role="group" aria-label="Acções do elemento">
+        {onSelectDevice ? (
+          <MapPopupIconBtn title="Detalhes" onClick={() => onSelectDevice(p.id)}>
+            <IconInfo />
+          </MapPopupIconBtn>
+        ) : null}
+        {showSplitter ? (
+          <MapPopupIconBtn title="Splitter" primary onClick={() => onOpenSplitter!(p.id)}>
+            <IconSplitter />
+          </MapPopupIconBtn>
+        ) : null}
+        {showCableFibers ? (
+          <MapPopupIconBtn title="Fibras" primary onClick={() => onOpenCableFibers!(p.id)}>
+            <IconFibers />
+          </MapPopupIconBtn>
+        ) : null}
+        {showSplice ? (
+          <MapPopupIconBtn title="Emenda" primary onClick={() => onOpenSplice!(p.id)}>
+            <IconEmenda />
+          </MapPopupIconBtn>
+        ) : null}
+        {showEdit ? (
+          <MapPopupIconBtn title="Editar" onClick={() => onEditPosition!(p.id)}>
+            <IconEdit />
+          </MapPopupIconBtn>
+        ) : null}
+        {showCoords ? (
+          <MapPopupIconBtn title="Coordenadas" onClick={() => onCopyCoords!(p.lat, p.lng)}>
+            <IconLocate />
+          </MapPopupIconBtn>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!onSelectDevice) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-      {onSelectDevice ? (
-        <button type="button" className="btn" onClick={() => onSelectDevice(p.id)}>
-          Ver detalhe
-        </button>
-      ) : null}
-      {showSplitter ? (
-        <button type="button" className="btn btn--primary" onClick={() => onOpenSplitter!(p.id)}>
-          Splitter
-        </button>
-      ) : null}
-      {showCableFibers ? (
-        <button type="button" className="btn btn--primary" onClick={() => onOpenCableFibers!(p.id)}>
-          Fibras
-        </button>
-      ) : null}
+    <div className="map-popup-actions" role="group" aria-label="Acções">
+      <MapPopupIconBtn title="Detalhes" onClick={() => onSelectDevice(p.id)}>
+        <IconInfo />
+      </MapPopupIconBtn>
     </div>
   );
 }
@@ -320,73 +476,71 @@ function dominantStatus(members: MapPoint[]): "online" | "offline" | "unknown" {
 
 const iconCache = new Map<string, L.DivIcon>();
 
-function equipmentPinIcon(color: string): L.DivIcon {
-  const key = `eq:${color}`;
+function equipmentPinIcon(color: string, styleId = "pin"): L.DivIcon {
+  const key = `eq:v2:${styleId}:${color}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
-  const fill = color;
-  const stroke = "rgba(0,0,0,0.32)";
-  const html = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38" aria-hidden="true"><path fill="${fill}" stroke="${stroke}" stroke-width="1" d="M15 2C8.4 2 3 7.3 3 13.8c0 6.2 9.8 16.5 11.6 18.4L15 36l0.4-3.8C17.2 30.3 27 20 27 13.8 27 7.3 21.6 2 15 2z"/><circle cx="15" cy="14" r="4.2" fill="#fff" opacity="0.95"/></svg>`;
+  const layout = pinLayout("equipment", styleId);
+  const html = buildPinSvg("equipment", styleId, color, layout.size);
   const icon = L.divIcon({
     className: "map-equip-pin-wrap",
-    html,
-    iconSize: [30, 38],
-    iconAnchor: [15, 36],
-    popupAnchor: [0, -34],
+    html: `<div style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.28));line-height:0">${html}</div>`,
+    iconSize: layout.iconSize,
+    iconAnchor: layout.iconAnchor,
+    popupAnchor: layout.popupAnchor,
   });
   iconCache.set(key, icon);
   return icon;
 }
 
-/** Marcador de login/conexão — círculo com ícone de utilizador. */
-function connectionPinIcon(color: string): L.DivIcon {
-  const key = `conn:${color}`;
+/** Marcador de login/conexão. */
+function connectionPinIcon(color: string, styleId = "user"): L.DivIcon {
+  const key = `conn:v2:${styleId}:${color}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
-  const fill = color;
-  const stroke = "rgba(0,0,0,0.28)";
-  const html = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/><circle cx="14" cy="11" r="4" fill="#fff" opacity="0.95"/><path d="M7 22c0-3.9 3.1-7 7-7s7 3.1 7 7" fill="#fff" opacity="0.95"/></svg>`;
+  const layout = pinLayout("connection", styleId);
+  const html = buildPinSvg("connection", styleId, color, layout.size);
   const icon = L.divIcon({
     className: "map-conn-pin-wrap",
-    html,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14],
+    html: `<div style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.28));line-height:0">${html}</div>`,
+    iconSize: layout.iconSize,
+    iconAnchor: layout.iconAnchor,
+    popupAnchor: layout.popupAnchor,
   });
   iconCache.set(key, icon);
   return icon;
 }
 
-function clusterBadgeIcon(count: number, color: string, kind: string, isConnection: boolean): L.DivIcon {
-  const key = `badge:${count}:${color}:${kind}:${isConnection}`;
+function clusterBadgeIcon(count: number, color: string, kind: string, isConnection: boolean, iconStyles: MapIconStyles): L.DivIcon {
+  const styleId = isConnection ? iconStyles.connection : iconStyles.equipment;
+  const key = `badge:v2:${count}:${color}:${kind}:${isConnection}:${styleId}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
   const badge = count > 1 ? `<span style="position:absolute;top:-6px;right:-8px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#0f172a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)">${count > 999 ? "999+" : count}</span>` : "";
-  const stroke = "rgba(0,0,0,0.32)";
-  const inner = isConnection
-    ? `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="12" fill="${color}" stroke="${stroke}" stroke-width="1.2"/><circle cx="14" cy="11" r="4" fill="#fff" opacity="0.95"/><path d="M7 22c0-3.9 3.1-7 7-7s7 3.1 7 7" fill="#fff" opacity="0.95"/></svg>`
-    : `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38"><path fill="${color}" stroke="${stroke}" stroke-width="1" d="M15 2C8.4 2 3 7.3 3 13.8c0 6.2 9.8 16.5 11.6 18.4L15 36l0.4-3.8C17.2 30.3 27 20 27 13.8 27 7.3 21.6 2 15 2z"/><circle cx="15" cy="14" r="4.2" fill="#fff" opacity="0.95"/></svg>`;
-  const html = `<div style="position:relative;display:inline-block;line-height:0">${inner}${badge}</div>`;
+  const role = isConnection ? "connection" : "equipment";
+  const layout = pinLayout(role, styleId);
+  const inner = buildPinSvg(role, styleId, color, layout.size);
+  const html = `<div style="position:relative;display:inline-block;line-height:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.28))">${inner}${badge}</div>`;
   const icon = L.divIcon({
     className: "map-cluster-badge-wrap",
     html,
-    iconSize: isConnection ? [28, 28] : [30, 38],
-    iconAnchor: isConnection ? [14, 14] : [15, 36],
-    popupAnchor: isConnection ? [0, -14] : [0, -34],
+    iconSize: layout.iconSize,
+    iconAnchor: layout.iconAnchor,
+    popupAnchor: layout.popupAnchor,
   });
   iconCache.set(key, icon);
   return icon;
 }
 
-function clusterBadgeInfraIcon(count: number, kind: InfraMapKind, color?: string | null): L.DivIcon {
-  const key = `infra-badge:${count}:${kind}:${color ?? ""}`;
+function clusterBadgeInfraIcon(count: number, kind: InfraMapKind, color?: string | null, styleId?: string | null): L.DivIcon {
+  const key = `infra-badge:v2:${count}:${kind}:${color ?? ""}:${styleId ?? ""}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
   const badge =
     count > 1
       ? `<span style="position:absolute;top:-6px;right:-8px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#0f172a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)">${count > 999 ? "999+" : count}</span>`
       : "";
-  const innerPin = infrastructurePinIcon(kind, color).options.html ?? "";
+  const innerPin = infrastructurePinIcon(kind, color, null, styleId).options.html ?? "";
   const html = `<div style="position:relative;display:inline-block;line-height:0">${innerPin}${badge}</div>`;
   const icon = L.divIcon({
     className: "map-cluster-badge-wrap",
@@ -448,20 +602,27 @@ function withMapPinHighlight(icon: L.DivIcon, highlighted: boolean, accent: stri
   });
 }
 
+function infraStyleFor(kind: InfraMapKind, styles: MapIconStyles): string | null {
+  if (kind === "cto") return styles.cto;
+  if (kind === "splice_box") return styles.splice_box;
+  return null;
+}
+
 function markerIconOpts(
   displayMode: MapDisplayMode,
   p: MapPoint,
   colors: MapColors,
+  iconStyles: MapIconStyles,
   highlightedId?: string | null,
 ): { icon: L.Icon | L.DivIcon } {
   const highlighted = !!highlightedId && p.id === highlightedId;
   let icon: L.DivIcon;
   if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
-    icon = infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null);
+    icon = infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null, infraStyleFor(p.mapKind, iconStyles));
   } else if (isConnectionPoint(p)) {
-    icon = connectionPinIcon(colors.connection);
+    icon = connectionPinIcon(colors.connection, iconStyles.connection);
   } else if (displayMode !== "status") {
-    icon = equipmentPinIcon(colors.equipment);
+    icon = equipmentPinIcon(colors.equipment, iconStyles.equipment);
   } else {
     icon = statusPinIcon(p.status);
   }
@@ -472,6 +633,7 @@ function markerIconOptsGroup(
   displayMode: MapDisplayMode,
   members: MapPoint[],
   colors: MapColors,
+  iconStyles: MapIconStyles,
   clusterKind?: string,
   highlightedId?: string | null,
 ): { icon: L.Icon | L.DivIcon } {
@@ -482,24 +644,24 @@ function markerIconOptsGroup(
   if (members.length > 1 && clusterKind) {
     if (infraKind && isInfraMapKind(infraKind)) {
       const color = members[0].markerColor;
-      return { icon: clusterBadgeInfraIcon(members.length, infraKind, color) };
+      return { icon: clusterBadgeInfraIcon(members.length, infraKind, color, infraStyleFor(infraKind, iconStyles)) };
     }
     const color = isConn ? colors.connection : colors.equipment;
-    return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn) };
+    return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn, iconStyles) };
   }
   const single = members[0];
   const highlighted = !!highlightedId && members.length === 1 && single.id === highlightedId;
   if (infraKind && isInfraMapKind(infraKind)) {
     const label = infraKind === "cto" && members.length === 1 ? members[0].mapLabel : null;
-    const icon = infrastructurePinIcon(infraKind, members[0].markerColor, label);
+    const icon = infrastructurePinIcon(infraKind, members[0].markerColor, label, infraStyleFor(infraKind, iconStyles));
     return { icon: withMapPinHighlight(icon, highlighted, highlightAccent(single, colors)) };
   }
   if (isConn) {
-    const icon = connectionPinIcon(colors.connection);
+    const icon = connectionPinIcon(colors.connection, iconStyles.connection);
     return { icon: withMapPinHighlight(icon, highlighted, colors.connection) };
   }
   if (displayMode !== "status") {
-    const icon = equipmentPinIcon(colors.equipment);
+    const icon = equipmentPinIcon(colors.equipment, iconStyles.equipment);
     return { icon: withMapPinHighlight(icon, highlighted, colors.equipment) };
   }
   const icon = statusPinIcon(dominantStatus(members));
@@ -510,11 +672,12 @@ function mapMarkerProps(
   p: MapPoint,
   displayMode: MapDisplayMode,
   colors: MapColors,
+  iconStyles: MapIconStyles,
   highlightedId?: string | null,
 ) {
   const highlighted = !!highlightedId && p.id === highlightedId;
   return {
-    ...markerIconOpts(displayMode, p, colors, highlightedId),
+    ...markerIconOpts(displayMode, p, colors, iconStyles, highlightedId),
     zIndexOffset: highlighted ? 1200 : 0,
   };
 }
@@ -535,8 +698,12 @@ function ClusterCellMarkers({
   onSelectDevice,
   onOpenSplitter,
   onOpenCableFibers,
+  onOpenSplice,
+  onEditPosition,
+  onCopyCoords,
   displayMode,
   colors,
+  iconStyles,
   highlightedId,
 }: {
   c: ClusterCell;
@@ -550,8 +717,12 @@ function ClusterCellMarkers({
   onSelectDevice?: (id: string) => void;
   onOpenSplitter?: (id: string) => void;
   onOpenCableFibers?: (id: string) => void;
+  onOpenSplice?: (id: string) => void;
+  onEditPosition?: (id: string) => void;
+  onCopyCoords?: (lat: number, lng: number) => void;
   displayMode: MapDisplayMode;
   colors: MapColors;
+  iconStyles: MapIconStyles;
   highlightedId?: string | null;
 }) {
   const map = useMap();
@@ -559,10 +730,10 @@ function ClusterCellMarkers({
   if (c.members.length === 1) {
     const p = c.members[0];
     return (
-      <Marker position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
+      <Marker position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, iconStyles, highlightedId)}>
         <Popup>
           {devicePopupBody(p, displayMode)}
-          <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
+          <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} onOpenSplice={onOpenSplice} onEditPosition={onEditPosition} onCopyCoords={onCopyCoords} />
         </Popup>
       </Marker>
     );
@@ -572,7 +743,7 @@ function ClusterCellMarkers({
     return (
       <Marker
         position={[c.lat, c.lng]}
-        {...markerIconOptsGroup(displayMode, c.members, colors, c.kind, highlightedId)}
+        {...markerIconOptsGroup(displayMode, c.members, colors, iconStyles, c.kind, highlightedId)}
         zIndexOffset={c.members.some((m) => m.id === highlightedId) ? 1200 : 0}
         eventHandlers={{
           click: (e) => {
@@ -614,10 +785,10 @@ function ClusterCellMarkers({
         if (grp.length === 1) {
           const p = grp[0];
           return (
-            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
+            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, iconStyles, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
-                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
+                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} onOpenSplice={onOpenSplice} onEditPosition={onEditPosition} onCopyCoords={onCopyCoords} />
               </Popup>
             </Marker>
           );
@@ -626,10 +797,10 @@ function ClusterCellMarkers({
           return spider.members.map((m, i) => {
             const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
             return (
-              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, iconStyles, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
-                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
+                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} onOpenSplice={onOpenSplice} onEditPosition={onEditPosition} onCopyCoords={onCopyCoords} />
                 </Popup>
               </Marker>
             );
@@ -640,7 +811,7 @@ function ClusterCellMarkers({
           <Marker
             key={sk}
             position={[clat, clng]}
-            {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]), highlightedId)}
+            {...markerIconOptsGroup(displayMode, grp, colors, iconStyles, pointClusterKind(grp[0]), highlightedId)}
             zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
             eventHandlers={{
               click: (e) => {
@@ -678,12 +849,16 @@ function ClusterMarkersByView({
   onSelectDevice,
   onOpenSplitter,
   onOpenCableFibers,
+  onOpenSplice,
+  onEditPosition,
+  onCopyCoords,
   spider,
   setSpider,
   spiderRef,
   runSpiderOpen,
   stopSpiderAnim,
   colors,
+  iconStyles,
   highlightedId,
 }: {
   points: MapPoint[];
@@ -691,12 +866,16 @@ function ClusterMarkersByView({
   onSelectDevice?: (id: string) => void;
   onOpenSplitter?: (id: string) => void;
   onOpenCableFibers?: (id: string) => void;
+  onOpenSplice?: (id: string) => void;
+  onEditPosition?: (id: string) => void;
+  onCopyCoords?: (lat: number, lng: number) => void;
   spider: SpiderState;
   setSpider: (s: SpiderState) => void;
   spiderRef: MutableRefObject<SpiderState>;
   runSpiderOpen: (key: string, members: MapPoint[], center: [number, number]) => void;
   stopSpiderAnim: () => void;
   colors: MapColors;
+  iconStyles: MapIconStyles;
   highlightedId?: string | null;
 }) {
   const map = useMap();
@@ -744,8 +923,12 @@ function ClusterMarkersByView({
           onSelectDevice={onSelectDevice}
           onOpenSplitter={onOpenSplitter}
           onOpenCableFibers={onOpenCableFibers}
+          onOpenSplice={onOpenSplice}
+          onEditPosition={onEditPosition}
+          onCopyCoords={onCopyCoords}
           displayMode={displayMode}
           colors={colors}
+          iconStyles={iconStyles}
           highlightedId={highlightedId}
         />
       ))}
@@ -762,6 +945,7 @@ function ScatterStackMarker({
   stopSpiderAnim,
   setSpider,
   colors,
+  iconStyles,
   highlightedId,
 }: {
   sk: string;
@@ -772,6 +956,7 @@ function ScatterStackMarker({
   stopSpiderAnim: () => void;
   setSpider: (s: SpiderState) => void;
   colors: MapColors;
+  iconStyles: MapIconStyles;
   highlightedId?: string | null;
 }) {
   const map = useMap();
@@ -779,7 +964,7 @@ function ScatterStackMarker({
   return (
     <Marker
       position={[clat, clng]}
-      {...markerIconOptsGroup(displayMode, grp, colors, pointClusterKind(grp[0]), highlightedId)}
+      {...markerIconOptsGroup(displayMode, grp, colors, iconStyles, pointClusterKind(grp[0]), highlightedId)}
       zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
       eventHandlers={{
         click: (e) => {
@@ -822,7 +1007,11 @@ function ScatterMarkersLayer({
   onSelectDevice,
   onOpenSplitter,
   onOpenCableFibers,
+  onOpenSplice,
+  onEditPosition,
+  onCopyCoords,
   colors,
+  iconStyles,
   keyPrefix,
   highlightedId,
 }: {
@@ -836,7 +1025,11 @@ function ScatterMarkersLayer({
   onSelectDevice?: (id: string) => void;
   onOpenSplitter?: (id: string) => void;
   onOpenCableFibers?: (id: string) => void;
+  onOpenSplice?: (id: string) => void;
+  onEditPosition?: (id: string) => void;
+  onCopyCoords?: (lat: number, lng: number) => void;
   colors: MapColors;
+  iconStyles: MapIconStyles;
   keyPrefix: string;
   highlightedId?: string | null;
 }) {
@@ -849,10 +1042,10 @@ function ScatterMarkersLayer({
         if (grp.length === 1) {
           const p = grp[0];
           return (
-            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, highlightedId)}>
+            <Marker key={p.id} position={[p.lat, p.lng]} {...mapMarkerProps(p, displayMode, colors, iconStyles, highlightedId)}>
               <Popup>
                 {devicePopupBody(p, displayMode)}
-                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
+                <MapPointPopupActions p={p} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} onOpenSplice={onOpenSplice} onEditPosition={onEditPosition} onCopyCoords={onCopyCoords} />
               </Popup>
             </Marker>
           );
@@ -862,10 +1055,10 @@ function ScatterMarkersLayer({
           return spider.members.map((m, i) => {
             const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
             return (
-              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, highlightedId)}>
+              <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, iconStyles, highlightedId)}>
                 <Popup>
                   {devicePopupBody(m, displayMode)}
-                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} />
+                  <MapPointPopupActions p={m} onSelectDevice={onSelectDevice} onOpenSplitter={onOpenSplitter} onOpenCableFibers={onOpenCableFibers} onOpenSplice={onOpenSplice} onEditPosition={onEditPosition} onCopyCoords={onCopyCoords} />
                 </Popup>
               </Marker>
             );
@@ -883,10 +1076,70 @@ function ScatterMarkersLayer({
             stopSpiderAnim={stopSpiderAnim}
             setSpider={setSpider}
             colors={colors}
+            iconStyles={iconStyles}
             highlightedId={highlightedId}
           />
         );
       })}
+    </>
+  );
+}
+
+function MapPlaceClickLayer({
+  enabled,
+  onMapClick,
+}: {
+  enabled: boolean;
+  onMapClick?: (lat: number, lng: number) => void;
+}) {
+  useMapEvents({
+    click(e) {
+      if (!enabled || !onMapClick) return;
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+function CablePathsLayer({ points }: { points: MapPoint[] }) {
+  const cables = useMemo(
+    () => points.filter((p) => p.mapKind === "cable" && Array.isArray(p.path) && p.path.length >= 2),
+    [points],
+  );
+  return (
+    <>
+      {cables.map((c) => (
+        <Polyline
+          key={`cable-path-${c.id}`}
+          positions={c.path!.map((pt) => [pt.lat, pt.lng] as [number, number])}
+          pathOptions={{ color: "#0f766e", weight: 4, opacity: 0.85 }}
+        />
+      ))}
+    </>
+  );
+}
+
+function DraftCableLayer({ draftPath }: { draftPath: MapLatLng[] }) {
+  if (draftPath.length === 0) return null;
+  const positions = draftPath.map((p) => [p.lat, p.lng] as [number, number]);
+  return (
+    <>
+      {draftPath.length >= 2 ? (
+        <Polyline positions={positions} pathOptions={{ color: "#ea580c", weight: 4, dashArray: "8 6", opacity: 0.95 }} />
+      ) : null}
+      {draftPath.map((p, i) => (
+        <CircleMarker
+          key={`draft-${i}`}
+          center={[p.lat, p.lng]}
+          radius={i === 0 || i === draftPath.length - 1 ? 7 : 5}
+          pathOptions={{
+            color: "#c2410c",
+            fillColor: i === 0 ? "#16a34a" : i === draftPath.length - 1 ? "#ea580c" : "#fdba74",
+            fillOpacity: 1,
+            weight: 2,
+          }}
+        />
+      ))}
     </>
   );
 }
@@ -897,14 +1150,21 @@ export function EquipmentMap({
   onSelectDevice,
   onOpenSplitter,
   onOpenCableFibers,
+  onOpenSplice,
+  onEditPosition,
+  onCopyCoords,
   flyTo,
   flyKey,
   fitBoundsVersion,
   onBoundsChange,
   mapColors,
+  mapIconStyles,
   connectionClusterForced = false,
   mapHeight = 480,
   highlightedId = null,
+  placeMode = null,
+  draftPath = [],
+  onMapClick,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -913,22 +1173,42 @@ export function EquipmentMap({
   onOpenSplitter?: (id: string) => void;
   /** Abre o modal de fibras do cabo (popup do mapa). */
   onOpenCableFibers?: (id: string) => void;
+  /** Abre o modal de emenda (caixa de emenda). */
+  onOpenSplice?: (id: string) => void;
+  /** Abre o painel em modo edição de posição (CTO). */
+  onEditPosition?: (id: string) => void;
+  /** Copia coordenadas do ponto. */
+  onCopyCoords?: (lat: number, lng: number) => void;
   flyTo: { lat: number; lng: number; zoom?: number } | null;
   flyKey: number;
   fitBoundsVersion: number;
   onBoundsChange?: (b: MapBounds) => void;
   mapColors?: MapColors;
+  mapIconStyles?: MapIconStyles;
   /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
   connectionClusterForced?: boolean;
   mapHeight?: number | string;
   /** Pin seleccionado (ex.: resultado da pesquisa) com destaque visual. */
   highlightedId?: string | null;
+  /** Modo de adicionar elemento no mapa (cursor + clique). */
+  placeMode?: MapPlaceMode;
+  /** Trajeto em construção do cabo. */
+  draftPath?: MapLatLng[];
+  onMapClick?: (lat: number, lng: number) => void;
 }) {
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
+  const iconStyles = mapIconStyles ?? DEFAULT_MAP_ICON_STYLES;
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
   const equipValid = useMemo(() => valid.filter((p) => !isConnectionPoint(p)), [valid]);
   const connValid = useMemo(() => valid.filter(isConnectionPoint), [valid]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
+  const placing = placeMode === "place" || placeMode === "cable";
+  const selectHandler = placing ? undefined : onSelectDevice;
+  const splitterHandler = placing ? undefined : onOpenSplitter;
+  const cableFibersHandler = placing ? undefined : onOpenCableFibers;
+  const spliceHandler = placing ? undefined : onOpenSplice;
+  const editHandler = placing ? undefined : onEditPosition;
+  const copyCoordsHandler = placing ? undefined : onCopyCoords;
 
   const [spider, setSpider] = useState<SpiderState>(null);
   const spiderRef = useRef(spider);
@@ -982,92 +1262,110 @@ export function EquipmentMap({
   const fitPointsRef = useRef<{ lat: number; lng: number }[]>([]);
   fitPointsRef.current = valid.map((p) => ({ lat: p.lat, lng: p.lng }));
 
-  if (valid.length === 0) {
-    return <p style={{ color: "var(--muted)" }}>Sem coordenadas para mostrar no mapa.</p>;
-  }
-
   return (
-    <MapContainer
-      center={center}
-      zoom={6}
-      style={{ height: mapHeight, width: "100%", minHeight: 420, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}
-      scrollWheelZoom
+    <div
+      className={
+        placing ? (placeMode === "cable" ? "map-place-mode map-place-mode--cable" : "map-place-mode map-place-mode--place") : undefined
+      }
     >
-      <MapInvalidateSize />
-      <FitBounds pointsRef={fitPointsRef} version={fitBoundsVersion} />
-      <MapBoundsReporter onBoundsChange={onBoundsChange} />
-      <MapFlyTo target={flyTo} flyKey={flyKey} />
-      <CloseSpiderOnMapClick active={!!spider && spider.phase >= 0.995} onClose={() => setSpider(null)} />
-      <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <MapContainer
+        center={center}
+        zoom={valid.length ? 6 : 5}
+        style={{ height: mapHeight, width: "100%", minHeight: 420, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}
+        scrollWheelZoom
+      >
+        <MapInvalidateSize />
+        {valid.length > 0 ? <FitBounds pointsRef={fitPointsRef} version={fitBoundsVersion} /> : null}
+        <MapBoundsReporter onBoundsChange={onBoundsChange} />
+        <MapFlyTo target={flyTo} flyKey={flyKey} />
+        <CloseSpiderOnMapClick active={!placing && !!spider && spider.phase >= 0.995} onClose={() => setSpider(null)} />
+        <MapPlaceClickLayer enabled={placing} onMapClick={onMapClick} />
+        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-      {displayMode === "cluster" && (
-        <ClusterMarkersByView
-          points={valid}
-          displayMode={displayMode}
-          onSelectDevice={onSelectDevice}
-          onOpenSplitter={onOpenSplitter}
-          onOpenCableFibers={onOpenCableFibers}
-          spider={spider}
-          setSpider={setSpider}
-          spiderRef={spiderRef}
-          runSpiderOpen={runSpiderOpen}
-          stopSpiderAnim={stopSpiderAnim}
-          colors={colors}
-          highlightedId={highlightedId}
-        />
-      )}
+        <CablePathsLayer points={valid} />
+        <DraftCableLayer draftPath={draftPath} />
 
-      {(displayMode === "scatter" || displayMode === "status") && (
-        <>
-          <ScatterMarkersLayer
-            stacks={stacksScatterEquip}
+        {displayMode === "cluster" && (
+          <ClusterMarkersByView
+            points={valid}
             displayMode={displayMode}
+            onSelectDevice={selectHandler}
+            onOpenSplitter={splitterHandler}
+            onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+            onEditPosition={editHandler}
+            onCopyCoords={copyCoordsHandler}
             spider={spider}
             setSpider={setSpider}
             spiderRef={spiderRef}
             runSpiderOpen={runSpiderOpen}
             stopSpiderAnim={stopSpiderAnim}
-            onSelectDevice={onSelectDevice}
-            onOpenSplitter={onOpenSplitter}
-            onOpenCableFibers={onOpenCableFibers}
             colors={colors}
-            keyPrefix="eq"
+            iconStyles={iconStyles}
             highlightedId={highlightedId}
           />
-          {connectionClusterForced && connValid.length > 0 ? (
-            <ClusterMarkersByView
-              points={connValid}
-              displayMode={displayMode}
-              onSelectDevice={onSelectDevice}
-              onOpenSplitter={onOpenSplitter}
-              onOpenCableFibers={onOpenCableFibers}
-              spider={spider}
-              setSpider={setSpider}
-              spiderRef={spiderRef}
-              runSpiderOpen={runSpiderOpen}
-              stopSpiderAnim={stopSpiderAnim}
-              colors={colors}
-              highlightedId={highlightedId}
-            />
-          ) : (
+        )}
+
+        {(displayMode === "scatter" || displayMode === "status") && (
+          <>
             <ScatterMarkersLayer
-              stacks={stacksScatterConn}
+              stacks={stacksScatterEquip}
               displayMode={displayMode}
               spider={spider}
               setSpider={setSpider}
               spiderRef={spiderRef}
               runSpiderOpen={runSpiderOpen}
               stopSpiderAnim={stopSpiderAnim}
-              onSelectDevice={onSelectDevice}
-              onOpenSplitter={onOpenSplitter}
-              onOpenCableFibers={onOpenCableFibers}
+              onSelectDevice={selectHandler}
+              onOpenSplitter={splitterHandler}
+              onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+            onEditPosition={editHandler}
+            onCopyCoords={copyCoordsHandler}
               colors={colors}
-              keyPrefix="conn"
+              iconStyles={iconStyles}
+              keyPrefix="eq"
               highlightedId={highlightedId}
             />
-          )}
-        </>
-      )}
-    </MapContainer>
+            {connectionClusterForced && connValid.length > 0 ? (
+              <ClusterMarkersByView
+                points={connValid}
+                displayMode={displayMode}
+                onSelectDevice={selectHandler}
+                onOpenSplitter={splitterHandler}
+                onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+            onEditPosition={editHandler}
+            onCopyCoords={copyCoordsHandler}
+                spider={spider}
+                setSpider={setSpider}
+                spiderRef={spiderRef}
+                runSpiderOpen={runSpiderOpen}
+                stopSpiderAnim={stopSpiderAnim}
+                colors={colors}
+                iconStyles={iconStyles}
+                highlightedId={highlightedId}
+              />
+            ) : (
+              <ScatterMarkersLayer
+                stacks={stacksScatterConn}
+                displayMode={displayMode}
+                spider={spider}
+                setSpider={setSpider}
+                spiderRef={spiderRef}
+                runSpiderOpen={runSpiderOpen}
+                stopSpiderAnim={stopSpiderAnim}
+                onSelectDevice={selectHandler}
+                onOpenSplitter={splitterHandler}
+                onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+            onEditPosition={editHandler}
+            onCopyCoords={copyCoordsHandler}
+                colors={colors}
+                iconStyles={iconStyles}
+                keyPrefix="conn"
+                highlightedId={highlightedId}
+              />
+            )}
+          </>
+        )}
+      </MapContainer>
+    </div>
   );
 }

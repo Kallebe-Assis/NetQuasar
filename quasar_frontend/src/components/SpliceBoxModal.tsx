@@ -13,11 +13,9 @@ import {
   formatFeedFiberColor,
   isCableFiberCount,
   parseSplitterOutputs,
-  SPLITTER_PORT_STATUSES,
   type SpliceBoxModel,
   type SplicePair,
   type SplitterPort,
-  type SplitterPortStatus,
 } from "../lib/fiberSplitter";
 import { FIBER_COLORS, formatSplitterDisplay, normalizeSplitterInput } from "../lib/networkInfrastructure";
 
@@ -38,9 +36,9 @@ type Props = {
 
 type TabId = "fibra" | "esquema";
 
-function colorOptions(current: string) {
-  const base = [...FIBER_COLORS];
-  if (current && !(FIBER_COLORS as readonly string[]).includes(current)) base.push(current);
+function colorOptions(current: string): string[] {
+  const base: string[] = [...FIBER_COLORS];
+  if (current && !base.includes(current)) base.push(current);
   return base;
 }
 
@@ -350,29 +348,12 @@ export function SpliceBoxModal({
                     </label>
                   </div>
                   <label className="splitter-modal__field">
-                    <span>Estado</span>
-                    <select
-                      className="select"
-                      disabled={!canEdit}
-                      value={p.status}
-                      onChange={(e) => {
-                        const status = e.target.value as SplitterPortStatus;
-                        setDraftPairs((rows) => rows.map((r, i) => (i === idx ? { ...r, status } : r)));
-                      }}
-                    >
-                      {SPLITTER_PORT_STATUSES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="splitter-modal__field">
                     <span>Destino</span>
                     <input
                       className="input"
                       disabled={!canEdit}
                       value={p.destination}
+                      placeholder="Opcional"
                       onChange={(e) => {
                         const destination = e.target.value;
                         setDraftPairs((rows) => rows.map((r, i) => (i === idx ? { ...r, destination } : r)));

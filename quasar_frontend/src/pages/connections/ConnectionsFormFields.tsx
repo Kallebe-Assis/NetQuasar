@@ -40,10 +40,10 @@ export function ProjectSelect({ value, projects, onChange }: ProjectSelectProps)
   return (
     <div className="conn-form-modal__field">
       <label className="conn-form-modal__field-label" htmlFor={id}>
-        Projeto
+        Projeto *
       </label>
       <select id={id} className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">—</option>
+        <option value="">— Seleccionar projeto —</option>
         {projects.map((p) => (
           <option key={p.id} value={p.id}>
             #{p.display_number} — {p.description}

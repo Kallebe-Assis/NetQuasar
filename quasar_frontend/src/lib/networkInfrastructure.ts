@@ -124,6 +124,7 @@ export type NetworkCable = {
   project_label?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  path?: Array<{ lat: number; lng: number }> | null;
   fiber_ports?: Array<{
     port: number;
     color?: string;

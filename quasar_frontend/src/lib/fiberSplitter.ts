@@ -159,7 +159,7 @@ export function buildDefaultSplicePairs(count: number, existing?: SplicePair[] |
       right_color_hex: prev?.right_color_hex || spec.color_hex,
       status: prev?.status ?? "livre",
       note: prev?.note ?? "",
-      destination: normalizeFiberDestination(prev?.destination),
+      destination: prev?.destination?.trim() ?? "",
     });
   }
   return out;
