@@ -108,9 +108,25 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "settings.permissions", module: "settings", module_label: "Configurações", label: "Gerir perfis de permissão" },
 ];
 
-export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = PERMISSION_CATALOG.filter((p) =>
-  p.key.endsWith(".view"),
-).map((p) => p.key);
+/** Espelha o perfil sistema «Usuário» / defaultViewerPermissions do backend (sem Configurações). */
+export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = [
+  "dashboard.view",
+  "monitoring.view",
+  "realtime.view",
+  "integrations.view",
+  "pops.view",
+  "devices.view",
+  "commercial.view",
+  "connections.view",
+  "alerts.view",
+  "map.view",
+  "tools.view",
+  "olt.view",
+  "mikrotik.view",
+  "switch.view",
+  "bng.view",
+  "reports.view",
+];
 
 export function groupPermissionsByModule(catalog: PermissionDefinition[] = PERMISSION_CATALOG) {
   const map = new Map<string, { module: string; module_label: string; items: PermissionDefinition[] }>();

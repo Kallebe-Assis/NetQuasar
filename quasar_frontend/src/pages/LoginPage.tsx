@@ -18,6 +18,7 @@ import {
   saveUserPermissions,
   saveUserRole,
 } from "../lib/auth";
+import { DEFAULT_USER_PERMISSIONS } from "../lib/permissions";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 
 type SetupStatus = { database_configured?: boolean };
@@ -72,8 +73,15 @@ export function LoginPage() {
         return;
       }
       saveAuthToken(t);
-      saveUserRole(typeof data?.role === "string" ? data.role : "admin");
-      saveUserPermissions(Array.isArray(data?.permissions) ? data.permissions : data?.role === "admin" ? ["*"] : []);
+      const role = typeof data?.role === "string" ? data.role : "admin";
+      saveUserRole(role);
+      const incoming = Array.isArray(data?.permissions) ? data.permissions.map((x) => String(x)).filter(Boolean) : [];
+      if (role === "admin" || incoming.includes("*")) {
+        saveUserPermissions(["*"]);
+      } else {
+        // Garante menu lateral mesmo se o backend devolver lista vazia.
+        saveUserPermissions(incoming.length > 0 ? incoming : [...DEFAULT_USER_PERMISSIONS]);
+      }
       savePermissionProfileId(typeof data?.permission_profile_id === "string" ? data.permission_profile_id : null);
       const display =
         typeof data?.display_name === "string" && data.display_name.trim()

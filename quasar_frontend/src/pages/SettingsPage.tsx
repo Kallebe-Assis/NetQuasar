@@ -677,10 +677,11 @@ function UsersPanel() {
       </p>
 
       <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end", marginBottom: 12 }}>
-        <div className="field" style={{ margin: 0, flex: "1 1 420px", minWidth: 280 }}>
+        <div className="field" style={{ margin: 0, flex: "1 1 640px", minWidth: 360, maxWidth: "100%" }}>
           <label style={{ fontSize: 11 }}>Pesquisar</label>
           <input
             className="input"
+            style={{ width: "100%" }}
             placeholder="Nome, e-mail ou telefone…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

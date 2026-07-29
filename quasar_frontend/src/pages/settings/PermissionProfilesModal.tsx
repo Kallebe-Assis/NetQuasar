@@ -20,6 +20,49 @@ type Props = {
   onClose: () => void;
 };
 
+function PermSwitch({
+  id,
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="toggle" htmlFor={id} style={{ alignItems: "flex-start", opacity: disabled ? 0.55 : 1 }}>
+      <span className="toggle__track" style={{ marginTop: 1 }}>
+        <input
+          id={id}
+          type="checkbox"
+          role="switch"
+          className="toggle__input"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="toggle__thumb" aria-hidden />
+      </span>
+      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span className="toggle__label" style={{ color: "var(--text)", fontSize: 13 }}>
+          {label}
+        </span>
+        {hint ? (
+          <span className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
+            {hint}
+          </span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
 export function PermissionProfilesModal({ open, onClose }: Props) {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
@@ -74,21 +117,21 @@ export function PermissionProfilesModal({ open, onClose }: Props) {
     setEditing(null);
   };
 
-  const togglePerm = (key: string) => {
+  const setPerm = (key: string, on: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (on) next.add(key);
+      else next.delete(key);
       return next;
     });
   };
 
-  const toggleModule = (keys: string[], allOn: boolean) => {
+  const setModule = (keys: string[], on: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
       for (const k of keys) {
-        if (allOn) next.delete(k);
-        else next.add(k);
+        if (on) next.add(k);
+        else next.delete(k);
       }
       return next;
     });
@@ -152,7 +195,7 @@ export function PermissionProfilesModal({ open, onClose }: Props) {
               <Shield size={18} aria-hidden /> Perfis de permissão
             </h2>
             <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: 13 }}>
-              Defina permissões unitárias por módulo, botão e acção. Os perfis <strong>Administrador</strong> e{" "}
+              Active ou desactive cada tela e cada função do perfil. Os perfis <strong>Administrador</strong> e{" "}
               <strong>Usuário</strong> vêm de base; pode criar outros.
             </p>
           </div>
@@ -259,26 +302,45 @@ export function PermissionProfilesModal({ open, onClose }: Props) {
                 {modules.map((mod) => {
                   const keys = mod.items.map((i) => i.key);
                   const onCount = keys.filter((k) => selected.has(k)).length;
-                  const allOn = onCount === keys.length;
+                  const allOn = onCount === keys.length && keys.length > 0;
+                  const partial = onCount > 0 && !allOn;
                   return (
                     <div key={mod.module} className="card" style={{ padding: 12, margin: 0, background: "var(--panel-2, transparent)" }}>
-                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <strong>{mod.module_label}</strong>
-                        <button type="button" className="btn" style={{ fontSize: 12 }} onClick={() => toggleModule(keys, allOn)}>
-                          {allOn ? "Limpar módulo" : "Marcar módulo"}
-                        </button>
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 10,
+                          gap: 12,
+                          paddingBottom: 8,
+                          borderBottom: "1px solid var(--border)",
+                        }}
+                      >
+                        <div>
+                          <strong style={{ display: "block" }}>{mod.module_label}</strong>
+                          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                            Tela · {onCount}/{keys.length} funções
+                            {partial ? " (parcial)" : ""}
+                          </span>
+                        </div>
+                        <PermSwitch
+                          id={`perm-mod-${mod.module}`}
+                          checked={allOn}
+                          onChange={(on) => setModule(keys, on)}
+                          label={allOn ? "ON" : "OFF"}
+                        />
                       </div>
-                      <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
                         {mod.items.map((item) => (
-                          <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}>
-                            <input type="checkbox" checked={selected.has(item.key)} onChange={() => togglePerm(item.key)} />
-                            <span>
-                              <span style={{ display: "block" }}>{item.label}</span>
-                              <span className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
-                                {item.key}
-                              </span>
-                            </span>
-                          </label>
+                          <PermSwitch
+                            key={item.key}
+                            id={`perm-${item.key}`}
+                            checked={selected.has(item.key)}
+                            onChange={(on) => setPerm(item.key, on)}
+                            label={item.label}
+                            hint={item.key}
+                          />
                         ))}
                       </div>
                     </div>

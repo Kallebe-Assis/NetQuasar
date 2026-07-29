@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Server } from "lucide-react";
 import { PageCountPill } from "../components/PageCountPill";
 import { DeviceReportModal, type DeviceReportTarget } from "../components/DeviceReportModal";
 import { InfoHint } from "../components/InfoHint";
@@ -900,7 +901,7 @@ export function MonitoringPage() {
                       <th style={{ cursor: "pointer", userSelect: "none" }} onClick={() => onEquipSortClick("temperature_c")} title="Ordenar">
                         Temp °C{sortMark("temperature_c")}
                       </th>
-                      {canMutate ? <th style={{ width: 48 }} /> : null}
+                      <th style={{ width: 48 }} aria-label="Acções" />
                     </tr>
                   </thead>
                   <tbody>
@@ -929,19 +930,22 @@ export function MonitoringPage() {
                           <td className="mono">{row.memory_percent != null ? `${row.memory_percent.toFixed(0)}%` : EM_DASH}</td>
                           <td className="mono">{row.uptime ?? EM_DASH}</td>
                           <td className="mono">{row.temperature_c != null ? `${row.temperature_c.toFixed(0)} °C` : EM_DASH}</td>
-                          {canMutate ? (
-                            <td>
+                          <td>
+                            {canMutate ? (
                               <button type="button" className="btn btn--icon" aria-label="Opções do equipamento" title="Opções" onClick={() => setActionMenuRow(row)}>
                                 ⋮
                               </button>
-                            </td>
-                          ) : (
-                            <td>
-                              <Link className="btn" style={{ fontSize: 11, padding: "4px 8px" }} to={`/devices?focus=${encodeURIComponent(row.id)}`}>
-                                Ver equipamento
+                            ) : (
+                              <Link
+                                className="btn btn--icon"
+                                to={`/devices?focus=${encodeURIComponent(row.id)}`}
+                                aria-label="Ver equipamento"
+                                title="Ver equipamento"
+                              >
+                                <Server size={16} strokeWidth={2} aria-hidden />
                               </Link>
-                            </td>
-                          )}
+                            )}
+                          </td>
                         </tr>
                       );
                     })}

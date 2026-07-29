@@ -24,7 +24,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { clearSession, getAuthToken, getStoredUserDisplayLabel, can, isAdminUser } from "../lib/auth";
+import { clearSession, getAuthToken, getStoredUserDisplayLabel, getStoredUserPermissionsKey, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
@@ -222,7 +222,8 @@ export function ShellLayout() {
     indicatorText = `Finalizado: ${monState.data.last_activity}`;
   }
 
-  const navItems = useMemo(() => filterNav(nav), []);
+  const permissionsKey = getStoredUserPermissionsKey();
+  const navItems = useMemo(() => filterNav(nav), [permissionsKey]);
   const pageTitle = useMemo(() => pageTitleForPath(location.pathname, navItems), [location.pathname, navItems]);
 
   useEffect(() => {

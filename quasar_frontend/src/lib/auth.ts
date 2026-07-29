@@ -1,4 +1,4 @@
-import { hasAnyPermission, hasPermission, type PermissionKey } from "./permissions";
+import { DEFAULT_USER_PERMISSIONS, hasAnyPermission, hasPermission, type PermissionKey } from "./permissions";
 
 const K_BASE = "netquasar_api_base";
 const K_KEY = "netquasar_api_key";
@@ -121,20 +121,38 @@ export function saveUserPermissions(perms: string[] | null | undefined) {
   localStorage.setItem(K_PERMS, JSON.stringify(perms));
 }
 
+/**
+ * Permissões da sessão actual.
+ * Viewer sem lista gravada (sessões antigas / login sem payload) herda o catálogo de visualização padrão,
+ * alinhado ao perfil «Usuário» do backend — senão o menu lateral fica vazio.
+ */
 export function getStoredUserPermissions(): string[] {
   const raw = localStorage.getItem(K_PERMS);
   if (!raw) {
-    // Compatibilidade: sessões antigas sem lista → admin tem tudo, viewer só leitura implícita via isAdminUser.
     if (getStoredUserRole() === "admin") return ["*"];
+    if (getStoredUserRole() === "viewer") return [...DEFAULT_USER_PERMISSIONS];
     return [];
   }
   try {
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((x) => String(x));
+    if (!Array.isArray(parsed)) {
+      if (getStoredUserRole() === "viewer") return [...DEFAULT_USER_PERMISSIONS];
+      return [];
+    }
+    const list = parsed.map((x) => String(x)).filter(Boolean);
+    if (list.length === 0 && getStoredUserRole() === "viewer") {
+      return [...DEFAULT_USER_PERMISSIONS];
+    }
+    return list;
   } catch {
+    if (getStoredUserRole() === "viewer") return [...DEFAULT_USER_PERMISSIONS];
     return [];
   }
+}
+
+/** Chave estável para re-renderizar UI quando as permissões da sessão mudam. */
+export function getStoredUserPermissionsKey(): string {
+  return getStoredUserPermissions().slice().sort().join("|");
 }
 
 export function savePermissionProfileId(id: string | null | undefined) {
@@ -171,12 +189,7 @@ export function isAdminUser(): boolean {
 export function can(permission: PermissionKey | string): boolean {
   if (!getAuthToken()) return false;
   if (isAdminUser()) return true;
-  const perms = getStoredUserPermissions();
-  if (perms.length === 0) {
-    // Viewer legado sem lista: só leitura implícita não concede writes.
-    return false;
-  }
-  return hasPermission(perms, permission);
+  return hasPermission(getStoredUserPermissions(), permission);
 }
 
 export function canAny(...permissions: Array<PermissionKey | string>): boolean {
