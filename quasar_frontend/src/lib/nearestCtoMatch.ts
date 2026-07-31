@@ -121,6 +121,24 @@ export function formatDistanceMeters(meters: number | null | undefined): string 
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
+/**
+ * Devolve as N CTOs mais próximas de um ponto (Haversine), ordenadas por distância.
+ */
+export function findNearestCtos(
+  point: NullableGeoPoint,
+  ctos: CtoCandidate[],
+  limit = 3,
+): Array<{ cto: CtoCandidate; distanceMeters: number }> {
+  if (!isValidGeoPoint(point) || limit < 1) return [];
+  const scored: Array<{ cto: CtoCandidate; distanceMeters: number }> = [];
+  for (const cto of ctos) {
+    if (!isValidGeoPoint(cto)) continue;
+    scored.push({ cto, distanceMeters: haversineDistanceMeters(point, cto) });
+  }
+  scored.sort((a, b) => a.distanceMeters - b.distanceMeters);
+  return scored.slice(0, limit);
+}
+
 /** Rótulo legível da CTO (descrição ou número). */
 export function ctoLabel(cto: CtoCandidate | null | undefined): string {
   if (!cto) return "—";

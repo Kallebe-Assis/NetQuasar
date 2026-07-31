@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { ConfirmModal } from "./ConfirmModal";
 import { can, isAdminUser } from "../lib/auth";
 import { apiFetch } from "../lib/api";
 import { CtoSplitterModal } from "./CtoSplitterModal";
@@ -78,6 +79,11 @@ type Props = {
   /** Abre directamente o formulário de edição (posição, etc.). */
   autoOpenEdit?: boolean;
   onEditAutoOpened?: () => void;
+  /** Só em modo edição do mapa: excluir / ocultar / reposicionar. */
+  mapEditMode?: boolean;
+  onHideFromMap?: (mapId: string) => void;
+  onStartReposition?: (mapId: string, kind: InfraMapKind, entityId: string) => void;
+  onDeleted?: (mapId: string) => void;
 };
 
 export function MapInfraSidePanel({
@@ -94,6 +100,10 @@ export function MapInfraSidePanel({
   onSpliceAutoOpened,
   autoOpenEdit = false,
   onEditAutoOpened,
+  mapEditMode = false,
+  onHideFromMap,
+  onStartReposition,
+  onDeleted,
 }: Props) {
   const parsed = mapId ? parseInfraMapId(mapId) : null;
   const canEdit = isAdminUser() || can("connections.manage") || can("map.manage");
@@ -102,6 +112,7 @@ export function MapInfraSidePanel({
   const [splitterOpen, setSplitterOpen] = useState(false);
   const [cableFibersOpen, setCableFibersOpen] = useState(false);
   const [spliceOpen, setSpliceOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [form, setForm] = useState({
     description: "",
     latitude: "",
@@ -137,6 +148,7 @@ export function MapInfraSidePanel({
     setSplitterOpen(false);
     setCableFibersOpen(false);
     setSpliceOpen(false);
+    setConfirmDelete(false);
     setErr(null);
   }, [mapId]);
 
@@ -246,7 +258,35 @@ export function MapInfraSidePanel({
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
   });
 
+  const deleteMut = useMutation({
+    mutationFn: async () => {
+      if (!parsed) throw new Error("Elemento inválido.");
+      const path =
+        parsed.kind === "cto"
+          ? `/api/v1/commercial/network/ctos/${parsed.id}`
+          : parsed.kind === "cable"
+            ? `/api/v1/commercial/network/cables/${parsed.id}`
+            : parsed.kind === "splice_box"
+              ? `/api/v1/commercial/network/splice-boxes/${parsed.id}`
+              : parsed.kind === "pole"
+                ? `/api/v1/commercial/network/poles/${parsed.id}`
+                : null;
+      if (!path) throw new Error("Este tipo não pode ser excluído aqui.");
+      await apiFetch(path, { method: "DELETE" });
+    },
+    onSuccess: async () => {
+      setConfirmDelete(false);
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      if (mapId) onDeleted?.(mapId);
+      onClose();
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao excluir."),
+  });
+
   if (!open || !parsed) return null;
+
+  const editableKinds: InfraMapKind[] = ["cto", "cable", "splice_box", "pole"];
+  const canMapEditActions = mapEditMode && canEdit && editableKinds.includes(parsed.kind);
 
   const title =
     parsed.kind === "cto"
@@ -264,6 +304,32 @@ export function MapInfraSidePanel({
     parsed.kind === "cto"
       ? ctoQ.data?.description ?? fallback?.description ?? null
       : null;
+
+  function renderMapEditActions() {
+    if (!canMapEditActions || !mapId || !parsed) return null;
+    return (
+      <div className="map-infra-panel__edit-actions">
+        <p className="map-infra-panel__muted" style={{ margin: "0 0 6px" }}>
+          Modo edição
+        </p>
+        <div className="map-infra-panel__actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => onStartReposition?.(mapId, parsed.kind, parsed.id)}
+          >
+            {parsed.kind === "cable" ? "Reposicionar trajeto" : "Reposicionar no mapa"}
+          </button>
+          <button type="button" className="btn" onClick={() => onHideFromMap?.(mapId)}>
+            Ocultar no mapa
+          </button>
+          <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
+            Excluir
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <aside className="map-infra-panel" aria-label="Painel de infraestrutura">
@@ -337,9 +403,9 @@ export function MapInfraSidePanel({
             <button type="button" className="btn btn--primary" onClick={() => setSplitterOpen(true)}>
               Visualizar splitter
             </button>
-            {canEdit ? (
+            {canEdit && !mapEditMode ? (
               <button type="button" className="btn" onClick={() => setEditing(true)}>
-                Editar no mapa
+                Editar dados
               </button>
             ) : null}
             <Link className="btn" to={`${APP_ROUTES.connections}?tab=cto`}>
@@ -356,6 +422,7 @@ export function MapInfraSidePanel({
               </a>
             ) : null}
           </div>
+          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -477,6 +544,7 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
+          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -534,6 +602,7 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
+          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -568,7 +637,21 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
+          {renderMapEditActions()}
         </div>
+      ) : null}
+
+      {confirmDelete ? (
+        <ConfirmModal
+          open
+          title="Excluir elemento"
+          message={`Tem a certeza que deseja excluir permanentemente este ${INFRA_MAP_KIND_LABELS[parsed.kind] ?? "elemento"}?`}
+          confirmLabel="Excluir"
+          danger
+          busy={deleteMut.isPending}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => deleteMut.mutate()}
+        />
       ) : null}
     </aside>
   );

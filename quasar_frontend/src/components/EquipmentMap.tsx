@@ -9,7 +9,7 @@ export type MapPointKind = "equipment" | "connection" | InfraMapKind;
 
 export type MapLatLng = { lat: number; lng: number };
 
-export type MapPlaceMode = "place" | "cable" | null;
+export type MapPlaceMode = "place" | "cable" | "reposition" | "edit-cable" | null;
 
 export type MapPoint = {
   id: string;
@@ -228,7 +228,7 @@ function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds)
     };
     const schedule = () => {
       if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(emit, 280);
+      timer = window.setTimeout(emit, 450);
     };
     map.whenReady(emit);
     map.on("moveend", schedule);
@@ -602,6 +602,13 @@ function withMapPinHighlight(icon: L.DivIcon, highlighted: boolean, accent: stri
   });
 }
 
+
+function highlightSet(highlightedId?: string | string[] | null): Set<string> {
+  if (!highlightedId) return new Set();
+  if (Array.isArray(highlightedId)) return new Set(highlightedId.filter(Boolean));
+  return new Set([highlightedId]);
+}
+
 function infraStyleFor(kind: InfraMapKind, styles: MapIconStyles): string | null {
   if (kind === "cto") return styles.cto;
   if (kind === "splice_box") return styles.splice_box;
@@ -613,9 +620,9 @@ function markerIconOpts(
   p: MapPoint,
   colors: MapColors,
   iconStyles: MapIconStyles,
-  highlightedId?: string | null,
+  highlightedId?: string | string[] | null,
 ): { icon: L.Icon | L.DivIcon } {
-  const highlighted = !!highlightedId && p.id === highlightedId;
+  const highlighted = highlightSet(highlightedId).has(p.id);
   let icon: L.DivIcon;
   if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
     icon = infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null, infraStyleFor(p.mapKind, iconStyles));
@@ -635,7 +642,7 @@ function markerIconOptsGroup(
   colors: MapColors,
   iconStyles: MapIconStyles,
   clusterKind?: string,
-  highlightedId?: string | null,
+  highlightedId?: string | string[] | null,
 ): { icon: L.Icon | L.DivIcon } {
   const isConn = members.length > 0 && members.every(isConnectionPoint);
   const infraKind = members.length > 0 && members.every((m) => m.mapKind === members[0].mapKind && isInfrastructurePoint(m))
@@ -650,7 +657,7 @@ function markerIconOptsGroup(
     return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn, iconStyles) };
   }
   const single = members[0];
-  const highlighted = !!highlightedId && members.length === 1 && single.id === highlightedId;
+  const highlighted = members.length === 1 && highlightSet(highlightedId).has(single.id);
   if (infraKind && isInfraMapKind(infraKind)) {
     const label = infraKind === "cto" && members.length === 1 ? members[0].mapLabel : null;
     const icon = infrastructurePinIcon(infraKind, members[0].markerColor, label, infraStyleFor(infraKind, iconStyles));
@@ -673,9 +680,9 @@ function mapMarkerProps(
   displayMode: MapDisplayMode,
   colors: MapColors,
   iconStyles: MapIconStyles,
-  highlightedId?: string | null,
+  highlightedId?: string | string[] | null,
 ) {
-  const highlighted = !!highlightedId && p.id === highlightedId;
+  const highlighted = highlightSet(highlightedId).has(p.id);
   return {
     ...markerIconOpts(displayMode, p, colors, iconStyles, highlightedId),
     zIndexOffset: highlighted ? 1200 : 0,
@@ -723,7 +730,7 @@ function ClusterCellMarkers({
   displayMode: MapDisplayMode;
   colors: MapColors;
   iconStyles: MapIconStyles;
-  highlightedId?: string | null;
+  highlightedId?: string | string[] | null;
 }) {
   const map = useMap();
 
@@ -744,7 +751,7 @@ function ClusterCellMarkers({
       <Marker
         position={[c.lat, c.lng]}
         {...markerIconOptsGroup(displayMode, c.members, colors, iconStyles, c.kind, highlightedId)}
-        zIndexOffset={c.members.some((m) => m.id === highlightedId) ? 1200 : 0}
+        zIndexOffset={c.members.some((m) => highlightSet(highlightedId).has(m.id)) ? 1200 : 0}
         eventHandlers={{
           click: (e) => {
             L.DomEvent.stopPropagation(e);
@@ -812,7 +819,7 @@ function ClusterCellMarkers({
             key={sk}
             position={[clat, clng]}
             {...markerIconOptsGroup(displayMode, grp, colors, iconStyles, pointClusterKind(grp[0]), highlightedId)}
-            zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
+            zIndexOffset={grp.some((m) => highlightSet(highlightedId).has(m.id)) ? 1200 : 0}
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
@@ -876,7 +883,7 @@ function ClusterMarkersByView({
   stopSpiderAnim: () => void;
   colors: MapColors;
   iconStyles: MapIconStyles;
-  highlightedId?: string | null;
+  highlightedId?: string | string[] | null;
 }) {
   const map = useMap();
   const [zoom, setZoom] = useState(() => map.getZoom());
@@ -957,7 +964,7 @@ function ScatterStackMarker({
   setSpider: (s: SpiderState) => void;
   colors: MapColors;
   iconStyles: MapIconStyles;
-  highlightedId?: string | null;
+  highlightedId?: string | string[] | null;
 }) {
   const map = useMap();
   const [clat, clng] = centroid(grp);
@@ -965,7 +972,7 @@ function ScatterStackMarker({
     <Marker
       position={[clat, clng]}
       {...markerIconOptsGroup(displayMode, grp, colors, iconStyles, pointClusterKind(grp[0]), highlightedId)}
-      zIndexOffset={grp.some((m) => m.id === highlightedId) ? 1200 : 0}
+      zIndexOffset={grp.some((m) => highlightSet(highlightedId).has(m.id)) ? 1200 : 0}
       eventHandlers={{
         click: (e) => {
           L.DomEvent.stopPropagation(e);
@@ -1031,7 +1038,7 @@ function ScatterMarkersLayer({
   colors: MapColors;
   iconStyles: MapIconStyles;
   keyPrefix: string;
-  highlightedId?: string | null;
+  highlightedId?: string | string[] | null;
 }) {
   return (
     <>
@@ -1101,46 +1108,165 @@ function MapPlaceClickLayer({
   return null;
 }
 
-function CablePathsLayer({ points }: { points: MapPoint[] }) {
+function CablePathsLayer({
+  points,
+  editingCableId,
+}: {
+  points: MapPoint[];
+  editingCableId?: string | null;
+}) {
   const cables = useMemo(
     () => points.filter((p) => p.mapKind === "cable" && Array.isArray(p.path) && p.path.length >= 2),
     [points],
   );
   return (
     <>
-      {cables.map((c) => (
-        <Polyline
-          key={`cable-path-${c.id}`}
-          positions={c.path!.map((pt) => [pt.lat, pt.lng] as [number, number])}
-          pathOptions={{ color: "#0f766e", weight: 4, opacity: 0.85 }}
-        />
-      ))}
+      {cables.map((c) => {
+        if (editingCableId && c.id === editingCableId) return null;
+        return (
+          <Polyline
+            key={`cable-path-${c.id}`}
+            positions={c.path!.map((pt) => [pt.lat, pt.lng] as [number, number])}
+            pathOptions={{ color: "#0f766e", weight: 4, opacity: 0.85 }}
+          />
+        );
+      })}
     </>
   );
 }
 
-function DraftCableLayer({ draftPath }: { draftPath: MapLatLng[] }) {
+function DraftCableLayer({
+  draftPath,
+  editable = false,
+  onVertexMove,
+}: {
+  draftPath: MapLatLng[];
+  editable?: boolean;
+  onVertexMove?: (index: number, lat: number, lng: number) => void;
+}) {
+  const vertexIcon = useMemo(() => {
+    const html =
+      '<div style="width:14px;height:14px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div>';
+    return L.divIcon({
+      className: "map-cable-vertex",
+      html,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+  }, []);
+
   if (draftPath.length === 0) return null;
   const positions = draftPath.map((p) => [p.lat, p.lng] as [number, number]);
   return (
     <>
       {draftPath.length >= 2 ? (
-        <Polyline positions={positions} pathOptions={{ color: "#ea580c", weight: 4, dashArray: "8 6", opacity: 0.95 }} />
-      ) : null}
-      {draftPath.map((p, i) => (
-        <CircleMarker
-          key={`draft-${i}`}
-          center={[p.lat, p.lng]}
-          radius={i === 0 || i === draftPath.length - 1 ? 7 : 5}
+        <Polyline
+          positions={positions}
           pathOptions={{
-            color: "#c2410c",
-            fillColor: i === 0 ? "#16a34a" : i === draftPath.length - 1 ? "#ea580c" : "#fdba74",
-            fillOpacity: 1,
-            weight: 2,
+            color: editable ? "#2563eb" : "#ea580c",
+            weight: 4,
+            dashArray: editable ? undefined : "8 6",
+            opacity: 0.95,
           }}
         />
-      ))}
+      ) : null}
+      {draftPath.map((p, i) =>
+        editable && onVertexMove ? (
+          <Marker
+            key={`draft-edit-${i}`}
+            position={[p.lat, p.lng]}
+            icon={vertexIcon}
+            draggable
+            zIndexOffset={1800}
+            eventHandlers={{
+              dragend: (e) => {
+                const ll = e.target.getLatLng();
+                onVertexMove(i, ll.lat, ll.lng);
+              },
+            }}
+          />
+        ) : (
+          <CircleMarker
+            key={`draft-${i}`}
+            center={[p.lat, p.lng]}
+            radius={i === 0 || i === draftPath.length - 1 ? 7 : 5}
+            pathOptions={{
+              color: "#c2410c",
+              fillColor: i === 0 ? "#16a34a" : i === draftPath.length - 1 ? "#ea580c" : "#fdba74",
+              fillOpacity: 1,
+              weight: 2,
+            }}
+          />
+        ),
+      )}
     </>
+  );
+}
+
+function RepositionGhostMarker({
+  position,
+  onDragEnd,
+}: {
+  position: MapLatLng | null;
+  onDragEnd?: (lat: number, lng: number) => void;
+}) {
+  const icon = useMemo(() => {
+    const html =
+      '<div style="width:22px;height:22px;border-radius:50%;background:#ea580c;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35)"></div>';
+    return L.divIcon({
+      className: "map-reposition-ghost",
+      html,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+  }, []);
+
+  if (!position) return null;
+  return (
+    <Marker
+      position={[position.lat, position.lng]}
+      icon={icon}
+      draggable
+      zIndexOffset={1900}
+      eventHandlers={{
+        dragend: (e) => {
+          const ll = e.target.getLatLng();
+          onDragEnd?.(ll.lat, ll.lng);
+        },
+      }}
+    >
+      <Popup>Arraste para reposicionar ou clique no mapa.</Popup>
+    </Marker>
+  );
+}
+
+function userLocationIcon(): L.DivIcon {
+  const key = "user-gps:v1";
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const html = `<div class="map-user-loc" aria-hidden="true"><span class="map-user-loc__pulse"></span><span class="map-user-loc__dot"></span></div>`;
+  const icon = L.divIcon({
+    className: "map-user-loc-wrap",
+    html,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+  });
+  iconCache.set(key, icon);
+  return icon;
+}
+
+function UserLocationMarker({ location }: { location: MapLatLng | null | undefined }) {
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return null;
+  return (
+    <Marker position={[location.lat, location.lng]} icon={userLocationIcon()} zIndexOffset={2000}>
+      <Popup>
+        <strong>A sua posição</strong>
+        <div className="mono" style={{ fontSize: 12 }}>
+          {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
+        </div>
+      </Popup>
+    </Marker>
   );
 }
 
@@ -1162,9 +1288,14 @@ export function EquipmentMap({
   connectionClusterForced = false,
   mapHeight = 480,
   highlightedId = null,
+  userLocation = null,
   placeMode = null,
   draftPath = [],
   onMapClick,
+  onDraftVertexMove,
+  repositionPreview = null,
+  editingCableMapId = null,
+  mapEditMode = false,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -1188,13 +1319,23 @@ export function EquipmentMap({
   /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
   connectionClusterForced?: boolean;
   mapHeight?: number | string;
-  /** Pin seleccionado (ex.: resultado da pesquisa) com destaque visual. */
-  highlightedId?: string | null;
-  /** Modo de adicionar elemento no mapa (cursor + clique). */
+  /** Pin seleccionado e/ou CTOs próximas (destaque visual). */
+  highlightedId?: string | string[] | null;
+  /** Posição GPS do técnico (marcador em tempo real). */
+  userLocation?: MapLatLng | null;
+  /** Modo de adicionar / editar no mapa (cursor + clique). */
   placeMode?: MapPlaceMode;
-  /** Trajeto em construção do cabo. */
+  /** Trajeto em construção ou edição do cabo. */
   draftPath?: MapLatLng[];
   onMapClick?: (lat: number, lng: number) => void;
+  /** Arrastar vértice do trajeto em edição. */
+  onDraftVertexMove?: (index: number, lat: number, lng: number) => void;
+  /** Pré-visualização ao reposicionar um ponto. */
+  repositionPreview?: MapLatLng | null;
+  /** Map id do cabo cujo path está a ser editado (oculta o polyline original). */
+  editingCableMapId?: string | null;
+  /** Destaque visual do modo edição. */
+  mapEditMode?: boolean;
 }) {
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const iconStyles = mapIconStyles ?? DEFAULT_MAP_ICON_STYLES;
@@ -1202,12 +1343,13 @@ export function EquipmentMap({
   const equipValid = useMemo(() => valid.filter((p) => !isConnectionPoint(p)), [valid]);
   const connValid = useMemo(() => valid.filter(isConnectionPoint), [valid]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
-  const placing = placeMode === "place" || placeMode === "cable";
+  const placing =
+    placeMode === "place" || placeMode === "cable" || placeMode === "reposition" || placeMode === "edit-cable";
   const selectHandler = placing ? undefined : onSelectDevice;
   const splitterHandler = placing ? undefined : onOpenSplitter;
   const cableFibersHandler = placing ? undefined : onOpenCableFibers;
   const spliceHandler = placing ? undefined : onOpenSplice;
-  const editHandler = placing ? undefined : onEditPosition;
+  const editHandler = placing || !mapEditMode ? undefined : onEditPosition;
   const copyCoordsHandler = placing ? undefined : onCopyCoords;
 
   const [spider, setSpider] = useState<SpiderState>(null);
@@ -1264,9 +1406,18 @@ export function EquipmentMap({
 
   return (
     <div
-      className={
-        placing ? (placeMode === "cable" ? "map-place-mode map-place-mode--cable" : "map-place-mode map-place-mode--place") : undefined
-      }
+      className={[
+        placing
+          ? placeMode === "cable" || placeMode === "edit-cable"
+            ? "map-place-mode map-place-mode--cable"
+            : placeMode === "reposition"
+              ? "map-place-mode map-place-mode--reposition"
+              : "map-place-mode map-place-mode--place"
+          : undefined,
+        mapEditMode ? "map-edit-mode" : undefined,
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <MapContainer
         center={center}
@@ -1282,8 +1433,17 @@ export function EquipmentMap({
         <MapPlaceClickLayer enabled={placing} onMapClick={onMapClick} />
         <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-        <CablePathsLayer points={valid} />
-        <DraftCableLayer draftPath={draftPath} />
+        <CablePathsLayer points={valid} editingCableId={editingCableMapId} />
+        <DraftCableLayer
+          draftPath={draftPath}
+          editable={placeMode === "edit-cable"}
+          onVertexMove={onDraftVertexMove}
+        />
+        <RepositionGhostMarker
+          position={placeMode === "reposition" ? repositionPreview : null}
+          onDragEnd={onMapClick}
+        />
+        <UserLocationMarker location={userLocation} />
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView

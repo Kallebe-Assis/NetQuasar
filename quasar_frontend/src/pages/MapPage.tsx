@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LocateFixed, Pencil } from "lucide-react";
 import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
@@ -10,6 +11,7 @@ import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { CTO_MAP_PIN_COLOR, DEFAULT_MAP_ICON_STYLES, INFRA_MAP_KIND_LABELS, isInfraMapKind, type InfraMapKind, type MapIconStyles } from "../lib/mapInfrastructureIcons";
 import { fiberSpecByName } from "../lib/fiberSplitter";
+import { formatDistanceMeters } from "../lib/nearestCtoMatch";
 import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
 import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
@@ -86,6 +88,18 @@ type InfrastructurePoint = {
   splitter?: string | null;
   fiber_color?: string | null;
   path?: MapLatLng[] | null;
+};
+
+type NearestCtoApi = {
+  id: string;
+  map_id: string;
+  description: string;
+  display_number: number;
+  lat: number;
+  lng: number;
+  distance_m: number;
+  splitter?: string | null;
+  fiber_color?: string | null;
 };
 
 type PointDetail = Point & {
@@ -217,10 +231,34 @@ export function MapPage() {
   const [placeSession, setPlaceSession] = useState<MapPlaceSession | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const canEditMap = isAdminUser() || can("connections.manage") || can("map.manage");
+  const [mapEditMode, setMapEditMode] = useState(false);
+  const [hiddenMapIds, setHiddenMapIds] = useState<Set<string>>(() => new Set());
+  const [repositionTarget, setRepositionTarget] = useState<{
+    mapId: string;
+    kind: InfraMapKind;
+    entityId: string;
+  } | null>(null);
+  const [repositionPreview, setRepositionPreview] = useState<MapLatLng | null>(null);
+  const [editingCable, setEditingCable] = useState<{ mapId: string; entityId: string } | null>(null);
+  const [geoTracking, setGeoTracking] = useState(false);
+  const [userLocation, setUserLocation] = useState<MapLatLng | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [nearestCtos, setNearestCtos] = useState<NearestCtoApi[]>([]);
+  const geoWatchRef = useRef<number | null>(null);
+  const geoFirstFixRef = useRef(false);
+  const nearestQueryRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
   const onMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
   const qc = useQueryClient();
 
-  const placeMode: MapPlaceMode = addKind === "cable" ? "cable" : addKind ? "place" : null;
+  const placeMode: MapPlaceMode = editingCable
+    ? "edit-cable"
+    : repositionTarget
+      ? "reposition"
+      : addKind === "cable"
+        ? "cable"
+        : addKind
+          ? "place"
+          : null;
 
   const uiAppearance = useQuery({
     queryKey: queryKeys.uiAppearance,
@@ -367,18 +405,18 @@ export function MapPage() {
       "map-infrastructure-points",
       infraKinds.join(","),
       projectFilterId,
-      projectFilterId ? "all" : mapBounds?.minLat,
-      projectFilterId ? "all" : mapBounds?.maxLat,
-      projectFilterId ? "all" : mapBounds?.minLng,
-      projectFilterId ? "all" : mapBounds?.maxLng,
-      projectFilterId ? "all" : mapBounds?.zoom,
+      mapBounds?.minLat,
+      mapBounds?.maxLat,
+      mapBounds?.minLng,
+      mapBounds?.maxLng,
+      mapBounds?.zoom,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("kinds", infraKinds.join(","));
       if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
-      // Sem filtro de projeto: limitar ao viewport. Com projeto: API ignora bbox.
-      if (!projectFilterId.trim() && mapBounds) {
+      // Sempre limitar ao viewport — evita carregar milhares de CTOs de uma vez.
+      if (mapBounds) {
         params.set("min_lat", String(mapBounds.minLat));
         params.set("max_lat", String(mapBounds.maxLat));
         params.set("min_lng", String(mapBounds.minLng));
@@ -386,11 +424,11 @@ export function MapPage() {
         if (mapBounds.zoom != null) params.set("zoom", String(mapBounds.zoom));
       }
       const qs = params.toString();
-      return apiFetch<{ points: InfrastructurePoint[]; total?: number; truncated?: boolean }>(
+      return apiFetch<{ points: InfrastructurePoint[]; total?: number; truncated?: boolean; limit?: number }>(
         `/api/v1/map/infrastructure-points${qs ? `?${qs}` : ""}`,
       );
     },
-    enabled: showInfrastructure && (projectFilterId.trim() !== "" || mapBounds != null),
+    enabled: showInfrastructure && mapBounds != null,
     placeholderData: keepPreviousData,
   });
 
@@ -427,9 +465,11 @@ export function MapPage() {
       login: c.login,
     }));
     const infraRaw = showInfrastructure && Array.isArray(infraPts.data?.points) ? infraPts.data.points : [];
+    const infraIds = new Set<string>();
     const infra: Point[] = infraRaw
       .filter((p) => isInfraMapKind(p.point_type))
       .map((p) => {
+        infraIds.add(`${p.point_type}:${p.id}`);
         const splitterLabel = p.point_type === "cto" && p.splitter ? String(p.splitter).trim() : "";
         const ctoColor = ctoColorByFeed ? fiberSpecByName(p.fiber_color).hex : mapPrefsDraft.cto;
         const spliceColor = mapPrefsDraft.splice_box;
@@ -451,7 +491,32 @@ export function MapPage() {
           path: Array.isArray(p.path) ? p.path : null,
         };
       });
-    return [...equip, ...conn, ...infra];
+    // Garante que as CTOs próximas do GPS aparecem mesmo fora do viewport actual.
+    if (showCtos) {
+      for (const c of nearestCtos) {
+        const key = `cto:${c.id}`;
+        if (infraIds.has(key)) continue;
+        infraIds.add(key);
+        const ctoColor = ctoColorByFeed ? fiberSpecByName(c.fiber_color).hex : mapPrefsDraft.cto;
+        infra.push({
+          id: c.map_id,
+          description: c.description,
+          category: "CTO",
+          lat: Number(c.lat),
+          lng: Number(c.lng),
+          status: (c.splitter ?? "").trim() || "—",
+          point_type: "cto",
+          mapKind: "cto",
+          markerColor: ctoColor,
+          display_number: c.display_number,
+          mapLabel: c.description,
+          splitter: c.splitter ?? null,
+          fiber_color: c.fiber_color ?? null,
+          path: null,
+        });
+      }
+    }
+    return [...equip, ...conn, ...infra].filter((p) => !hiddenMapIds.has(p.id));
   }, [
     equipPoints,
     connPts.data?.points,
@@ -459,10 +524,13 @@ export function MapPage() {
     showConnections,
     showEquipment,
     showInfrastructure,
+    showCtos,
+    nearestCtos,
     projectFilterId,
     ctoColorByFeed,
     mapPrefsDraft.cto,
     mapPrefsDraft.splice_box,
+    hiddenMapIds,
   ]);
 
   const connTotal = connPts.data?.total;
@@ -491,9 +559,22 @@ export function MapPage() {
     queryFn: () => apiFetch<PointDetail>(`/api/v1/map/equipment-points/${selId!}`),
   });
 
-  const mapPoints: MapPoint[] = useMemo(
-    () =>
-      displayedPoints.map((p) => ({
+  const mapPoints: MapPoint[] = useMemo(() => {
+    const nearestLabel = new Map(nearestCtos.map((c, i) => [c.map_id, `#${i + 1} · ${formatDistanceMeters(c.distance_m)}`]));
+    const zoom = mapBounds?.zoom ?? 0;
+    // Labels de CTO são caras no DOM — só com zoom alto ou nas próximas/seleccionadas.
+    const showCtoLabels = zoom >= 15;
+    return displayedPoints
+      .filter((p) => !(repositionTarget && p.id === repositionTarget.mapId))
+      .map((p) => {
+      const nearest = nearestLabel.get(p.id);
+      const selected = selId === p.id;
+      let mapLabel = p.mapLabel;
+      if (p.mapKind === "cto") {
+        if (nearest) mapLabel = nearest;
+        else if (!showCtoLabels && !selected) mapLabel = undefined;
+      }
+      return {
         id: p.id,
         description: p.description,
         lat: Number(p.lat),
@@ -503,18 +584,256 @@ export function MapPage() {
         status: p.status,
         mapKind: p.mapKind,
         markerColor: p.markerColor,
-        mapLabel: p.mapLabel,
+        mapLabel,
         splitter: p.splitter ?? null,
         path: p.path ?? null,
-      })),
-    [displayedPoints],
+      };
+    });
+  }, [displayedPoints, selId, nearestCtos, mapBounds?.zoom, repositionTarget]);
+
+  const mapHighlightIds = useMemo(() => {
+    const ids = nearestCtos.map((c) => c.map_id);
+    if (selId && !ids.includes(selId)) ids.unshift(selId);
+    else if (selId) {
+      // keep selId first for emphasis order isn't needed
+    }
+    return ids.length > 0 ? ids : selId;
+  }, [nearestCtos, selId]);
+
+  const stopGeoTracking = useCallback(() => {
+    if (geoWatchRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+    }
+    geoWatchRef.current = null;
+    setGeoTracking(false);
+  }, []);
+
+  const fetchNearestCtos = useCallback(
+    async (lat: number, lng: number) => {
+      const params = new URLSearchParams({
+        lat: String(lat),
+        lng: String(lng),
+        limit: "3",
+      });
+      if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
+      try {
+        const r = await apiFetch<{ ctos?: NearestCtoApi[] }>(`/api/v1/map/nearest-ctos?${params}`);
+        setNearestCtos(Array.isArray(r.ctos) ? r.ctos : []);
+      } catch (e) {
+        setMapToast({ ok: false, text: e instanceof Error ? e.message : "Falha ao calcular CTOs próximas." });
+      }
+    },
+    [projectFilterId],
   );
+
+  const startGeoTracking = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGeoError("Geolocalização não é suportada neste navegador.");
+      setMapToast({ ok: false, text: "Geolocalização não suportada neste dispositivo." });
+      return;
+    }
+    if (!window.isSecureContext) {
+      setGeoError("GPS exige HTTPS (ou localhost).");
+      setMapToast({ ok: false, text: "Para usar o GPS no telemóvel, aceda via HTTPS." });
+      return;
+    }
+    stopGeoTracking();
+    setGeoError(null);
+    setGeoTracking(true);
+    setShowCtos(true);
+    setShowEquipment(false);
+    setShowConnections(false);
+    geoFirstFixRef.current = false;
+    nearestQueryRef.current = null;
+    userPickedTab.current = true;
+    setView("mapa");
+    setMapToast({ ok: true, text: "A pedir permissão de localização…" });
+
+    geoWatchRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setUserLocation({ lat, lng });
+        setGeoError(null);
+        if (!geoFirstFixRef.current) {
+          geoFirstFixRef.current = true;
+          setFlyTo({ lat, lng, zoom: 17 });
+          setFlyKey((k) => k + 1);
+          setMapToast({ ok: true, text: "Posição obtida. A calcular CTOs próximas…" });
+        }
+        const prev = nearestQueryRef.current;
+        const now = Date.now();
+        const movedFar =
+          !prev ||
+          Math.abs(prev.lat - lat) > 0.00018 ||
+          Math.abs(prev.lng - lng) > 0.00018 ||
+          now - prev.at > 8_000;
+        if (!movedFar) return;
+        nearestQueryRef.current = { lat, lng, at: now };
+        void fetchNearestCtos(lat, lng);
+      },
+      (err) => {
+        const msg =
+          err.code === err.PERMISSION_DENIED
+            ? "Permissão de localização negada. Active o GPS nas definições do browser."
+            : err.code === err.POSITION_UNAVAILABLE
+              ? "Posição indisponível. Verifique o GPS do dispositivo."
+              : "Tempo esgotado ao obter a localização.";
+        setGeoError(msg);
+        setMapToast({ ok: false, text: msg });
+        stopGeoTracking();
+      },
+      { enableHighAccuracy: true, maximumAge: 3_000, timeout: 25_000 },
+    );
+  }, [fetchNearestCtos, stopGeoTracking]);
+
+  useEffect(() => {
+    return () => {
+      if (geoWatchRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!geoTracking || !userLocation) return;
+    void fetchNearestCtos(userLocation.lat, userLocation.lng);
+  }, [projectFilterId]); // eslint-disable-line react-hooks/exhaustive-deps -- só reconsulta ao mudar projeto
 
   const cancelAddMode = useCallback(() => {
     setAddKind(null);
     setDraftPath([]);
     setAddMenuOpen(false);
+    setRepositionTarget(null);
+    setRepositionPreview(null);
+    setEditingCable(null);
   }, []);
+
+  const toggleMapEditMode = useCallback(() => {
+    setMapEditMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setRepositionTarget(null);
+        setRepositionPreview(null);
+        setEditingCable(null);
+        setDraftPath([]);
+        setAddKind(null);
+      } else {
+        setAddKind(null);
+        setAddMenuOpen(false);
+        setPlaceSession(null);
+      }
+      return next;
+    });
+  }, []);
+
+  const patchInfraPosition = useCallback(
+    async (kind: InfraMapKind, entityId: string, lat: number, lng: number, path?: MapLatLng[]) => {
+      const endpoint =
+        kind === "cto"
+          ? `/api/v1/commercial/network/ctos/${entityId}`
+          : kind === "cable"
+            ? `/api/v1/commercial/network/cables/${entityId}`
+            : kind === "splice_box"
+              ? `/api/v1/commercial/network/splice-boxes/${entityId}`
+              : kind === "pole"
+                ? `/api/v1/commercial/network/poles/${entityId}`
+                : kind === "project"
+                  ? `/api/v1/commercial/network/projects/${entityId}`
+                  : null;
+      if (!endpoint) throw new Error("Tipo não suportado.");
+      const json: Record<string, unknown> = { latitude: lat, longitude: lng };
+      if (kind === "cable" && path && path.length >= 2) {
+        json.path = path.map((p) => ({ lat: p.lat, lng: p.lng }));
+      }
+      await apiFetch(endpoint, { method: "PATCH", json });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      if (kind === "cto") await qc.invalidateQueries({ queryKey: ["map-cto-detail", entityId] });
+      if (kind === "cable") await qc.invalidateQueries({ queryKey: ["map-cable-detail", entityId] });
+    },
+    [qc],
+  );
+
+  const startReposition = useCallback(
+    (mapId: string, kind: InfraMapKind, entityId: string) => {
+      if (!mapEditMode) {
+        setMapToast({ ok: false, text: "Active o Modo edição para reposicionar elementos." });
+        return;
+      }
+      setAddKind(null);
+      setPlaceSession(null);
+      if (kind === "cable") {
+        const pt = displayedPoints.find((p) => p.id === mapId);
+        const path =
+          pt?.path && pt.path.length >= 2
+            ? pt.path.map((p) => ({ lat: p.lat, lng: p.lng }))
+            : pt
+              ? [
+                  { lat: Number(pt.lat), lng: Number(pt.lng) },
+                  { lat: Number(pt.lat) + 0.0001, lng: Number(pt.lng) + 0.0001 },
+                ]
+              : [];
+        setEditingCable({ mapId, entityId });
+        setDraftPath(path);
+        setRepositionTarget(null);
+        setRepositionPreview(null);
+        setMapToast({ ok: true, text: "Arraste os pontos do cabo ou clique no mapa para adicionar. Guarde quando terminar." });
+        return;
+      }
+      const pt = displayedPoints.find((p) => p.id === mapId);
+      setEditingCable(null);
+      setDraftPath([]);
+      setRepositionTarget({ mapId, kind, entityId });
+      setRepositionPreview(pt ? { lat: Number(pt.lat), lng: Number(pt.lng) } : null);
+      setMapToast({ ok: true, text: "Clique no mapa ou arraste o marcador para a nova posição." });
+    },
+    [mapEditMode, displayedPoints],
+  );
+
+  const commitReposition = useCallback(
+    async (lat: number, lng: number) => {
+      if (!repositionTarget) return;
+      try {
+        await patchInfraPosition(repositionTarget.kind, repositionTarget.entityId, lat, lng);
+        setRepositionPreview({ lat, lng });
+        setRepositionTarget(null);
+        setRepositionPreview(null);
+        setMapToast({ ok: true, text: "Posição actualizada." });
+        setFlyTo({ lat, lng, zoom: 17 });
+        setFlyKey((k) => k + 1);
+        if (selId === repositionTarget.mapId) {
+          setDetailFallback({
+            id: repositionTarget.mapId,
+            description: selPoint?.description ?? "Elemento",
+            category: selPoint?.category ?? "",
+            lat,
+            lng,
+            status: selPoint?.status ?? "infra",
+            mapKind: repositionTarget.kind,
+          });
+        }
+      } catch (e) {
+        setMapToast({ ok: false, text: e instanceof Error ? e.message : "Falha ao reposicionar." });
+      }
+    },
+    [repositionTarget, patchInfraPosition, selId, selPoint],
+  );
+
+  const saveEditedCablePath = useCallback(async () => {
+    if (!editingCable) return;
+    if (draftPath.length < 2) {
+      setMapToast({ ok: false, text: "O cabo precisa de pelo menos 2 pontos." });
+      return;
+    }
+    try {
+      await patchInfraPosition("cable", editingCable.entityId, draftPath[0].lat, draftPath[0].lng, draftPath);
+      setEditingCable(null);
+      setDraftPath([]);
+      setMapToast({ ok: true, text: "Trajeto do cabo actualizado." });
+    } catch (e) {
+      setMapToast({ ok: false, text: e instanceof Error ? e.message : "Falha ao guardar o cabo." });
+    }
+  }, [editingCable, draftPath, patchInfraPosition]);
 
   const enableLayerForKind = useCallback((kind: PlaceableKind) => {
     if (kind === "cto") setShowCtos(true);
@@ -525,6 +844,10 @@ export function MapPage() {
   }, []);
 
   const startAddKind = useCallback((kind: PlaceableKind) => {
+    setMapEditMode(false);
+    setRepositionTarget(null);
+    setRepositionPreview(null);
+    setEditingCable(null);
     setAddKind(kind);
     setDraftPath([]);
     setAddMenuOpen(false);
@@ -536,6 +859,14 @@ export function MapPage() {
 
   const handleMapPlaceClick = useCallback(
     (lat: number, lng: number) => {
+      if (repositionTarget) {
+        void commitReposition(lat, lng);
+        return;
+      }
+      if (editingCable) {
+        setDraftPath((prev) => [...prev, { lat, lng }]);
+        return;
+      }
       if (!addKind) return;
       if (addKind === "cable") {
         setDraftPath((prev) => [...prev, { lat, lng }]);
@@ -544,7 +875,7 @@ export function MapPage() {
       setPlaceSession({ mode: "create", kind: addKind, lat, lng });
       setAddKind(null);
     },
-    [addKind],
+    [addKind, repositionTarget, editingCable, commitReposition],
   );
 
   const saveCablePath = useCallback(() => {
@@ -773,13 +1104,13 @@ export function MapPage() {
   }, [addMenuOpen]);
 
   useEffect(() => {
-    if (!addKind) return;
+    if (!addKind && !repositionTarget && !editingCable) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") cancelAddMode();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addKind, cancelAddMode]);
+  }, [addKind, repositionTarget, editingCable, cancelAddMode]);
 
   /** Só o total da API — não usar `filteredPoints`: filtro POP/categoria vazio não deve trocar para «Lista» e esconder o mapa. */
   useEffect(() => {
@@ -820,13 +1151,19 @@ export function MapPage() {
           Mapa
           <InfoHint label="Como usar o mapa">
             <p>
-              Equipamentos com coordenadas, CTOs e cabos da área visível (viewport), e opcionalmente logins ou outra
-              infraestrutura. Use o botão <strong>+</strong> no mapa para adicionar elementos clicando na posição.
+              Equipamentos com coordenadas e infraestrutura (CTOs, cabos, etc.) apenas na área visível, com limite por
+              zoom para manter o mapa fluido. Use o botão <strong>+</strong> no mapa para adicionar elementos.
             </p>
             <p>Seleccione uma CTO para abrir o painel lateral (localização e edição). Filtros no ícone de filtro.</p>
           </InfoHint>
         </h1>
         <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
+        {showInfrastructure && infraPts.data?.truncated ? (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            Infra limitada neste zoom
+            {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa para ver mais CTOs
+          </span>
+        ) : null}
         {showConnections && connTotal != null ? (
           <span style={{ fontSize: 11, color: "var(--muted)" }}>
             Conexões na área: {connPts.data?.points?.length ?? 0}
@@ -909,6 +1246,24 @@ export function MapPage() {
             ) : null}
           </div>
           <MapFilterButton activeCount={filterActiveCount} onClick={() => setFilterModalOpen(true)} />
+          <button
+            type="button"
+            className={`btn btn--icon btn--icon-menu${geoTracking ? " btn--primary" : ""}`}
+            title={geoTracking ? "Parar localização GPS" : "Usar minha localização (CTOs próximas)"}
+            aria-label={geoTracking ? "Parar localização GPS" : "Usar minha localização"}
+            aria-pressed={geoTracking}
+            onClick={() => {
+              if (geoTracking) {
+                stopGeoTracking();
+                setNearestCtos([]);
+                setMapToast({ ok: true, text: "Localização GPS desligada." });
+              } else {
+                startGeoTracking();
+              }
+            }}
+          >
+            <LocateFixed size={18} strokeWidth={2} aria-hidden />
+          </button>
           <MapSettingsButton onClick={() => setSettingsModalOpen(true)} />
           <button
             type="button"
@@ -1096,6 +1451,20 @@ export function MapPage() {
               <div className={`map-workspace${infraPanelOpen && isInfraPoint ? " map-workspace--with-panel" : ""}`}>
                 <div className="map-workspace__map">
                   {canEditMap ? (
+                    <div className="map-edit-toggle">
+                      <button
+                        type="button"
+                        className={`map-edit-toggle__btn${mapEditMode ? " map-edit-toggle__btn--active" : ""}`}
+                        aria-pressed={mapEditMode}
+                        title={mapEditMode ? "Sair do modo edição" : "Entrar no modo edição"}
+                        onClick={toggleMapEditMode}
+                      >
+                        <Pencil size={15} strokeWidth={2.25} />
+                        {mapEditMode ? "Modo edição" : "Editar"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {canEditMap && !mapEditMode ? (
                     <div className="map-add" ref={addMenuRef}>
                       <button
                         type="button"
@@ -1128,7 +1497,44 @@ export function MapPage() {
                     </div>
                   ) : null}
 
-                  {addKind === "cable" ? (
+                  {editingCable ? (
+                    <div className="map-cable-toolbar" role="status">
+                      <span>
+                        Editar trajeto do cabo ({draftPath.length} ponto{draftPath.length === 1 ? "" : "s"}). Arraste vértices ou
+                        clique para adicionar.
+                      </span>
+                      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          disabled={draftPath.length === 0}
+                          onClick={() => setDraftPath((p) => p.slice(0, -1))}
+                        >
+                          Desfazer
+                        </button>
+                        <button type="button" className="btn btn--sm" onClick={cancelAddMode}>
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--primary"
+                          disabled={draftPath.length < 2}
+                          onClick={() => void saveEditedCablePath()}
+                        >
+                          Guardar trajeto
+                        </button>
+                      </div>
+                    </div>
+                  ) : repositionTarget ? (
+                    <div className="map-place-hint" role="status">
+                      <span>
+                        Reposicionar: clique no mapa ou arraste o marcador. Esc cancela.
+                      </span>
+                      <button type="button" className="btn btn--sm" onClick={cancelAddMode}>
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : addKind === "cable" ? (
                     <div className="map-cable-toolbar" role="status">
                       <span>
                         Desenhe o trajeto ({draftPath.length} ponto{draftPath.length === 1 ? "" : "s"}). Clique no mapa para
@@ -1165,6 +1571,24 @@ export function MapPage() {
                         Cancelar
                       </button>
                     </div>
+                  ) : mapEditMode ? (
+                    <div className="map-place-hint" role="status">
+                      <span>
+                        Modo edição activo — seleccione um elemento e use o painel para reposicionar, ocultar ou excluir.
+                      </span>
+                      <button type="button" className="btn btn--sm" onClick={toggleMapEditMode}>
+                        Sair
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {hiddenMapIds.size > 0 ? (
+                    <div className="map-hidden-chip">
+                      <span>{hiddenMapIds.size} oculto{hiddenMapIds.size === 1 ? "" : "s"}</span>
+                      <button type="button" className="btn btn--sm" onClick={() => setHiddenMapIds(new Set())}>
+                        Mostrar todos
+                      </button>
+                    </div>
                   ) : null}
 
                   <EquipmentMap
@@ -1174,9 +1598,16 @@ export function MapPage() {
                     mapColors={mapColors}
                     mapIconStyles={mapIconStyles}
                     connectionClusterForced={connectionClusterForced}
-                    highlightedId={selId}
+                    highlightedId={mapHighlightIds}
+                    userLocation={userLocation}
                     placeMode={placeMode}
                     draftPath={draftPath}
+                    mapEditMode={mapEditMode}
+                    editingCableMapId={editingCable?.mapId ?? null}
+                    repositionPreview={repositionPreview}
+                    onDraftVertexMove={(index, lat, lng) => {
+                      setDraftPath((prev) => prev.map((p, i) => (i === index ? { lat, lng } : p)));
+                    }}
                     onMapClick={handleMapPlaceClick}
                     onSelectDevice={(id) => {
                       if (id) openPointDetail(id);
@@ -1197,9 +1628,15 @@ export function MapPage() {
                       openPointDetail(id);
                     }}
                     onEditPosition={
-                      canEditMap
+                      canEditMap && mapEditMode
                         ? (id) => {
                             if (!id) return;
+                            const parsed = parseInfraMapId(id);
+                            if (parsed) {
+                              startReposition(id, parsed.kind, parsed.id);
+                              openPointDetail(id, false);
+                              return;
+                            }
                             setAutoOpenEdit(true);
                             openPointDetail(id);
                           }
@@ -1217,11 +1654,54 @@ export function MapPage() {
                     fitBoundsVersion={fitBoundsVersion}
                     onBoundsChange={onMapBoundsChange}
                   />
+                  {geoTracking || nearestCtos.length > 0 || geoError ? (
+                    <div className="map-nearest-panel" role="region" aria-label="CTOs próximas">
+                      <div className="map-nearest-panel__title">
+                        <span>{geoTracking ? "CTOs mais próximas" : "CTOs próximas"}</span>
+                        {geoTracking ? (
+                          <button type="button" className="btn btn--sm" onClick={() => { stopGeoTracking(); setNearestCtos([]); }}>
+                            Parar
+                          </button>
+                        ) : null}
+                      </div>
+                      {geoError ? <p className="msg msg--err" style={{ margin: "0 0 8px", fontSize: 12 }}>{geoError}</p> : null}
+                      {geoTracking && !userLocation && !geoError ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>A obter GPS…</p>
+                      ) : null}
+                      {nearestCtos.length > 0 ? (
+                        <ul className="map-nearest-panel__list">
+                          {nearestCtos.map((c, i) => (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                className={`map-nearest-panel__item${selId === c.map_id ? " map-nearest-panel__item--active" : ""}`}
+                                onClick={() => openPointDetail(c.map_id)}
+                              >
+                                <span className="map-nearest-panel__rank">{i + 1}</span>
+                                <span className="map-nearest-panel__meta">
+                                  <span className="map-nearest-panel__name">
+                                    {c.description || `CTO ${c.display_number}`}
+                                  </span>
+                                  <span className="map-nearest-panel__dist">
+                                    {formatDistanceMeters(c.distance_m)}
+                                    {c.splitter ? ` · ${c.splitter}` : ""}
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : geoTracking && userLocation ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Nenhuma CTO com coordenadas encontrada.</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 {infraPanelOpen && isInfraPoint ? (
                   <MapInfraSidePanel
                     open
                     mapId={selId}
+                    mapEditMode={mapEditMode}
                     autoOpenSplitter={autoOpenSplitter}
                     onSplitterAutoOpened={() => setAutoOpenSplitter(false)}
                     autoOpenCableFibers={autoOpenCableFibers}
@@ -1249,6 +1729,18 @@ export function MapPage() {
                       setAutoOpenEdit(false);
                       setSelId(null);
                     }}
+                    onHideFromMap={(id) => {
+                      setHiddenMapIds((prev) => new Set(prev).add(id));
+                      setInfraPanelOpen(false);
+                      setSelId(null);
+                      setMapToast({ ok: true, text: "Elemento oculto neste mapa (sessão actual)." });
+                    }}
+                    onStartReposition={(mapId, kind, entityId) => startReposition(mapId, kind, entityId)}
+                    onDeleted={() => {
+                      setMapToast({ ok: true, text: "Elemento excluído." });
+                      setSelId(null);
+                      setInfraPanelOpen(false);
+                    }}
                     onSaved={(next) => {
                       setMapToast({ ok: true, text: "CTO actualizada." });
                       setFlyTo({ lat: next.lat, lng: next.lng, zoom: 17 });
@@ -1260,7 +1752,7 @@ export function MapPage() {
                           category: "CTO",
                           lat: next.lat,
                           lng: next.lng,
-                          status: "infra",
+                          status: selPoint?.status ?? "—",
                           mapKind: "cto",
                         });
                       }

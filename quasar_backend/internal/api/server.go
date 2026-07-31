@@ -275,6 +275,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Patch("/connections/{id}", s.patchClientConnection)
 				r.Delete("/connections/{id}", s.deleteClientConnection)
 				r.Post("/network/projects", s.createNetworkProject)
+				r.Post("/network/projects/import/kml", s.importNetworkProject)
 				r.Patch("/network/projects/{id}", s.patchNetworkProject)
 				r.Delete("/network/projects/{id}", s.deleteNetworkProject)
 				r.Post("/network/ctos", s.createNetworkCto)
@@ -490,6 +491,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/map/search", s.mapSearch)
 		r.Get("/map/locality-center", s.mapLocalityCenter)
 		r.Get("/map/project-center", s.mapProjectCenter)
+		r.Get("/map/nearest-ctos", s.mapNearestCtos)
 
 		r.Get("/overview/summary", s.overviewSummary)
 		r.Get("/overview/top-latency", s.overviewTopLatency)

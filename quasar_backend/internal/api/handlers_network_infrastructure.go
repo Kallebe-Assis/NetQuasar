@@ -434,7 +434,35 @@ func (s *Server) deleteNetworkProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
 		return
 	}
-	tag, err := s.DB().Exec(ctx, `DELETE FROM network_projects WHERE id=$1`, id)
+
+	tx, err := s.DB().Begin(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM network_projects WHERE id=$1)`, id).Scan(&exists); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !exists {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
+		return
+	}
+
+	counts := map[string]int64{}
+	for _, table := range []string{"network_ctos", "network_splice_boxes", "network_cables", "network_poles"} {
+		tag, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE project_id=$1`, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		counts[table] = tag.RowsAffected()
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM network_projects WHERE id=$1`, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -443,8 +471,13 @@ func (s *Server) deleteNetworkProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
 		return
 	}
-	s.appendAuditLog(ctx, "network_project", id.String(), "delete", s.actorFromRequest(r), nil, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if err := tx.Commit(ctx); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+
+	s.appendAuditLog(ctx, "network_project", id.String(), "delete", s.actorFromRequest(r), nil, counts)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": counts})
 }
 
 func networkStrPtr(p *string) string {

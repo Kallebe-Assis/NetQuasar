@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Eye, FileUp, MapPin, Pencil, Trash2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { LocationMapModal, type LocationMapPreview } from "../../components/LocationMapModal";
 import { PageCountPill } from "../../components/PageCountPill";
@@ -19,9 +19,16 @@ import {
   projectStatusLabel,
   type NetworkProject,
 } from "../../lib/networkInfrastructure";
+import {
+  kmlReviewSummary,
+  parseKmlToReviewItems,
+  reviewItemsToImportElements,
+  type KmlReviewItem,
+} from "../../lib/parseKmlProject";
 import { CoordFields, LocalitySelect } from "./ConnectionsFormFields";
 import { ConnectionsPager } from "./ConnectionsPager";
 import { ConnectionsTabToolbar } from "./ConnectionsTabToolbar";
+import { KmlImportReviewModal } from "./KmlImportReviewModal";
 import type { ConnectionsTabProps } from "./shared";
 import { useConnectionsLookups } from "./useConnectionsLookups";
 import { usePagedRows } from "./usePagedRows";
@@ -52,6 +59,17 @@ export function ProjectsTab({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [mapPreview, setMapPreview] = useState<LocationMapPreview | null>(null);
+  const [kmlItems, setKmlItems] = useState<KmlReviewItem[] | null>(null);
+  const [kmlFileName, setKmlFileName] = useState<string | null>(null);
+  const [kmlSkipped, setKmlSkipped] = useState(0);
+  const [kmlReviewOpen, setKmlReviewOpen] = useState(false);
+  const [kmlReviewDraft, setKmlReviewDraft] = useState<{
+    projectName: string;
+    items: KmlReviewItem[];
+    skipped: number;
+    fileName: string;
+  } | null>(null);
+  const kmlInputRef = useRef<HTMLInputElement>(null);
 
   const debouncedQ = useDebouncedValue(filters.q, 320);
   const filterKey = useMemo(
@@ -114,8 +132,9 @@ export function ProjectsTab({
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      const description = form.description.trim();
       const payload = {
-        description: form.description.trim(),
+        description,
         locality_id: form.locality_id.trim() || null,
         color: form.color.trim() || null,
         status: form.status,
@@ -123,25 +142,101 @@ export function ProjectsTab({
         longitude: parseCoordInput(form.longitude),
       };
       if (!payload.description) throw new Error("Descrição obrigatória.");
-      if (editId) return apiFetch(`/api/v1/commercial/network/projects/${editId}`, { method: "PATCH", json: payload });
+      if (editId) {
+        return apiFetch(`/api/v1/commercial/network/projects/${editId}`, { method: "PATCH", json: payload });
+      }
+      if (kmlItems) {
+        const elements = reviewItemsToImportElements(kmlItems);
+        const total =
+          elements.ctos.length + elements.splice_boxes.length + elements.poles.length + elements.cables.length;
+        if (total === 0) throw new Error("Nenhum elemento seleccionado para importar.");
+        if (payload.latitude == null || payload.longitude == null) {
+          const pts = kmlItems.filter((i) => i.include);
+          if (pts.length > 0) {
+            payload.latitude = pts.reduce((s, p) => s + p.latitude, 0) / pts.length;
+            payload.longitude = pts.reduce((s, p) => s + p.longitude, 0) / pts.length;
+          }
+        }
+        return apiFetch<{ id: string; display_number: number; imported: Record<string, number> }>(
+          "/api/v1/commercial/network/projects/import/kml",
+          {
+            method: "POST",
+            json: {
+              ...payload,
+              elements,
+            },
+          },
+        );
+      }
       return apiFetch("/api/v1/commercial/network/projects", { method: "POST", json: payload });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: queryKeys.networkProjects });
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      const wasEdit = !!editId;
+      const imported =
+        data && typeof data === "object" && data !== null && "imported" in data
+          ? (data as { imported: Record<string, number> }).imported
+          : null;
       setFormOpen(false);
       setEditId(null);
       setForm(EMPTY);
-      toastOk(pushToast, editId ? "Projeto actualizado." : "Projeto criado.");
+      setKmlItems(null);
+      setKmlFileName(null);
+      setKmlSkipped(0);
+      setKmlReviewDraft(null);
+      if (imported) {
+        toastOk(
+          pushToast,
+          `Projecto criado com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s).`,
+        );
+      } else {
+        toastOk(pushToast, wasEdit ? "Projeto actualizado." : "Projeto criado.");
+      }
     },
     onError: (e) => toastErr(pushToast, e),
   });
+
+  async function onKmlFile(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = parseKmlToReviewItems(text);
+      if (parsed.items.length === 0) {
+        throw new Error("O KML não contém elementos reconhecidos.");
+      }
+      setKmlReviewDraft({
+        projectName: parsed.projectName,
+        items: parsed.items,
+        skipped: parsed.skipped,
+        fileName: file.name,
+      });
+      setKmlReviewOpen(true);
+      if (!form.description.trim() && parsed.projectName) {
+        setForm((f) => ({ ...f, description: parsed.projectName }));
+      }
+    } catch (e) {
+      setKmlReviewDraft(null);
+      setKmlReviewOpen(false);
+      toastErr(pushToast, e);
+    }
+  }
+
+  function clearKml() {
+    setKmlItems(null);
+    setKmlFileName(null);
+    setKmlSkipped(0);
+    setKmlReviewDraft(null);
+    setKmlReviewOpen(false);
+  }
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/network/projects/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.networkProjects });
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       setDeleteId(null);
-      toastOk(pushToast, "Projeto removido.");
+      toastOk(pushToast, "Projeto e elementos removidos.");
     },
     onError: (e) => toastErr(pushToast, e),
   });
@@ -188,6 +283,7 @@ export function ProjectsTab({
             onClick={() => {
               setEditId(null);
               setForm(EMPTY);
+              clearKml();
               setFormOpen(true);
             }}
           >
@@ -352,13 +448,84 @@ export function ProjectsTab({
                   />
                 </div>
               </section>
+              {!editId ? (
+                <section className="conn-form-modal__section">
+                  <h3 className="conn-form-modal__section-title">Importar KML</h3>
+                  <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)" }}>
+                    Após escolher o ficheiro, abre-se um modal para rever e corrigir em massa o tipo e os atributos de
+                    cada elemento (CTO, emenda, poste, cabo).
+                  </p>
+                  <input
+                    ref={kmlInputRef}
+                    type="file"
+                    accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      void onKmlFile(f);
+                    }}
+                  />
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={saveMut.isPending}
+                      onClick={() => kmlInputRef.current?.click()}
+                    >
+                      <FileUp size={15} style={{ marginRight: 6 }} />
+                      Importar KML
+                    </button>
+                    {kmlItems ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={saveMut.isPending}
+                          onClick={() => {
+                            if (!kmlItems) return;
+                            setKmlReviewDraft({
+                              projectName: form.description.trim() || "Projecto importado",
+                              items: kmlItems,
+                              skipped: kmlSkipped,
+                              fileName: kmlFileName ?? "KML",
+                            });
+                            setKmlReviewOpen(true);
+                          }}
+                        >
+                          <Pencil size={15} style={{ marginRight: 6 }} />
+                          Rever elementos
+                        </button>
+                        <button type="button" className="btn btn--icon" title="Remover KML" onClick={clearKml}>
+                          <X size={15} />
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                  {kmlItems ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        background: "var(--panel2, transparent)",
+                        fontSize: 12,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{kmlFileName ?? "KML"}</div>
+                      <div style={{ color: "var(--muted)", marginTop: 4 }}>{kmlReviewSummary(kmlItems)}</div>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
             </div>
             <div className="conn-form-modal__foot">
               <button type="button" className="btn" onClick={() => setFormOpen(false)} disabled={saveMut.isPending}>
                 Cancelar
               </button>
               <button type="button" className="btn btn--primary" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
-                Guardar
+                {kmlItems && !editId ? "Criar e importar" : "Guardar"}
               </button>
             </div>
           </div>
@@ -397,13 +564,36 @@ export function ProjectsTab({
       {deleteId ? (
         <ConfirmModal
           open
-          title="Remover projeto"
-          message="Os elementos vinculados permanecem no sistema, mas deixam de estar associados a este projeto."
-          confirmLabel="Remover"
+          title="Excluir projeto e elementos"
+          message="Esta acção é irreversível. O projeto e todos os elementos vinculados (CTOs, caixas de emenda, cabos e postes) serão permanentemente removidos."
+          confirmLabel="Excluir tudo"
           danger
           onCancel={() => setDeleteId(null)}
           onConfirm={() => deleteMut.mutate(deleteId)}
           busy={deleteMut.isPending}
+        />
+      ) : null}
+
+      {kmlReviewDraft ? (
+        <KmlImportReviewModal
+          open={kmlReviewOpen}
+          fileName={kmlReviewDraft.fileName}
+          projectName={kmlReviewDraft.projectName}
+          skipped={kmlReviewDraft.skipped}
+          initialItems={kmlReviewDraft.items}
+          onCancel={() => {
+            setKmlReviewOpen(false);
+            // Se ainda não havia confirmação prévia, limpa o draft.
+            if (!kmlItems) setKmlReviewDraft(null);
+          }}
+          onConfirm={(items) => {
+            setKmlItems(items);
+            setKmlFileName(kmlReviewDraft.fileName);
+            setKmlSkipped(kmlReviewDraft.skipped);
+            setKmlReviewDraft({ ...kmlReviewDraft, items });
+            setKmlReviewOpen(false);
+            toastOk(pushToast, `Revisão pronta: ${kmlReviewSummary(items)}`);
+          }}
         />
       ) : null}
 
