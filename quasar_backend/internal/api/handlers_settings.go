@@ -64,6 +64,7 @@ type databaseConnectionBody struct {
 	DBPassword      *string `json:"db_password"`
 	DBName          *string `json:"db_name"`
 	SSLMode         *string `json:"ssl_mode"`
+	Provider        *string `json:"provider"`
 	ApplyConnection *bool   `json:"apply_connection"`
 	DatabaseURL     *string `json:"database_url"`
 }
@@ -76,13 +77,13 @@ func (s *Server) getDatabaseMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	var host *string
 	var port *int
-	var user, dbname, ssl *string
+	var user, dbname, ssl, provider *string
 	var hasPass bool
 	err := p.QueryRow(r.Context(), `
-		SELECT host, port, db_user, db_name, ssl_mode,
+		SELECT host, port, db_user, db_name, ssl_mode, provider,
 			(db_password IS NOT NULL AND length(trim(db_password)) > 0)
 		FROM settings_database_meta WHERE id=1
-	`).Scan(&host, &port, &user, &dbname, &ssl, &hasPass)
+	`).Scan(&host, &port, &user, &dbname, &ssl, &provider, &hasPass)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -91,12 +92,17 @@ func (s *Server) getDatabaseMeta(w http.ResponseWriter, r *http.Request) {
 	if s.Cfg != nil && s.Cfg.DatabaseURL != "" {
 		active = "env_NETQUASAR_DATABASE_URL"
 	}
+	prov := "local"
+	if provider != nil && strings.TrimSpace(*provider) != "" {
+		prov = strings.TrimSpace(*provider)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"host":                host,
 		"port":                port,
 		"db_user_masked":      maskDBUser(user),
 		"db_name":             dbname,
 		"ssl_mode":            ssl,
+		"provider":            prov,
 		"password_configured": hasPass,
 		"active_dsn_source":   active,
 		"note":                "PATCH com apply_connection=true valida DSN, aplica migrações no alvo e recarrega o pool; senha nunca é devolvida no GET.",
@@ -172,6 +178,15 @@ func (s *Server) patchDatabaseMeta(w http.ResponseWriter, r *http.Request) {
 			passVal = *body.DBPassword
 		}
 	}
+	var provider any
+	if body.Provider != nil {
+		pnorm := strings.ToLower(strings.TrimSpace(*body.Provider))
+		if pnorm != "local" && pnorm != "external" {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "provider deve ser local ou external", nil)
+			return
+		}
+		provider = pnorm
+	}
 	_, err := p.Exec(r.Context(), `
 		UPDATE settings_database_meta SET
 			host = COALESCE($1, host),
@@ -180,10 +195,11 @@ func (s *Server) patchDatabaseMeta(w http.ResponseWriter, r *http.Request) {
 			db_name = COALESCE($4, db_name),
 			ssl_mode = COALESCE($5, ssl_mode),
 			db_password = CASE WHEN $6::boolean THEN $7::text ELSE db_password END,
+			provider = COALESCE($8::text, provider),
 			updated_at = now()
 		WHERE id=1
 	`, body.Host, body.Port, body.DBUser, body.DBName, body.SSLMode,
-		passUpdate, passVal)
+		passUpdate, passVal, provider)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

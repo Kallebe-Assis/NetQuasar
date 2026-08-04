@@ -15,6 +15,7 @@ const (
 	jobCommercialReport  = "commercial_report"
 	jobOnuMonthlyReport  = "onu_monthly_report"
 	jobBngStatsReport    = "bng_stats_report"
+	jobDatabaseBackup    = "database_backup"
 )
 
 func automationJobLabel(jobType string) string {
@@ -27,6 +28,8 @@ func automationJobLabel(jobType string) string {
 		return "Relatório ONU mensal"
 	case jobBngStatsReport:
 		return "Totais BNG"
+	case jobDatabaseBackup:
+		return "Backup PostgreSQL (B2)"
 	default:
 		return jobType
 	}

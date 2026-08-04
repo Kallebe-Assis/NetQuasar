@@ -311,7 +311,24 @@ func (c *Config) PostgresDSN() string {
 		out = base
 	}
 	out = EnsureSupabaseSSLRootCertIfNeeded(out)
+	out = EnsureReadWriteSessionAttrs(out)
 	return out
+}
+
+// EnsureReadWriteSessionAttrs força ligação ao primary (evita réplicas só-leitura).
+// Sem isto, Ping/migrations “no-op” podem passar e o primeiro INSERT falha com SQLSTATE 25006.
+func EnsureReadWriteSessionAttrs(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	q := u.Query()
+	if strings.TrimSpace(q.Get("target_session_attrs")) != "" {
+		return dsn
+	}
+	q.Set("target_session_attrs", "read-write")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func splitComma(s string) []string {

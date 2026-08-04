@@ -8,6 +8,7 @@ import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 import { AutomationHistoryModal } from "./AutomationHistoryModal";
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
+import { DatabaseBackupAutomationCard } from "./DatabaseBackupAutomationCard";
 
 const TZ_DEFAULT = "America/Sao_Paulo";
 
@@ -543,6 +544,7 @@ export function ScheduledReportsPanel() {
       </div>
       <AutomationHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <OnuMonthlyReportPanel />
+      <DatabaseBackupAutomationCard />
       <BngStatsScheduleCard />
       <DigestScheduleCard />
       <CommercialScheduleCard />

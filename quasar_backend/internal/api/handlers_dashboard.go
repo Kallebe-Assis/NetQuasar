@@ -322,7 +322,7 @@ func (s *Server) buildDashboardAnalytics(ctx context.Context, pool *pgxpool.Pool
 		_ = pool.QueryRow(gctx, `
 			SELECT COUNT(*)::bigint,
 				COUNT(*) FILTER (WHERE ph.ok)::bigint,
-				AVG(ph.latency_ms)::float8 FILTER (WHERE ph.ok AND ph.latency_ms IS NOT NULL)
+				AVG(ph.latency_ms) FILTER (WHERE ph.ok AND ph.latency_ms IS NOT NULL)::float8
 			FROM ping_history ph
 			JOIN devices d ON d.id = ph.device_id AND `+sqlDeviceOperationalAtivoD+`
 			WHERE ph.checked_at >= $1`, winSince).Scan(&pingN, &pingOk, &pingAvg)

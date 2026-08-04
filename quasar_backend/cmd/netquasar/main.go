@@ -90,6 +90,9 @@ func main() {
 			log.Fatal().Err(err).Msg("db pool")
 		}
 		dbHolder.Store(pool)
+		if err := bootstrap.AssertWritablePostgres(ctx, pool); err != nil {
+			log.Fatal().Err(err).Msg("database writable check")
+		}
 		if err := bootstrap.EnsureDefaultUsers(ctx, pool); err != nil {
 			log.Fatal().Err(err).Msg("seed users")
 		}

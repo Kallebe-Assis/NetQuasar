@@ -485,19 +485,18 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
   );
 }
 
-export function DatabaseCleanupButton() {
+export function DatabaseCleanupButton({ embedded = false }: { embedded?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-        <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Manutenção de dados históricos</h3>
-        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.45 }}>
-          Analise o volume e a antiguidade dos dados na base PostgreSQL e elimine registos antigos com confirmação em duas etapas. A auditoria
-          regista quem executou cada operação.
+      <div style={embedded ? undefined : { marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+        <h3 style={{ fontSize: 14, margin: "0 0 6px" }}>Limpeza de dados históricos</h3>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.4 }}>
+          Analise e elimine registos antigos (com confirmação e auditoria).
         </p>
-        <button type="button" className="btn btn--primary" onClick={() => setOpen(true)}>
+        <button type="button" className="btn" onClick={() => setOpen(true)}>
           <Database size={16} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
-          Abrir análise e limpeza…
+          Abrir análise…
         </button>
       </div>
       <DatabaseCleanupModal open={open} onClose={() => setOpen(false)} />

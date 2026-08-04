@@ -26,6 +26,7 @@ RUN apt-get update \
     tzdata \
     traceroute \
     nmap \
+    postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend /out/netquasar .

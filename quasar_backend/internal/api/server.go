@@ -23,12 +23,14 @@ type Server struct {
 	DBHolder          *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
 	WorkerCtx         context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
 	rt                *realtimeBroker
-	ensureMonitorOnce   sync.Once
-	automationONUOnce      sync.Once
-	automationReportsOnce  sync.Once
+	ensureMonitorOnce      sync.Once
+	automationONUOnce     sync.Once
+	automationReportsOnce sync.Once
 	// sysCfgImportMu protege o mapa de jobs de importação de configuração (aba Base de dados).
-	sysCfgImportMu    sync.Mutex
-	sysCfgImportJobs  map[string]*sysConfigImportJob
+	sysCfgImportMu   sync.Mutex
+	sysCfgImportJobs map[string]*sysConfigImportJob
+	dbRestoreMu      sync.Mutex
+	dbRestoreJobs    map[string]*dbRestoreJob
 	bngCollectProgress *bngCollectProgressStore
 }
 
@@ -66,6 +68,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		DBHolder:           dbHolder,
 		WorkerCtx:          workerCtx,
 		sysCfgImportJobs:   make(map[string]*sysConfigImportJob),
+		dbRestoreJobs:      make(map[string]*dbRestoreJob),
 		bngCollectProgress: newBngCollectProgressStore(),
 	}
 	if workerCtx != nil {
@@ -136,6 +139,10 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/database/cleanup/scan", s.databaseCleanupScan)
 				r.Post("/database/cleanup/execute", s.databaseCleanupExecute)
 				r.Get("/database/logs", s.settingsDatabaseLogs)
+				r.Get("/database/backups/b2", s.listDatabaseBackupsB2)
+				r.Post("/database/backups/upload", s.uploadDatabaseBackupRestore)
+				r.Post("/database/backups/restore", s.restoreDatabaseBackup)
+				r.Get("/database/backups/restore/{jobId}", s.getDatabaseRestoreJob)
 				r.Get("/system-config/export", s.exportSystemConfiguration)
 				r.Post("/system-config/import", s.startSystemConfigurationImport)
 				r.Get("/system-config/import/{jobId}", s.getSystemConfigurationImportJob)
@@ -195,6 +202,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/automation/bng-stats-report", s.getAutomationBngStatsReport)
 				r.Patch("/automation/bng-stats-report", s.patchAutomationBngStatsReport)
 				r.Post("/automation/bng-stats-report/run", s.runAutomationBngStatsReport)
+				r.Get("/automation/database-backup", s.getAutomationDatabaseBackup)
+				r.Patch("/automation/database-backup", s.patchAutomationDatabaseBackup)
+				r.Post("/automation/database-backup/run", s.runAutomationDatabaseBackup)
+				r.Get("/backup/b2", s.getSettingsB2Backup)
+				r.Patch("/backup/b2", s.patchSettingsB2Backup)
+				r.Post("/backup/b2/test", s.testSettingsB2Backup)
 				r.Get("/automation/history", s.getAutomationExecutionHistory)
 				r.Get("/notifications/smtp", s.getSMTPSettings)
 				r.Patch("/notifications/smtp", s.patchSMTPSettings)

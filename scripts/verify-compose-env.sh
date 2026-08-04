@@ -24,9 +24,10 @@ for v in "${required_vars[@]}"; do
   fi
 done
 
-if grep -E '^NETQUASAR_DATABASE_URL=' .env >/dev/null 2>&1; then
-  echo "Aviso: NETQUASAR_DATABASE_URL está definido no .env — a app usará essa URL (ex.: Supabase :6543)." >&2
-  echo "  O contentor Postgres do Compose continua a subir, mas o NetQuasar pode não o utilizar." >&2
+if grep -E '^NETQUASAR_DATABASE_URL=.+' .env >/dev/null 2>&1; then
+  echo "Nota: NETQUASAR_DATABASE_URL está definido no .env." >&2
+  echo "  Com docker compose actual, o serviço netquasar força URL vazia e usa o contentor postgres (NETQUASAR_DB_*)." >&2
+  echo "  A URL no .env só afecta go run / binário fora do Compose." >&2
 fi
 
 echo "OK: .env e ficheiros Compose parecem consistentes em $ROOT"

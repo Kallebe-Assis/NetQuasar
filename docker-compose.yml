@@ -19,8 +19,9 @@ services:
     env_file:
       - .env
     environment:
-      # NETQUASAR_DATABASE_URL vem só do env_file (.env na raiz), não da shell do Windows
-      # (evita que `docker compose` substitua ${...} com um valor antigo na sessão e parta o :8080).
+      # Forçar stack Compose a usar o serviço postgres (NETQUASAR_DB_*),
+      # mesmo que .env ainda tenha NETQUASAR_DATABASE_URL (ex.: Supabase).
+      NETQUASAR_DATABASE_URL: ""
       NETQUASAR_HTTP_ADDR: ":8080"
       NETQUASAR_HTTP_WRITE_TIMEOUT: "20m"
       NETQUASAR_EMBEDDED_UI: "true"
@@ -39,14 +40,18 @@ services:
       - netquasar_net
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
+    ports:
+      # 5433 no host evita conflito com Postgres local na 5432
+      - "${POSTGRES_PUBLISH_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - netquasar_pgdata:/var/lib/postgresql/data
+      # PG 18+ exige montar /var/lib/postgresql (não .../data)
+      - netquasar_pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s

@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Blend, ClockFading, Cpu, Filter, Plus, Shield, Sun, ThermometerSun } from "lucide-react";
-import { PAGE_TOAST_AUTO_MS } from "../lib/pageToast";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { InfoHint } from "../components/InfoHint";
@@ -15,8 +14,7 @@ import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { MikrotikSettingsPanel } from "./settings/MikrotikSettingsPanel";
 import { SwitchSettingsPanel } from "./settings/SwitchSettingsPanel";
 import { BngCollectionPanel } from "./settings/BngCollectionPanel";
-import { SystemConfigBackupPanel } from "./settings/SystemConfigBackupPanel";
-import { DatabaseCleanupButton } from "./settings/DatabaseCleanupModal";
+import { DatabasePanel } from "./settings/DatabasePanel";
 import { OltVendorsPanel } from "./settings/OltVendorsPanel";
 import { PermissionProfilesModal } from "./settings/PermissionProfilesModal";
 import type { PermissionProfile } from "../lib/permissions";
@@ -90,431 +88,6 @@ export function SettingsPage() {
   );
 }
 
-type DbMeta = {
-  host: string | null;
-  port: number | null;
-  db_user_masked: unknown;
-  db_name: string | null;
-  ssl_mode: string | null;
-  password_configured: boolean;
-  active_dsn_source: string;
-  note?: string;
-};
-
-function hasMaskedDbUser(meta: DbMeta | undefined): boolean {
-  if (!meta) return false;
-  const m = meta.db_user_masked;
-  if (m == null) return false;
-  if (typeof m === "string") return m.trim().length > 0;
-  return true;
-}
-
-function friendlyDbTestSuccessMessage(serverMessage: string): string {
-  const m = serverMessage.toLowerCase();
-  if (m.includes("url") && (m.includes("informada") || m.includes("bem-suced"))) {
-    return "Ligação bem-sucedida com o endereço completo (URL) que indicou.";
-  }
-  if (m.includes("parâmetros") || m.includes("parametros")) {
-    return "Ligação bem-sucedida: o servidor aceitou os dados de acesso que preencheu.";
-  }
-  if (m.includes("ping") || m.includes("pool atual")) {
-    return "A base de dados que está em uso neste momento respondeu corretamente.";
-  }
-  return "Ligação à base de dados bem-sucedida.";
-}
-
-/** Texto extra devolvido pelo backend em `details.hint` (ex.: Supabase + Docker + IPv6). */
-function dbErrorDetailsHint(err: unknown): string | null {
-  if (!(err instanceof ApiError) || err.body == null || typeof err.body !== "object") return null;
-  const d = (err.body as { details?: unknown }).details;
-  if (!d || typeof d !== "object") return null;
-  const hint = (d as { hint?: unknown }).hint;
-  return typeof hint === "string" && hint.trim() ? hint.trim() : null;
-}
-
-function friendlyDbConnectionError(err: unknown): string {
-  if (!(err instanceof ApiError)) {
-    return "Não foi possível concluir a requisição. Verifique a ligação à internet e tente novamente.";
-  }
-  const hint = dbErrorDetailsHint(err);
-  if (hint) return hint;
-  const raw = (err.message || "").toLowerCase();
-  const code = (err.code || "").toUpperCase();
-
-  if (code === "VALIDATION" || raw.includes("informe host") || raw.includes("db_password")) {
-    return "Falta informação para testar: são necessários o servidor, a porta, o nome da base, o utilizador e a palavra-passe. Se já guardou a palavra-passe antes, pode deixar esse campo vazio e voltar a testar. Pode também usar só o campo “URL completa”.";
-  }
-  if (code === "NO_DB") {
-    return "O serviço de base de dados não está disponível neste momento. Tente reiniciar a aplicação.";
-  }
-  if (raw.includes("authentication failed") || raw.includes("password authentication")) {
-    return "O servidor recusou o utilizador ou a palavra-passe. Confirme as credenciais da base de dados.";
-  }
-  if (raw.includes("connection refused")) {
-    return "O servidor recusou a ligação na porta indicada. Verifique se o PostgreSQL está a correr e se a porta está correta.";
-  }
-  if (raw.includes("no such host") || raw.includes("name or service not known")) {
-    return "Não encontrámos esse endereço de servidor. Confirme o nome ou o IP.";
-  }
-  if (raw.includes("timeout") || raw.includes("deadline exceeded") || raw.includes("i/o timeout")) {
-    return "A ligação demorou demasiado. Verifique rede, firewall e se o servidor está acessível.";
-  }
-  if (raw.includes("does not exist") && raw.includes("database")) {
-    return "Essa base de dados não existe neste servidor. Confirme o nome da base.";
-  }
-  if (raw.includes("ssl") || raw.includes("tls") || raw.includes("certificate")) {
-    return "Há um problema com a ligação segura (SSL). Experimente “require” ou “disable” no modo SSL, conforme o seu fornecedor de base de dados.";
-  }
-  if (
-    (code === "TEST_FAILED" || code === "PING_FAILED" || code === "MIGRATE_FAILED" || code === "CONNECT_FAILED") &&
-    (raw.includes("network is unreachable") || raw.includes("no route to host")) &&
-    (raw.includes("dial tcp [") || raw.includes("dial tcp6 ["))
-  ) {
-    return "Falha de rede IPv6 até ao Postgres. Use o Session pooler (….pooler.supabase.com) no painel Supabase ou ative IPv6 no Docker.";
-  }
-  if (code === "TEST_FAILED" || code === "PING_FAILED" || code === "MIGRATE_FAILED" || code === "CONNECT_FAILED") {
-    return "Não foi possível ligar. Confirme servidor, porta, utilizador, palavra-passe e nome da base.";
-  }
-  return "Não foi possível ligar à base de dados. Revise os dados e tente novamente.";
-}
-
-function friendlyDbPatchError(err: unknown): string {
-  if (!(err instanceof ApiError)) return "Não foi possível salvar. Tente novamente.";
-  const raw = (err.message || "").toLowerCase();
-  if (raw.includes("database_url") && raw.includes("apply_connection")) {
-    return "Para usar uma URL completa tem de marcar a opção “Aplicar já esta ligação”.";
-  }
-  return friendlyDbConnectionError(err);
-}
-
-function validateDbUrlFormat(url: string): string | null {
-  const t = url.trim();
-  if (!t) return null;
-  if (!/^postgres(ql)?:\/\//i.test(t)) {
-    return "O endereço completo (URL) deve começar por postgres:// ou postgresql://.";
-  }
-  return null;
-}
-
-/** db.<ref> sem domínio completo .supabase.co (ex.: …truncado em …s) — a validação antiga não apanha porque falta a palavra "supabase". */
-function supabaseDbHostIncompleteMessage(host: string): string | null {
-  const t = host.trim().toLowerCase();
-  if (!t.startsWith("db.")) return null;
-  if (t.endsWith(".supabase.co")) return null;
-  const withoutDb = t.slice(3);
-  const parts = withoutDb.split(".");
-  if (parts.length < 2) {
-    return "O servidor está incompleto: o host da Supabase tem de ser db.SEU_REF.supabase.co (com .supabase.co no fim). Copie o valor completo do painel.";
-  }
-  if (parts.length === 2 && parts[1].length <= 3 && parts[1] !== "supabase") {
-    return "O servidor parece truncado (falta supabase.co). Confirme db.SEU_REF.supabase.co inteiro. A partir do Docker, use a URI do Session pooler em “URL completa” (Connect → Session).";
-  }
-  return null;
-}
-
-/** Host Supabase aceite nos campos: ligação direta ou pooler de sessão. */
-function isAllowedSupabasePostgresHost(host: string): boolean {
-  const h = host.trim().toLowerCase();
-  if (!h.includes("supabase")) return true;
-  return h.endsWith(".supabase.co") || h.endsWith(".pooler.supabase.com");
-}
-
-/** Campos em falta para um teste por dados (sem URL); considera o que já está gravado no sistema. */
-function missingDbFieldsForTest(opts: {
-  host: string;
-  port: string;
-  dbName: string;
-  dbUser: string;
-  dbPass: string;
-  passwordConfigured: boolean;
-  userKnownInSettings: boolean;
-}): string[] {
-  const missing: string[] = [];
-  if (!opts.host.trim()) missing.push("servidor (endereço ou IP)");
-  const p = opts.port.trim();
-  if (!p || Number.isNaN(Number(p)) || Number(p) <= 0) missing.push("porta (em geral 5432)");
-  if (!opts.dbName.trim()) missing.push("nome da base de dados");
-  if (!opts.dbUser.trim() && !opts.userKnownInSettings) missing.push("utilizador da base de dados");
-  if (!opts.dbPass.trim() && !opts.passwordConfigured) missing.push("palavra-passe da base de dados");
-  return missing;
-}
-
-type DbTestResponse = { ok?: boolean; message?: string };
-
-function DatabasePanel() {
-  const qc = useQueryClient();
-  const meta = useQuery({ queryKey: ["settings-db-meta"], queryFn: () => apiFetch<DbMeta>("/api/v1/settings/database") });
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("");
-  const [dbUser, setDbUser] = useState("");
-  const [dbName, setDbName] = useState("");
-  const [sslMode, setSslMode] = useState("");
-  const [dbPass, setDbPass] = useState("");
-  const [dbUrl, setDbUrl] = useState("");
-  const [apply, setApply] = useState(false);
-  const [dbToast, setDbToast] = useState<{ ok: boolean; text: string } | null>(null);
-
-  useEffect(() => {
-    if (!meta.data) return;
-    setHost(meta.data.host ?? "");
-    setPort(meta.data.port != null ? String(meta.data.port) : "");
-    setDbName(meta.data.db_name ?? "");
-    const sm = (meta.data.ssl_mode ?? "").trim().toLowerCase();
-    setSslMode(sm === "disable" ? "disable" : "require");
-  }, [meta.data]);
-
-  useEffect(() => {
-    if (!dbToast) return;
-    const t = window.setTimeout(() => setDbToast(null), PAGE_TOAST_AUTO_MS);
-    return () => window.clearTimeout(t);
-  }, [dbToast]);
-
-  const patch = useMutation({
-    mutationFn: (body: Record<string, unknown>) => apiFetch("/api/v1/settings/database", { method: "PATCH", json: body }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["settings-db-meta"] });
-      setDbToast({ ok: true, text: "Guardado com sucesso (base de dados)." });
-    },
-    onError: (e) => setDbToast({ ok: false, text: friendlyDbPatchError(e) }),
-  });
-
-  const testConn = useMutation({
-    mutationFn: (body: Record<string, unknown>) => apiFetch<DbTestResponse>("/api/v1/settings/database/test", { method: "POST", json: body }),
-    onSuccess: (data) => {
-      const msg = typeof data?.message === "string" ? data.message : "";
-      setDbToast({ ok: true, text: friendlyDbTestSuccessMessage(msg) });
-    },
-    onError: (e) => setDbToast({ ok: false, text: friendlyDbConnectionError(e) }),
-  });
-
-  if (meta.isLoading) return <p>A carregar metadados…</p>;
-  if (meta.isError) return <div className="msg msg--err">{(meta.error as Error).message}</div>;
-
-  const buildPatchBody = (): Record<string, unknown> => {
-    const body: Record<string, unknown> = {};
-    if (host.trim()) body.host = host.trim();
-    if (port.trim()) body.port = Number(port);
-    if (dbUser.trim()) body.db_user = dbUser.trim();
-    if (dbName.trim()) body.db_name = dbName.trim();
-    if (sslMode.trim()) body.ssl_mode = sslMode.trim();
-    if (dbPass) body.db_password = dbPass;
-    if (apply) body.apply_connection = true;
-    if (dbUrl.trim()) {
-      body.database_url = dbUrl.trim();
-      body.apply_connection = true;
-    }
-    return body;
-  };
-
-  const runTestConnection = () => {
-    const urlErr = validateDbUrlFormat(dbUrl);
-    if (urlErr) {
-      setDbToast({ ok: false, text: urlErr });
-      return;
-    }
-
-    const incompleteHost = supabaseDbHostIncompleteMessage(host);
-    if (incompleteHost) {
-      setDbToast({ ok: false, text: incompleteHost });
-      return;
-    }
-
-    const hostNorm = host.trim().toLowerCase();
-    if (hostNorm.includes("supabase") && !isAllowedSupabasePostgresHost(hostNorm)) {
-      setDbToast({
-        ok: false,
-        text: "Para Supabase use um host completo: db.…supabase.co (direto) ou ….pooler.supabase.com (session pooler). Copie do painel Connect.",
-      });
-      return;
-    }
-    const urlTrim = dbUrl.trim().toLowerCase();
-    if (
-      urlTrim.startsWith("postgres") &&
-      urlTrim.includes("supabase") &&
-      !urlTrim.includes(".supabase.co") &&
-      !urlTrim.includes("pooler.supabase.com")
-    ) {
-      setDbToast({
-        ok: false,
-        text: "Na URL, o host Supabase deve incluir db.….supabase.co ou ….pooler.supabase.com (copie do painel). Não use o URL https:// do painel.",
-      });
-      return;
-    }
-
-    const b = buildPatchBody();
-    delete b.apply_connection;
-
-    if (dbUrl.trim()) {
-      testConn.mutate({ database_url: dbUrl.trim() });
-      return;
-    }
-
-    const keys = Object.keys(b);
-    if (keys.length === 0) {
-      testConn.mutate({});
-      return;
-    }
-
-    const missing = missingDbFieldsForTest({
-      host,
-      port,
-      dbName,
-      dbUser,
-      dbPass,
-      passwordConfigured: !!meta.data?.password_configured,
-      userKnownInSettings: hasMaskedDbUser(meta.data),
-    });
-    if (missing.length > 0) {
-      setDbToast({
-        ok: false,
-        text: `Falta preencher: ${missing.join(", ")}. Depois volte a carregar em “Testar ligação”.`,
-      });
-      return;
-    }
-
-    testConn.mutate(b);
-  };
-
-  const fieldStyle: CSSProperties = { maxWidth: 560 };
-  const hostFieldStyle: CSSProperties = { width: "100%", maxWidth: "min(100%, 920px)" };
-  const sslChoice = sslMode.trim().toLowerCase() === "disable" ? "disable" : "require";
-
-  return (
-    <div className="card">
-      <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        Base de dados (PostgreSQL)
-        <InfoHint label="Ligação à base de dados">
-          <p>
-            Estado: ligação em uso é{" "}
-            <strong>{meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições salvas"}</strong>
-            {" · "}
-            Palavra-passe na base de dados: <strong>{meta.data?.password_configured ? "já salva" : "ainda não salva"}</strong>
-          </p>
-          <p>
-            Preencha os campos abaixo <strong>ou</strong> só o campo “URL completa”. Use “Testar ligação” para confirmar o acesso sem alterar o sistema; use
-            “Salvar” para gravar (e “Aplicar já” apenas se souber o que faz — troca a ligação ativa).
-          </p>
-          <p>
-            O host <span className="mono">db.…supabase.co</span> pode resolver só para IPv6; no Docker use o <strong>Session pooler</strong> (ex.:{" "}
-            <span className="mono">aws-1-sa-east-1.pooler.supabase.com</span> — o painel indica <span className="mono">aws-0-</span> ou{" "}
-            <span className="mono">aws-1-</span>) em “URL completa” ou nos campos. Com <strong>require</strong>, o teste usa o certificado CA incluído para ligações{" "}
-            <span className="mono">db.*.supabase.co</span>.
-          </p>
-          <p>
-            Se preencher o campo URL completa, o teste usa só a URL (não precisa dos campos de cima para testar). Para salvar uma nova URL é necessário
-            marcar “Aplicar já esta ligação”.
-          </p>
-          <p>
-            <strong>Docker / sem IPv6:</strong> cole a URI do <strong>Session pooler</strong> (Connect → Session): host <span className="mono">aws-0-</span> ou{" "}
-            <span className="mono">aws-1-REGIÃO.pooler.supabase.com</span>, utilizador <span className="mono">postgres.SEU_REF</span>.
-          </p>
-        </InfoHint>
-      </h2>
-
-      <h3 style={{ fontSize: 14, marginTop: 16, marginBottom: 8 }}>Dados da ligação</h3>
-      <div className="field" style={hostFieldStyle}>
-        <label htmlFor="db-host">Servidor (host ou IP)</label>
-        <input
-          id="db-host"
-          className="input mono"
-          style={{
-            fontSize: 14,
-            width: "100%",
-            minWidth: 0,
-            minHeight: 48,
-            padding: "10px 12px",
-            boxSizing: "border-box",
-          }}
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          placeholder="db.….supabase.co ou aws-1-….pooler.supabase.com"
-          autoComplete="off"
-          spellCheck={false}
-          title={host ? host : "Host completo"}
-        />
-        <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0", lineHeight: 1.45 }}>
-          Ligação direta: acaba em <span className="mono">.supabase.co</span>. Session pooler: acaba em{" "}
-          <span className="mono">.pooler.supabase.com</span>. Copie o valor completo do painel (Connect).
-        </p>
-      </div>
-      <div className="field" style={fieldStyle}>
-        <label htmlFor="db-port">Porta</label>
-        <input id="db-port" className="input" style={{ maxWidth: 120 }} value={port} onChange={(e) => setPort(e.target.value)} placeholder="5432" inputMode="numeric" autoComplete="off" />
-      </div>
-      <div className="field" style={fieldStyle}>
-        <label htmlFor="db-user">Utilizador da base de dados</label>
-        <input id="db-user" className="input" value={dbUser} onChange={(e) => setDbUser(e.target.value)} placeholder="nome de utilizador PostgreSQL" autoComplete="off" />
-        {hasMaskedDbUser(meta.data) && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe um utilizador salvo; pode deixar em branco para manter o atual.</p>
-        )}
-      </div>
-      <div className="field" style={fieldStyle}>
-        <label htmlFor="db-name">Nome da base de dados</label>
-        <input id="db-name" className="input" value={dbName} onChange={(e) => setDbName(e.target.value)} placeholder="ex.: netquasar" autoComplete="off" />
-      </div>
-      <div className="field" style={fieldStyle}>
-        <span id="db-ssl-label" style={{ display: "block", marginBottom: 8, fontWeight: 600, fontSize: 13 }}>
-          Modo SSL
-        </span>
-        <div className="row" role="radiogroup" aria-labelledby="db-ssl-label" style={{ flexWrap: "wrap", gap: 16, alignItems: "center" }}>
-          <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 14 }}>
-            <input type="radio" name="db-ssl-mode" checked={sslChoice === "require"} onChange={() => setSslMode("require")} />
-            <span>
-              <strong>require</strong> — encriptado (Supabase, nuvem, Internet)
-            </span>
-          </label>
-          <label className="row" style={{ gap: 8, cursor: "pointer", fontSize: 14 }}>
-            <input type="radio" name="db-ssl-mode" checked={sslChoice === "disable"} onChange={() => setSslMode("disable")} />
-            <span>
-              <strong>disable</strong> — sem TLS (Postgres local / rede de confiança)
-            </span>
-          </label>
-        </div>
-      </div>
-      <div className="field" style={fieldStyle}>
-        <label htmlFor="db-pass">Palavra-passe da base de dados</label>
-        <input id="db-pass" className="input" type="password" autoComplete="new-password" value={dbPass} onChange={(e) => setDbPass(e.target.value)} placeholder="não é mostrada depois de salvar" />
-        {meta.data?.password_configured && (
-          <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>Já existe palavra-passe salva; pode deixar em branco para testar com a salva.</p>
-        )}
-      </div>
-
-      <h3 style={{ fontSize: 14, marginTop: 20, marginBottom: 8 }}>URL completa (opcional)</h3>
-      <div className="field" style={fieldStyle}>
-        <label htmlFor="db-url">Endereço completo (connection string)</label>
-        <input id="db-url" className="input mono" value={dbUrl} onChange={(e) => setDbUrl(e.target.value)} placeholder="postgres://utilizador:palavra-passe@servidor:5432/nome_da_base?sslmode=require" spellCheck={false} autoComplete="off" />
-      </div>
-
-      <label className="row" style={{ gap: 10, marginTop: 16, alignItems: "flex-start", maxWidth: 560 }}>
-        <input type="checkbox" checked={apply} onChange={(e) => setApply(e.target.checked)} style={{ marginTop: 4 }} />
-        <span style={{ fontSize: 13, lineHeight: 1.45 }}>
-          <strong>Aplicar já esta ligação</strong> — valida, corre migrações no destino e passa a usar esta base em todo o sistema. Só marque se tiver a certeza dos dados.
-        </span>
-      </label>
-
-      <div className="row" style={{ marginTop: 16, flexWrap: "wrap", gap: 8 }}>
-        <button type="button" className="btn btn--primary" disabled={patch.isPending} onClick={() => patch.mutate(buildPatchBody())}>
-          Salvar definições
-        </button>
-        <button type="button" className="btn" disabled={testConn.isPending} onClick={runTestConnection}>
-          Testar ligação
-        </button>
-      </div>
-
-      {dbToast && (
-        <div className={`page-toast ${dbToast.ok ? "page-toast--ok" : "page-toast--err"}`} role="status" style={{ marginTop: 14, maxWidth: 560 }}>
-          <button type="button" className="page-toast__close" aria-label="Fechar" onClick={() => setDbToast(null)}>
-            ×
-          </button>
-          {dbToast.text}
-        </div>
-      )}
-
-      <SystemConfigBackupPanel />
-      <DatabaseCleanupButton />
-    </div>
-  );
-}
 
 type UserRow = {
   id: string;
@@ -661,7 +234,7 @@ function UsersPanel() {
   const profileLabel = (u: UserRow) =>
     u.permission_profile_name || (u.role === "admin" ? "Administrador" : "Usuário");
 
-  if (list.isLoading) return <p>A carregar…</p>;
+  if (list.isLoading) return <p>A carregarâ€¦</p>;
   if (list.isError) {
     const ae = list.error as ApiError;
     if (ae?.status === 403) {
@@ -682,7 +255,7 @@ function UsersPanel() {
           <input
             className="input"
             style={{ width: "100%" }}
-            placeholder="Nome, e-mail ou telefone…"
+            placeholder="Nome, e-mail ou telefoneâ€¦"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1218,7 +791,7 @@ function AlertThresholdsPanel() {
     return <Cpu size={14} aria-hidden />;
   };
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
@@ -1252,7 +825,7 @@ function AlertThresholdsPanel() {
               }
             }}
           >
-            <option value="">Selecionar…</option>
+            <option value="">Selecionarâ€¦</option>
             {metricCatalog.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label} ({scopeLabel(m.scope)})
@@ -1322,8 +895,8 @@ function AlertThresholdsPanel() {
                       ))}
                     </select>
                     <select className="input alert-rules-input-op" value={r.operator} onChange={(e) => updateRow(idx, { operator: e.target.value as "gte" | "lte" })}>
-                      <option value="gte">≥</option>
-                      <option value="lte">≤</option>
+                      <option value="gte">â‰¥</option>
+                      <option value="lte">â‰¤</option>
                     </select>
                   </div>
                 </td>
@@ -1909,7 +1482,7 @@ function ConnectionPanel() {
           </InfoHint>
         </h4>
         {rows.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum extra â€” use Â«AdicionarÂ» para incluir mais leituras.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((r) => (
@@ -1950,7 +1523,7 @@ function ConnectionPanel() {
                   onChange={(e) => updateExtraRow(cat, r.id, { label: e.target.value })}
                 />
                 <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeExtraRow(cat, r.id)}>
-                  −
+                  âˆ’
                 </button>
               </div>
             ))}
@@ -2008,7 +1581,7 @@ function ConnectionPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-conn-def"] }),
   });
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
@@ -2107,7 +1680,7 @@ function ConnectionPanel() {
           </InfoHint>
         </h3>
         <div className="settings-conn-block">
-          <h4>OLT — PON / GBIC / ONU</h4>
+          <h4>OLT â€” PON / GBIC / ONU</h4>
           <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
             <div className="field" style={{ minWidth: 260 }}>
               <label>Total de ONUs</label>
@@ -2333,12 +1906,12 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       }),
   });
 
-  if (q.isLoading) return <p>A carregar…</p>;
+  if (q.isLoading) return <p>A carregarâ€¦</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
     <div className="card">
-      <h2>Telegram — {title}</h2>
+      <h2>Telegram â€” {title}</h2>
       <p style={{ fontSize: 12, color: "var(--muted)" }}>
         Para alterar o bot, introduza um novo token abaixo. O valor já salvo não é mostrado por segurança.
       </p>

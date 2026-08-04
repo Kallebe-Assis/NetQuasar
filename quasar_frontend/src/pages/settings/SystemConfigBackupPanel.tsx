@@ -155,29 +155,21 @@ export function SystemConfigBackupPanel() {
   const stepLabel = job?.current_step ?? (importing ? "A iniciar…" : "");
 
   return (
-    <div className="card" style={{ marginTop: 20 }}>
-      <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 0 }}>
-        Backup de configuração
+    <div className="card" style={{ marginTop: 0 }}>
+      <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 0, marginBottom: 6 }}>
+        Backup de configuração (JSON)
         <InfoHint label="Exportar / importar definições">
           <p>
-            Exporta todas as definições do sistema em JSON: ligação PostgreSQL, credenciais SNMP/SSH, monitoramento, SMTP, Telegram, regras de alerta, perfis OLT,
-            integrações, automações e variáveis <span className="mono">NETQUASAR_*</span> do ambiente.
+            Snapshot das definições do sistema (credenciais, alertas, OLT, Telegram, automações, etc.). Não inclui inventário
+            (equipamentos, ONUs). O ficheiro contém segredos — não partilhe.
           </p>
-          <p>
-            <strong>Atenção:</strong> o ficheiro contém segredos (palavras-passe, tokens). Não partilhe publicamente.
-          </p>
-          <p>A importação aplica secções por ordem, com progresso e logs. Não inclui inventário (equipamentos, ONUs, etc.).</p>
         </InfoHint>
       </h2>
 
-      <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
-        Exporte um snapshot completo ou restaure definições a partir de um backup JSON anterior.
-      </p>
-
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
         <button type="button" className="btn btn--primary" disabled={exporting || importing} onClick={() => void handleExport()}>
           <Download size={16} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
-          {exporting ? "A exportar…" : "Exportar configurações (JSON)"}
+          {exporting ? "A exportar…" : "Exportar"}
         </button>
         <button
           type="button"
@@ -186,7 +178,7 @@ export function SystemConfigBackupPanel() {
           onClick={() => fileRef.current?.click()}
         >
           <Upload size={16} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
-          {importing ? "A importar…" : "Importar backup…"}
+          {importing ? "A importar…" : "Importar…"}
         </button>
         <input
           ref={fileRef}

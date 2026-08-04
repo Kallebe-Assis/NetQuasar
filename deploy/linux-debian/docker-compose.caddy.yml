@@ -1,0 +1,32 @@
+# Overlay: Caddy com TLS automático (Let's Encrypt) na frente do NetQuasar.
+# Requer domínio em NETQUASAR_DOMAIN (DNS A → IP público) e portas 80/443 abertas.
+#
+# Na raiz do repositório:
+#   echo 'NETQUASAR_DOMAIN=netquasar.seudominio.com' >> .env
+#   docker compose -f docker-compose.yml -f deploy/linux-debian/docker-compose.caddy.yml up -d
+#
+# Depois aceda: https://netquasar.seudominio.com
+# (pode fechar a 8080 no firewall; o Caddy fala com o contentor pela rede interna)
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      NETQUASAR_DOMAIN: ${NETQUASAR_DOMAIN:?defina NETQUASAR_DOMAIN no .env}
+    volumes:
+      - ./deploy/linux-debian/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - netquasar
+    networks:
+      - netquasar_net
+
+volumes:
+  caddy_data:
+  caddy_config:

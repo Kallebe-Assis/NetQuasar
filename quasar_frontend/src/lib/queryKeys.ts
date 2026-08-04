@@ -14,6 +14,8 @@ export const queryKeys = {
   automationAlertsDigest: ["automation-alerts-digest"] as const,
   automationCommercial: ["automation-commercial"] as const,
   automationBngStats: ["automation-bng-stats"] as const,
+  automationDatabaseBackup: ["automation-database-backup"] as const,
+  settingsB2Backup: ["settings-b2-backup"] as const,
   automationHistory: ["automation-history"] as const,
   smtpSettings: ["smtp-settings"] as const,
   alertsIncidents: ["alerts-incidents"] as const,

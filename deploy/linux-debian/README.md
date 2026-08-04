@@ -93,6 +93,42 @@ sudo ufw reload
 
 Ajuste a porta se alterou no `.env`.
 
+## 5.1. HTTPS com proxy reverso (Caddy) — GPS / geolocalização
+
+Browsers só permitem GPS em **HTTPS** (ou `localhost`). Com `http://IP:8080` a localização fica bloqueada.
+
+**Precisa de um domínio** (ex. `netquasar.seudominio.com`) com registo DNS **A** a apontar para o IP público do servidor. Let’s Encrypt não emite certificado fiável só para IP.
+
+1. No painel do DNS, crie o registo A e espere propagar (`ping netquasar.seudominio.com` deve resolver para o seu IP).
+
+2. No `.env` da raiz:
+
+```bash
+NETQUASAR_DOMAIN=netquasar.seudominio.com
+```
+
+3. Firewall — abra 80 e 443 (Let’s Encrypt usa a 80 na emissão):
+
+```bash
+sudo ufw allow 80/tcp comment 'HTTP/ACME'
+sudo ufw allow 443/tcp comment 'HTTPS'
+sudo ufw reload
+```
+
+4. Suba o stack **com** o overlay Caddy (na raiz do repo):
+
+```bash
+docker compose -f docker-compose.yml -f deploy/linux-debian/docker-compose.caddy.yml up -d
+```
+
+5. Aceda a `https://netquasar.seudominio.com` (não use o IP na barra do browser).
+
+Opcional: feche a 8080 no firewall (`sudo ufw delete allow 8080/tcp`) para o público só entrar pelo HTTPS; o Caddy continua a falar com o contentor `netquasar:8080` na rede Docker.
+
+Ficheiros: `deploy/linux-debian/Caddyfile` e `deploy/linux-debian/docker-compose.caddy.yml`.
+
+**Sem domínio:** não há certificado automático limpo. Pode usar túnel (Cloudflare Tunnel / ngrok) para obter um `https://…` temporário, ou certificado autoassinado (avisos no browser).
+
 ## 6. Atualização (nova versão do código)
 
 ```bash
@@ -119,6 +155,8 @@ Substitui `quasar` / `netquasar` se alteraste `POSTGRES_USER` / `POSTGRES_DB`.
 | Ficheiro / pasta        | Função |
 |-------------------------|--------|
 | `docker-compose.yml`    | Stack: app + Postgres + Redis |
+| `deploy/linux-debian/docker-compose.caddy.yml` | Overlay HTTPS (Caddy + Let’s Encrypt) |
+| `deploy/linux-debian/Caddyfile` | Config do proxy reverso |
 | `Dockerfile`            | Build multi-stage (Vite → Go → imagem Debian slim) |
 | `.env.example`          | Modelo de variáveis |
 | `.env`                  | **Local** — credenciais (não versionar) |

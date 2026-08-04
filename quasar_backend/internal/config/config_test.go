@@ -61,3 +61,19 @@ func TestEnsureSupabaseSSLRootCertIfNeeded(t *testing.T) {
 		t.Fatal("non-supabase dsn should be unchanged")
 	}
 }
+
+func TestEnsureReadWriteSessionAttrs(t *testing.T) {
+	base := "postgres://u:p@localhost:5432/db?sslmode=require"
+	got := EnsureReadWriteSessionAttrs(base)
+	if !strings.Contains(got, "target_session_attrs=read-write") {
+		t.Fatalf("expected target_session_attrs, got %q", got)
+	}
+	twice := EnsureReadWriteSessionAttrs(got)
+	if twice != got {
+		t.Fatalf("second call should noop, got %q vs %q", twice, got)
+	}
+	custom := "postgres://u:p@localhost:5432/db?target_session_attrs=any"
+	if EnsureReadWriteSessionAttrs(custom) != custom {
+		t.Fatal("should preserve existing target_session_attrs")
+	}
+}

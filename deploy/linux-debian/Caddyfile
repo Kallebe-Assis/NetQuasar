@@ -1,0 +1,19 @@
+# Caddy — HTTPS na frente do NetQuasar
+#
+# Pré-requisito: DNS A (ou AAAA) do domínio a apontar para o IP público do servidor.
+# Substitua netquasar.exemplo.com pelo seu domínio real.
+#
+# Uso com Compose (na raiz do repo):
+#   export NETQUASAR_DOMAIN=netquasar.exemplo.com
+#   docker compose -f docker-compose.yml -f deploy/linux-debian/docker-compose.caddy.yml up -d
+#
+# Ou Caddy no host (sem contentor):
+#   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+#   # ver https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+#   sudo cp deploy/linux-debian/Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+
+{$NETQUASAR_DOMAIN:netquasar.exemplo.com} {
+	encode gzip
+	reverse_proxy netquasar:8080
+}
