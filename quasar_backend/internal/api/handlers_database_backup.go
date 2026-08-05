@@ -658,8 +658,13 @@ func (s *Server) runRestoreJob(jobID, dumpPath string, removeAfter bool) {
 		s.finishRestoreJob(jobID, false, err.Error())
 		return
 	}
-	s.setRestoreStep(jobID, 85, "A reabrir pool…")
 	cfg := config.ConfigFromPostgresDSN(dsn)
+	s.setRestoreStep(jobID, 75, "A aplicar migrações…")
+	if err := db.Migrate(ctx, cfg); err != nil {
+		s.finishRestoreJob(jobID, false, "migrações após restore: "+err.Error())
+		return
+	}
+	s.setRestoreStep(jobID, 85, "A reabrir pool…")
 	newPool, err := db.NewPool(ctx, cfg)
 	if err != nil {
 		s.finishRestoreJob(jobID, false, "pool após restore: "+err.Error())

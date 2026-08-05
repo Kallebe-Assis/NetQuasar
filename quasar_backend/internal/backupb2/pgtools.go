@@ -28,7 +28,7 @@ func findTool(name string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("%s não encontrado no PATH (instale postgresql-client)", name)
+	return "", fmt.Errorf("%s não encontrado no PATH (instale postgresql-client-18)", name)
 }
 
 // DumpFull cria um dump custom (schema+dados) em outPath.
@@ -77,7 +77,7 @@ GRANT USAGE ON SCHEMA public TO public;
 	return nil
 }
 
-// RestoreFull restaura dump custom (após WipePublicSchema).
+// RestoreFull restaura dump custom (após WipePublicSchema) e valida tabelas essenciais.
 func RestoreFull(ctx context.Context, databaseURL, dumpPath string) error {
 	bin, err := findTool("pg_restore")
 	if err != nil {
@@ -91,12 +91,60 @@ func RestoreFull(ctx context.Context, databaseURL, dumpPath string) error {
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return nil
+	runErr := cmd.Run()
+	errOut := strings.TrimSpace(stderr.String())
+
+	// Exit code 1 = avisos; >1 = erro. Em ambos os casos validamos o schema —
+	// um cliente pg_restore antigo pode terminar com código 1 sem criar tabelas.
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			code := ee.ExitCode()
+			if code > 1 {
+				return fmt.Errorf("pg_restore (exit %d): %w: %s", code, runErr, errOut)
+			}
+		} else {
+			return fmt.Errorf("pg_restore: %w: %s", runErr, errOut)
 		}
-		return fmt.Errorf("pg_restore: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	if err := validateRestoredSchema(ctx, databaseURL); err != nil {
+		hint := "verifique se o postgresql-client no contentor é >= versão do dump (ex.: postgresql-client-18)"
+		if errOut != "" {
+			return fmt.Errorf("pg_restore incompleto: %w (%s). stderr: %s", err, hint, errOut)
+		}
+		return fmt.Errorf("pg_restore incompleto: %w (%s)", err, hint)
+	}
+	return nil
+}
+
+func validateRestoredSchema(ctx context.Context, databaseURL string) error {
+	bin, err := findTool("psql")
+	if err != nil {
+		return err
+	}
+	const q = `
+SELECT string_agg(t, ', ' ORDER BY t)
+FROM unnest(ARRAY['devices','users','goose_db_version']) AS t
+WHERE NOT EXISTS (
+  SELECT 1 FROM information_schema.tables
+  WHERE table_schema = 'public' AND table_name = t
+);
+`
+	cmd := exec.CommandContext(ctx, bin,
+		"--dbname="+databaseURL,
+		"-v", "ON_ERROR_STOP=1",
+		"-t", "-A",
+		"-c", q,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("validação pós-restore: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	missing := strings.TrimSpace(stdout.String())
+	if missing != "" {
+		return fmt.Errorf("faltam tabelas essenciais após restore: %s — cliente pg_restore demasiado antigo para este dump?", missing)
 	}
 	return nil
 }
