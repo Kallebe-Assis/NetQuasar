@@ -88,7 +88,7 @@ func (s *Server) tryScheduledONUReport(ctx context.Context, log *zerolog.Logger)
 	if log != nil {
 		log.Info().Str("period", period).Str("time_hhmm", cfg.TimeHHMM).Int("day_of_month", cfg.DayOfMonth).Msg("relatório ONU mensal devido — a executar")
 	}
-	if err := s.executeONUMonthlyReport(ctx, period, "scheduler", true); err != nil && log != nil {
+	if err := s.executeONUMonthlyReport(ctx, period, automationMetaFromActor(auditActorSistema, nil), true); err != nil && log != nil {
 		log.Warn().Err(err).Str("period", period).Msg("relatório ONU agendado falhou")
 	}
 }
@@ -159,12 +159,8 @@ func (s *Server) setONUAutomationStatus(ctx context.Context, status string, errM
 	`, status, em)
 }
 
-func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, actor string, requireEnabled bool) error {
+func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, meta automationRunMeta, requireEnabled bool) error {
 	started := time.Now()
-	trigger := "manual"
-	if actor == "scheduler" {
-		trigger = "scheduled"
-	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base de dados indisponível")
@@ -178,11 +174,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		trigger := "manual"
-		if actor == "scheduler" {
-			trigger = "scheduled"
-		}
-		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, false,
+		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, meta, started, false,
 			"Não iniciado (desativado, já em execução ou bloqueado)", nil, map[string]any{"period": period}, period)
 		return nil
 	}
@@ -194,12 +186,12 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 	s.setMonitoringActivity(ctx, "Relatório ONU mensal: a recolher dados OLT")
 
 	var runID uuid.UUID
-	startSummary, _ := json.Marshal(map[string]any{"period": period, "actor": actor})
+	startSummary, _ := json.Marshal(map[string]any{"period": period, "actor": meta.Actor, "trigger": meta.Trigger})
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO onu_report_runs (status, summary) VALUES ('collecting', $1::jsonb) RETURNING id
 	`, string(startSummary)).Scan(&runID); err != nil {
 		s.setONUAutomationStatus(ctx, "failed", strPtr(err.Error()))
-		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, false, "Falha ao iniciar execução", err,
+		s.recordAutomationExecution(ctx, jobOnuMonthlyReport, meta, started, false, "Falha ao iniciar execução", err,
 			map[string]any{"period": period}, period)
 		return err
 	}
@@ -207,7 +199,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 	oltOK, oltFail := 0, 0
 	rows, err := pool.Query(ctx, `SELECT id FROM devices WHERE lower(trim(category)) = 'olt' ORDER BY description`)
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), nil, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, err.Error(), nil, started, meta)
 		return err
 	}
 	defer rows.Close()
@@ -225,7 +217,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 
 	agg, err := s.aggregateONUReport(ctx)
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), map[string]any{"olts_refreshed": oltOK, "olts_failed": oltFail}, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, err.Error(), map[string]any{"olts_refreshed": oltOK, "olts_failed": oltFail}, started, meta)
 		return err
 	}
 	agg["period"] = period
@@ -235,7 +227,7 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 	upserted, syncErr := s.syncCommercialMonthlyFromOLTSnapshots(ctx, period)
 	agg["commercial_localities_upserted"] = upserted
 	if syncErr != nil {
-		s.finishONURun(ctx, runID, period, false, syncErr.Error(), agg, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, syncErr.Error(), agg, started, meta)
 		return syncErr
 	}
 
@@ -244,30 +236,30 @@ func (s *Server) executeONUMonthlyReport(ctx context.Context, period string, act
 
 	cfg, err := telegramclient.LoadConfig(ctx, pool, "reports")
 	if err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, meta)
 		return err
 	}
 	if !cfg.Ready() {
 		err := fmt.Errorf("Telegram (relatórios) não configurado")
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, meta)
 		return err
 	}
 	text, compErr := s.commercialTelegramCompose(ctx, period, true)
 	if compErr != nil {
-		s.finishONURun(ctx, runID, period, false, compErr.Error(), agg, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, compErr.Error(), agg, started, meta)
 		return compErr
 	}
 	if err := telegramclient.SendMessage(ctx, cfg, text); err != nil {
-		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, actor, trigger)
+		s.finishONURun(ctx, runID, period, false, err.Error(), agg, started, meta)
 		return err
 	}
 
-	s.finishONURun(ctx, runID, period, true, "", agg, started, actor, trigger)
-	s.appendAuditLog(ctx, "automation_onu_report", "1", "run", actor, nil, agg)
+	s.finishONURun(ctx, runID, period, true, "", agg, started, meta)
+	s.appendAuditLog(ctx, "automation_onu_report", "1", "run", meta.Actor, nil, agg)
 	return nil
 }
 
-func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period string, ok bool, errMsg string, agg map[string]any, started time.Time, actor, trigger string) {
+func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period string, ok bool, errMsg string, agg map[string]any, started time.Time, meta automationRunMeta) {
 	status := "completed"
 	stAuto := "completed"
 	var em *string
@@ -322,7 +314,7 @@ func (s *Server) finishONURun(ctx context.Context, runID uuid.UUID, period strin
 	if !ok {
 		statusMsg = fmt.Sprintf("Relatório ONU %s falhou", period)
 	}
-	s.recordAutomationExecution(ctx, jobOnuMonthlyReport, actor, trigger, started, ok, statusMsg, execErr, agg, period)
+	s.recordAutomationExecution(ctx, jobOnuMonthlyReport, meta, started, ok, statusMsg, execErr, agg, period)
 }
 
 func (s *Server) aggregateONUReport(ctx context.Context) (map[string]any, error) {
@@ -477,11 +469,11 @@ func (s *Server) runAutomationONU(w http.ResponseWriter, r *http.Request) {
 	var tz string
 	_ = pool.QueryRow(r.Context(), `SELECT timezone FROM automation_onu_report WHERE id=1`).Scan(&tz)
 	period := onuReportPeriodNow(tz)
-	actor := s.actorFromRequest(r)
-	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "run_manual", actor, nil, map[string]any{"period": period})
+	meta := s.automationMetaFromRequest(r)
+	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "run_manual", meta.Actor, nil, map[string]any{"period": period})
 	go func() {
 		bg := context.Background()
-		if err := s.executeONUMonthlyReport(bg, period, actor, false); err != nil {
+		if err := s.executeONUMonthlyReport(bg, period, meta, false); err != nil {
 			s.Log.Warn().Err(err).Str("period", period).Msg("relatório ONU manual falhou")
 		}
 	}()

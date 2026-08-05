@@ -159,6 +159,8 @@ func monitoringHeader(level, title, message, alertType string, meta map[string]a
 		return "🟡 ALERTA QUEDA DE ONUs"
 	case "bng_subscriber_drop":
 		return "🟡 ALERTA QUEDA DE PPPoE"
+	case "mikrotik_pppoe_drop":
+		return "🟡 ALERTA QUEDA DE PPPoE MIKROTIK"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx", "olt_onu_rx", "olt_onu_tx", "olt_onu_optical":
 		return "🟡 ALERTA ÓPTICA"
 	case "uptime_restart_low":
@@ -246,6 +248,8 @@ func ResolutionStatusLine(alertType, originalMessage string) string {
 		return "ONUs online normalizadas"
 	case "bng_subscriber_drop":
 		return "Logins BNG normalizados"
+	case "mikrotik_pppoe_drop":
+		return "Sessões PPPoE MikroTik normalizadas"
 	case "olt_onu_rise":
 		return "Variação de ONUs online normalizada"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
@@ -725,6 +729,10 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
 	case "bng_subscriber_drop":
 		parts = appendBngSubscriberDropTelegramLines(parts, meta, title, inc)
+	case "mikrotik_pppoe_drop":
+		if n := metaInt(meta, "drop_count"); n > 0 {
+			parts = append(parts, fmt.Sprintf("• Sessões desconectadas: %d", n))
+		}
 	case "interface_down_transition", "interface_down", "mikrotik_sfp_tx", "mikrotik_sfp_rx":
 		if tgt := interfaceTargetFromMeta(meta, inc); tgt != "" {
 			parts = append(parts, "• "+tgt)
@@ -1011,6 +1019,8 @@ func ResolutionHeadlineForAlertType(alertType string) string {
 		return "Contagem de ONUs online normalizada"
 	case "bng_subscriber_drop":
 		return "Contagem de logins BNG normalizada"
+	case "mikrotik_pppoe_drop":
+		return "Contagem de sessões PPPoE MikroTik normalizada"
 	case "olt_onu_rise":
 		return "Variação de ONUs online normalizada"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":

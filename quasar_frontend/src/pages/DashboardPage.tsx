@@ -47,7 +47,6 @@ type DashboardTotals = {
 type NamedCount = { category?: string; network_status?: string; operational_mode?: string; count?: number; pop_name?: string; locality_name?: string; alert_type?: string };
 
 type LatRank = { device_id?: string; description?: string; avg_latency_ms?: number; samples?: number };
-type MikTraffic = { device_id?: string; description?: string; if_in_octets?: number | null; if_out_octets?: number | null; collected_at?: string };
 type OltOnu = {
   device_id?: string;
   description?: string;
@@ -73,7 +72,6 @@ type DashboardAnalytics = {
   telemetry_window?: { samples?: number };
   alerts_by_type_30d?: NamedCount[];
   alerts_open?: number;
-  mikrotik_interface_traffic_latest?: MikTraffic[];
   olt_onu_by_device?: OltOnu[];
   olt_onu_fleet_totals?: { onu_count?: number; onu_online?: number; onu_offline?: number };
 };
@@ -104,19 +102,6 @@ function fmtInt(n: unknown): string {
 function fmt1(n: unknown): string {
   const x = num(n);
   return Number.isFinite(x) ? x.toFixed(1) : "—";
-}
-
-function fmtBytes(n: unknown): string {
-  const x = num(n);
-  if (x <= 0) return "—";
-  const u = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let v = x;
-  let i = 0;
-  while (v >= 1024 && i < u.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
 }
 
 function trunc(s: string, max = 22): string {
@@ -266,20 +251,6 @@ export function DashboardPage() {
       code: String(r.alert_type ?? ""),
     }));
   }, [dash.data?.alerts_by_type_30d]);
-
-  const mikTrafficBar = useMemo(() => {
-    return (dash.data?.mikrotik_interface_traffic_latest ?? []).map((r) => {
-      const inn = r.if_in_octets != null ? num(r.if_in_octets) : 0;
-      const out = r.if_out_octets != null ? num(r.if_out_octets) : 0;
-      return {
-        name: trunc(String(r.description ?? r.device_id ?? "?"), 18),
-        "Entrada (GiB)": inn / 1024 ** 3,
-        "Saída (GiB)": out / 1024 ** 3,
-        _rawIn: inn,
-        _rawOut: out,
-      };
-    });
-  }, [dash.data?.mikrotik_interface_traffic_latest]);
 
   const oltOnuBar = useMemo(() => {
     return (dash.data?.olt_onu_by_device ?? []).map((r) => ({
@@ -673,64 +644,8 @@ export function DashboardPage() {
       </Section>
 
       <Section
-        id="sec-mikrotik"
-        title="5 · Tráfego por interface (Mikrotik, última amostra)"
-        subtitle="Equipamentos Ativos (categoria ou marca Mikrotik). Soma IF-MIB ifInOctets / ifOutOctets na última amostra — valores cumulativos SNMP em GiB."
-      >
-        {mikTrafficBar.length === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: 13 }}>Sem snapshots de interface no período. Use Interfaces SNMP nos equipamentos ou ferramentas de walk.</p>
-        ) : (
-          <>
-            <ChartBox h={320}>
-              <BarChart data={mikTrafficBar} margin={{ left: 8, right: 8, top: 12, bottom: 52 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-30} textAnchor="end" height={72} />
-                <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} />
-                <Tooltip
-                  formatter={(v: number, name: string) => [`${fmt1(v)} GiB`, name]}
-                  contentStyle={tooltipStyle}
-                  labelFormatter={(_, p) => {
-                    const pl = (p as { payload?: { _rawIn?: number; _rawOut?: number } })?.payload;
-                    if (!pl) return "";
-                    return `${fmtBytes(pl._rawIn)} ↓ · ${fmtBytes(pl._rawOut)} ↑`;
-                  }}
-                />
-                <Legend />
-                <Bar dataKey="Entrada (GiB)" fill="#58a6ff" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Saída (GiB)" fill="#3fb950" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartBox>
-            <div className="table-wrap" style={{ marginTop: 10 }}>
-              <table style={{ fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th>Equipamento</th>
-                    <th className="mono">Entrada</th>
-                    <th className="mono">Saída</th>
-                    <th>Última colheita</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(dash.data?.mikrotik_interface_traffic_latest ?? []).map((r) => (
-                    <tr key={r.device_id}>
-                      <td>{r.description}</td>
-                      <td className="mono">{fmtBytes(r.if_in_octets)}</td>
-                      <td className="mono">{fmtBytes(r.if_out_octets)}</td>
-                      <td className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
-                        {r.collected_at ? new Date(r.collected_at).toLocaleString("pt-PT") : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </Section>
-
-      <Section
         id="sec-olt"
-        title="6 · ONUs por OLT (snapshot)"
+        title="5 · ONUs por OLT (snapshot)"
         subtitle="OLTs em operação Ativo: soma onu_total / onu_online / onu_offline nas PONs do último snapshot."
       >
         {oltOnuBar.length === 0 ? (
@@ -803,7 +718,7 @@ export function DashboardPage() {
 
       <Section
         id="sec-olt-capacity"
-        title="7 · Capacidade OLT por PON"
+        title="6 · Capacidade OLT por PON"
         subtitle="Percentual de ocupação por PON (base 128 ONUs/PON) e tendência total de ONUs nos últimos 7 dias."
       >
         {cap.isError && <div className="msg msg--err">{(cap.error as Error).message}</div>}

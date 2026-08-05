@@ -99,7 +99,7 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 	if !due {
 		return
 	}
-	if err := s.executeAlertsDigest(ctx, runKey, auditActorSistema); err != nil && log != nil {
+	if err := s.executeAlertsDigest(ctx, runKey, automationMetaFromActor(auditActorSistema, nil)); err != nil && log != nil {
 		log.Warn().Err(err).Str("run_key", runKey).Msg("resumo de alertas agendado falhou")
 	}
 }
@@ -138,17 +138,13 @@ func (s *Server) tryScheduledCommercialReport(ctx context.Context, log *zerolog.
 	if !due {
 		return
 	}
-	if err := s.executeCommercialReportOnly(ctx, period, auditActorSistema); err != nil && log != nil {
+	if err := s.executeCommercialReportOnly(ctx, period, automationMetaFromActor(auditActorSistema, nil)); err != nil && log != nil {
 		log.Warn().Err(err).Str("period", period).Msg("relatório comercial agendado falhou")
 	}
 }
 
-func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) error {
+func (s *Server) executeAlertsDigest(ctx context.Context, runKey string, meta automationRunMeta) error {
 	started := time.Now()
-	trigger := "manual"
-	if actor == "scheduler" {
-		trigger = "scheduled"
-	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
@@ -163,7 +159,7 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 	if tag.RowsAffected() == 0 {
 		sum := s.alertsDigestSummary(ctx)
 		sum["run_key"] = runKey
-		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false,
+		s.recordAutomationExecution(ctx, jobAlertsDigest, meta, started, false,
 			"Não iniciado (desativado, já em execução ou bloqueado)", nil, sum, runKey)
 		return nil
 	}
@@ -181,7 +177,7 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 		s.setAlertsDigestStatus(ctx, "failed", strPtr(err.Error()), runKey)
 		sum := s.alertsDigestSummary(ctx)
 		sum["run_key"] = runKey
-		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false, "Falha ao compor resumo", err, sum, runKey)
+		s.recordAutomationExecution(ctx, jobAlertsDigest, meta, started, false, "Falha ao compor resumo", err, sum, runKey)
 		return err
 	}
 	var sendErr error
@@ -211,15 +207,15 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey, actor string) 
 		s.setAlertsDigestStatus(ctx, "failed", strPtr(sendErr.Error()), runKey)
 		sum := s.alertsDigestSummary(ctx)
 		sum["run_key"] = runKey
-		s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, false, "Falha no envio", sendErr, sum, runKey)
+		s.recordAutomationExecution(ctx, jobAlertsDigest, meta, started, false, "Falha no envio", sendErr, sum, runKey)
 		return sendErr
 	}
 	s.setAlertsDigestStatus(ctx, "completed", nil, runKey)
 	sum := s.alertsDigestSummary(ctx)
 	sum["run_key"] = runKey
-	s.recordAutomationExecution(ctx, jobAlertsDigest, actor, trigger, started, true,
+	s.recordAutomationExecution(ctx, jobAlertsDigest, meta, started, true,
 		fmt.Sprintf("Resumo enviado (%s)", subject), nil, sum, runKey)
-	s.appendAuditLog(ctx, "automation_alerts_digest", "1", "run", actor, nil, map[string]any{"run_key": runKey})
+	s.appendAuditLog(ctx, "automation_alerts_digest", "1", "run", meta.Actor, nil, map[string]any{"run_key": runKey})
 	return nil
 }
 
@@ -275,12 +271,8 @@ func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string,
 	return subject, strings.TrimSpace(sb.String()), nil
 }
 
-func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor string) error {
+func (s *Server) executeCommercialReportOnly(ctx context.Context, period string, meta automationRunMeta) error {
 	started := time.Now()
-	trigger := "manual"
-	if actor == "scheduler" {
-		trigger = "scheduled"
-	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
@@ -294,7 +286,7 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 	}
 	if tag.RowsAffected() == 0 {
 		sum := s.commercialReportSummary(ctx, period)
-		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false,
+		s.recordAutomationExecution(ctx, jobCommercialReport, meta, started, false,
 			"Não iniciado (desativado, já em execução ou bloqueado)", nil, sum, period)
 		return nil
 	}
@@ -311,7 +303,7 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 	if err != nil {
 		s.setCommercialReportStatus(ctx, "failed", strPtr(err.Error()), period)
 		sum := s.commercialReportSummary(ctx, period)
-		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false, "Falha ao compor relatório", err, sum, period)
+		s.recordAutomationExecution(ctx, jobCommercialReport, meta, started, false, "Falha ao compor relatório", err, sum, period)
 		return err
 	}
 	var sendErr error
@@ -342,14 +334,14 @@ func (s *Server) executeCommercialReportOnly(ctx context.Context, period, actor 
 	if sendErr != nil {
 		s.setCommercialReportStatus(ctx, "failed", strPtr(sendErr.Error()), period)
 		sum := s.commercialReportSummary(ctx, period)
-		s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, false, "Falha no envio", sendErr, sum, period)
+		s.recordAutomationExecution(ctx, jobCommercialReport, meta, started, false, "Falha no envio", sendErr, sum, period)
 		return sendErr
 	}
 	s.setCommercialReportStatus(ctx, "completed", nil, period)
 	sum := s.commercialReportSummary(ctx, period)
-	s.recordAutomationExecution(ctx, jobCommercialReport, actor, trigger, started, true,
+	s.recordAutomationExecution(ctx, jobCommercialReport, meta, started, true,
 		fmt.Sprintf("Base comercial %s enviada", period), nil, sum, period)
-	s.appendAuditLog(ctx, "automation_commercial_report", "1", "run", actor, nil, map[string]any{"period": period})
+	s.appendAuditLog(ctx, "automation_commercial_report", "1", "run", meta.Actor, nil, map[string]any{"period": period})
 	return nil
 }
 
@@ -438,7 +430,7 @@ func (s *Server) patchAutomationAlertsDigest(w http.ResponseWriter, r *http.Requ
 func (s *Server) runAutomationAlertsDigest(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02")
 	go func() {
-		_ = s.executeAlertsDigest(context.Background(), runKey, s.actorFromRequest(r))
+		_ = s.executeAlertsDigest(context.Background(), runKey, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "run_key": runKey})
 }
@@ -483,7 +475,7 @@ func (s *Server) runAutomationCommercialReport(w http.ResponseWriter, r *http.Re
 	_ = s.DB().QueryRow(r.Context(), `SELECT timezone FROM automation_commercial_report WHERE id=1`).Scan(&tz)
 	period := onuReportPeriodNow(tz)
 	go func() {
-		_ = s.executeCommercialReportOnly(context.Background(), period, s.actorFromRequest(r))
+		_ = s.executeCommercialReportOnly(context.Background(), period, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "period": period})
 }

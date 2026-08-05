@@ -30,6 +30,7 @@ var dbCleanupTables = []dbCleanupTableSpec{
 	{Table: "olt_onu_samples", DateCol: "recorded_at", Label: "Histórico agregado ONU (OLT)", Category: "olt"},
 	{Table: "bng_stats_samples", DateCol: "collected_at", Label: "Totais BNG (monitoramento)", Category: "bng"},
 	{Table: "bng_session_snapshots", DateCol: "captured_at", Label: "Snapshots sessões PPPoE BNG", Category: "bng"},
+	{Table: "bng_login_events", DateCol: "disconnected_at", Label: "Histórico de logins BNG (encerrados)", Category: "bng", Guard: "closed_only"},
 	{Table: "events", DateCol: "created_at", Label: "Eventos do sistema", Category: "sistema"},
 	{Table: "snmp_walk_jobs", DateCol: "created_at", Label: "Jobs SNMP walk", Category: "sistema"},
 	{Table: "onu_report_runs", DateCol: "started_at", Label: "Execuções relatório ONU", Category: "olt"},

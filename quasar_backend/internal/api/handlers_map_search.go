@@ -203,38 +203,55 @@ func (s *Server) mapSearch(w http.ResponseWriter, r *http.Request) {
 
 	infraKinds := []struct {
 		filter, table, kind, prefix string
+		hasProject                  bool
 	}{
-		{"cto", "network_ctos", "cto", "CTO"},
-		{"poste", "network_poles", "pole", "Poste"},
-		{"pole", "network_poles", "pole", "Poste"},
-		{"emenda", "network_splice_boxes", "splice_box", "Emenda"},
-		{"cabo", "network_cables", "cable", "Cabo"},
-		{"projeto", "network_projects", "project", "Projeto"},
+		{"cto", "network_ctos", "cto", "CTO", true},
+		{"poste", "network_poles", "pole", "Poste", true},
+		{"emenda", "network_splice_boxes", "splice_box", "Emenda", true},
+		{"cabo", "network_cables", "cable", "Cabo", true},
+		{"projeto", "network_projects", "project", "Projeto", false},
 	}
 	for _, ik := range infraKinds {
 		if typeFilter != "" && typeFilter != "infra" && typeFilter != "infrastructure" && typeFilter != ik.filter && typeFilter != ik.kind {
 			continue
 		}
-		rows, err := s.DB().Query(ctx, `
-			SELECT id::text, description, display_number, latitude, longitude
-			FROM `+ik.table+`
+		var sqlQ string
+		if ik.hasProject {
+			sqlQ = `
+			SELECT t.id::text, t.description, t.display_number, t.latitude, t.longitude,
+			       COALESCE(NULLIF(trim(p.description), ''), '')
+			FROM ` + ik.table + ` t
+			LEFT JOIN network_projects p ON p.id = t.project_id
+			WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
+			  AND t.description ILIKE $1
+			ORDER BY t.display_number
+			LIMIT $2`
+		} else {
+			sqlQ = `
+			SELECT id::text, description, display_number, latitude, longitude, ''::text
+			FROM ` + ik.table + `
 			WHERE latitude IS NOT NULL AND longitude IS NOT NULL
 			  AND description ILIKE $1
 			ORDER BY display_number
-			LIMIT $2
-		`, pattern, perKind)
+			LIMIT $2`
+		}
+		rows, err := s.DB().Query(ctx, sqlQ, pattern, perKind)
 		if err == nil {
 			func() {
 				defer rows.Close()
 				for rows.Next() {
-					var id, desc string
+					var id, desc, projectName string
 					var num int
 					var lat, lng float64
-					if rows.Scan(&id, &desc, &num, &lat, &lng) == nil {
-						appendIfRoom(map[string]any{
+					if rows.Scan(&id, &desc, &num, &lat, &lng, &projectName) == nil {
+						row := map[string]any{
 							"id": id, "label": desc, "kind": ik.kind, "category": ik.prefix,
 							"lat": lat, "lng": lng, "map_id": "infra-" + ik.kind + "-" + id,
-						})
+						}
+						if projectName != "" {
+							row["project_name"] = projectName
+						}
+						appendIfRoom(row)
 					}
 				}
 			}()

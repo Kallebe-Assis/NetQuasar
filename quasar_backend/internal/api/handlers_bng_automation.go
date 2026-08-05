@@ -49,17 +49,13 @@ func (s *Server) tryScheduledBngStatsReport(ctx context.Context, log *zerolog.Lo
 	if !due {
 		return
 	}
-	if err := s.executeBngStatsReport(ctx, runKey, auditActorSistema); err != nil && log != nil {
+	if err := s.executeBngStatsReport(ctx, runKey, automationMetaFromActor(auditActorSistema, nil)); err != nil && log != nil {
 		log.Warn().Err(err).Str("run_key", runKey).Msg("relatório BNG agendado falhou")
 	}
 }
 
-func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string) error {
+func (s *Server) executeBngStatsReport(ctx context.Context, runKey string, meta automationRunMeta) error {
 	started := time.Now()
-	trigger := "manual"
-	if actor == auditActorSistema {
-		trigger = "scheduled"
-	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
@@ -74,7 +70,7 @@ func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string
 	if tag.RowsAffected() == 0 {
 		sum := s.bngStatsReportSummary(ctx)
 		sum["run_key"] = runKey
-		s.recordAutomationExecution(ctx, jobBngStatsReport, actor, trigger, started, false,
+		s.recordAutomationExecution(ctx, jobBngStatsReport, meta, started, false,
 			"Não iniciado (desativado, já em execução ou bloqueado)", nil, sum, runKey)
 		return nil
 	}
@@ -91,7 +87,7 @@ func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string
 	if err != nil {
 		s.setBngStatsReportStatus(ctx, "failed", strPtr(err.Error()), runKey)
 		sum := s.bngStatsReportSummary(ctx)
-		s.recordAutomationExecution(ctx, jobBngStatsReport, actor, trigger, started, false, "Falha ao compor relatório", err, sum, runKey)
+		s.recordAutomationExecution(ctx, jobBngStatsReport, meta, started, false, "Falha ao compor relatório", err, sum, runKey)
 		return err
 	}
 	title, _ := payload["title"].(string)
@@ -127,14 +123,14 @@ func (s *Server) executeBngStatsReport(ctx context.Context, runKey, actor string
 	if sendErr != nil {
 		s.setBngStatsReportStatus(ctx, "failed", strPtr(sendErr.Error()), runKey)
 		sum := s.bngStatsReportSummary(ctx)
-		s.recordAutomationExecution(ctx, jobBngStatsReport, actor, trigger, started, false, "Falha no envio", sendErr, sum, runKey)
+		s.recordAutomationExecution(ctx, jobBngStatsReport, meta, started, false, "Falha no envio", sendErr, sum, runKey)
 		return sendErr
 	}
 	s.setBngStatsReportStatus(ctx, "completed", nil, runKey)
 	sum := s.bngStatsReportSummary(ctx)
-	s.recordAutomationExecution(ctx, jobBngStatsReport, actor, trigger, started, true,
+	s.recordAutomationExecution(ctx, jobBngStatsReport, meta, started, true,
 		"Relatório de totais BNG enviado", nil, sum, runKey)
-	s.appendAuditLog(ctx, "automation_bng_stats_report", "1", "run", actor, nil, map[string]any{"run_key": runKey})
+	s.appendAuditLog(ctx, "automation_bng_stats_report", "1", "run", meta.Actor, nil, map[string]any{"run_key": runKey})
 	return nil
 }
 
@@ -214,7 +210,7 @@ func (s *Server) patchAutomationBngStatsReport(w http.ResponseWriter, r *http.Re
 func (s *Server) runAutomationBngStatsReport(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02")
 	go func() {
-		_ = s.executeBngStatsReport(context.Background(), runKey, s.actorFromRequest(r))
+		_ = s.executeBngStatsReport(context.Background(), runKey, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "run_key": runKey})
 }

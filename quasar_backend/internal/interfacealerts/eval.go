@@ -19,19 +19,23 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const alertTypeIfaceDown = "interface_down_transition"
+const (
+	alertTypeIfaceDown         = "interface_down_transition"
+	alertTypeMikrotikPPPoEDrop = "mikrotik_pppoe_drop"
+	metaKeyMikrotikPPPoEDrop   = "mikrotik_pppoe_drop"
+)
 
 // Params entrada para avaliação pós-snapshot de interfaces.
 type Params struct {
-	DeviceID    uuid.UUID
-	Host        string
-	DeviceDesc  string
-	Category    string
-	Brand       string
-	Model       string
-	Source      string
-	PrevJSON    []byte // nil ou vazio = sem comparação de transição
-	CurrJSON    []byte
+	DeviceID   uuid.UUID
+	Host       string
+	DeviceDesc string
+	Category   string
+	Brand      string
+	Model      string
+	Source     string
+	PrevJSON   []byte // nil ou vazio = sem comparação de transição
+	CurrJSON   []byte
 }
 
 // EvaluateAfterSnapshot aplica limiares SFP (SNMP MikroTik + Telnet Switch/MikroTik) e transições UP→DOWN.
@@ -54,7 +58,7 @@ func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		return
 	}
 	prevVars := snapshotwalk.VarsFromJSON(p.PrevJSON)
-	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Category, p.Source, prevVars, currVars, customs)
+	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Category, p.Source, mk, prevVars, currVars, customs)
 }
 
 func isMikrotik(category, brand, model, description string) bool {
@@ -66,6 +70,21 @@ func isMikrotik(category, brand, model, description string) bool {
 	return strings.Contains(hay, "mikrotik") || strings.Contains(hay, "routeros") ||
 		strings.Contains(hay, "ccr") || strings.Contains(hay, "crs") || strings.Contains(hay, "rb") ||
 		strings.Contains(hay, "chr")
+}
+
+func isPPPoEIfaceName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	return strings.Contains(n, "pppoe") || strings.HasPrefix(n, "<pppoe")
+}
+
+func ifaceDisplayName(r snmpifparse.IfRow, customs map[int]string) (baseName, label string) {
+	baseName = snmpifparse.PreferIfaceName(r.IfName, r.DisplayName, r.Descr, r.IfIndex)
+	custom := customs[r.IfIndex]
+	label = snmpifparse.FormatAlertIfaceLabel(baseName, r.IfAlias, custom)
+	if label == "" {
+		label = fmt.Sprintf("if%d", r.IfIndex)
+	}
+	return baseName, label
 }
 
 func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
@@ -95,14 +114,14 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 			sfp = true
 		}
 		sfpEval = append(sfpEval, alertthresholds.SfpInterfaceRow{
-			IfIndex:            r.IfIndex,
-			DisplayName:        disp,
-			IfName:             baseName,
-			IfAlias:            strings.TrimSpace(r.IfAlias),
-			CustomDescription:  customs[r.IfIndex],
-			Sfp:                sfp,
-			TxDBm:              copyFloatPtr(op.TxDBm),
-			RxDBm:              copyFloatPtr(op.RxDBm),
+			IfIndex:           r.IfIndex,
+			DisplayName:       disp,
+			IfName:            baseName,
+			IfAlias:           strings.TrimSpace(r.IfAlias),
+			CustomDescription: customs[r.IfIndex],
+			Sfp:               sfp,
+			TxDBm:             copyFloatPtr(op.TxDBm),
+			RxDBm:             copyFloatPtr(op.RxDBm),
 		})
 		seen[r.IfIndex] = struct{}{}
 	}
@@ -132,24 +151,69 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 }
 
 func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
-	deviceID uuid.UUID, devDesc, host, category, source string,
+	deviceID uuid.UUID, devDesc, host, category, source string, mikrotik bool,
 	prevVars, currVars []probing.SNMPVar, customs map[int]string,
 ) {
 	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "iface_down_count", category)
-	if !ok {
-		return
-	}
 	prevRows := snmpifparse.BuildIfTable(prevVars)
 	currRows := snmpifparse.BuildIfTable(currVars)
 	prevBy := map[int]snmpifparse.IfRow{}
 	for _, r := range prevRows {
 		prevBy[r.IfIndex] = r
 	}
+	currBy := map[int]snmpifparse.IfRow{}
+	for _, r := range currRows {
+		currBy[r.IfIndex] = r
+	}
 	src := strings.TrimSpace(source)
 	if src == "" {
 		src = "interface_snapshot"
 	}
+
+	pppoeDrops := 0
+	if mikrotik {
+		// UP→DOWN ainda presente
+		for _, r := range currRows {
+			base, _ := ifaceDisplayName(r, customs)
+			if !isPPPoEIfaceName(base) && !isPPPoEIfaceName(r.Descr) && !isPPPoEIfaceName(r.DisplayName) {
+				continue
+			}
+			p, hasPrev := prevBy[r.IfIndex]
+			if !hasPrev {
+				continue
+			}
+			prevUp := snmpifparse.OperStatusLabel(p.OperStatus) == "up"
+			currUp := snmpifparse.OperStatusLabel(r.OperStatus) == "up"
+			if prevUp && !currUp {
+				pppoeDrops++
+			}
+		}
+		// Sessões que desapareceram do IF-MIB (comum no RouterOS)
+		for _, p := range prevRows {
+			base, _ := ifaceDisplayName(p, customs)
+			if !isPPPoEIfaceName(base) && !isPPPoEIfaceName(p.Descr) && !isPPPoEIfaceName(p.DisplayName) {
+				continue
+			}
+			if snmpifparse.OperStatusLabel(p.OperStatus) != "up" {
+				continue
+			}
+			if _, stillThere := currBy[p.IfIndex]; !stillThere {
+				pppoeDrops++
+			}
+		}
+		evaluateMikrotikPPPoEDropBatch(ctx, pool, log, deviceID, devDesc, host, src, category, pppoeDrops)
+	}
+
+	if !ok {
+		return
+	}
+
 	for _, r := range currRows {
+		baseName, label := ifaceDisplayName(r, customs)
+		if mikrotik && (isPPPoEIfaceName(baseName) || isPPPoEIfaceName(r.Descr) || isPPPoEIfaceName(r.DisplayName)) {
+			// PPPoE MikroTik: só o alerta agregado (não um por sessão).
+			continue
+		}
 		p, hasPrev := prevBy[r.IfIndex]
 		if !hasPrev {
 			continue
@@ -162,12 +226,7 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 			if sev == "ok" {
 				continue
 			}
-			baseName := snmpifparse.PreferIfaceName(r.IfName, r.DisplayName, r.Descr, r.IfIndex)
 			custom := customs[r.IfIndex]
-			label := snmpifparse.FormatAlertIfaceLabel(baseName, r.IfAlias, custom)
-			if label == "" {
-				label = fmt.Sprintf("if%d", r.IfIndex)
-			}
 			msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN.", devDesc, host, label)
 			meta := alertnotify.WithStatusTransition(map[string]any{
 				"source":             src,
@@ -201,6 +260,60 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 			})
 		}
 	}
+}
+
+func evaluateMikrotikPPPoEDropBatch(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
+	deviceID uuid.UUID, devDesc, host, source, category string, dropCount int,
+) {
+	th, metricLabel, enabled := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "mikrotik_pppoe_drop_count", category)
+	if !enabled {
+		closeMikrotikPPPoEDrop(ctx, pool, log, deviceID)
+		return
+	}
+	if dropCount <= 0 {
+		closeMikrotikPPPoEDrop(ctx, pool, log, deviceID)
+		return
+	}
+	sev := alertthresholds.EvalMetricSeverity(float64(dropCount), th)
+	if sev == "ok" {
+		closeMikrotikPPPoEDrop(ctx, pool, log, deviceID)
+		return
+	}
+	if strings.TrimSpace(metricLabel) == "" {
+		metricLabel = "Sessões PPPoE"
+	}
+	label := strings.TrimSpace(devDesc)
+	if label == "" {
+		label = strings.TrimSpace(host)
+	}
+	msg := fmt.Sprintf("%s (%s): %d sessões PPPoE desconectaram entre coletas (limiar %s).",
+		label, host, dropCount, metricLabel)
+	meta := alertnotify.WithStatusTransition(map[string]any{
+		"source":     source,
+		"key":        metaKeyMikrotikPPPoEDrop,
+		"drop_count": dropCount,
+		"metric_id":  "mikrotik_pppoe_drop_count",
+	}, "pppoe_stable", "pppoe_drop_batch", nil)
+	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+		DeviceID: deviceID, Severity: sev, AlertType: alertTypeMikrotikPPPoEDrop,
+		Message: msg, IP: host, DeviceName: devDesc, Meta: meta,
+		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: metaKeyMikrotikPPPoEDrop},
+	}, &alertstore.NotifyCreate{
+		Log: log, Level: strings.ToUpper(sev), Headline: "Queda de sessões PPPoE MikroTik",
+	})
+	if err != nil && log != nil {
+		log.Error().Err(err).Str("device", deviceID.String()).Msg("mikrotik_pppoe_drop")
+	} else if res.Created && log != nil {
+		log.Warn().Str("device", deviceID.String()).Int("drops", dropCount).Msg("alerta: queda PPPoE MikroTik em lote")
+	}
+}
+
+func closeMikrotikPPPoEDrop(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID) {
+	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertTypeMikrotikPPPoEDrop,
+		Match:    alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: metaKeyMikrotikPPPoEDrop},
+		Resolved: map[string]any{"resolved": "pppoe_stable", "key": metaKeyMikrotikPPPoEDrop},
+	})
 }
 
 func copyFloatPtr(p *float64) *float64 {

@@ -20,6 +20,7 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   olt_onu_drop: "olt",
   olt_onu_rise: "olt",
   bng_subscriber_drop: "equipment",
+  mikrotik_pppoe_drop: "interface",
   pon_down: "olt",
 };
 
@@ -69,6 +70,8 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "Subida de ONUs";
     case "bng_subscriber_drop":
       return "Queda de logins BNG";
+    case "mikrotik_pppoe_drop":
+      return "Queda de PPPoE MikroTik";
     default:
       return "Alerta";
   }

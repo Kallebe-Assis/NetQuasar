@@ -659,17 +659,69 @@ func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
 		return
 	}
-	sessions, capturedAt, source, note := s.loadCachedBngSessions(r.Context(), id)
 	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
-	sessions = normalizeCachedSessionLogins(sessions, profile.Options.PPPoELoginStripSuffix)
-	sessions = bngcollect.EnrichSessionMaps(sessions)
+	sessions, capturedAt, onlineN, totalN, err := bngcollect.ListKnownLoginsAsSessions(r.Context(), s.DB(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	source := "known_logins"
+	note := ""
+	if totalN == 0 {
+		// Bootstrap único a partir do último snapshot (não bloqueia pedidos seguintes).
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := bngcollect.EnsureKnownLoginsFromLatestSnapshot(ctx, s.DB(), id, profile.Options.PPPoELoginStripSuffix); err != nil {
+				s.Log.Warn().Err(err).Str("device_id", id.String()).Msg("bng ensure known logins")
+			}
+		}()
+		sessions, capturedAt, source, note = s.loadCachedBngSessions(r.Context(), id)
+		sessions = normalizeCachedSessionLogins(sessions, profile.Options.PPPoELoginStripSuffix)
+		sessions = bngcollect.EnrichSessionMaps(sessions)
+		onlineN = len(sessions)
+		totalN = len(sessions)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"device_id":    id,
-		"sessions":     sessions,
-		"captured_at":  capturedAt,
-		"source":       source,
-		"note":         note,
-		"count":        len(sessions),
+		"device_id":     id,
+		"sessions":      sessions,
+		"captured_at":   capturedAt,
+		"source":        source,
+		"note":          note,
+		"count":         totalN,
+		"online_count":  onlineN,
+		"offline_count": totalN - onlineN,
+	})
+}
+
+func (s *Server) bngDeviceLoginEvents(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	if _, _, err := s.resolveBngDevice(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
+		return
+	}
+	login := strings.TrimSpace(r.URL.Query().Get("q"))
+	if login == "" {
+		login = strings.TrimSpace(r.URL.Query().Get("login"))
+	}
+	if login == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "query q ou login obrigatória", nil)
+		return
+	}
+	events, err := bngcollect.ListLoginEvents(r.Context(), s.DB(), id, login, 100)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id": id,
+		"login":     login,
+		"events":    events,
+		"count":     len(events),
 	})
 }
 
@@ -827,6 +879,9 @@ func (s *Server) runBngSessionsCollect(deviceID uuid.UUID, host, comm string) {
 		s.bngCollectProgress.finish(deviceID, 0, err.Error())
 		return
 	}
+	if err := bngcollect.SyncKnownLogins(ctx, s.DB(), deviceID, sessions, profile.Options.PPPoELoginStripSuffix); err != nil {
+		s.Log.Warn().Err(err).Str("device_id", deviceID.String()).Msg("bng sync known logins")
+	}
 	_ = bngcollect.CollectAndStoreInfrastructure(ctx, s.DB(), deviceID, host, comm, 2*time.Minute, profile.Options)
 	_ = out
 	s.bngCollectProgress.finish(deviceID, len(sessions), "")
@@ -945,6 +1000,9 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !found {
+		if err := bngcollect.MarkKnownLoginOfflineIfExists(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix); err != nil {
+			s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao marcar offline")
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"found": false, "source": "snmp_live", "query": q,
 			"session": sessionRowToJSON(row),
@@ -954,6 +1012,9 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := bngcollect.UpsertSessionInLatestSnapshot(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
 		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao actualizar snapshot")
+	}
+	if err := bngcollect.TouchKnownLoginOnline(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
+		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao actualizar known login")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true, "source": "snmp_live", "query": q,

@@ -130,8 +130,9 @@ const FIELD_ORDER = [
 ];
 
 function normalizeLabel(raw: string): string {
-  const key = raw.trim().toLowerCase();
-  return LABEL_PT[key] ?? raw.trim();
+  let key = raw.trim().toLowerCase();
+  key = key.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  return LABEL_PT[key] ?? raw.trim().replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function stripUnitParen(raw: string, unit: string): string {
@@ -148,10 +149,26 @@ function normalizeValue(label: string, value: string): string {
   const snParen = v.match(/sn\(([A-Za-z0-9]+)\)/i);
   if (snParen) return snParen[1];
   if (label === "SN" && /^sn\s+/i.test(v)) return v.replace(/^sn\s+/i, "").trim();
-  if (label === "RX" || label === "TX") return stripUnitParen(v, "dbm");
-  if (label === "Voltagem") return stripUnitParen(v, "v");
-  if (label === "Temperatura") return stripUnitParen(v, "c");
-  if (label === "Bias") return stripUnitParen(v, "ma");
+  if (label === "RX" || label === "TX") {
+    v = stripUnitParen(v, "dbm");
+    if (v && !/dbm/i.test(v)) return `${v} dBm`;
+    return v;
+  }
+  if (label === "Voltagem") {
+    v = stripUnitParen(v, "v");
+    if (v && !/v$/i.test(v)) return `${v} V`;
+    return v;
+  }
+  if (label === "Temperatura") {
+    v = stripUnitParen(v, "c");
+    if (v && !/°?\s*c$/i.test(v)) return `${v} °C`;
+    return v;
+  }
+  if (label === "Bias") {
+    v = stripUnitParen(v, "ma");
+    if (v && !/ma$/i.test(v)) return `${v} mA`;
+    return v;
+  }
   return v;
 }
 
@@ -189,11 +206,11 @@ function stripCommandEcho(output: string, command: string): string {
 }
 
 function looksLikeLabelOnly(line: string): RegExpMatchArray | null {
-  return line.match(/^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s*$/);
+  return line.match(/^\s{0,6}([A-Za-z0-9 /_.()-]{2,56}):\s*$/);
 }
 
 function looksLikeLabelWithValue(line: string): RegExpMatchArray | null {
-  return line.match(/^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s+(.+?)\s*$/);
+  return line.match(/^\s{0,6}([A-Za-z0-9 /_.()-]{2,56}):\s+(.+?)\s*$/);
 }
 
 function extractKeyValueFields(text: string): OltTelnetReportField[] {
@@ -246,9 +263,40 @@ function extractPowerFields(text: string, labelRx = "RX", labelTx = "TX"): OltTe
   const lineMatch = text.match(/gpon_onu[^\n]+\s+(-?\d+(?:\.\d+)?)\s*\(dbm\)/i);
   if (lineMatch) {
     const isRx = /onu-rx|rx power/i.test(text) || Number(lineMatch[1]) < 0;
-    fields.push({ label: isRx ? labelRx : labelTx, value: `${lineMatch[1]} dBm` });
+    fields.push({ label: isRx ? labelRx : labelTx, value: lineMatch[1] });
   }
   return fields;
+}
+
+/** VSOL: show pon onu N rx-power / tx-power — cabeçalho Onu/ONU_Rx e valor após ---. */
+function extractVsolPonOnuPower(text: string, command: string): OltTelnetReportField[] {
+  const blob = `${command}\n${text}`.toLowerCase();
+  let label = "RX";
+  if (/onu_tx|tx-power|tx_power/.test(blob) && !/onu_rx|rx-power|rx_power/.test(blob)) {
+    label = "TX";
+  } else if (/onu_rx|rx-power|rx_power|onu-rx/.test(blob)) {
+    label = "RX";
+  } else if (/onu_tx|tx-power|tx_power|onu-tx/.test(blob)) {
+    label = "TX";
+  }
+
+  const parts = text.split(/\n\s*-{3,}\s*\n/);
+  const body = parts.length >= 2 ? parts.slice(1).join("\n") : text;
+  const nums = body.match(/-?\d+(?:\.\d+)?/g) ?? [];
+  let power: string | undefined;
+  for (const n of nums) {
+    if (n.includes(".") || n.startsWith("-")) {
+      power = n;
+      break;
+    }
+  }
+  if (!power && nums.length >= 2) power = nums[nums.length - 1];
+  if (!power) {
+    const m = text.match(/ONU_R[Xx]\s*[|\s]+(-?\d+(?:\.\d+)?)/i) || text.match(/(-?\d+\.\d+)\s*(?:dBm)?/i);
+    if (m) power = m[1];
+  }
+  if (!power) return [];
+  return [{ label, value: power.includes("dBm") ? power : `${power} dBm` }];
 }
 
 function dataRowsAfterHeader(text: string, headerRe: RegExp): string {
@@ -315,6 +363,10 @@ function extractFieldsForCommand(command: string, cleaned: string): OltTelnetRep
     const vsol = extractVsolOnuState(cleaned);
     if (vsol.length > 0) return vsol;
   }
+  if (/rx-power|tx-power|onu_rx|onu_tx|show\s+pon\s+onu/.test(cmd)) {
+    const vsol = extractVsolPonOnuPower(cleaned, command);
+    if (vsol.length > 0) return vsol;
+  }
   if (/onu-rx/.test(cmd)) return extractPowerFields(cleaned, "RX", "TX");
   if (/onu-tx/.test(cmd)) return extractPowerFields(cleaned, "RX", "TX");
 
@@ -322,6 +374,12 @@ function extractFieldsForCommand(command: string, cleaned: string): OltTelnetRep
   const power = extractPowerFields(cleaned);
   for (const pf of power) {
     if (!fields.some((f) => fieldKey(f.label) === fieldKey(pf.label))) fields.push(pf);
+  }
+  // Fallback: tabela VSOL rx/tx se KV não trouxe potência
+  if (!fields.some((f) => f.label === "RX" || f.label === "TX")) {
+    for (const pf of extractVsolPonOnuPower(cleaned, command)) {
+      if (!fields.some((f) => fieldKey(f.label) === fieldKey(pf.label))) fields.push(pf);
+    }
   }
   return fields;
 }

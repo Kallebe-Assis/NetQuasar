@@ -122,14 +122,14 @@ export function ConnectionsPageShell() {
     <>
       <div className="page-heading">
         <h1>
-          Conexões
+          Elementos
           <InfoHint label="Sobre infraestrutura e logins">
             <p>Logins de clientes e infraestrutura da rede óptica (CTO, emendas, cabos, postes, projetos).</p>
           </InfoHint>
         </h1>
       </div>
 
-      <nav className="conn-tabs" aria-label="Secções de conexões">
+      <nav className="conn-tabs" aria-label="Secções de elementos">
         {TABS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? "active" : ""} onClick={() => switchTab(t.id)}>
             {t.label}

@@ -126,6 +126,7 @@ type MapSearchResult = {
   label: string;
   kind: string;
   category?: string;
+  project_name?: string | null;
   lat: number;
   lng: number;
   map_id: string;
@@ -1235,7 +1236,9 @@ export function MapPage() {
                           }}
                           onClick={() => selectSearchResult(row)}
                         >
-                          <span style={{ fontWeight: 600 }}>{row.label}</span>
+                          <span style={{ fontWeight: 600 }}>
+                            {row.project_name?.trim() ? `${row.project_name.trim()} — ${row.label}` : row.label}
+                          </span>
                           <span style={{ color: "var(--muted)", marginLeft: 8 }}>{searchKindLabel(row.kind)}</span>
                         </button>
                       </li>

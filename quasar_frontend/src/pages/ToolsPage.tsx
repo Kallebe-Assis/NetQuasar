@@ -101,7 +101,7 @@ export function ToolsPage() {
     },
   });
 
-  const [mxIps, setMxIps] = useState("1.1.1.1\n8.8.8.8");
+  const [mxIps, setMxIps] = useState("");
   const [mxPorts, setMxPorts] = useState("2265\n80\n8080\n8888\n443\n8443");
   const [mxTo, setMxTo] = useState("300");
   const [mxInsecure, setMxInsecure] = useState(true);
@@ -113,6 +113,12 @@ export function ToolsPage() {
       const ports = splitLinesOrComma(mxPorts)
         .map((p) => Number(p))
         .filter((n) => !Number.isNaN(n) && n > 0 && n <= 65535);
+      if (ips.length === 0) {
+        throw new Error("Indique pelo menos um IP.");
+      }
+      if (ports.length === 0) {
+        throw new Error("Indique pelo menos uma porta.");
+      }
       const timeout_ms = Number(mxTo) || 6000;
       type Row = { ip: string; port: number; https: unknown; http: unknown };
       const rows: Row[] = [];
@@ -652,11 +658,23 @@ export function ToolsPage() {
           <div className="tools-http-matrix-inputs">
             <div className="field tools-http-matrix-inputs__col">
               <label>IPs</label>
-              <textarea className="textarea mono tools-http-matrix-inputs__textarea" rows={8} value={mxIps} onChange={(e) => setMxIps(e.target.value)} />
+              <textarea
+                className="textarea mono tools-http-matrix-inputs__textarea"
+                rows={8}
+                value={mxIps}
+                onChange={(e) => setMxIps(e.target.value)}
+                placeholder={"1.1.1.1\n8.8.8.8"}
+              />
             </div>
             <div className="field tools-http-matrix-inputs__col">
               <label>Portas</label>
-              <textarea className="textarea mono tools-http-matrix-inputs__textarea" rows={8} value={mxPorts} onChange={(e) => setMxPorts(e.target.value)} />
+              <textarea
+                className="textarea mono tools-http-matrix-inputs__textarea"
+                rows={8}
+                value={mxPorts}
+                onChange={(e) => setMxPorts(e.target.value)}
+                placeholder={"80\n443\n8080"}
+              />
             </div>
             <div className="field tools-http-matrix-inputs__opts">
               <label>Timeout (ms)</label>

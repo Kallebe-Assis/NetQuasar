@@ -17,6 +17,7 @@ export const queryKeys = {
   automationDatabaseBackup: ["automation-database-backup"] as const,
   settingsB2Backup: ["settings-b2-backup"] as const,
   automationHistory: ["automation-history"] as const,
+  automationOverview: ["automation-overview"] as const,
   smtpSettings: ["smtp-settings"] as const,
   alertsIncidents: ["alerts-incidents"] as const,
   alertsActive: ["alerts-active"] as const,

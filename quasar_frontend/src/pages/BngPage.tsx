@@ -38,6 +38,7 @@ import {
   BNG_SESSION_REFRESH_MODE_KEY,
   bngCellDisplay,
   formatBngDateTime,
+  formatBngDuration,
   formatBngIpv6Display,
   formatBngIpType,
   formatBngSessionStatus,
@@ -50,6 +51,7 @@ import {
   type StatsSeriesKey,
 } from "../lib/bngDisplay";
 import { useAppToast } from "../lib/appToast";
+import { queryKeys } from "../lib/queryKeys";
 import {
   BNG_SESSION_SEARCH_FIELDS,
   countActiveBngSessionFilters,
@@ -118,6 +120,31 @@ type PppoeSession = {
   up_flow_display?: string;
   dn_flow_display?: string;
   qos_profile?: string;
+  is_online?: boolean;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  last_offline_at?: string;
+  known_login?: boolean;
+};
+
+type BngLoginEvent = {
+  connected_at?: string;
+  disconnected_at?: string;
+  online?: boolean;
+  duration_sec?: number;
+  duration_display?: string;
+  online_time_sec?: number;
+  online_time_display?: string;
+  vlan?: string;
+  ipv4?: string;
+  ipv6?: string;
+  ipv6_pd?: string;
+  mac?: string;
+  interface?: string;
+  car_up_cir_kbps?: string;
+  car_dn_cir_kbps?: string;
+  car_up_cir_display?: string;
+  car_dn_cir_display?: string;
 };
 
 type SessionBreakdown = {
@@ -893,6 +920,51 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
 }
 
 function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse; loading: boolean }) {
+  const [vlanSelected, setVlanSelected] = useState<string[]>([]);
+  const [localityId, setLocalityId] = useState("");
+  const [sortBy, setSortBy] = useState<"count_desc" | "count_asc" | "label_asc" | "label_desc">("count_desc");
+
+  const localities = useQuery({
+    queryKey: queryKeys.commercialLocalities,
+    queryFn: () =>
+      apiFetch<{ localities: { id: string; name: string; vlans?: string[] }[] }>("/api/v1/commercial/localities"),
+    staleTime: 60_000,
+  });
+
+  const vlanRows = useMemo(() => {
+    const raw = data?.report?.by_vlan ?? [];
+    let rows = [...raw];
+    if (localityId) {
+      const loc = (localities.data?.localities ?? []).find((l) => l.id === localityId);
+      const allowed = new Set((loc?.vlans ?? []).map(String));
+      if (allowed.size > 0) {
+        rows = rows.filter((r) => allowed.has(String(r.key)) || allowed.has(String(r.label)));
+      } else {
+        rows = [];
+      }
+    }
+    if (vlanSelected.length > 0) {
+      const sel = new Set(vlanSelected);
+      rows = rows.filter((r) => sel.has(String(r.key)) || sel.has(String(r.label)));
+    }
+    rows.sort((a, b) => {
+      switch (sortBy) {
+        case "count_asc":
+          return a.count - b.count || a.label.localeCompare(b.label, "pt");
+        case "label_asc":
+          return a.label.localeCompare(b.label, "pt");
+        case "label_desc":
+          return b.label.localeCompare(a.label, "pt");
+        case "count_desc":
+        default:
+          return b.count - a.count || a.label.localeCompare(b.label, "pt");
+      }
+    });
+    return rows;
+  }, [data?.report?.by_vlan, localityId, localities.data, vlanSelected, sortBy]);
+
+  const allVlanOptions = data?.report?.by_vlan ?? [];
+
   if (loading) return <p style={{ fontSize: 13, color: "var(--muted)" }}>A carregar relatório de sessões…</p>;
   const rep = data?.report;
   if (!rep || rep.session_count === 0) {
@@ -921,6 +993,105 @@ function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse
           {rep.session_count.toLocaleString("pt-PT")} logins
           {data?.captured_at ? ` · ${formatBngDateTime(data.captured_at)}` : ""}
         </span>
+      </div>
+
+      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+        <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Logins por VLAN</h3>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            marginBottom: 12,
+            alignItems: "flex-end",
+          }}
+        >
+          <div className="field" style={{ margin: 0, minWidth: 180 }}>
+            <label style={{ fontSize: 11 }}>Localidade</label>
+            <select className="input" value={localityId} onChange={(e) => setLocalityId(e.target.value)}>
+              <option value="">Todas</option>
+              {(localities.data?.localities ?? []).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {(l.vlans?.length ?? 0) > 0 ? ` (${l.vlans!.length} VLAN)` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
+            <label style={{ fontSize: 11 }}>Ordenar</label>
+            <select
+              className="input"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            >
+              <option value="count_desc">Quantidade ↓</option>
+              <option value="count_asc">Quantidade ↑</option>
+              <option value="label_asc">VLAN A–Z</option>
+              <option value="label_desc">VLAN Z–A</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => {
+              setVlanSelected([]);
+              setLocalityId("");
+              setSortBy("count_desc");
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
+        {allVlanOptions.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, maxHeight: 96, overflow: "auto" }}>
+            {allVlanOptions.map((v) => {
+              const on = vlanSelected.length === 0 || vlanSelected.includes(v.key);
+              const active = vlanSelected.includes(v.key);
+              return (
+                <button
+                  key={v.key}
+                  type="button"
+                  className={active ? "btn btn--primary btn--sm" : "btn btn--sm"}
+                  style={{ opacity: on || vlanSelected.length === 0 ? 1 : 0.45 }}
+                  onClick={() =>
+                    setVlanSelected((prev) =>
+                      prev.includes(v.key) ? prev.filter((x) => x !== v.key) : [...prev, v.key],
+                    )
+                  }
+                  title={`${v.count} logins`}
+                >
+                  {v.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {vlanRows.length === 0 ? (
+          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0 }}>
+            Nenhuma VLAN para os filtros seleccionados.
+            {localityId ? " Associe VLANs à localidade no menu Localidades." : ""}
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>VLAN</th>
+                  <th style={{ width: 120, textAlign: "right" }}>Quantidade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vlanRows.map((b) => (
+                  <tr key={b.key}>
+                    <td className="mono">VLAN {b.label}</td>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>{b.count.toLocaleString("pt-PT")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
@@ -1157,6 +1328,17 @@ function SessionDetailModal({
     retry: false,
   });
 
+  const history = useQuery({
+    queryKey: ["bng-session-history", deviceId, login],
+    enabled: open && !!login && !!deviceId,
+    queryFn: () =>
+      apiFetch<{ events: BngLoginEvent[]; count: number }>(
+        `/api/v1/bng/devices/${deviceId}/sessions/history?q=${encodeURIComponent(login)}`,
+      ),
+    staleTime: 0,
+    retry: false,
+  });
+
   const sessionIndex = lookup.data?.session?.index?.trim();
   const traffic = useQuery({
     queryKey: ["bng-session-traffic", deviceId, sessionIndex],
@@ -1182,6 +1364,7 @@ function SessionDetailModal({
     syncedRef.current = token;
     qc.invalidateQueries({ queryKey: ["bng-device-sessions", deviceId] });
     qc.invalidateQueries({ queryKey: ["bng-session-report", deviceId] });
+    qc.invalidateQueries({ queryKey: ["bng-session-history", deviceId, login] });
   }, [open, lookup.isSuccess, lookup.data, lookup.dataUpdatedAt, login, deviceId, qc]);
 
   useEffect(() => {
@@ -1342,6 +1525,7 @@ function SessionDetailModal({
               onClick={() => {
                 lookup.refetch();
                 authLogs.refetch();
+                history.refetch();
                 if (sessionIndex) traffic.refetch();
               }}
             >
@@ -1349,6 +1533,63 @@ function SessionDetailModal({
             </button>
           )}
         </div>
+
+        <SessionDetailSection title="Histórico de conexões">
+          {history.isLoading && (history.data?.events?.length ?? 0) === 0 ? (
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+              <Loader2 size={14} className="map-refresh-spin" aria-hidden /> A carregar histórico…
+            </p>
+          ) : (history.data?.events?.length ?? 0) === 0 ? (
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
+              Sem histórico guardado. Execute a consulta completa SNMP para registar logins.
+            </p>
+          ) : (
+            <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto" }}>
+              <table className="mk-noc-table">
+                <thead>
+                  <tr>
+                    <th>Conectou</th>
+                    <th>Desconectou</th>
+                    <th>Tempo online</th>
+                    <th>VLAN</th>
+                    <th>IPv4</th>
+                    <th>IPv6</th>
+                    <th>Up</th>
+                    <th>Down</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(history.data?.events ?? []).map((ev, i) => (
+                    <tr key={`${ev.connected_at}-${i}`}>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>{formatBngDateTime(ev.connected_at)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>
+                        {ev.online ? (
+                          <span style={{ color: "var(--ok, #16a34a)", fontWeight: 600 }}>Ainda online</span>
+                        ) : (
+                          formatBngDateTime(ev.disconnected_at)
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>
+                        {ev.duration_display || formatBngDuration(ev.duration_sec) || "—"}
+                      </td>
+                      <td className="mono">{bngCellDisplay(ev.vlan)}</td>
+                      <td className="mono">{bngCellDisplay(ev.ipv4)}</td>
+                      <td className="mono" style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {formatBngIpv6Display(ev.ipv6)}
+                      </td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>
+                        {ev.car_up_cir_display || sessionDisplayUpLimit(ev) || "—"}
+                      </td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>
+                        {ev.car_dn_cir_display || sessionDisplayDnLimit(ev) || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SessionDetailSection>
 
         <SessionDetailSection title="Tentativas de autenticação">
           {authLogs.isLoading && authAttempts.length === 0 ? (
@@ -1515,6 +1756,9 @@ export function BngPage() {
         captured_at?: string;
         note?: string;
         count?: number;
+        online_count?: number;
+        offline_count?: number;
+        source?: string;
       }>(`/api/v1/bng/devices/${selectedId}/sessions`),
   });
 
@@ -1563,7 +1807,7 @@ export function BngPage() {
       setCollectProgress(null);
       qc.invalidateQueries({ queryKey: ["bng-device-sessions", selectedId] });
       qc.invalidateQueries({ queryKey: ["bng-session-report", selectedId] });
-      toastOk(pushToast, `Consulta completa: ${data.session_count ?? 0} sessão(ões) PPPoE.`);
+      toastOk(pushToast, `Consulta completa: ${data.session_count ?? 0} sessão(ões) sincronizada(s).`);
     },
     onError: (err) => {
       setCollectProgress(null);
@@ -1990,8 +2234,14 @@ export function BngPage() {
                 )}
                 {sessions.data?.captured_at && (
                   <span style={{ fontSize: 12, color: "var(--muted)", alignSelf: "center" }}>
-                    Última consulta: {formatBngDateTime(sessions.data.captured_at)} (
-                    {sessions.data.count ?? 0} sessões)
+                    Última sincronização: {formatBngDateTime(sessions.data.captured_at)}
+                    {" · "}
+                    {sessions.data.online_count ?? sessions.data.count ?? 0} online
+                    {sessions.data.offline_count != null
+                      ? ` · ${sessions.data.offline_count} offline`
+                      : ""}
+                    {" · "}
+                    {sessions.data.count ?? 0} registados
                   </span>
                 )}
               </div>
@@ -2270,7 +2520,7 @@ export function BngPage() {
                               : loginSearch.data?.found === false
                                 ? "Login não encontrado online no BNG."
                                 : "Aguardando resultado da pesquisa."
-                            : "Nenhuma sessão. Execute a consulta completa SNMP."}
+                            : "Nenhum login registado. Execute a consulta completa SNMP para sincronizar o inventário."}
                         </td>
                       </tr>
                     ) : (

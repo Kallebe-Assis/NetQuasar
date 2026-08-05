@@ -67,3 +67,58 @@ Temperature:
 		t.Fatalf("iface=%q", fields["Interface PON"])
 	}
 }
+
+func TestParseVsolOpticalInfoFields_onuParenLabel(t *testing.T) {
+	out := `Alarm                      : enable
+Piggyback DBA rpt mode     : not support
+Rx optical level(ONU)      : -22.93
+Lower rx optical threshold : -36.00
+Upper rx optical threshold : -0.00
+Tx optical level           : 2.38
+Lower tx optical threshold : 70.00
+Upper tx optical threshold : 90.00
+ONU response time          : 88
+Power feed voltage         : 3.30(V)
+Laser bias current         : 8.976(mA)
+Temperature                : 52.199(C)
+
+gpon-olt(config-pon-0/1)#`
+	fields := ParseTelnetReportSteps([]struct {
+		Command string
+		Output  string
+	}{{Command: "show onu 3 optical_info", Output: out}})
+	if fields["RX"] != "-22.93" {
+		t.Fatalf("RX=%q fields=%v", fields["RX"], fields)
+	}
+	if fields["TX"] != "2.38" {
+		t.Fatalf("TX=%q", fields["TX"])
+	}
+	if fields["Voltagem"] != "3.30" {
+		t.Fatalf("Voltagem=%q", fields["Voltagem"])
+	}
+	if fields["Temperatura"] != "52.199" {
+		t.Fatalf("Temperatura=%q", fields["Temperatura"])
+	}
+	if fields["Bias"] != "8.976" {
+		t.Fatalf("Bias=%q", fields["Bias"])
+	}
+}
+
+func TestParseVsolPonOnuRxPowerTable(t *testing.T) {
+	out := `Onu         ONU_Rx
+------------------------------------
+2
+-18.12`
+	fields := ParseTelnetReportSteps([]struct {
+		Command string
+		Output  string
+	}{{Command: "show pon onu 2 rx-power", Output: out}})
+	if fields["RX"] != "-18.12" {
+		t.Fatalf("RX=%q fields=%v", fields["RX"], fields)
+	}
+	row := map[string]any{}
+	mergeTelnetFieldsIntoOnuRow(row, fields, "2026-01-01T00:00:00Z")
+	if row["rx_dbm"].(float64) != -18.12 {
+		t.Fatalf("rx_dbm=%v", row["rx_dbm"])
+	}
+}

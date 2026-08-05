@@ -39,10 +39,61 @@ func (s *Server) ensureDBRestoreJobs() {
 	s.dbRestoreMu.Unlock()
 }
 
+// ensureAutomationDatabaseBackupSchema cria tabelas do backup automático se faltarem
+// (ex.: migration 092 não aplicada ou restore incompleto).
+func (s *Server) ensureAutomationDatabaseBackupSchema(ctx context.Context) error {
+	pool := s.DB()
+	if pool == nil {
+		return fmt.Errorf("base indisponível")
+	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS settings_b2_backup (
+			id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+			key_id TEXT,
+			application_key TEXT,
+			bucket TEXT,
+			bucket_id TEXT,
+			endpoint TEXT,
+			region TEXT NOT NULL DEFAULT 'us-east-005',
+			prefix TEXT NOT NULL DEFAULT 'netquasar/postgres',
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO settings_b2_backup (id) VALUES (1) ON CONFLICT (id) DO NOTHING`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS automation_database_backup (
+			id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+			enabled BOOLEAN NOT NULL DEFAULT false,
+			frequency TEXT NOT NULL DEFAULT 'daily' CHECK (frequency IN ('daily', 'weekly')),
+			day_of_week INT CHECK (day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)),
+			time_hhmm TEXT NOT NULL DEFAULT '03:00' CHECK (time_hhmm ~ '^\d{2}:\d{2}$'),
+			timezone TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
+			keep_last INT NOT NULL DEFAULT 14 CHECK (keep_last >= 1 AND keep_last <= 365),
+			last_run_at TIMESTAMPTZ,
+			last_run_key TEXT,
+			last_status TEXT,
+			last_error TEXT,
+			last_object_key TEXT,
+			last_size_bytes BIGINT,
+			running BOOLEAN NOT NULL DEFAULT false,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO automation_database_backup (id) VALUES (1) ON CONFLICT (id) DO NOTHING`)
+	return err
+}
+
 func (s *Server) loadB2Creds(ctx context.Context) (backupb2.Creds, error) {
 	pool := s.DB()
 	if pool == nil {
 		return backupb2.Creds{}, fmt.Errorf("base indisponível")
+	}
+	if err := s.ensureAutomationDatabaseBackupSchema(ctx); err != nil {
+		return backupb2.Creds{}, err
 	}
 	var keyID, appKey, bucket, bucketID, endpoint, region, prefix *string
 	err := pool.QueryRow(ctx, `
@@ -118,6 +169,10 @@ func (s *Server) getSettingsB2Backup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "NO_DB", "pool não configurado", nil)
 		return
 	}
+	if err := s.ensureAutomationDatabaseBackupSchema(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
 	var keyID, bucket, bucketID, endpoint, region, prefix *string
 	var hasKey bool
 	err := pool.QueryRow(r.Context(), `
@@ -144,6 +199,10 @@ func (s *Server) patchSettingsB2Backup(w http.ResponseWriter, r *http.Request) {
 	pool := s.DB()
 	if pool == nil {
 		writeErr(w, http.StatusServiceUnavailable, "NO_DB", "pool não configurado", nil)
+		return
+	}
+	if err := s.ensureAutomationDatabaseBackupSchema(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	var body map[string]any
@@ -206,6 +265,10 @@ func (s *Server) getAutomationDatabaseBackup(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusServiceUnavailable, "NO_DB", "pool não configurado", nil)
 		return
 	}
+	if err := s.ensureAutomationDatabaseBackupSchema(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
 	var en, running bool
 	var freq, th, tz, lastKey, lastStatus, lastErr, lastObj *string
 	var dow, keep *int
@@ -241,6 +304,10 @@ func (s *Server) patchAutomationDatabaseBackup(w http.ResponseWriter, r *http.Re
 	pool := s.DB()
 	if pool == nil {
 		writeErr(w, http.StatusServiceUnavailable, "NO_DB", "pool não configurado", nil)
+		return
+	}
+	if err := s.ensureAutomationDatabaseBackupSchema(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	var body map[string]any
@@ -286,9 +353,9 @@ func (s *Server) patchAutomationDatabaseBackup(w http.ResponseWriter, r *http.Re
 
 func (s *Server) runAutomationDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02") + "-manual"
-	actor := s.actorFromRequest(r)
+	meta := s.automationMetaFromRequest(r)
 	go func() {
-		_ = s.executeDatabaseBackup(context.Background(), runKey, actor)
+		_ = s.executeDatabaseBackup(context.Background(), runKey, meta)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "message": "Backup iniciado"})
 }
@@ -296,6 +363,12 @@ func (s *Server) runAutomationDatabaseBackup(w http.ResponseWriter, r *http.Requ
 func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Logger) {
 	pool := s.DB()
 	if pool == nil {
+		return
+	}
+	if err := s.ensureAutomationDatabaseBackupSchema(ctx); err != nil {
+		if log != nil {
+			log.Warn().Err(err).Msg("automation database backup: schema")
+		}
 		return
 	}
 	s.clearStaleAutomationRunning(ctx, "automation_database_backup")
@@ -326,20 +399,19 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	if !due {
 		return
 	}
-	if err := s.executeDatabaseBackup(ctx, runKey, auditActorSistema); err != nil && log != nil {
+	if err := s.executeDatabaseBackup(ctx, runKey, automationMetaFromActor(auditActorSistema, nil)); err != nil && log != nil {
 		log.Warn().Err(err).Str("run_key", runKey).Msg("backup B2 agendado falhou")
 	}
 }
 
-func (s *Server) executeDatabaseBackup(ctx context.Context, runKey, actor string) error {
+func (s *Server) executeDatabaseBackup(ctx context.Context, runKey string, meta automationRunMeta) error {
 	started := time.Now()
-	trigger := "manual"
-	if actor == auditActorSistema {
-		trigger = "scheduled"
-	}
 	pool := s.DB()
 	if pool == nil {
 		return fmt.Errorf("base indisponível")
+	}
+	if err := s.ensureAutomationDatabaseBackupSchema(ctx); err != nil {
+		return err
 	}
 	tag, err := pool.Exec(ctx, `
 		UPDATE automation_database_backup SET running = true, updated_at = now()
@@ -349,7 +421,7 @@ func (s *Server) executeDatabaseBackup(ctx context.Context, runKey, actor string
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		s.recordAutomationExecution(ctx, jobDatabaseBackup, actor, trigger, started, false,
+		s.recordAutomationExecution(ctx, jobDatabaseBackup, meta, started, false,
 			"Não iniciado (já em execução)", nil, map[string]any{"run_key": runKey}, runKey)
 		return nil
 	}
@@ -359,12 +431,12 @@ func (s *Server) executeDatabaseBackup(ctx context.Context, runKey, actor string
 
 	dsn, err := s.activeDatabaseDSN(ctx)
 	if err != nil {
-		s.failDBBackup(ctx, actor, trigger, started, runKey, err)
+		s.failDBBackup(ctx, meta, started, runKey, err)
 		return err
 	}
 	creds, err := s.loadB2Creds(ctx)
 	if err != nil {
-		s.failDBBackup(ctx, actor, trigger, started, runKey, err)
+		s.failDBBackup(ctx, meta, started, runKey, err)
 		return err
 	}
 	tmpDir := filepath.Join(os.TempDir(), "netquasar-backup")
@@ -374,18 +446,18 @@ func (s *Server) executeDatabaseBackup(ctx context.Context, runKey, actor string
 	defer os.Remove(localPath)
 
 	if err := backupb2.DumpFull(ctx, dsn, localPath); err != nil {
-		s.failDBBackup(ctx, actor, trigger, started, runKey, err)
+		s.failDBBackup(ctx, meta, started, runKey, err)
 		return err
 	}
 	cli, err := backupb2.NewClient(ctx, creds)
 	if err != nil {
-		s.failDBBackup(ctx, actor, trigger, started, runKey, err)
+		s.failDBBackup(ctx, meta, started, runKey, err)
 		return err
 	}
 	objKey := backupb2.ObjectKeyForDump(creds.Prefix, fileName)
 	fileID, size, err := cli.UploadFile(ctx, localPath, objKey)
 	if err != nil {
-		s.failDBBackup(ctx, actor, trigger, started, runKey, err)
+		s.failDBBackup(ctx, meta, started, runKey, err)
 		return err
 	}
 	_, _ = pool.Exec(ctx, `
@@ -395,13 +467,13 @@ func (s *Server) executeDatabaseBackup(ctx context.Context, runKey, actor string
 		WHERE id = 1
 	`, runKey, objKey, size)
 	sum := map[string]any{"run_key": runKey, "object_key": objKey, "size_bytes": size, "file_id": fileID}
-	s.recordAutomationExecution(ctx, jobDatabaseBackup, actor, trigger, started, true,
+	s.recordAutomationExecution(ctx, jobDatabaseBackup, meta, started, true,
 		"Backup enviado ao B2", nil, sum, runKey)
-	s.appendAuditLog(ctx, "automation_database_backup", "1", "run", actor, nil, sum)
+	s.appendAuditLog(ctx, "automation_database_backup", "1", "run", meta.Actor, nil, sum)
 	return nil
 }
 
-func (s *Server) failDBBackup(ctx context.Context, actor, trigger string, started time.Time, runKey string, err error) {
+func (s *Server) failDBBackup(ctx context.Context, meta automationRunMeta, started time.Time, runKey string, err error) {
 	pool := s.DB()
 	if pool != nil {
 		msg := err.Error()
@@ -409,7 +481,7 @@ func (s *Server) failDBBackup(ctx context.Context, actor, trigger string, starte
 			UPDATE automation_database_backup SET last_status = 'error', last_error = $1, updated_at = now() WHERE id = 1
 		`, msg)
 	}
-	s.recordAutomationExecution(ctx, jobDatabaseBackup, actor, trigger, started, false,
+	s.recordAutomationExecution(ctx, jobDatabaseBackup, meta, started, false,
 		"Falha no backup", err, map[string]any{"run_key": runKey}, runKey)
 }
 

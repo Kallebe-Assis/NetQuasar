@@ -8,16 +8,19 @@ import (
 )
 
 var (
-	telnetKvLineRE     = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s+(.+?)\s*$`)
-	telnetKvLabelOnlyRE = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.-]{2,48}):\s*$`)
-	telnetGponPowerRE  = regexp.MustCompile(`gpon_onu[^\n]+\s+(-?\d+(?:\.\d+)?)\s*\(dbm\)`)
-	telnetVsolInfoRE     = regexp.MustCompile(`^(GPON[\d/:\w-]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
+	telnetKvLineRE      = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.()-]{2,56}):\s+(.+?)\s*$`)
+	telnetKvLabelOnlyRE = regexp.MustCompile(`^\s{0,6}([A-Za-z0-9 /_.()-]{2,56}):\s*$`)
+	telnetGponPowerRE   = regexp.MustCompile(`gpon_onu[^\n]+\s+(-?\d+(?:\.\d+)?)\s*\(dbm\)`)
+	telnetVsolInfoRE    = regexp.MustCompile(`^(GPON[\d/:\w-]+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
 	// show onu auto-find: OnuIndex  Sn  State  (ex.: GPON0/4:1  ZTEGCFAA2AB1  unknow)
 	telnetVsolAutoFindRE = regexp.MustCompile(`^(?i)(GPON\d+/\d+:\d+)\s+(\S+)\s+(\S+)\s*$`)
 	// show pon onu uncfg: gpon_olt-1/1/9  Model  SERIAL  PW
-	telnetZtePonUncfgRE  = regexp.MustCompile(`^(?i)(gpon_olt-\d+/\d+/(\d+))\s+(\S+)\s+([A-Za-z0-9]{6,})\s+(\S+)\s*$`)
-	telnetVsolStateRE    = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
-	telnetOnuNumberRE  = regexp.MustCompile(`ONU Number:\s*(\S+)`)
+	telnetZtePonUncfgRE = regexp.MustCompile(`^(?i)(gpon_olt-\d+/\d+/(\d+))\s+(\S+)\s+([A-Za-z0-9]{6,})\s+(\S+)\s*$`)
+	telnetVsolStateRE   = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
+	telnetOnuNumberRE   = regexp.MustCompile(`ONU Number:\s*(\S+)`)
+	telnetFloatRE       = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+	telnetParenStripRE  = regexp.MustCompile(`\([^)]*\)`)
+	telnetParenSpaceRE  = regexp.MustCompile(`\s*\([^)]*\)\s*`)
 )
 
 var telnetLabelPT = map[string]string{
@@ -44,14 +47,22 @@ var telnetLabelPT = map[string]string{
 	"voltage": "Voltagem", "power feed voltage": "Voltagem",
 	"laser bias current": "Bias",
 	"onu pon interface": "Interface PON",
+	"lower rx optical threshold": "RX mín.", "upper rx optical threshold": "RX máx.",
+	"lower tx optical threshold": "TX mín.", "upper tx optical threshold": "TX máx.",
+	"onu response time": "Tempo resposta",
+	"piggyback dba rpt mode": "Piggyback DBA",
+	"alarm": "Alarm",
 }
 
 func normalizeTelnetLabel(raw string) string {
 	key := strings.ToLower(strings.TrimSpace(raw))
+	key = telnetParenStripRE.ReplaceAllString(key, " ")
+	key = strings.Join(strings.Fields(key), " ")
 	if pt, ok := telnetLabelPT[key]; ok {
 		return pt
 	}
-	return strings.TrimSpace(raw)
+	display := telnetParenSpaceRE.ReplaceAllString(strings.TrimSpace(raw), " ")
+	return strings.Join(strings.Fields(display), " ")
 }
 
 func normalizeTelnetValue(label, value string) string {
@@ -182,12 +193,49 @@ func extractTelnetPowerFields(text string) map[string]string {
 			}
 		}
 		if isRx {
-			out["RX"] = m[1] + " dBm"
+			out["RX"] = m[1]
 		} else {
-			out["TX"] = m[1] + " dBm"
+			out["TX"] = m[1]
 		}
 	}
 	return out
+}
+
+// extractVsolPonOnuPowerFields interpreta "show pon onu N rx-power" / tx-power (VSOL).
+// Ex.:
+//
+//	Onu         ONU_Rx
+//	------------------------------------
+//	2
+//	-18.12
+func extractVsolPonOnuPowerFields(cmd, text string) map[string]string {
+	blob := strings.ToLower(cmd + "\n" + text)
+	label := "RX"
+	hasRx := strings.Contains(blob, "onu_rx") || strings.Contains(blob, "rx-power") || strings.Contains(blob, "rx_power") || strings.Contains(blob, "onu-rx")
+	hasTx := strings.Contains(blob, "onu_tx") || strings.Contains(blob, "tx-power") || strings.Contains(blob, "tx_power") || strings.Contains(blob, "onu-tx")
+	if hasTx && !hasRx {
+		label = "TX"
+	}
+
+	body := text
+	if parts := regexp.MustCompile(`(?m)\n\s*-{3,}\s*\n`).Split(text, 2); len(parts) == 2 {
+		body = parts[1]
+	}
+	nums := telnetFloatRE.FindAllString(body, -1)
+	power := ""
+	for _, n := range nums {
+		if strings.Contains(n, ".") || strings.HasPrefix(n, "-") {
+			power = n
+			break
+		}
+	}
+	if power == "" && len(nums) >= 2 {
+		power = nums[len(nums)-1]
+	}
+	if power == "" {
+		return nil
+	}
+	return map[string]string{label: power}
 }
 
 func dataRowsAfterHeader(text string, headerRe *regexp.Regexp) string {
@@ -268,11 +316,23 @@ func ParseTelnetReportSteps(steps []struct {
 			fields = extractVsolOnuInfoFields(cleaned)
 		case strings.Contains(cmd, "show onu state"):
 			fields = extractVsolOnuStateFields(cleaned)
+		case strings.Contains(cmd, "rx-power") || strings.Contains(cmd, "tx-power") ||
+			strings.Contains(cmd, "show pon onu"):
+			fields = extractVsolPonOnuPowerFields(cmd, cleaned)
 		default:
 			fields = extractTelnetKVFields(cleaned)
 			for k, v := range extractTelnetPowerFields(cleaned) {
 				if _, ok := fields[k]; !ok {
 					fields[k] = v
+				}
+			}
+			if _, hasRX := fields["RX"]; !hasRX {
+				if _, hasTX := fields["TX"]; !hasTX {
+					for k, v := range extractVsolPonOnuPowerFields(cmd, cleaned) {
+						if _, ok := fields[k]; !ok {
+							fields[k] = v
+						}
+					}
 				}
 			}
 		}

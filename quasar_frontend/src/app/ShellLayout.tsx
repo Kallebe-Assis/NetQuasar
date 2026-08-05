@@ -12,6 +12,7 @@ import {
   Plug,
   ChartPie,
   ClockCheck,
+  Component,
   Cpu,
   MapPin,
   MonitorSmartphone,
@@ -51,7 +52,7 @@ const nav: NavEntry[] = [
   { kind: "link", to: APP_ROUTES.monitoring, label: "Monitoramento", icons: [ShieldCheck] },
   { kind: "link", to: APP_ROUTES.realtime, label: "Tempo real", icons: [ClockCheck] },
   { kind: "link", to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
-  { kind: "link", to: APP_ROUTES.pops, label: "POPs", icons: [Warehouse] },
+  { kind: "link", to: APP_ROUTES.pops, label: "Localidades", icons: [Warehouse] },
   { kind: "link", to: APP_ROUTES.devices, label: "Equipamentos", icons: [MonitorSmartphone] },
   { kind: "link", to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
   {
@@ -61,7 +62,7 @@ const nav: NavEntry[] = [
     icons: [MapPin],
     children: [
       { to: APP_ROUTES.map, label: "Mapa", icons: [MapPin] },
-      { to: APP_ROUTES.connections, label: "Conexões", icons: [Network] },
+      { to: APP_ROUTES.connections, label: "Elementos", icons: [Component] },
     ],
   },
   { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },

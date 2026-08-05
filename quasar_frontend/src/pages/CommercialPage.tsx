@@ -252,51 +252,13 @@ export function CommercialPage() {
     });
   }, [recs.data?.records, locById]);
 
-  const [locModalOpen, setLocModalOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<"resumo" | "localidades" | "registros">("resumo");
+  const [mainTab, setMainTab] = useState<"resumo" | "registros">("resumo");
   const newRecMenu = useFloatingMenu("start", 260);
   const [singleRecModalOpen, setSingleRecModalOpen] = useState(false);
   const [recEditOpen, setRecEditOpen] = useState(false);
   const [editRecRow, setEditRecRow] = useState<MonthlyRecord | null>(null);
   const [recEditYm, setRecEditYm] = useState("");
   const [recEditCnt, setRecEditCnt] = useState("");
-  const [locName, setLocName] = useState("");
-  const [locRc, setLocRc] = useState("");
-  const createLoc = useMutation({
-    mutationFn: () => apiFetch("/api/v1/commercial/localities", { method: "POST", json: { name: locName, region_code: locRc || null } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
-      setLocName("");
-      setLocRc("");
-      setLocModalOpen(false);
-      notify("Localidade adicionada com sucesso.");
-    },
-    onError: (e) => toastErr(pushToast, e),
-  });
-
-  const [editingLocId, setEditingLocId] = useState<string | null>(null);
-  const [editLocName, setEditLocName] = useState("");
-  const [editLocRc, setEditLocRc] = useState("");
-  const patchLoc = useMutation({
-    mutationFn: ({ id, name, region_code }: { id: string; name: string; region_code: string | null }) =>
-      apiFetch(`/api/v1/commercial/localities/${id}`, { method: "PATCH", json: { name, region_code } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
-      setEditingLocId(null);
-      notify("Guardado com sucesso (localidade).");
-    },
-    onError: (e) => toastErr(pushToast, e, "Falha ao salvar (localidade)."),
-  });
-  const delLoc = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/commercial/localities/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
-      qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
-      setEditingLocId(null);
-      notify("Localidade eliminada.");
-    },
-    onError: (e) => toastErr(pushToast, e, "Falha ao eliminar localidade."),
-  });
 
   const [lid, setLid] = useState("");
   const [ym, setYm] = useState(seed);
@@ -591,7 +553,10 @@ export function CommercialPage() {
         <h1>
           Clientes
           <InfoHint label="Sobre clientes">
-            <p>Localidades, registos mensais e totais agregados por mês. Conexões PPPoE/DHCP ficam no menu Conexões.</p>
+            <p>
+              Registos mensais e totais agregados por mês. O cadastro de localidades (endereço, UF, POP, VLANs) fica no menu{" "}
+              <strong>Localidades</strong>. Conexões PPPoE/DHCP ficam em Elementos.
+            </p>
           </InfoHint>
         </h1>
         <PageCountPill label="Registros mensais" count={(recs.data?.records ?? []).length} />
@@ -599,9 +564,6 @@ export function CommercialPage() {
       <div className="tabs" style={{ flexWrap: "wrap", marginBottom: 16 }}>
         <button type="button" className={mainTab === "resumo" ? "active" : ""} onClick={() => setMainTab("resumo")}>
           Resumo
-        </button>
-        <button type="button" className={mainTab === "localidades" ? "active" : ""} onClick={() => setMainTab("localidades")}>
-          Localidades
         </button>
         <button type="button" className={mainTab === "registros" ? "active" : ""} onClick={() => setMainTab("registros")}>
           Registros
@@ -1132,123 +1094,6 @@ export function CommercialPage() {
         </>
       )}
 
-      {mainTab === "localidades" && (
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-            <h2 style={{ margin: 0 }}>Localidades cadastradas</h2>
-            {canMutate ? (
-              <button
-                type="button"
-                className="btn btn--primary"
-                style={{ width: 40, height: 40, padding: 0, fontSize: 22, lineHeight: 1, borderRadius: "var(--radius, 8px)", flexShrink: 0 }}
-                title="Nova localidade"
-                aria-label="Adicionar nova localidade"
-                onClick={() => {
-                  setLocName("");
-                  setLocRc("");
-                  setLocModalOpen(true);
-                }}
-              >
-                +
-              </button>
-            ) : null}
-          </div>
-          <p style={{ color: "var(--muted)", fontSize: 12 }}>
-            Editar nome ou código de região; excluir remove a localidade (registos mensais associados podem falhar se a API restringir).
-          </p>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>Código região</th>
-                  <th>Criada em</th>
-                  <th style={{ width: 220 }}>Acções</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(locs.data?.localities ?? []).map((l) => (
-                  <tr key={l.id}>
-                    {editingLocId === l.id ? (
-                      <>
-                        <td>
-                          <input className="input" style={{ width: "100%" }} value={editLocName} onChange={(e) => setEditLocName(e.target.value)} />
-                        </td>
-                        <td>
-                          <input className="input mono" style={{ width: "100%" }} value={editLocRc} onChange={(e) => setEditLocRc(e.target.value)} />
-                        </td>
-                        <td className="mono" style={{ fontSize: 11 }}>
-                          {l.created_at ? formatAlertDateTimePt(String(l.created_at)) : "—"}
-                        </td>
-                        <td>
-                          {canMutate ? (
-                            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                              <button
-                                type="button"
-                                className="btn btn--primary"
-                                disabled={!editLocName.trim() || patchLoc.isPending}
-                                onClick={() => patchLoc.mutate({ id: l.id, name: editLocName.trim(), region_code: editLocRc.trim() || null })}
-                              >
-                                Salvar
-                              </button>
-                              <button type="button" className="btn" onClick={() => setEditingLocId(null)}>
-                                Cancelar
-                              </button>
-                            </div>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td>{l.name}</td>
-                        <td className="mono">{l.region_code ?? "—"}</td>
-                        <td className="mono" style={{ fontSize: 11 }}>
-                          {l.created_at ? formatAlertDateTimePt(String(l.created_at)) : "—"}
-                        </td>
-                        <td>
-                          {canMutate ? (
-                            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                              <button
-                                type="button"
-                                className="btn"
-                                onClick={() => {
-                                  setEditingLocId(l.id);
-                                  setEditLocName(l.name);
-                                  setEditLocRc(l.region_code ?? "");
-                                }}
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                className="btn"
-                                disabled={delLoc.isPending}
-                                onClick={() => {
-                                  if (confirm(`Excluir localidade «${l.name}»?`)) delLoc.mutate(l.id);
-                                }}
-                              >
-                                Excluir
-                              </button>
-                            </div>
-                          ) : (
-                            <span style={{ color: "var(--muted)" }}>—</span>
-                          )}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {(locs.data?.localities ?? []).length === 0 && <p style={{ color: "var(--muted)" }}>Ainda não há localidades.</p>}
-          {patchLoc.isError && <div className="msg msg--err">{(patchLoc.error as Error).message}</div>}
-          {delLoc.isError && <div className="msg msg--err">{(delLoc.error as Error).message}</div>}
-        </div>
-      )}
-
       {mainTab === "registros" && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Registros mensais</h2>
@@ -1550,47 +1395,6 @@ export function CommercialPage() {
               </button>
             </div>
             {patchRec.isError && <div className="msg msg--err" style={{ marginTop: 12 }}>{(patchRec.error as Error).message}</div>}
-          </div>
-        </div>
-      )}
-
-      {locModalOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !createLoc.isPending && setLocModalOpen(false)}>
-          <div
-            className="card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="commercial-new-locality-title"
-            style={{ maxWidth: 480, width: "100%", margin: "12vh auto" }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <h2 id="commercial-new-locality-title" style={{ marginTop: 0 }}>
-              Nova localidade
-            </h2>
-            <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-              Identificação utilizada nas OLT e nos registos mensais da base comercial.
-            </p>
-            <div className="field">
-              <label>Nome</label>
-              <input className="input" placeholder="Nome *" autoFocus value={locName} onChange={(e) => setLocName(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Código da região (opcional)</label>
-              <input className="input" placeholder="Ex.: RJ, SP…" value={locRc} onChange={(e) => setLocRc(e.target.value)} />
-            </div>
-            <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button type="button" className="btn btn--primary" disabled={!locName.trim() || createLoc.isPending} onClick={() => createLoc.mutate()}>
-                {createLoc.isPending ? "A salvar…" : "Salvar localidade"}
-              </button>
-              <button type="button" className="btn" disabled={createLoc.isPending} onClick={() => setLocModalOpen(false)}>
-                Cancelar
-              </button>
-            </div>
-            {createLoc.isError && (
-              <div className="msg msg--err" style={{ marginTop: 12 }}>
-                {(createLoc.error as Error).message}
-              </div>
-            )}
           </div>
         </div>
       )}

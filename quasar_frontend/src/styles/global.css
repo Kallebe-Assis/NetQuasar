@@ -4995,6 +4995,235 @@ h3 .info-hint {
   padding: 20px 22px;
 }
 
+/* —— Automações (Settings): layout lista + detalhe —— */
+.automations-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.automations-workspace__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.automations-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.automations-kpi {
+  margin: 0;
+  padding: 12px 14px;
+}
+.automations-kpi__label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.automations-kpi__value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 4px;
+}
+.automations-kpi__meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.automations-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
+.automations-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .automations-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.automations-list,
+.automations-detail {
+  margin: 0;
+  min-height: 320px;
+}
+.automations-list__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.automations-list__ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automations-list__item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--panel2, var(--panel));
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.automations-list__item:hover {
+  border-color: var(--accent, #3b82f6);
+}
+.automations-list__item.is-active {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 1px var(--accent, #3b82f6);
+  background: var(--accent-dim, color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent));
+}
+.automations-list__icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.automations-list__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.automations-list__name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.automations-list__desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.automations-list__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.automations-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel);
+}
+.automations-pill--on {
+  color: var(--ok, #16a34a);
+  border-color: color-mix(in srgb, var(--ok, #16a34a) 40%, var(--border));
+}
+.automations-pill--off {
+  color: var(--muted);
+}
+.automations-pill--run {
+  color: var(--accent, #3b82f6);
+}
+.automations-pill--system {
+  color: var(--accent, #3b82f6);
+}
+.automations-pill--manual {
+  color: var(--warn, #ca8a04);
+}
+.automations-pill--cat {
+  color: var(--text);
+}
+.automations-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.automations-detail__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  padding-bottom: 0;
+}
+.automations-detail__tabs button {
+  font: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.automations-detail__tabs button.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent, #3b82f6);
+  font-weight: 600;
+}
+.automations-detail__form > .card {
+  margin: 0;
+  border: none;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.automations-history__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.automations-history__scroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.automations-history__scroll table tr.is-selected td {
+  background: var(--accent-dim, color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent));
+}
+.automations-log-pre {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--panel2, var(--panel));
+  color: var(--text);
+  max-height: 280px;
+  overflow: auto;
+}
+
 .monitoring-toolbar-search {
   display: inline-flex;
   align-items: center;
