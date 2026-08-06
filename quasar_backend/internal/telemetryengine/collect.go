@@ -427,6 +427,75 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 		}
 	}
 	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, timeout)
+	return mikrotikResult(out, telnetOut, err)
+}
+
+// CollectHealthAndStore ciclo rápido: só CPU/memória/temperatura/uptime (sem walks pesados).
+// Usado pelo worker paralelo de monitoramento para garantir KPIs em cada intervalo.
+func CollectHealthAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+	var category, brand, model, description string
+	var bngEnabled bool
+	_ = pool.QueryRow(ctx, `
+		SELECT coalesce(category,''), coalesce(brand,''), coalesce(model,''), coalesce(description,''),
+			coalesce(bng_enabled, false)
+		FROM devices WHERE id=$1
+	`, deviceID).Scan(&category, &brand, &model, &description, &bngEnabled)
+
+	timeout := 20 * time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl) - time.Second; rem > 5*time.Second {
+			timeout = rem
+		}
+	}
+	if timeout > 25*time.Second {
+		timeout = 25 * time.Second
+	}
+
+	if bngEnabled && !mikrotikcollect.IsMikrotikDevice(category, brand, model, description) && !switchcollect.IsSwitchDevice(category, brand, model, description) {
+		// BNG: coleta periódica dedicada; health path devolve ok sem bloquear.
+		return CollectResult{OK: true, Metrics: map[string]any{"skipped": "bng_dedicated_cycle"}}, nil
+	}
+	if switchcollect.IsSwitchDevice(category, brand, model, description) {
+		out, err := switchcollect.CollectHealthAndStore(ctx, pool, deviceID, host, community, timeout)
+		return switchHealthResult(out, err)
+	}
+	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
+		out, err := mikrotikcollect.CollectHealthAndStore(ctx, pool, deviceID, host, community, timeout)
+		return mikrotikHealthResult(out, err)
+	}
+	// Genérico: GETs do inventário (já é o path leve).
+	return CollectAndStore(ctx, pool, deviceID, host, community)
+}
+
+func mikrotikHealthResult(out mikrotikcollect.CollectOutput, err error) (CollectResult, error) {
+	return mikrotikResult(out, mikrotikcollect.TelnetCollectOutput{}, err)
+}
+
+func switchHealthResult(out mikrotikcollect.CollectOutput, err error) (CollectResult, error) {
+	snmpOK := err == nil && out.Status.Collected > 0
+	var oids []string
+	for _, fr := range out.Fields {
+		if fr.OID != "" {
+			oids = append(oids, fr.OID)
+		}
+	}
+	sn := probing.SNMPGetResult{OK: snmpOK, Note: out.Status.Message}
+	if !snmpOK {
+		sn.Error = out.Status.Message
+		if sn.Error == "" && err != nil {
+			sn.Error = err.Error()
+		}
+	}
+	metrics := map[string]any{
+		"switch_collection": out,
+		"oids":              oids,
+		"profile_source":    "settings_switch_collection",
+		"health_cycle":      true,
+	}
+	return CollectResult{OK: snmpOK, OIDs: oids, SNMP: sn, Metrics: metrics}, err
+}
+
+func mikrotikResult(out mikrotikcollect.CollectOutput, telnetOut mikrotikcollect.TelnetCollectOutput, err error) (CollectResult, error) {
 	snmpOK := err == nil && out.Status.Collected > 0
 	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
 		snmpOK = false

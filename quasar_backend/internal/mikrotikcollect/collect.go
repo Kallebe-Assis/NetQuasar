@@ -65,6 +65,8 @@ type CollectOpts struct {
 	Timeout    time.Duration
 	// Sections, se não vazio, limita a coleta a estas secções do catálogo (ex.: "optical").
 	Sections []string
+	// ScalarsOnly ignora walks/tabelas — só ModeSNMPGet (ciclo rápido de KPIs).
+	ScalarsOnly bool
 }
 
 func sectionAllowed(section string, sections []string) bool {
@@ -203,6 +205,12 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 		if mode == ModeIFMibTable {
 			mode = ModeSNMPWalk
 		}
+		if opts.ScalarsOnly && mode != ModeSNMPGet {
+			out.Status.Skipped = append(out.Status.Skipped, SkippedField{
+				Key: entry.Key, Label: label, Reason: "scalars_only",
+			})
+			continue
+		}
 		div := EffectiveDivisor(def, entry)
 		p := pending{entry: entry, def: def, label: label, mode: mode, oid: oid, div: div}
 		if mode == ModeSNMPGet {
@@ -297,7 +305,7 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 			continue
 		}
 		// Passos manuais só no ciclo de telemetria completo (não em coleta filtrada por secção).
-		if len(opts.Sections) > 0 {
+		if len(opts.Sections) > 0 || opts.ScalarsOnly {
 			continue
 		}
 		oid := strings.TrimSpace(step.OID)

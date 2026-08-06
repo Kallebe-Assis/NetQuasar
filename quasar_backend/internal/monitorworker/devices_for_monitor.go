@@ -33,6 +33,26 @@ func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUI
 		  AND trim(both from coalesce(d.network_status, '')) = 'Normal'
 		  AND trim(both from coalesce(d.operational_mode, '')) = 'Ativo'
 	`
+	return scanPingableDevices(ctx, pool, base, only, "equipamento não encontrado ou inelegível para monitorização")
+}
+
+// loadTelemetryDevices lista equipamentos com telemetria activa (KPIs SNMP no ciclo paralelo).
+// Não depende só de ping_enabled: telemetria ligada + IP + Normal/Ativo.
+func loadTelemetryDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUID) ([]pingableDeviceRow, error) {
+	base := `
+		SELECT d.id, host(d.ip)::text, d.snmp_community, d.description, d.telemetry_enabled,
+			coalesce(d.bng_enabled, false),
+			coalesce(d.category, ''), coalesce(d.brand, ''), coalesce(d.model, ''), d.max_pons
+		FROM devices d
+		WHERE d.telemetry_enabled = true
+		  AND d.ip IS NOT NULL AND trim(host(d.ip)::text) <> ''
+		  AND trim(both from coalesce(d.network_status, '')) = 'Normal'
+		  AND trim(both from coalesce(d.operational_mode, '')) = 'Ativo'
+	`
+	return scanPingableDevices(ctx, pool, base, only, "equipamento não encontrado ou inelegível para telemetria")
+}
+
+func scanPingableDevices(ctx context.Context, pool *pgxpool.Pool, base string, only *uuid.UUID, notFoundMsg string) ([]pingableDeviceRow, error) {
 	args := []any{}
 	if only != nil {
 		base += ` AND d.id = $1`
@@ -56,7 +76,7 @@ func loadPingableDevices(ctx context.Context, pool *pgxpool.Pool, only *uuid.UUI
 		return nil, err
 	}
 	if only != nil && len(out) == 0 {
-		return nil, fmt.Errorf("equipamento não encontrado ou inelegível para monitorização")
+		return nil, fmt.Errorf("%s", notFoundMsg)
 	}
 	return out, nil
 }

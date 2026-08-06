@@ -64,6 +64,45 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	return telemetry, telnetOut, err
 }
 
+// CollectHealthAndStore coleta só GETs de saúde/sistema (ciclo rápido do worker).
+func CollectHealthAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (mikrotikcollect.CollectOutput, error) {
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	if timeout > 25*time.Second {
+		timeout = 25 * time.Second
+	}
+	profile := LoadGlobalProfile(ctx, pool)
+	telemetry := mikrotikcollect.CollectMetrics(ctx, host, community, profile, mikrotikcollect.CollectOpts{
+		WalkTarget:  mikrotikcollect.TargetTelemetry,
+		Sections:    []string{"health", "system", "inventory"},
+		ScalarsOnly: true,
+		Timeout:     timeout,
+	})
+	var snmpVars []probing.SNMPVar
+	for _, fr := range telemetry.Fields {
+		if !fr.OK || fr.CollectMode != mikrotikcollect.ModeSNMPGet || fr.Value == nil {
+			continue
+		}
+		snmpVars = append(snmpVars, probing.SNMPVar{OID: fr.OID, Value: formatSNMPValue(fr.Value)})
+	}
+	b, err := buildTelemetryMetricsJSON(telemetry, snmpVars, mikrotikcollect.TelnetCollectOutput{})
+	if err != nil {
+		return telemetry, err
+	}
+	storeCtx := ctx
+	var cancel context.CancelFunc
+	if ctx.Err() != nil {
+		storeCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+	}
+	_, err = pool.Exec(storeCtx, `
+		INSERT INTO telemetry_samples (device_id, collected_at, metrics)
+		VALUES ($1, now(), $2::jsonb)
+	`, deviceID, b)
+	return telemetry, err
+}
+
 // CollectInterfaceWalks devolve vars SNMP para interface_snapshots.
 func CollectInterfaceWalks(ctx context.Context, host, community string, pool *pgxpool.Pool, total time.Duration) ([]probing.SNMPVar, bool) {
 	profile := LoadGlobalProfile(ctx, pool)

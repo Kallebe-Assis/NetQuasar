@@ -1,10 +1,16 @@
 // Package monitorworker executa ciclos de sondagem enquanto monitoring_runtime.is_running = true,
 // independentemente de conexões HTTP do front (troca de tela não interrompe). Parar só via POST /monitoring/stop.
 //
-// Ciclos leves em paralelo (cada um com o seu intervalo): ping, telemetria SNMP e BNG.
-// O pipeline sequencial fica para interfaces / OLT. Dentro de cada ciclo, vários equipamentos
-// são sondados em paralelo (DefaultSweepConcurrency); o mesmo device fica serializado
-// com WithDeviceProbeRowLock / snmpdevicelock.
+// Arquitectura (modo full):
+//
+//	tick (1s)
+//	├── ping paralelo          (latencyCycleMu, ping_seconds)
+//	├── telemetria health      (telemetryCycleMu, telemetry_seconds) — KPIs CPU/mem/temp/uptime
+//	├── BNG paralelo           (bngCycleMu)
+//	└── pipeline sequencial    (monitoringPipelineMu) — interfaces / OLT (sem telemetria/BNG/ping)
+//
+// A fase health usa CollectHealthAndStore (só GETs escalares), TryAcquire com timeout no
+// snmpdevicelock, e só avança last_telemetry_cycle_at quando todos os elegíveis foram cobertos.
 package monitorworker
 
 import (

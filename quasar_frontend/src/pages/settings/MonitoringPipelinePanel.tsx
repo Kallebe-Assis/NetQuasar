@@ -267,10 +267,19 @@ function frequencyForStep(step: PipelineStep, intervals: MonitoringIntervalsPayl
   }
 }
 
+/** Passos opcionais do default — não forçam o cartão «Parcial». */
+const OPTIONAL_PIPELINE_STEP_IDS = new Set(["olt-onu-full"]);
+
 function modeFromRuntime(mode?: string, steps?: PipelineStep[]): ModeChoice {
   const m = String(mode ?? "").toLowerCase();
   if (m === "simple_ping") return "simple_ping";
-  if (steps && steps.some((s) => !s.enabled)) return "partial";
+  if (
+    steps?.some(
+      (s) => !s.enabled && !OPTIONAL_PIPELINE_STEP_IDS.has(String(s.id ?? "").toLowerCase()),
+    )
+  ) {
+    return "partial";
+  }
   return "full";
 }
 
@@ -280,6 +289,7 @@ export function MonitoringSettingsPanel() {
   const [subTab, setSubTab] = useState<SubTab>("overview");
   const [addKind, setAddKind] = useState("ping");
   const [modeChoice, setModeChoice] = useState<ModeChoice>("full");
+  const [modeTouched, setModeTouched] = useState(false);
   const [tick, setTick] = useState(0);
 
   const [steps, setSteps] = useState<PipelineStep[]>([]);
@@ -330,8 +340,26 @@ export function MonitoringSettingsPanel() {
 
   useEffect(() => {
     if (!stateQ.data) return;
+    // Não sobrescrever a escolha do utilizador a cada poll de 5s.
+    if (modeTouched) return;
     setModeChoice(modeFromRuntime(stateQ.data.monitoring_mode, intervalsQ.data?.pipeline_steps));
-  }, [stateQ.data, intervalsQ.data?.pipeline_steps]);
+  }, [stateQ.data, intervalsQ.data?.pipeline_steps, modeTouched]);
+
+  const selectMode = (next: ModeChoice) => {
+    setModeTouched(true);
+    setModeChoice(next);
+    if (next === "full") {
+      // Completo: activa passos núcleo; mantém olt-onu-full opcional desligado por defeito.
+      setSteps((prev) =>
+        prev.map((s) =>
+          OPTIONAL_PIPELINE_STEP_IDS.has(String(s.id ?? "").toLowerCase())
+            ? s
+            : { ...s, enabled: true },
+        ),
+      );
+      setEquip({ switch: true, mikrotik: true, olt: true, onu: true, generic: true });
+    }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -351,6 +379,7 @@ export function MonitoringSettingsPanel() {
       }
     },
     onSuccess: () => {
+      setModeTouched(false);
       void qc.invalidateQueries({ queryKey: queryKeys.monIntervals });
       void qc.invalidateQueries({ queryKey: queryKeys.monState });
       toastOk(pushToast, "Configurações de monitoramento guardadas.");
@@ -399,6 +428,7 @@ export function MonitoringSettingsPanel() {
   const restoreDefaults = () => {
     setSteps(defaultPipelineSteps());
     setDraft({ ...DEFAULT_INTERVALS });
+    setModeTouched(true);
     setModeChoice("full");
     setEquip({ switch: true, mikrotik: true, olt: true, onu: true, generic: true });
     toastOk(pushToast, "Padrões restaurados neste formulário. Clique em Salvar para aplicar.");
@@ -612,19 +642,19 @@ export function MonitoringSettingsPanel() {
                 desc="Executa todos os módulos activos do pipeline na ordem definida."
                 selected={modeChoice === "full"}
                 badge="Recomendado"
-                onSelect={() => setModeChoice("full")}
+                onSelect={() => selectMode("full")}
               />
               <ModeCard
                 title="Parcial"
                 desc="Executa apenas os módulos activos que seleccionar no pipeline."
                 selected={modeChoice === "partial"}
-                onSelect={() => setModeChoice("partial")}
+                onSelect={() => selectMode("partial")}
               />
               <ModeCard
                 title="Ping Apenas"
                 desc="Apenas verificação de disponibilidade (ICMP/TCP), sem SNMP/OLT."
                 selected={modeChoice === "simple_ping"}
-                onSelect={() => setModeChoice("simple_ping")}
+                onSelect={() => selectMode("simple_ping")}
               />
             </div>
             <div className="mon-cfg__info-banner">
