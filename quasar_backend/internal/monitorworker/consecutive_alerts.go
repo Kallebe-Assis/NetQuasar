@@ -1,7 +1,12 @@
 package monitorworker
 
+import "time"
+
 const minConsecutivePingsForAlert = 3
 const minConsecutiveLatencyForAlert = 2
+
+// MinAlertOpenBeforeResolve evita fechar offline/latência segundos após abrir (flapping).
+const MinAlertOpenBeforeResolve = time.Minute
 
 // ConsecutivePingsRequired exige no mínimo 3 leituras consecutivas de falha ICMP/TCP
 // antes de abrir alerta de equipamento offline.
@@ -33,4 +38,16 @@ func (c intervalConfig) alertConsecutiveRequired() int {
 
 func (c intervalConfig) latencyConsecutiveRequired() int {
 	return consecutiveLatencyRequired(c.OfflineThreshold)
+}
+
+// shouldResolvePingUnreachableAfterOK só resolve após 2.ª leitura OK consecutiva
+// (streak anterior já era 0) — simétrico ao limiar de abertura.
+func shouldResolvePingUnreachableAfterOK(prevFailStreak int) bool {
+	return prevFailStreak == 0
+}
+
+// shouldResolveLatencyHighAfterCalm só resolve na 2.ª leitura calma consecutiva
+// (streak de latência alta já era 0 no ciclo anterior).
+func shouldResolveLatencyHighAfterCalm(prevHighStreak int) bool {
+	return prevHighStreak == 0
 }

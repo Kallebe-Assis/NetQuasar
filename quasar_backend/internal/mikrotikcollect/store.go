@@ -10,13 +10,73 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
 
+func collectTimeoutFromCtx(ctx context.Context, requested time.Duration) time.Duration {
+	if requested <= 0 {
+		requested = 45 * time.Second
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		rem := time.Until(dl) - 3*time.Second
+		if rem < 8*time.Second {
+			if rem < 5*time.Second {
+				return 5 * time.Second
+			}
+			return rem
+		}
+		if rem < requested {
+			return rem
+		}
+	}
+	if requested > 90*time.Second {
+		return 90 * time.Second
+	}
+	return requested
+}
+
+func mergeCollectOutputs(dst *CollectOutput, src CollectOutput) {
+	if dst.Fields == nil {
+		dst.Fields = make(map[string]FieldResult)
+	}
+	for k, v := range src.Fields {
+		dst.Fields[k] = v
+	}
+	dst.Status.Enabled += src.Status.Enabled
+	dst.Status.Collected += src.Status.Collected
+	dst.Status.Failed += src.Status.Failed
+	dst.Status.Skipped = append(dst.Status.Skipped, src.Status.Skipped...)
+	dst.Status.MissingOID = append(dst.Status.MissingOID, src.Status.MissingOID...)
+	if dst.Status.Message == "" && src.Status.Message != "" {
+		dst.Status.Message = src.Status.Message
+	}
+}
+
 // CollectAndStore executa coleta MikroTik (SNMP + telnet conforme perfil) e persiste em telemetry_samples.
+// Inclui métricas de telemetria (CPU, memória, temperatura, uptime, …) e secção óptica/SFP habilitada.
 func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (CollectOutput, TelnetCollectOutput, error) {
+	timeout = collectTimeoutFromCtx(ctx, timeout)
 	profile := LoadGlobalProfile(ctx, pool)
+
+	telemBudget := time.Duration(float64(timeout) * 0.65)
+	if telemBudget < 10*time.Second {
+		telemBudget = timeout
+	}
 	telemetry := CollectMetrics(ctx, host, community, profile, CollectOpts{
 		WalkTarget: TargetTelemetry,
-		Timeout:    timeout,
+		Timeout:    telemBudget,
 	})
+
+	opticalBudget := timeout - telemBudget
+	if opticalBudget < 8*time.Second {
+		opticalBudget = 8 * time.Second
+	}
+	if ctx.Err() == nil {
+		optical := CollectMetrics(ctx, host, community, profile, CollectOpts{
+			WalkTarget: TargetInterfaces,
+			Sections:   []string{"optical"},
+			Timeout:    opticalBudget,
+		})
+		mergeCollectOutputs(&telemetry, optical)
+	}
+
 	var snmpVars []probing.SNMPVar
 	for _, fr := range telemetry.Fields {
 		if !fr.OK {

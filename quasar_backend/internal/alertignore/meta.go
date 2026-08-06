@@ -15,10 +15,13 @@ func MetaKeyFromAlert(alertType string, meta map[string]any) string {
 		return k
 	}
 	switch strings.TrimSpace(alertType) {
-	case "olt_onu_drop", "olt_onu_rise", "olt_onu_rx", "olt_onu_tx":
+	case "olt_onu_drop", "olt_onu_rise", "olt_onu_rx", "olt_onu_tx", "pon_down":
 		if p := strings.TrimSpace(fmt.Sprint(meta["pon"])); p != "" && p != "<nil>" {
 			if mid := strings.TrimSpace(fmt.Sprint(meta["metric_id"])); mid != "" && mid != "<nil>" {
 				return mid + ":" + p
+			}
+			if strings.TrimSpace(alertType) == "pon_down" {
+				return "pon_down:" + p
 			}
 			return p
 		}

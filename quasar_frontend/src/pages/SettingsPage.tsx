@@ -1852,7 +1852,7 @@ const TELEGRAM_MONITORING_TEST_TEMPLATES: { id: string; label: string }[] = [
   { id: "uptime_restart_low", label: "Uptime / reinício" },
   { id: "sfp_rx", label: "SFP RX" },
   { id: "sfp_tx", label: "SFP TX" },
-  { id: "pon_off", label: "PON OFF (queda ONUs)" },
+	{ id: "pon_off", label: "PON OFF / PON DOWN" },
   { id: "interface_down", label: "Interface DOWN" },
   { id: "telemetry_threshold", label: "Telemetria (limiar)" },
   { id: "snmp_failure", label: "Falha SNMP" },

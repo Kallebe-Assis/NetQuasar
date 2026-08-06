@@ -68,7 +68,7 @@ func EvaluateLatencyHighAlerts(ctx context.Context, pool *pgxpool.Pool, log *zer
 			reportLat = (prevSampleLatMs + currLat) / 2
 		}
 		openOrUpdateLatencyHigh(ctx, pool, log, deviceID, deviceCategory, description, ip, reportLat, currLat, prevSampleLatMs, requiredConsecutive)
-	} else if streakAfter == 0 && reachOK {
+	} else if streakAfter == 0 && reachOK && shouldResolveLatencyHighAfterCalm(prevHighStreak) {
 		closeLatencyHighIfCalm(ctx, pool, log, deviceID, deviceCategory, currLat)
 	}
 	return streakAfter
@@ -172,7 +172,7 @@ func closeLatencyHighIfCalm(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 	}
 	closed, _, err := alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
 		DeviceID: deviceID, AlertType: alertTypeLatencyHigh, Match: latencyHighMatch,
-		Resolved: resolved,
+		Resolved: resolved, MinOpenAge: MinAlertOpenBeforeResolve,
 	})
 	if err != nil && log != nil {
 		log.Error().Err(err).Str("device", deviceID.String()).Msg("fechar latency_high")

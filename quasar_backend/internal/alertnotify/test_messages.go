@@ -27,7 +27,10 @@ func MonitoringTestMessage(template string) string {
 	case "sfp_tx", "mikrotik_sfp_tx":
 		return formatMonitoringTelegram("WARNING", "Potência óptica SFP",
 			fmt.Sprintf("Router-Core (%s): interface sfp1 — potência SFP TX -12.300 dBm (severidade: warning).", ip))
-	case "pon_down", "pon_off", "olt_onu_drop":
+	case "pon_down", "pon_off":
+		return formatMonitoringTelegram("CRITICAL", "PON inactiva (DOWN)",
+			fmt.Sprintf("PON 0/1/1 — status DOWN (inactiva) — OLT %s (%s).", equip, ip))
+	case "olt_onu_drop":
 		return formatMonitoringTelegram("CRITICAL", "Queda de ONUs online — PON",
 			fmt.Sprintf("Queda de 8 ONUs online na PON 0/1/1 da OLT %s (%s).", equip, ip))
 	case "interface_down", "interface_down_transition":

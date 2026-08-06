@@ -158,6 +158,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		}
 		summary["onu_delta_alerts_skipped"] = "coleta SNMP incompleta ou truncada"
 	}
+	oltifderive.PreserveLinkOperStatusAll(curMaps)
 	oltifderive.ApplyPonOperStatusAll(curMaps)
 	pons = oltifderive.PonsMapsToAny(curMaps)
 	alertSource := source
@@ -168,6 +169,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	}
 	if !incomplete {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
+		alertthresholds.EvaluatePonDownAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
 	}
 
 	sb, _ := json.Marshal(summary)

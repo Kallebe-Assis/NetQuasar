@@ -47,5 +47,6 @@ COPY --from=backend /app/data/certs /app/data/certs
 EXPOSE 8080
 ENV NETQUASAR_HTTP_ADDR=:8080 \
     NETQUASAR_EMBEDDED_UI=true \
+    TZ=America/Sao_Paulo \
     PATH="/usr/lib/postgresql/18/bin:/usr/local/bin:/usr/bin:/bin"
 CMD ["./netquasar"]

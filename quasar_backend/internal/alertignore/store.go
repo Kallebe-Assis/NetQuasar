@@ -23,6 +23,7 @@ const SQLActiveIgnoreNotExists = `
 			CASE a.alert_type
 			  WHEN 'olt_onu_drop' THEN COALESCE(NULLIF(trim(a.meta->>'pon'), ''), '')
 			  WHEN 'olt_onu_rise' THEN COALESCE(NULLIF(trim(a.meta->>'pon'), ''), '')
+			  WHEN 'pon_down' THEN COALESCE(NULLIF(trim(a.meta->>'key'), ''), 'pon_down:' || NULLIF(trim(a.meta->>'pon'), ''))
 			  WHEN 'olt_onu_rx' THEN COALESCE(NULLIF(trim(a.meta->>'metric_id') || ':' || trim(a.meta->>'pon'), ':'), NULLIF(trim(a.meta->>'pon'), ''))
 			  WHEN 'olt_onu_tx' THEN COALESCE(NULLIF(trim(a.meta->>'metric_id') || ':' || trim(a.meta->>'pon'), ':'), NULLIF(trim(a.meta->>'pon'), ''))
 			  WHEN 'telemetry_threshold' THEN CASE WHEN NULLIF(trim(a.meta->>'metric_id'), '') IS NOT NULL THEN 'telemetry:' || trim(a.meta->>'metric_id') ELSE '' END

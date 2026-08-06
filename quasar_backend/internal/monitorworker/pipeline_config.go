@@ -338,6 +338,9 @@ func deviceMatchesScope(row pingableDeviceRow, scope StepScope) bool {
 		if cat == "bng" {
 			return isBngDevice(row)
 		}
+		if cat == "mikrotik" {
+			return workerLikelyMikrotik(row.category, row.brand, row.model, row.description)
+		}
 		return strings.EqualFold(strings.TrimSpace(row.category), scope.Category)
 	}
 	if target == "devices" {

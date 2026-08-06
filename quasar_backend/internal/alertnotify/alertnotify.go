@@ -149,6 +149,8 @@ func monitoringHeader(level, title, message, alertType string, meta map[string]a
 	switch at {
 	case "interface_down_transition", "interface_down":
 		return "🔴 ALERTA INTERFACE"
+	case "pon_down":
+		return "🔴 ALERTA PON DOWN"
 	case "ping_unreachable":
 		return "🔴 EQUIPAMENTO OFFLINE"
 	case "latency_high", "latency_degraded":
@@ -221,6 +223,8 @@ func resolutionHeader(alertType, title, detail string) string {
 	switch strings.TrimSpace(alertType) {
 	case "olt_onu_drop", "olt_onu_rise":
 		return "🟢 ONUs NORMALIZADAS"
+	case "pon_down":
+		return "🟢 PON UP"
 	default:
 		return "🟢 ALERTA RESOLVIDO"
 	}
@@ -239,6 +243,11 @@ func ResolutionStatusLine(alertType, originalMessage string) string {
 			return tgt + " — operação UP"
 		}
 		return "Interface voltou a operação UP"
+	case "pon_down":
+		if tgt := incidentTarget(originalMessage); tgt != "" {
+			return tgt + " — PON UP (activa)"
+		}
+		return "PON voltou a operação UP"
 	case "olt_onu_drop":
 		if strings.Contains(low, "pon") {
 			if tgt := incidentTarget(originalMessage); tgt != "" {
@@ -727,6 +736,14 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		}
 	case "olt_onu_drop", "olt_onu_rise":
 		parts = appendOltOnuDeltaTelegramLines(parts, alertType, meta, inc)
+	case "pon_down":
+		if p := metaString(meta, "pon"); p != "" {
+			parts = append(parts, "• PON: "+p)
+		}
+		if n := metaString(meta, "pon_name"); n != "" {
+			parts = append(parts, "• Nome: "+n)
+		}
+		parts = append(parts, "• Status: DOWN (inactiva)")
 	case "bng_subscriber_drop":
 		parts = appendBngSubscriberDropTelegramLines(parts, meta, title, inc)
 	case "mikrotik_pppoe_drop":
@@ -843,10 +860,10 @@ func telegramUnifiedOnuResolutionBlocks(
 		parts = append(parts, "• POP: "+pn)
 	}
 	if !activeSince.IsZero() {
-		parts = append(parts, "• Início: "+activeSince.UTC().Format("02/01/2006 15:04"))
+		parts = append(parts, "• Início: "+FormatAlertDateTime(activeSince))
 	}
 	if closedAt != nil {
-		parts = append(parts, "• Fim: "+closedAt.UTC().Format("02/01/2006 15:04"))
+		parts = append(parts, "• Fim: "+FormatAlertDateTime(*closedAt))
 		if d := closedAt.Sub(activeSince); d > 0 {
 			parts = append(parts, "• Duração: "+formatDurationPT(d))
 		} else {
@@ -1015,6 +1032,8 @@ func ResolutionHeadlineForAlertType(alertType string) string {
 		return "Latência voltou ao intervalo normal"
 	case "interface_down_transition":
 		return "Interface voltou a operação UP"
+	case "pon_down":
+		return "PON voltou a operação UP"
 	case "olt_onu_drop":
 		return "Contagem de ONUs online normalizada"
 	case "bng_subscriber_drop":
@@ -1066,10 +1085,10 @@ func SendResolutionTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 		extras = append(extras, "POP: "+row.PopName)
 	}
 	if !row.ActiveSince.IsZero() {
-		extras = append(extras, "Início: "+row.ActiveSince.UTC().Format("02/01/2006 15:04"))
+		extras = append(extras, "Início: "+FormatAlertDateTime(row.ActiveSince))
 	}
 	if row.ClosedAt != nil {
-		extras = append(extras, "Fim: "+row.ClosedAt.UTC().Format("02/01/2006 15:04"))
+		extras = append(extras, "Fim: "+FormatAlertDateTime(*row.ClosedAt))
 		if d := row.ClosedAt.Sub(row.ActiveSince); d > 0 {
 			extras = append(extras, "Duração: "+formatDurationPT(d))
 		}

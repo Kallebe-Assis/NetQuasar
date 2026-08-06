@@ -3,6 +3,7 @@ package mikrotikcollect
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -62,6 +63,62 @@ type CollectOutput struct {
 type CollectOpts struct {
 	WalkTarget string
 	Timeout    time.Duration
+	// Sections, se não vazio, limita a coleta a estas secções do catálogo (ex.: "optical").
+	Sections []string
+}
+
+func sectionAllowed(section string, sections []string) bool {
+	if len(sections) == 0 {
+		return true
+	}
+	for _, s := range sections {
+		if strings.EqualFold(strings.TrimSpace(s), strings.TrimSpace(section)) {
+			return true
+		}
+	}
+	return false
+}
+
+func getOIDTimeout(total time.Duration) time.Duration {
+	t := total
+	if t <= 0 {
+		t = 12 * time.Second
+	}
+	if t > 4*time.Second {
+		return 4 * time.Second
+	}
+	if t < 2*time.Second {
+		return 2 * time.Second
+	}
+	return t
+}
+
+// snmpGetScalar tenta GET; se falhar e o OID não terminar em .0, retenta com .0 (OIDs escalares comuns).
+func snmpGetScalar(ctx context.Context, host, community, oid string, timeout time.Duration) (probing.SNMPGetResult, string) {
+	oid = strings.TrimSpace(strings.TrimPrefix(oid, "."))
+	to := getOIDTimeout(timeout)
+	try := func(o string) probing.SNMPGetResult {
+		return probing.SNMPGet(ctx, probing.SNMPGetParams{
+			Host: host, Community: community, OIDs: []string{o},
+			Version: "2c", Timeout: to, Retries: 0,
+		})
+	}
+	res := try(oid)
+	usable := res.OK && len(res.Vars) > 0 && probing.SNMPValueUsable(fmt.Sprint(res.Vars[0].Value))
+	if usable {
+		return res, oid
+	}
+	if !strings.HasSuffix(oid, ".0") {
+		alt := oid + ".0"
+		res2 := try(alt)
+		if res2.OK && len(res2.Vars) > 0 && probing.SNMPValueUsable(fmt.Sprint(res2.Vars[0].Value)) {
+			return res2, alt
+		}
+	}
+	if res.OK && len(res.Vars) > 0 {
+		return res, oid
+	}
+	return res, oid
 }
 
 // CollectMetrics executa coleta conforme perfil — só métricas enabled com OID preenchido.
@@ -82,8 +139,22 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 	}
 	targetFilter := strings.TrimSpace(opts.WalkTarget)
 
+	type pending struct {
+		entry CatalogEntry
+		def   MetricDef
+		label string
+		mode  string
+		oid   string
+		div   int
+	}
+	var gets []pending
+	var rest []pending
+
 	for _, entry := range profile.CatalogEntries() {
 		if targetFilter != "" && entry.WalkTarget != targetFilter {
+			continue
+		}
+		if !sectionAllowed(entry.Section, opts.Sections) {
 			continue
 		}
 		def, ok := profile.Metrics[entry.Key]
@@ -132,43 +203,66 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 		if mode == ModeIFMibTable {
 			mode = ModeSNMPWalk
 		}
-		fr := FieldResult{Key: entry.Key, Label: label, CollectMode: mode, OID: oid}
 		div := EffectiveDivisor(def, entry)
-		fr.ValueDivisor = div
-		switch mode {
-		case ModeSNMPGet:
-			res := probing.SNMPGet(ctx, probing.SNMPGetParams{
-				Host: host, Community: community, OIDs: []string{oid},
-				Version: "2c", Timeout: timeout, Retries: 0,
-			})
-			if !res.OK || len(res.Vars) == 0 {
-				fr.OK = false
-				fr.Error = res.Error
-				if fr.Error == "" {
-					fr.Error = "SNMP GET sem resposta"
-				}
-				out.Status.Failed++
-			} else {
-				fr.OK = true
-				fr.Value = applyDivisor(res.Vars[0].Value, div)
-				out.Status.Collected++
+		p := pending{entry: entry, def: def, label: label, mode: mode, oid: oid, div: div}
+		if mode == ModeSNMPGet {
+			gets = append(gets, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+
+	// Fase 1: GETs escalares (CPU, memória, temperatura, uptime) antes de walks pesados.
+	for _, p := range gets {
+		if ctx.Err() != nil {
+			fr := FieldResult{Key: p.entry.Key, Label: p.label, CollectMode: p.mode, OID: p.oid, ValueDivisor: p.div, OK: false, Error: ctx.Err().Error()}
+			out.Fields[p.entry.Key] = fr
+			out.Status.Failed++
+			continue
+		}
+		res, usedOID := snmpGetScalar(ctx, host, community, p.oid, timeout)
+		fr := FieldResult{Key: p.entry.Key, Label: p.label, CollectMode: p.mode, OID: usedOID, ValueDivisor: p.div}
+		if !res.OK || len(res.Vars) == 0 || !probing.SNMPValueUsable(fmt.Sprint(res.Vars[0].Value)) {
+			fr.OK = false
+			fr.Error = res.Error
+			if fr.Error == "" {
+				fr.Error = "SNMP GET sem resposta"
 			}
+			out.Status.Failed++
+		} else {
+			fr.OK = true
+			fr.Value = applyDivisor(res.Vars[0].Value, p.div)
+			out.Status.Collected++
+		}
+		out.Fields[p.entry.Key] = fr
+	}
+
+	// Fase 2: walks / óptico / IF-MIB / PPPoE.
+	for _, p := range rest {
+		if ctx.Err() != nil {
+			fr := FieldResult{Key: p.entry.Key, Label: p.label, CollectMode: p.mode, OID: p.oid, ValueDivisor: p.div, OK: false, Error: ctx.Err().Error()}
+			out.Fields[p.entry.Key] = fr
+			out.Status.Failed++
+			continue
+		}
+		fr := FieldResult{Key: p.entry.Key, Label: p.label, CollectMode: p.mode, OID: p.oid, ValueDivisor: p.div}
+		switch p.mode {
 		case ModeSNMPWalk, ModeIFMibTable:
-			fr = collectSNMPWalk(ctx, host, community, timeout, entry, oid, div, profile.Metrics, fr, &out.Status)
+			fr = collectSNMPWalk(ctx, host, community, timeout, p.entry, p.oid, p.div, profile.Metrics, fr, &out.Status)
 		case ModeIFMibStatus:
-			fr = collectIFMibStatus(ctx, host, community, timeout, entry, oid, fr, &out.Status)
+			fr = collectIFMibStatus(ctx, host, community, timeout, p.entry, p.oid, fr, &out.Status)
 		case ModeOpticalSFPParse:
-			fr = collectOpticalSFPParse(ctx, host, community, timeout, profile, oid, fr, &out.Status)
+			fr = collectOpticalSFPParse(ctx, host, community, timeout, profile, p.oid, fr, &out.Status)
 		case ModeOpticalSFPColumn:
-			fr = collectOpticalColumnWalk(ctx, host, community, timeout, entry, oid, div, fr, &out.Status)
+			fr = collectOpticalColumnWalk(ctx, host, community, timeout, p.entry, p.oid, p.div, fr, &out.Status)
 		case ModeIFMibPPPoE:
-			fr = collectIFMibPPPoE(ctx, host, community, timeout, oid, fr, &out.Status)
+			fr = collectIFMibPPPoE(ctx, host, community, timeout, p.oid, fr, &out.Status)
 		default:
 			fr.OK = false
-			fr.Error = "modo de coleta desconhecido: " + mode
+			fr.Error = "modo de coleta desconhecido: " + p.mode
 			out.Status.Failed++
 		}
-		out.Fields[entry.Key] = fr
+		out.Fields[p.entry.Key] = fr
 	}
 
 	// Propagar sub-métricas ópticas a partir do walk da tabela completa.
@@ -200,6 +294,10 @@ func CollectMetrics(ctx context.Context, host, community string, profile Profile
 
 	for _, step := range profile.CollectionSteps {
 		if !step.IsEnabled() {
+			continue
+		}
+		// Passos manuais só no ciclo de telemetria completo (não em coleta filtrada por secção).
+		if len(opts.Sections) > 0 {
 			continue
 		}
 		oid := strings.TrimSpace(step.OID)

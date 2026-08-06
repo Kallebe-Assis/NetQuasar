@@ -204,8 +204,9 @@ func (s *Server) pingRunDevice(w http.ResponseWriter, r *http.Request) {
 			WHERE alert_type = 'ping_unreachable'
 			  AND closed_at IS NULL
 			  AND device_id = $1::uuid
+			  AND active_since <= now() - ($3::bigint * interval '1 millisecond')
 			RETURNING id, message, alert_type
-		`, id, metaClose).Scan(&aid, &msg, &at); err == nil {
+		`, id, metaClose, monitorworker.MinAlertOpenBeforeResolve.Milliseconds()).Scan(&aid, &msg, &at); err == nil {
 			alertnotify.SendResolutionTelegramAndPatchMeta(ctxBase, s.DB(), &s.Log, aid, alertnotify.ResolutionHeadlineForAlertType(at), msg)
 		}
 	} else if monitorworker.ShouldOpenPingUnreachableAlert(okb, streakAfter, monitorworker.ConsecutivePingsRequired(offlineThreshold)) && eligibleForAlerts {

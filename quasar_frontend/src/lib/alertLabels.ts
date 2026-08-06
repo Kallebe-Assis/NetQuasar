@@ -79,14 +79,25 @@ export function displayAlertMessage(message: string | null | undefined, type: st
   return m.replace(/\s+/g, " ").trim() || "—";
 }
 
-/** Data/hora legível para histórico (fuso local do navegador). */
+const ALERT_DISPLAY_TZ = "America/Sao_Paulo";
+
+/** Data/hora legível para histórico (sempre America/Sao_Paulo). */
 export function formatAlertDateTimePt(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return String(iso);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const parts = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: ALERT_DISPLAY_TZ,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${get("day")}/${get("month")}/${get("year")} - ${get("hour")}:${get("minute")}`;
   } catch {
     return String(iso);
   }

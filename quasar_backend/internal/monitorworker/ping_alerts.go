@@ -135,8 +135,9 @@ func resolvePingUnreachableForDevices(ctx context.Context, pool *pgxpool.Pool, l
 			WHERE alert_type = $1
 			  AND closed_at IS NULL
 			  AND device_id = $3::uuid
+			  AND active_since <= now() - ($4::bigint * interval '1 millisecond')
 			RETURNING id, alert_type, message, device_name, ip
-		`, alertTypePingUnreachable, metaRaw, deviceID).Scan(&id, &atype, &msg, &dname, &ip)
+		`, alertTypePingUnreachable, metaRaw, deviceID, MinAlertOpenBeforeResolve.Milliseconds()).Scan(&id, &atype, &msg, &dname, &ip)
 		if err != nil {
 			continue
 		}

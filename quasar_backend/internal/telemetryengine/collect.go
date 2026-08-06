@@ -420,7 +420,13 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 }
 
 func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
-	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, 12*time.Second)
+	timeout := 45 * time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl) - 3*time.Second; rem > 10*time.Second {
+			timeout = rem
+		}
+	}
+	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, timeout)
 	snmpOK := err == nil && out.Status.Collected > 0
 	if out.Status.Enabled > 0 && out.Status.Collected == 0 && out.Status.Failed == 0 && len(out.Status.MissingOID) > 0 {
 		snmpOK = false

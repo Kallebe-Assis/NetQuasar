@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -152,10 +153,11 @@ func PatchOpenMeta(ctx context.Context, pool *pgxpool.Pool, spec OpenSpec) error
 
 // CloseSpec fecha alertas abertos que correspondem ao Match.
 type CloseSpec struct {
-	DeviceID  uuid.UUID
-	AlertType string
-	Match     Match
-	Resolved  map[string]any
+	DeviceID   uuid.UUID
+	AlertType  string
+	Match      Match
+	Resolved   map[string]any
+	MinOpenAge time.Duration // se > 0, só fecha se active_since for pelo menos esta idade
 }
 
 // Close fecha alerta(s) e opcionalmente notifica resolução via Telegram.
@@ -169,6 +171,11 @@ func Close(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, spec Cl
 	metaRaw, _ := json.Marshal(spec.Resolved)
 
 	args := []any{spec.DeviceID, spec.AlertType, metaRaw}
+	extraWhere := ""
+	if spec.MinOpenAge > 0 {
+		args = append(args, spec.MinOpenAge.Milliseconds())
+		extraWhere = fmt.Sprintf(` AND active_since <= now() - ($%d::bigint * interval '1 millisecond')`, len(args))
+	}
 	whereParam := len(args) + 1
 	args = spec.Match.appendKeyArg(args)
 
@@ -178,9 +185,9 @@ func Close(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, spec Cl
 			meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb
 		WHERE device_id = $1::uuid
 		  AND alert_type = $2::text
-		  AND closed_at IS NULL%s
+		  AND closed_at IS NULL%s%s
 		RETURNING id, message
-	`, spec.Match.whereClause(whereParam))
+	`, extraWhere, spec.Match.whereClause(whereParam))
 
 	var id uuid.UUID
 	var msg string

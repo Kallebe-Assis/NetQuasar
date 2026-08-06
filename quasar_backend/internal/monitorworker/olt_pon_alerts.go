@@ -263,9 +263,11 @@ deriveLoop:
 	}
 	pons = applyMaxPonsLimitMapRows(pons, maxPons)
 
+	oltifderive.PreserveLinkOperStatusAll(pons)
 	oltifderive.ApplyPonOperStatusAll(pons)
 	if !incomplete {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+		alertthresholds.EvaluatePonDownAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	}
 	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, log, deviceID, devDesc, host, pons)
 

@@ -157,24 +157,40 @@ func ParseOpticalPorts(vars []probing.SNMPVar, profile MetricsConfig) []OpticalP
 		case OptColTxFault:
 			row.TxFault = parseBoolInt(v.Value)
 		case OptColWavelength:
-			if n, ok := parseNumericRaw(v.Value); ok && n != 0 {
-				f := applyDivisorFloat(n, divWave)
-				row.WavelengthNm = &f
+			if n, ok := parseNumericRaw(v.Value); ok {
+				switch int64(n) {
+				case 2147483647, -2147483648:
+				default:
+					f := applyDivisorFloat(n, divWave)
+					row.WavelengthNm = &f
+				}
 			}
 		case OptColTemperature:
-			if n, ok := parseNumericRaw(v.Value); ok && n != 0 {
-				f := applyDivisorFloat(n, divTemp)
-				row.TemperatureC = &f
+			if n, ok := parseNumericRaw(v.Value); ok {
+				switch int64(n) {
+				case 2147483647, -2147483648:
+				default:
+					f := applyDivisorFloat(n, divTemp)
+					row.TemperatureC = &f
+				}
 			}
 		case OptColSupplyVoltage:
-			if n, ok := parseNumericRaw(v.Value); ok && n != 0 {
-				f := applyDivisorFloat(n, divVolt)
-				row.SupplyVoltageV = &f
+			if n, ok := parseNumericRaw(v.Value); ok {
+				switch int64(n) {
+				case 0, 2147483647, -2147483648:
+				default:
+					f := applyDivisorFloat(n, divVolt)
+					row.SupplyVoltageV = &f
+				}
 			}
 		case OptColTxBias:
-			if n, ok := parseNumericRaw(v.Value); ok && n != 0 {
-				f := applyDivisorFloat(n, divBias)
-				row.BiasCurrentMA = &f
+			if n, ok := parseNumericRaw(v.Value); ok {
+				switch int64(n) {
+				case 0, 2147483647, -2147483648:
+				default:
+					f := applyDivisorFloat(n, divBias)
+					row.BiasCurrentMA = &f
+				}
 			}
 		case OptColTxPower:
 			if f, ok := parseOpticalDbm(v.Value, divTx); ok {

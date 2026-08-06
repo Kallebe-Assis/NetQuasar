@@ -1,6 +1,9 @@
 package monitorworker
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLatencyHighStreakAfter(t *testing.T) {
 	t.Parallel()
@@ -26,5 +29,24 @@ func TestLatencyHighStreakAfter(t *testing.T) {
 func TestLatencyHighConsecutiveRequired(t *testing.T) {
 	if consecutivePingsRequired(0) != 3 {
 		t.Fatalf("expected min 3 consecutive readings, got %d", consecutivePingsRequired(0))
+	}
+}
+
+func TestShouldResolveAfterConfirmations(t *testing.T) {
+	t.Parallel()
+	if shouldResolvePingUnreachableAfterOK(3) {
+		t.Fatal("first OK after failures must not resolve")
+	}
+	if !shouldResolvePingUnreachableAfterOK(0) {
+		t.Fatal("second consecutive OK must resolve")
+	}
+	if shouldResolveLatencyHighAfterCalm(2) {
+		t.Fatal("first calm after high must not resolve")
+	}
+	if !shouldResolveLatencyHighAfterCalm(0) {
+		t.Fatal("second consecutive calm must resolve")
+	}
+	if MinAlertOpenBeforeResolve < time.Minute {
+		t.Fatalf("min open age must be >= 1m, got %v", MinAlertOpenBeforeResolve)
 	}
 }

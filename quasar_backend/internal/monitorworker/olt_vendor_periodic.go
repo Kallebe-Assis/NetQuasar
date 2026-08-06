@@ -168,11 +168,17 @@ func CollectOltVendorPeriodic(
 			oltifderive.StripPartialSummaryKeys(execSt.Summary, modeNorm)
 		}
 	}
+	oltifderive.PreserveLinkOperStatusAll(pons)
 	oltifderive.ApplyPonOperStatusAll(pons)
 	if !incomplete && !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	} else if NormalizeOltOnuMode(onuCollectMode) == "onu_counts" || NormalizeOltOnuMode(onuCollectMode) == "status_only" {
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
+	}
+	// Status PON (up/down): avaliar sempre que a coleta não estiver incompleta —
+	// inclui modo pipeline pon_status (antes não gerava alerta).
+	if !incomplete {
+		alertthresholds.EvaluatePonDownAlerts(sctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	}
 	if !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {
 		alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
