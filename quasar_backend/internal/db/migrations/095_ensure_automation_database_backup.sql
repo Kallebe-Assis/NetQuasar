@@ -1,3 +1,4 @@
+-- +goose Up
 -- Recuperação: garante tabelas do backup automático mesmo se a 092
 -- tiver ficado marcada no goose sem criar as relações (ou restore incompleto).
 
@@ -8,6 +9,7 @@ UPDATE settings_database_meta
 SET provider = 'local'
 WHERE provider IS NULL OR trim(provider) = '';
 
+-- +goose StatementBegin
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -20,6 +22,7 @@ BEGIN
       CHECK (provider IN ('local', 'external'));
   END IF;
 END $$;
+-- +goose StatementEnd
 
 ALTER TABLE settings_database_meta
   ALTER COLUMN provider SET DEFAULT 'local',
@@ -58,3 +61,6 @@ CREATE TABLE IF NOT EXISTS automation_database_backup (
 );
 INSERT INTO automation_database_backup (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
+
+-- +goose Down
+SELECT 1;

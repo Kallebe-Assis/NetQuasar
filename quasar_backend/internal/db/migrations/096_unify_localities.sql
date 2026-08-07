@@ -1,3 +1,4 @@
+-- +goose Up
 -- Unifica Localidades (ex-comercial + POPs): endereço, UF, coords; POP opcional; VLANs.
 
 ALTER TABLE commercial_localities
@@ -17,6 +18,7 @@ ALTER TABLE pops
   ADD COLUMN IF NOT EXISTS locality_id UUID REFERENCES commercial_localities(id) ON DELETE RESTRICT;
 
 -- Backfill: cada POP sem localidade ganha (ou reutiliza) uma localidade com o mesmo nome.
+-- +goose StatementBegin
 DO $$
 DECLARE
   r RECORD;
@@ -54,6 +56,7 @@ BEGIN
     UPDATE pops SET locality_id = lid, updated_at = now() WHERE id = r.id;
   END LOOP;
 END $$;
+-- +goose StatementEnd
 
 -- Localidade pode ter 0..N POPs; cada POP aponta para exactamente uma localidade.
 CREATE INDEX IF NOT EXISTS pops_locality_id_idx ON pops (locality_id);
@@ -71,3 +74,14 @@ CREATE TABLE IF NOT EXISTS locality_vlans (
 );
 
 CREATE INDEX IF NOT EXISTS locality_vlans_vlan_idx ON locality_vlans (vlan);
+
+-- +goose Down
+DROP TABLE IF EXISTS locality_vlans;
+DROP INDEX IF EXISTS pops_locality_id_idx;
+ALTER TABLE pops DROP COLUMN IF EXISTS locality_id;
+ALTER TABLE commercial_localities
+  DROP COLUMN IF EXISTS updated_at,
+  DROP COLUMN IF EXISTS longitude,
+  DROP COLUMN IF EXISTS latitude,
+  DROP COLUMN IF EXISTS uf,
+  DROP COLUMN IF EXISTS address;

@@ -1,3 +1,4 @@
+-- +goose Up
 -- Logins PPPoE já vistos no BNG + histórico de sessões (online/offline).
 CREATE TABLE IF NOT EXISTS bng_known_logins (
     id BIGSERIAL PRIMARY KEY,
@@ -65,3 +66,8 @@ ALTER TABLE bng_known_logins
 ALTER TABLE bng_known_logins
     ADD CONSTRAINT bng_known_logins_current_event_id_fkey
     FOREIGN KEY (current_event_id) REFERENCES bng_login_events(id) ON DELETE SET NULL;
+
+-- +goose Down
+ALTER TABLE bng_known_logins DROP CONSTRAINT IF EXISTS bng_known_logins_current_event_id_fkey;
+DROP TABLE IF EXISTS bng_login_events;
+DROP TABLE IF EXISTS bng_known_logins;
