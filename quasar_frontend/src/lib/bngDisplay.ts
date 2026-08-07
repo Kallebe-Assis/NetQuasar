@@ -254,7 +254,7 @@ export const STATS_SERIES: { key: StatsSeriesKey; color: string; label: string }
 
 export type PppoeSessionFields = {
   online_time?: string;
-  online_time_sec?: string;
+  online_time_sec?: string | number;
   car_up_cir_kbps?: string;
   car_dn_cir_kbps?: string;
   car_up_cir_display?: string;

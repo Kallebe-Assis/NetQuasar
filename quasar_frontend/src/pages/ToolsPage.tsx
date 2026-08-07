@@ -14,6 +14,8 @@ import {
   NetworkToolTextOutput,
 } from "../components/ToolsOutputViews";
 import { InfoHint } from "../components/InfoHint";
+import { LatencyLiveChart } from "../components/LatencyLiveChart";
+import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
 import { buildSnmpBulkResult, exportSnmpBulkCsv, flattenSnmpBulkRows } from "../lib/toolsSnmpBulk";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
@@ -174,6 +176,22 @@ export function ToolsPage() {
 
   const [icmpHost, setIcmpHost] = useState("127.0.0.1");
   const [icmpTo, setIcmpTo] = useState("3000");
+  const [icmpContinuous, setIcmpContinuous] = useState(false);
+  const icmpTargets = useMemo(() => {
+    const host = icmpHost.trim();
+    if (!host) return [];
+    return [{ id: "tools-icmp", host, label: host }];
+  }, [icmpHost]);
+  const icmpLive = useContinuousIcmpPing({
+    targets: icmpTargets,
+    enabled: tab === "icmp" && icmpContinuous && icmpTargets.length > 0,
+    minIntervalMs: 1000,
+    timeoutMs: Number(icmpTo) || 3000,
+    maxPoints: 120,
+  });
+  useEffect(() => {
+    if (tab !== "icmp") setIcmpContinuous(false);
+  }, [tab]);
   const [tracertHost, setTracertHost] = useState("8.8.8.8");
   const [tracertHops, setTracertHops] = useState("30");
   const [tracertTo, setTracertTo] = useState("60000");
@@ -764,25 +782,78 @@ export function ToolsPage() {
       {tab === "icmp" && (
         <ToolsPanel
           title="ICMP ping (único alvo)"
-          description="Um host ou IP por requisição. Útil para teste rápido com o mesmo motor ICMP usado noutras partes do sistema."
+          description="Ping contínuo com intervalo mínimo de 1 s entre ciclos. O gráfico de latência cresce com cada amostra. Também pode enviar um ping avulso."
           results={
             <>
               <ToolOutputError err={icmpRun.error as Error | null} />
-              {icmpRun.data !== undefined ? <IcmpSingleOutput data={icmpRun.data} /> : null}
+              {icmpContinuous ? (
+                <div style={{ marginTop: 8 }}>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                      {icmpLive.latest["tools-icmp"] ? (
+                        <>
+                          <span className={icmpLive.latest["tools-icmp"].ok ? "badge" : "badge badge--off"}>
+                            {icmpLive.latest["tools-icmp"].ok ? "Ping OK" : "Ping falhou"}
+                          </span>
+                          <span className="mono" style={{ fontSize: 15 }}>
+                            {icmpLive.latest["tools-icmp"].ms != null ? `${icmpLive.latest["tools-icmp"].ms} ms` : "—"}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--muted)", fontSize: 12 }}>A iniciar ping contínuo…</span>
+                      )}
+                    </div>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                      {(icmpLive.series["tools-icmp"] ?? []).length} amostra(s) · ≥ 1 s
+                    </span>
+                  </div>
+                  <LatencyLiveChart points={icmpLive.series["tools-icmp"] ?? []} ariaLabel={`Latência ICMP de ${icmpHost.trim()}`} />
+                  {icmpLive.lastError ? (
+                    <p style={{ color: "var(--muted)", fontSize: 11, marginTop: 8 }}>{icmpLive.lastError}</p>
+                  ) : null}
+                </div>
+              ) : icmpRun.data !== undefined ? (
+                <IcmpSingleOutput data={icmpRun.data} />
+              ) : null}
             </>
           }
         >
           <div className="field" style={{ marginBottom: 0 }}>
             <label htmlFor="tools-icmp-host">Host ou IP</label>
-            <input id="tools-icmp-host" className="input mono" value={icmpHost} onChange={(e) => setIcmpHost(e.target.value)} />
+            <input
+              id="tools-icmp-host"
+              className="input mono"
+              value={icmpHost}
+              onChange={(e) => setIcmpHost(e.target.value)}
+              disabled={icmpContinuous}
+            />
           </div>
           <div className="field" style={{ marginBottom: 0, maxWidth: 140 }}>
             <label htmlFor="tools-icmp-to">Timeout (ms)</label>
-            <input id="tools-icmp-to" className="input mono" value={icmpTo} onChange={(e) => setIcmpTo(e.target.value)} />
+            <input
+              id="tools-icmp-to"
+              className="input mono"
+              value={icmpTo}
+              onChange={(e) => setIcmpTo(e.target.value)}
+              disabled={icmpContinuous}
+            />
           </div>
           <div className="tools-panel__actions">
-            <button type="button" className="btn btn--primary" disabled={icmpRun.isPending} onClick={() => icmpRun.mutate()}>
-              {icmpRun.isPending ? "A enviar…" : "Ping"}
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={icmpContinuous || icmpRun.isPending || !icmpHost.trim()}
+              onClick={() => icmpRun.mutate()}
+            >
+              {icmpRun.isPending ? "A enviar…" : "Ping avulso"}
+            </button>
+            <button
+              type="button"
+              className={icmpContinuous ? "btn" : "btn btn--primary"}
+              disabled={!icmpHost.trim()}
+              onClick={() => setIcmpContinuous((v) => !v)}
+            >
+              {icmpContinuous ? "Parar contínuo" : "Iniciar contínuo"}
             </button>
           </div>
         </ToolsPanel>

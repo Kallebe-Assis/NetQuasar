@@ -1328,16 +1328,18 @@ function SessionDetailModal({
     retry: false,
   });
 
-  const history = useQuery({
+  type BngSessionHistoryData = { events: BngLoginEvent[]; count: number };
+  const sessionHistory = useQuery<BngSessionHistoryData>({
     queryKey: ["bng-session-history", deviceId, login],
     enabled: open && !!login && !!deviceId,
-    queryFn: () =>
-      apiFetch<{ events: BngLoginEvent[]; count: number }>(
+    queryFn: async () =>
+      apiFetch<BngSessionHistoryData>(
         `/api/v1/bng/devices/${deviceId}/sessions/history?q=${encodeURIComponent(login)}`,
       ),
     staleTime: 0,
     retry: false,
   });
+  const sessionHistoryEvents: BngLoginEvent[] = sessionHistory.data?.events ?? [];
 
   const sessionIndex = lookup.data?.session?.index?.trim();
   const traffic = useQuery({
@@ -1525,7 +1527,7 @@ function SessionDetailModal({
               onClick={() => {
                 lookup.refetch();
                 authLogs.refetch();
-                history.refetch();
+                sessionHistory.refetch();
                 if (sessionIndex) traffic.refetch();
               }}
             >
@@ -1535,11 +1537,11 @@ function SessionDetailModal({
         </div>
 
         <SessionDetailSection title="Histórico de conexões">
-          {history.isLoading && (history.data?.events?.length ?? 0) === 0 ? (
+          {sessionHistory.isLoading && sessionHistoryEvents.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
               <Loader2 size={14} className="map-refresh-spin" aria-hidden /> A carregar histórico…
             </p>
-          ) : (history.data?.events?.length ?? 0) === 0 ? (
+          ) : sessionHistoryEvents.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
               Sem histórico guardado. Execute a consulta completa SNMP para registar logins.
             </p>
@@ -1559,7 +1561,7 @@ function SessionDetailModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {(history.data?.events ?? []).map((ev, i) => (
+                  {sessionHistoryEvents.map((ev, i) => (
                     <tr key={`${ev.connected_at}-${i}`}>
                       <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>{formatBngDateTime(ev.connected_at)}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 11 }}>

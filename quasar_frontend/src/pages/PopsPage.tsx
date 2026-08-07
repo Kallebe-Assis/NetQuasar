@@ -344,7 +344,7 @@ export function PopsPage() {
         <div>
           <h1 style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
             Localidades
-            <PageCountPill count={rows.length} />
+            <PageCountPill label="Localidades" count={rows.length} />
           </h1>
           <p style={{ color: "var(--muted)", fontSize: 13, margin: "6px 0 0" }}>
             Cadastro unificado com endereço, UF, coordenadas, POP opcional e VLANs do BNG. Contagem de clientes vem dos registos mensais.

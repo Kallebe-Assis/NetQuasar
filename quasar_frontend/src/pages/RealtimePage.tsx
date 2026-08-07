@@ -1,22 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { ToolOutputError } from "../components/ToolsOutputViews";
+import { useMemo, useState, useEffect } from "react";
+import { LatencyLiveChart } from "../components/LatencyLiveChart";
+import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
-import { apiUrl, getStoredApiKey } from "../lib/auth";
+import { useQuery } from "@tanstack/react-query";
 
 type DeviceRow = {
   id: string;
   description: string;
   ip?: string | null;
   network_status?: string | null;
-};
-
-type RealtimeSample = {
-  device_id: string;
-  ok?: boolean;
-  latency_ms?: number;
-  method?: string;
-  checked_at?: string | null;
 };
 
 function isNormalNetworkStatus(ns: string | null | undefined): boolean {
@@ -47,38 +39,26 @@ export function RealtimePage() {
     setPicked((prev) => prev.filter((id) => allowed.has(id)));
   }, [normalDevices]);
 
-  const idsCsv = useMemo(() => picked.join(","), [picked]);
-  const [liveSamples, setLiveSamples] = useState<RealtimeSample[] | null>(null);
-  const rt = useQuery({
-    queryKey: ["realtime-ping", idsCsv],
-    queryFn: () => apiFetch<{ samples: RealtimeSample[]; note?: string }>(`/api/v1/realtime/ping?device_ids=${encodeURIComponent(idsCsv)}`),
-    enabled: picked.length > 0 && picked.length <= 3,
-    refetchInterval: false,
+  const targets = useMemo(
+    () =>
+      picked
+        .map((id) => {
+          const d = deviceById.get(id);
+          const host = String(d?.ip ?? "").trim();
+          if (!d || !host) return null;
+          return { id, host, label: d.description };
+        })
+        .filter((t): t is { id: string; host: string; label: string } => t != null),
+    [picked, deviceById],
+  );
+
+  const ping = useContinuousIcmpPing({
+    targets,
+    enabled: targets.length > 0 && targets.length <= 3,
+    minIntervalMs: 1000,
+    timeoutMs: 3000,
+    maxPoints: 120,
   });
-
-  useEffect(() => {
-    setLiveSamples(rt.data?.samples ?? null);
-  }, [rt.data?.samples]);
-
-  useEffect(() => {
-    if (picked.length === 0 || picked.length > 3) return;
-    const base = apiUrl("/api/v1/realtime/ws");
-    const token = getStoredApiKey();
-    const wsUrl = base.replace(/^http/i, "ws") + (token ? `?api_key=${encodeURIComponent(token)}` : "");
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(String(ev.data ?? "{}")) as { type?: string; data?: { samples?: RealtimeSample[] } };
-        if (msg.type === "realtime.ping.samples" && Array.isArray(msg.data?.samples)) {
-          const allow = new Set(picked);
-          setLiveSamples(msg.data.samples.filter((s) => allow.has(String(s.device_id))));
-        }
-      } catch {
-        // noop
-      }
-    };
-    return () => ws.close();
-  }, [picked]);
 
   function toggle(id: string) {
     setPicked((prev) => {
@@ -92,8 +72,8 @@ export function RealtimePage() {
     <>
       <h1>Tempo real</h1>
       <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0, maxWidth: 720 }}>
-        Monitorização rápida do estado de ping em cache (até 3 equipamentos). Apenas equipamentos com estado de rede{" "}
-        <strong>Normal</strong> podem ser selecionados. Atualização automática a cada 4 segundos enquanto houver seleção.
+        Ping ICMP contínuo (intervalo mínimo de 1 s entre ciclos) para até 3 equipamentos com estado de rede{" "}
+        <strong>Normal</strong>. O gráfico de latência é construído à medida que as amostras chegam.
       </p>
 
       {devices.isLoading && <p>A carregar equipamentos…</p>}
@@ -109,7 +89,8 @@ export function RealtimePage() {
           ) : (
             <>
               <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
-                Selecionados: <strong>{picked.length}</strong> de 3 máximo.
+                Selecionados: <strong>{picked.length}</strong> de 3 máximo
+                {ping.running ? " · ping contínuo activo" : ""}.
               </p>
               <div className="table-wrap" style={{ maxHeight: 320, overflow: "auto" }}>
                 <table>
@@ -146,62 +127,68 @@ export function RealtimePage() {
         <p style={{ color: "var(--muted)", marginTop: 12 }}>Escolha pelo menos um equipamento (máximo 3).</p>
       ) : null}
 
-      {picked.length > 0 && picked.length <= 3 && (
+      {picked.length > 0 && targets.length === 0 ? (
+        <p style={{ color: "var(--muted)", marginTop: 12 }}>Os equipamentos seleccionados não têm IP configurado.</p>
+      ) : null}
+
+      {targets.length > 0 && targets.length <= 3 && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h2>Última leitura</h2>
-          {rt.isLoading && <p>A obter dados…</p>}
-          <ToolOutputError err={rt.error as Error | null} />
-          {rt.data?.note ? <p style={{ color: "var(--muted)", fontSize: 12 }}>{rt.data.note}</p> : null}
-          {(liveSamples ?? rt.data?.samples) && !rt.isError ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-              {(liveSamples ?? rt.data?.samples ?? []).map((s) => {
-                const dev = deviceById.get(s.device_id);
-                const ok = s.ok === true;
-                const lat = typeof s.latency_ms === "number" ? s.latency_ms : null;
-                return (
-                  <div
-                    key={s.device_id}
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius)",
-                      padding: "12px 14px",
-                      background: "var(--panel2)",
-                    }}
-                  >
-                    <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 15 }}>{dev?.description ?? "Equipamento"}</div>
-                        <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                          {s.device_id}
-                        </div>
-                      </div>
-                      <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                        <span className={ok ? "badge" : "badge badge--off"}>{ok ? "Ping OK" : "Ping falhou"}</span>
-                        {lat != null ? (
-                          <span className="mono" style={{ fontSize: 15 }}>
-                            {lat} ms
-                          </span>
-                        ) : (
-                          <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
-                        )}
+          <h2>Latência em tempo real</h2>
+          {ping.lastError ? (
+            <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
+              Último aviso: {ping.lastError}
+            </p>
+          ) : null}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 8 }}>
+            {targets.map((t) => {
+              const latest = ping.latest[t.id];
+              const ok = latest?.ok === true;
+              const lat = latest?.ms ?? null;
+              const points = ping.series[t.id] ?? [];
+              return (
+                <div
+                  key={t.id}
+                  style={{
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    padding: "12px 14px",
+                    background: "var(--panel2)",
+                  }}
+                >
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }}>{t.label}</div>
+                      <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                        {t.host}
                       </div>
                     </div>
-                    <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 12 }}>
-                      <span>
-                        Método: <span className="mono">{s.method ?? "—"}</span>
-                      </span>
-                      <span>
-                        Registo:{" "}
-                        <span className="mono" style={{ fontSize: 11 }}>
-                          {s.checked_at ?? "—"}
-                        </span>
-                      </span>
+                    <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                      {latest ? (
+                        <>
+                          <span className={ok ? "badge" : "badge badge--off"}>{ok ? "Ping OK" : "Ping falhou"}</span>
+                          {lat != null ? (
+                            <span className="mono" style={{ fontSize: 15 }}>
+                              {lat} ms
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--muted)", fontSize: 12 }}>A iniciar…</span>
+                      )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          ) : null}
+                  <div style={{ marginTop: 12 }}>
+                    <LatencyLiveChart points={points} ariaLabel={`Latência de ${t.label}`} />
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+                    {points.length} amostra(s) · intervalo ≥ 1 s
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </>
