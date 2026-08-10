@@ -2,69 +2,121 @@ package monitorworker
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmetrics"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telemetryengine"
 	"github.com/rs/zerolog"
 )
 
+// normalizeTelemetryOID remove o ponto inicial opcional de OIDs SNMP.
 func normalizeTelemetryOID(oid string) string {
 	return strings.TrimPrefix(strings.TrimSpace(oid), ".")
 }
 
-func mikrotikScalarFromMetrics(metrics map[string]any, fieldKey string) *float64 {
-	if metrics == nil {
-		return nil
-	}
-	raw, ok := metrics["mikrotik_collection"]
-	if !ok || raw == nil {
-		return nil
-	}
-	doc, ok := raw.(map[string]any)
-	if !ok {
-		return nil
-	}
-	fields, ok := doc["fields"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	fr, ok := fields[fieldKey].(map[string]any)
-	if !ok {
-		return nil
-	}
-	okVal, _ := fr["ok"].(bool)
-	if !okVal {
-		return nil
-	}
-	val := fr["value"]
+// asFloat64 converte valores típicos de telemetria (float, int, string, json.Number) para float64.
+func asFloat64(val any) (float64, bool) {
 	switch x := val.(type) {
 	case float64:
-		return &x
+		return x, true
+	case float32:
+		return float64(x), true
 	case int:
-		f := float64(x)
-		return &f
+		return float64(x), true
 	case int64:
-		f := float64(x)
-		return &f
+		return float64(x), true
+	case json.Number:
+		f, err := x.Float64()
+		return f, err == nil
 	case string:
 		f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(x), ",", "."), 64)
-		if err != nil {
-			return nil
-		}
-		return &f
+		return f, err == nil
 	default:
-		return nil
+		return 0, false
 	}
 }
 
+// scalarFromCollectionBag lê um campo escalar de mikrotik_collection / switch_collection.
+// Aceita CollectOutput em memória (struct) ou mapa após round-trip JSON.
+func scalarFromCollectionBag(raw any, fieldKey string) *float64 {
+	if raw == nil {
+		return nil
+	}
+	switch doc := raw.(type) {
+	case mikrotikcollect.CollectOutput:
+		if v, ok := mikrotikcollect.ScalarFromFields(doc.Fields, fieldKey); ok {
+			return &v
+		}
+		return nil
+	case *mikrotikcollect.CollectOutput:
+		if doc == nil {
+			return nil
+		}
+		if v, ok := mikrotikcollect.ScalarFromFields(doc.Fields, fieldKey); ok {
+			return &v
+		}
+		return nil
+	case map[string]any:
+		fields, ok := doc["fields"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		fr, ok := fields[fieldKey].(map[string]any)
+		if !ok {
+			return nil
+		}
+		okVal, _ := fr["ok"].(bool)
+		if !okVal {
+			return nil
+		}
+		if f, ok := asFloat64(fr["value"]); ok {
+			return &f
+		}
+		return nil
+	default:
+		// Fallback: serializar e tratar como mapa (ex.: tipos aninhados inesperados).
+		b, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		var m map[string]any
+		if json.Unmarshal(b, &m) != nil {
+			return nil
+		}
+		return scalarFromCollectionBag(m, fieldKey)
+	}
+}
+
+// collectionScalarFromMetrics procura o campo nos bags MikroTik/Switch (SNMP e Telnet).
+func collectionScalarFromMetrics(metrics map[string]any, fieldKeys ...string) *float64 {
+	if metrics == nil {
+		return nil
+	}
+	bags := []string{
+		"mikrotik_collection", "switch_collection",
+		"mikrotik_telnet_collection", "switch_telnet_collection",
+	}
+	for _, key := range fieldKeys {
+		for _, bag := range bags {
+			if f := scalarFromCollectionBag(metrics[bag], key); f != nil {
+				return f
+			}
+		}
+	}
+	return nil
+}
+
+// parseTempCFromTelemetry obtém temperatura em °C a partir da coleta MikroTik/Switch ou OID de perfil.
 func parseTempCFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
-	if f := mikrotikScalarFromMetrics(metrics, "temperature"); f != nil {
+	// Preferência: temperature → board_temperature → cpu_temperature → telnet_sys_temperature.
+	if f := collectionScalarFromMetrics(metrics, "temperature", "board_temperature", "cpu_temperature", "telnet_sys_temperature"); f != nil {
 		v := snmpmetrics.NormalizeAmbientTempCelsius(*f)
 		if v > -273 && v < 500 {
 			return &v
@@ -146,7 +198,7 @@ func parseFloatOID(vars map[string]string, oid string) *float64 {
 }
 
 func parseCPUFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
-	if f := mikrotikScalarFromMetrics(metrics, "cpu_load"); f != nil {
+	if f := collectionScalarFromMetrics(metrics, "cpu_load", "cpu_hr"); f != nil {
 		v := *f
 		if v > 100 {
 			v = v / 10.0
@@ -154,9 +206,6 @@ func parseCPUFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *floa
 		if v >= 0 && v <= 1000 {
 			return &v
 		}
-	}
-	if f := mikrotikScalarFromMetrics(metrics, "cpu_hr"); f != nil {
-		return f
 	}
 	byOID := telemetryVarsByOID(vars)
 	primary := profileOID(metrics, "cpu_primary_oid")
@@ -184,8 +233,8 @@ func parseCPUFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *floa
 }
 
 func parseMemoryFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
-	used := mikrotikScalarFromMetrics(metrics, "memory_used")
-	size := mikrotikScalarFromMetrics(metrics, "memory_total")
+	used := collectionScalarFromMetrics(metrics, "memory_used")
+	size := collectionScalarFromMetrics(metrics, "memory_total", "memory_size")
 	if used != nil && size != nil && *size > 0 {
 		pct := 100.0 * (*used) / (*size)
 		return &pct
@@ -212,7 +261,7 @@ func parseMemoryFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *f
 }
 
 func parseUptimeMinutesFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
-	if f := mikrotikScalarFromMetrics(metrics, "sys_uptime"); f != nil {
+	if f := collectionScalarFromMetrics(metrics, "sys_uptime"); f != nil {
 		min := (*f / 100.0) / 60.0
 		return &min
 	}
@@ -242,15 +291,25 @@ func parseUptimeMinutesFromSNMP(sn probing.SNMPGetResult) *float64 {
 	return nil
 }
 
-// RunPostTelemetryAlertEval aplica limiares globais (CPU, memória, temperatura, uptime) após telemetria SNMP.
+// RunPostTelemetryAlertEval aplica limiares globais (CPU, memória, temperatura, uptime)
+// após telemetria SNMP — usado pelo worker de monitoramento e pelo refresh manual da API.
 func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	deviceID uuid.UUID, deviceDesc, host, community string,
 	category, brand, model string,
 	col telemetryengine.CollectResult,
 ) {
+	_ = community
+	_ = brand
+	_ = model
 	hasVars := len(col.SNMP.Vars) > 0
-	_, hasMk := col.Metrics["mikrotik_collection"]
-	if !hasVars && !hasMk {
+	hasCollection := false
+	for _, bag := range []string{"mikrotik_collection", "switch_collection", "mikrotik_telnet_collection", "switch_telnet_collection"} {
+		if _, ok := col.Metrics[bag]; ok {
+			hasCollection = true
+			break
+		}
+	}
+	if !hasVars && !hasCollection {
 		return
 	}
 	if c := parseCPUFromTelemetry(col.Metrics, col.SNMP.Vars); c != nil {

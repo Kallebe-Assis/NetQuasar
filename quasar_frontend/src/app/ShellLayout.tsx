@@ -3,7 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
+  History,
   Bolt,
+  CircleHelp,
   FileBarChart,
   ChevronDown,
   ChevronLeft,
@@ -14,11 +16,14 @@ import {
   ClockCheck,
   Component,
   Cpu,
+  Fuel,
   MapPin,
   MonitorSmartphone,
   Network,
   ShieldCheck,
   TriangleAlert,
+  Truck,
+  UserRoundKey,
   UsersRound,
   Warehouse,
   Wrench,
@@ -53,7 +58,19 @@ const nav: NavEntry[] = [
   { kind: "link", to: APP_ROUTES.realtime, label: "Tempo real", icons: [ClockCheck] },
   { kind: "link", to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
   { kind: "link", to: APP_ROUTES.pops, label: "Localidades", icons: [Warehouse] },
-  { kind: "link", to: APP_ROUTES.devices, label: "Equipamentos", icons: [MonitorSmartphone] },
+  {
+    kind: "group",
+    id: "equipamentos",
+    label: "Equipamentos",
+    icons: [MonitorSmartphone],
+    children: [
+      { to: APP_ROUTES.devices, label: "Geral", icons: [MonitorSmartphone] },
+      { to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
+      { to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
+      { to: APP_ROUTES.bng, label: "BNG", icons: [UserRoundKey] },
+      { to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
+    ],
+  },
   { kind: "link", to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
   {
     kind: "group",
@@ -66,11 +83,25 @@ const nav: NavEntry[] = [
     ],
   },
   { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
+  { kind: "link", to: APP_ROUTES.events, label: "Eventos", icons: [History] },
   { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
-  { kind: "link", to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
-  { kind: "link", to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
-  { kind: "link", to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
-  { kind: "link", to: APP_ROUTES.bng, label: "BNG", icons: [Network] },
+  {
+    kind: "group",
+    id: "frota",
+    label: "Frota",
+    icons: [Truck],
+    children: [
+      { to: APP_ROUTES.fleetDashboard, label: "Dashboard", icons: [ChartPie] },
+      { to: APP_ROUTES.fleetVehicles, label: "Veículos", icons: [Truck] },
+      { to: APP_ROUTES.fleetDrivers, label: "Motoristas", icons: [UsersRound] },
+      { to: APP_ROUTES.fleetFuelings, label: "Abastecimentos", icons: [Fuel] },
+      { to: APP_ROUTES.fleetFuels, label: "Combustíveis", icons: [Fuel] },
+      { to: APP_ROUTES.fleetStations, label: "Postos", icons: [MapPin] },
+      { to: APP_ROUTES.fleetCostCenters, label: "Centros de custo", icons: [Warehouse] },
+      { to: APP_ROUTES.fleetAlerts, label: "Alertas", icons: [TriangleAlert] },
+      { to: APP_ROUTES.fleetReports, label: "Relatórios", icons: [FileBarChart] },
+    ],
+  },
   { kind: "link", to: APP_ROUTES.reports, label: "Relatórios", icons: [FileBarChart] },
   { kind: "link", to: APP_ROUTES.settings, label: "Configurações", icons: [Bolt] },
 ];
@@ -367,16 +398,26 @@ export function ShellLayout() {
             <div className="sidebar__user" title="Sessão actual">
               {getStoredUserDisplayLabel() || "Usuário"}
             </div>
-            <button
-              type="button"
-              className="btn sidebar__logout"
-              onClick={() => {
-                clearSession();
-                window.location.href = APP_ROUTES.login;
-              }}
-            >
-              Sair
-            </button>
+            <div className="sidebar__foot-actions">
+              <NavLink
+                to={APP_ROUTES.about}
+                className={({ isActive }) => `btn btn--icon btn--icon-menu sidebar__about${isActive ? " btn--primary" : ""}`}
+                title="Sobre o NetQuasar"
+                aria-label="Sobre o NetQuasar"
+              >
+                <CircleHelp size={18} aria-hidden />
+              </NavLink>
+              <button
+                type="button"
+                className="btn sidebar__logout"
+                onClick={() => {
+                  clearSession();
+                  window.location.href = APP_ROUTES.login;
+                }}
+              >
+                Sair
+              </button>
+            </div>
           </div>
         </aside>
         <main className="main">

@@ -182,6 +182,7 @@ func CollectOltVendorPeriodic(
 	}
 	if !oltcollect.IsPartialOnuCollectMode(onuCollectMode) {
 		alertthresholds.EvaluateOltOnuOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
+		alertthresholds.EvaluateOltPonOpticalFromPons(sctx, pool, log, deviceID, devDesc, host, pons)
 	}
 
 	summary = execSt.Summary

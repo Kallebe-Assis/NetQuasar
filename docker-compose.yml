@@ -31,6 +31,7 @@ services:
       NETQUASAR_DB_PASSWORD: ${POSTGRES_PASSWORD}
       NETQUASAR_DB_NAME: ${POSTGRES_DB}
       NETQUASAR_DB_SSLMODE: disable
+      NETQUASAR_REDIS_URL: redis://redis:6379/0
       TZ: America/Sao_Paulo
     depends_on:
       postgres:

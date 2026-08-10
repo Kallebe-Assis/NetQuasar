@@ -104,6 +104,9 @@ const NETWORK_TOOL_LABELS: Record<string, string> = {
   telnet: "Teste Telnet",
   ssh: "Teste SSH",
   mikrotik_walk: "Walk SNMP (interfaces)",
+  mikrotik_quick_metrics: "Métricas rápidas MikroTik",
+  mikrotik_interfaces: "Interfaces MikroTik (IF-MIB)",
+  checks: "Matriz de checks",
 };
 
 export function resolveAuditEntityName(row: AuditRowView): string {

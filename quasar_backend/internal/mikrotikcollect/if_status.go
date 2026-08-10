@@ -147,3 +147,43 @@ func interfaceRowsSorted(byIdx map[int]*InterfaceStatusRow) []InterfaceStatusRow
 	}
 	return out
 }
+
+// ParseIFMibInterfaces funde ifDescr (col. 2), ifAdminStatus (7) e ifOperStatus (8)
+// a partir de um walk IF-MIB ifTable (ou colunas parciais).
+func ParseIFMibInterfaces(vars []probing.SNMPVar) []InterfaceStatusRow {
+	byIdx := map[int]*InterfaceStatusRow{}
+	ensure := func(idx int) *InterfaceStatusRow {
+		row := byIdx[idx]
+		if row == nil {
+			row = &InterfaceStatusRow{IfIndex: idx}
+			byIdx[idx] = row
+		}
+		return row
+	}
+	for _, v := range vars {
+		col, idx, ok := parseIfMibCell(v.OID, 0)
+		if !ok {
+			continue
+		}
+		row := ensure(idx)
+		switch col {
+		case IFColDescr:
+			row.Name = trimSNMPStr(v.Value)
+		case IFColAdminStatus:
+			n, err := strconv.Atoi(trimSNMPStr(v.Value))
+			if err != nil {
+				continue
+			}
+			row.AdminStatus = n
+			row.AdminStatusLabel = ifAdminStatusLabel(n)
+		case IFColOperStatus:
+			n, err := strconv.Atoi(trimSNMPStr(v.Value))
+			if err != nil {
+				continue
+			}
+			row.OperStatus = n
+			row.OperStatusLabel = ifOperStatusLabel(n)
+		}
+	}
+	return interfaceRowsSorted(byIdx)
+}

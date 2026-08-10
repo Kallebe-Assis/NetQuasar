@@ -171,6 +171,8 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		alertthresholds.EvaluateOltOnuQuantityDeltaAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
 		alertthresholds.EvaluatePonDownAlerts(ctx, pool, &s.Log, id, devDesc, host, prevMaps, curMaps, alertSource)
 	}
+	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, &s.Log, id, devDesc, host, curMaps)
+	alertthresholds.EvaluateOltPonOpticalFromPons(ctx, pool, &s.Log, id, devDesc, host, curMaps)
 
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)

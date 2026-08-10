@@ -37,6 +37,8 @@ export type PermissionKey =
   | "reports.view"
   | "reports.send"
   | "reports.manage"
+  | "fleet.view"
+  | "fleet.manage"
   | "settings.view"
   | "settings.system"
   | "settings.monitoring"
@@ -100,6 +102,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "reports.view", module: "reports", module_label: "Relatórios", label: "Visualizar e exportar" },
   { key: "reports.send", module: "reports", module_label: "Relatórios", label: "Enviar relatórios" },
   { key: "reports.manage", module: "reports", module_label: "Relatórios", label: "Gerir agendamentos" },
+  { key: "fleet.view", module: "fleet", module_label: "Frota", label: "Visualizar" },
+  { key: "fleet.manage", module: "fleet", module_label: "Frota", label: "Criar, editar e lançar abastecimentos" },
   { key: "settings.view", module: "settings", module_label: "Configurações", label: "Visualizar" },
   { key: "settings.system", module: "settings", module_label: "Configurações", label: "Base de dados, rede e aparência" },
   { key: "settings.monitoring", module: "settings", module_label: "Configurações", label: "Monitoramento, alertas e coletas" },
@@ -126,6 +130,7 @@ export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = [
   "switch.view",
   "bng.view",
   "reports.view",
+  "fleet.view",
 ];
 
 export function groupPermissionsByModule(catalog: PermissionDefinition[] = PERMISSION_CATALOG) {
@@ -163,6 +168,7 @@ export const ROUTE_VIEW_PERMISSION: Record<string, PermissionKey> = {
   "/commercial": "commercial.view",
   "/connections": "connections.view",
   "/alerts": "alerts.view",
+  "/events": "alerts.view",
   "/map": "map.view",
   "/tools": "tools.view",
   "/olt": "olt.view",
@@ -170,5 +176,15 @@ export const ROUTE_VIEW_PERMISSION: Record<string, PermissionKey> = {
   "/switch": "switch.view",
   "/bng": "bng.view",
   "/reports": "reports.view",
+  "/fleet": "fleet.view",
+  "/fleet/dashboard": "fleet.view",
+  "/fleet/vehicles": "fleet.view",
+  "/fleet/drivers": "fleet.view",
+  "/fleet/fuelings": "fleet.view",
+  "/fleet/fuels": "fleet.view",
+  "/fleet/stations": "fleet.view",
+  "/fleet/cost-centers": "fleet.view",
+  "/fleet/alerts": "fleet.view",
+  "/fleet/reports": "fleet.view",
   "/settings": "settings.view",
 };

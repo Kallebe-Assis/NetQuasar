@@ -308,14 +308,6 @@ func buildToolsWalkDiscoveries(rows []probing.SNMPVar) []map[string]any {
 	return out
 }
 
-func (s *Server) toolsMikrotikQuickMetrics(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Coleta RouterOS dedicada ainda não implementada.", nil)
-}
-
-func (s *Server) toolsMikrotikInterfaces(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Interfaces Mikrotik dedicadas não implementadas.", nil)
-}
-
 func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Host      string `json:"host"`
@@ -427,10 +419,6 @@ func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 		"root_oid": ifMibIfTable,
 		"note":     "Walk de interfaces (IF-MIB 1.3.6.1.2.1.2.2.1) em segundo plano. Use GET /api/v1/tools/snmp-walk/jobs/{jobId}/rows e /discoveries.",
 	})
-}
-
-func (s *Server) deviceChecks(w http.ResponseWriter, r *http.Request) {
-	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Matriz de checks unificada não implementada.", nil)
 }
 
 var deviceExportCSVHeader = []string{

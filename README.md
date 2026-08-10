@@ -7,7 +7,7 @@ Plataforma de **monitoramento e operação de rede** para provedores ISP (NOC). 
 | **Backend** | Go (`quasar_backend`) | API REST, workers de monitoramento, alertas, integrações |
 | **Frontend** | React + TypeScript + Vite (`quasar_frontend`) | Painel operacional para o dia a dia do NOC |
 | **Dados** | PostgreSQL | Inventário, histórico, alertas, configurações, auditoria |
-| **Cache / tempo real** | Redis (opcional) | Canal WebSocket para atualizações em tempo real |
+| **Cache / tempo real** | Redis (recomendado) | WebSocket realtime + cache do dashboard |
 | **Deploy** | Docker Compose + binário único | API + UI embutida na porta publicada |
 
 Documentação complementar: [Backend](quasar_backend/README-BACKEND.md) · [Frontend](quasar_frontend/README-FRONTEND.md) · [Deploy Debian](deploy/linux-debian/README.md) · [Roadmap](ROADMAP-ARQUITETURAL-DEPLOY.md)
@@ -58,9 +58,9 @@ Ligação/desligação: **Monitoramento** na UI ou `POST /api/v1/monitoring/star
 | Ciclo | Intervalo (config) | O que faz |
 |-------|-------------------|-----------|
 | **Latência / ping** | `ping_seconds` (paralelo) ou dentro do pipeline | Para cada equipamento monitorizado: ICMP e fallback TCP; grava `device_probe_cache` (`reach_ok`, `latency_ms`); abre/fecha alerta `ping_unreachable`; histórico em `ping_history`. Requer **3 leituras consecutivas** antes de abrir alerta de latência alta ou offline. |
-| **Telemetria SNMP** | Passo no pipeline (`pipeline_cycle_seconds`) | Walk/get conforme perfil do equipamento; amostras em `telemetry_samples` (CPU, memória, temperatura, uptime); avalia limiares globais → alertas `telemetry_threshold` e `uptime_restart_low` |
-| **Interfaces (IF-MIB)** | Passo no pipeline | Walk IF-MIB (+ IF-MIB-X); grava `interface_snapshots`; MikroTik: potências SFP e alertas ópticos; detecta transição UP→DOWN → `interface_down_transition` |
-| **OLT PON / ONUs** | Passo no pipeline | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, actualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs e potência óptica |
+| **Telemetria SNMP** | Passo no pipeline (`pipeline_cycle_seconds`) | Walk/get conforme perfil do equipamento; amostras em `telemetry_samples` (CPU, memória, temperatura, uptime); **no fim de cada ciclo OK** chama `RunPostTelemetryAlertEval` → alertas `telemetry_threshold` e `uptime_restart_low` (também no refresh manual) |
+| **Interfaces (IF-MIB)** | Passo no pipeline | Walk IF-MIB (+ IF-MIB-X); grava `interface_snapshots`; MikroTik: potências SFP **e temperatura do módulo**; alertas `mikrotik_sfp_tx` / `mikrotik_sfp_rx` / `mikrotik_sfp_temp`; detecta transição UP→DOWN → `interface_down_transition` |
+| **OLT PON / ONUs** | Passo no pipeline | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, actualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs, potência óptica ONU/PON e temperatura da PON |
 | **Pipeline completo** | `pipeline_cycle_seconds` | Executa os passos activos em sequência (ping incluído se `ping_parallel=false`); actualiza `last_pipeline_cycle_at` |
 
 Os campos `telemetry_seconds`, `interface_snapshot_seconds` e `olt_if_derived_pon_seconds` continuam disponíveis para ciclos **manuais** (`POST /monitoring/cycles/...`) e referência na UI; no worker automático em modo full, o gatilho principal é `pipeline_cycle_seconds`.
@@ -92,13 +92,18 @@ Configurável em **Monitoramento → Coleta nocturna**: janela horária para cic
 | `ping_unreachable` | Worker ping | Equipamento sem resposta ICMP/TCP |
 | `latency_high` | Worker ping | Latência acima do limiar global (`latency_ms`) |
 | `uptime_restart_low` | Telemetria SNMP | Uptime abaixo do mínimo (possível reinício) |
-| `telemetry_threshold` | Telemetria SNMP | CPU, memória, temperatura, etc. fora do limiar |
+| `telemetry_threshold` | Telemetria SNMP (worker + refresh) | CPU, memória, temperatura, uptime fora do limiar (`cpu_usage_pct`, `memory_usage_pct`, `temperature_c`, `uptime_minutes`) |
 | `interface_down_transition` | Snapshot interfaces | Interface mudou de UP para DOWN |
-| `mikrotik_sfp_tx` / `mikrotik_sfp_rx` | Snapshot interfaces MikroTik | Potência óptica SFP fora do limiar (dBm) |
+| `mikrotik_sfp_tx` / `mikrotik_sfp_rx` / `mikrotik_sfp_temp` | Snapshot interfaces MikroTik | Potência óptica ou temperatura do módulo SFP fora do limiar |
 | `olt_onu_drop` / `olt_onu_rise` | Coleta OLT | Queda ou subida de ONUs online por PON (contagem ou %) |
-| `olt_onu_rx` / `olt_onu_tx` | Coleta OLT | Potência óptica PON/ONU abaixo do limiar |
+| `olt_onu_rx` / `olt_onu_tx` | Coleta OLT | Potência óptica ONU/PON abaixo do limiar (`olt_onu_*_dbm`) |
+| `olt_pon_tx` / `olt_pon_rx` / `olt_pon_temp` | Coleta OLT | TX/RX ou temperatura da PON fora do limiar (`olt_pon_*`) |
+| `pon_down` | Coleta OLT | Status operacional da PON UP→DOWN |
+| `bng_*_drop` / `mikrotik_pppoe_drop` | Telemetria BNG / snapshot MikroTik | Queda de sessões entre coletas |
 
-Limiares globais: **Configurações → Monitoramento → Alertas** (regra «Limiar global de alertas» em `alert_rules`). Severidade: `info`, `warning`, `critical`.
+Limiares globais: **Configurações → Alertas** (aba própria; regra «Limiar global de alertas» em `alert_rules`). Operadores: **≥** (maior ou igual, `gte`) e **≤** (menor ou igual, `lte`). Severidade: `info`, `warning`, `critical`.
+
+Cada métrica na UI só gera alerta se estiver **habilitada**, o perfil global estiver **activo**, e o equipamento coincidir com `apply_categories` (vazio = todos). A avaliação de telemetria (CPU/mem/temp) corre no **ciclo automático do worker**, não apenas no refresh manual.
 
 ### Ciclo de vida de um alerta
 
@@ -275,9 +280,12 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ### Eventos (`/events`)
 
-**Função:** linha do tempo operacional (eventos agregados).
+**Função:** linha do tempo operacional (alertas abertos/resolvidos e checks de equipamento).
 
-**Como funciona:** `GET /api/v1/events?limit=` (1–200) — consulta histórica. A tabela `events` é **somente leitura** nesta versão (sem writers automáticos no backend Go); dados legados ou inserções manuais.
+**Como funciona:** `GET /api/v1/events?limit=` (1–200; filtro opcional `device_id=`). Writers automáticos no backend:
+
+- `alert.opened` / `alert.closed` — ao criar ou fechar alertas via `alertstore`
+- `device.checks` — ao executar `POST /api/v1/devices/{id}/checks`
 
 ---
 
@@ -287,7 +295,8 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 |--------|--------|
 | **Base de dados** | DSN, teste de ligação, logs |
 | **Utilizadores** | CRUD, perfil admin/operador |
-| **Monitoramento** | Intervalos, timeouts, modo, limiares de alerta |
+| **Monitoramento** | Intervalos, timeouts, modo, pipeline |
+| **Alertas** | Limiares globais (CPU, temp, SFP, OLT, BNG…): operador ≥/≤, faixas Normal/Atenção/Crítico; avaliados no worker e no refresh |
 | **OLT vendors** | Perfis SNMP/telnet por marca/modelo |
 | **MikroTik collection** | OIDs e passos de coleta |
 | **Telegram** | Bot token, chat monitoring e relatórios, teste de envio |
@@ -358,7 +367,7 @@ NetQuasar/
 
 | Ferramenta | Versão |
 |------------|--------|
-| Go | 1.22+ |
+| Go | 1.24+ |
 | Node.js | 20+ LTS |
 | PostgreSQL | 16 |
 | Docker (opcional) | Compose para postgres + redis |
@@ -429,7 +438,7 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `NETQUASAR_DATABASE_URL` | DSN PostgreSQL |
 | `NETQUASAR_SESSION_SECRET` | Segredo JWT (produção) |
 | `NETQUASAR_API_KEYS` | Chaves API |
-| `NETQUASAR_REDIS_URL` | Redis para WebSocket tempo real |
+| `NETQUASAR_REDIS_URL` | Redis para WebSocket tempo real e cache do dashboard (no Compose: `redis://redis:6379/0`) |
 | `NETQUASAR_PUBLISH_PORT` | Porta HTTP no Compose |
 | `NETQUASAR_LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
 
@@ -453,7 +462,8 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `/olt` | OLT |
 | `/mikrotik` | MikroTik |
 | `/bng` | BNG / sessões PPPoE |
-| `/events` | Eventos (linha do tempo, read-only) |
+| `/events` | Eventos (linha do tempo operacional) |
+| `/about` | Sobre / documentação do software |
 | `/reports` | Relatórios analíticos |
 | `/settings` | Configurações |
 

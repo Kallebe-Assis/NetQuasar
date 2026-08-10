@@ -234,7 +234,7 @@ function UsersPanel() {
   const profileLabel = (u: UserRow) =>
     u.permission_profile_name || (u.role === "admin" ? "Administrador" : "Usuário");
 
-  if (list.isLoading) return <p>A carregarâ€¦</p>;
+  if (list.isLoading) return <p>A carregar…</p>;
   if (list.isError) {
     const ae = list.error as ApiError;
     if (ae?.status === 403) {
@@ -255,7 +255,7 @@ function UsersPanel() {
           <input
             className="input"
             style={{ width: "100%" }}
-            placeholder="Nome, e-mail ou telefoneâ€¦"
+            placeholder="Nome, e-mail ou telefone…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -576,23 +576,29 @@ type AlertThresholdMetric = {
   apply_categories?: string[];
 };
 
-function equipScopeFromCategories(cats?: string[]): "*" | "olt" | "mikrotik" | "servidor" {
+function equipScopeFromCategories(cats?: string[]): "*" | "olt" | "mikrotik" | "bng" | "switch" | "servidor" {
   const c = cats ?? [];
   if (c.length === 0) return "*";
   const low = c.map((x) => String(x).toLowerCase().trim());
   if (low.some((x) => x === "*" || x === "all" || x === "todos")) return "*";
   if (low.includes("olt") && low.length === 1) return "olt";
   if (low.includes("mikrotik") && low.length === 1) return "mikrotik";
+  if (low.includes("bng") && low.length === 1) return "bng";
+  if (low.includes("switch") && low.length === 1) return "switch";
   if (low.includes("servidor") || low.includes("outros")) return "servidor";
   return "*";
 }
 
-function categoriesFromEquipScope(scope: "*" | "olt" | "mikrotik" | "servidor"): string[] {
+function categoriesFromEquipScope(scope: "*" | "olt" | "mikrotik" | "bng" | "switch" | "servidor"): string[] {
   switch (scope) {
     case "olt":
       return ["olt"];
     case "mikrotik":
       return ["mikrotik"];
+    case "bng":
+      return ["bng"];
+    case "switch":
+      return ["switch"];
     case "servidor":
       return ["servidor", "outros"];
     default:
@@ -600,6 +606,9 @@ function categoriesFromEquipScope(scope: "*" | "olt" | "mikrotik" | "servidor"):
   }
 }
 
+/** Catálogo padrão de métricas da aba Configurações → Alertas.
+ * IDs devem coincidir com os avaliadores no backend (`alertthresholds` / `monitorworker`).
+ * operator: "gte" (≥) ou "lte" (≤) — nunca usar símbolos Unicode soltos (evita mojibake). */
 function defaultAlertMetrics(): AlertThresholdMetric[] {
   return [
     { id: "cpu_usage_pct", label: "CPU utilizada", unit: "%", scope: "equipamento", enabled: true, operator: "gte", green_min: "50", warning_min: "75", critical_min: "90", apply_categories: [] },
@@ -627,6 +636,7 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
   ];
 }
 
+/** Painel da aba Alertas: persiste a regra «Limiar global de alertas» (condition_json schema v1). */
 function AlertThresholdsPanel() {
   type RuleRow = {
     id: string;
@@ -771,10 +781,12 @@ function AlertThresholdsPanel() {
     ]);
   };
 
-  const equipScopeOptions: { value: "*" | "olt" | "mikrotik" | "servidor"; label: string }[] = [
+  const equipScopeOptions: { value: "*" | "olt" | "mikrotik" | "bng" | "switch" | "servidor"; label: string }[] = [
     { value: "*", label: "Todos" },
     { value: "olt", label: "Somente OLT" },
-    { value: "mikrotik", label: "Somente Mikrotik (Categoria)" },
+    { value: "mikrotik", label: "Somente MikroTik" },
+    { value: "bng", label: "Somente BNG" },
+    { value: "switch", label: "Somente Switch" },
     { value: "servidor", label: "Servidor e outros" },
   ];
   const unitOptions = ["%", "ms", "°C", "dBm", "min", "ONUs", "evt", "Mbps"];
@@ -793,7 +805,7 @@ function AlertThresholdsPanel() {
     return <Cpu size={14} aria-hidden />;
   };
 
-  if (q.isLoading) return <p>A carregarâ€¦</p>;
+  if (q.isLoading) return <p>A carregar…</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
@@ -802,8 +814,9 @@ function AlertThresholdsPanel() {
         <div>
           <h2 style={{ marginBottom: 6 }}>Configuração de Alertas</h2>
           <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
-            Defina por linha: tipo de equipamento, métrica, operador (maior/menor) e faixas <span style={{ color: "#3fb950" }}>Normal</span>,{" "}
+            Defina por linha: tipo de equipamento, métrica, operador (≥ / ≤) e faixas <span style={{ color: "#3fb950" }}>Normal</span>,{" "}
             <span style={{ color: "#d29922" }}>Atenção</span> e <span style={{ color: "#f85149" }}>Crítico</span>.
+            Os limiares são avaliados no ciclo automático de telemetria do worker e no refresh manual.
           </p>
         </div>
         <label className="row" style={{ gap: 8 }}>
@@ -827,7 +840,7 @@ function AlertThresholdsPanel() {
               }
             }}
           >
-            <option value="">Selecionarâ€¦</option>
+            <option value="">Selecionar…</option>
             {metricCatalog.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label} ({scopeLabel(m.scope)})
@@ -868,7 +881,7 @@ function AlertThresholdsPanel() {
                   <select
                     className="input alert-rules-input-equip"
                     value={equipScopeFromCategories(r.apply_categories)}
-                    onChange={(e) => updateRow(idx, { apply_categories: categoriesFromEquipScope(e.target.value as "*" | "olt" | "mikrotik" | "servidor") })}
+                    onChange={(e) => updateRow(idx, { apply_categories: categoriesFromEquipScope(e.target.value as "*" | "olt" | "mikrotik" | "bng" | "switch" | "servidor") })}
                   >
                     {equipScopeOptions.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -897,8 +910,8 @@ function AlertThresholdsPanel() {
                       ))}
                     </select>
                     <select className="input alert-rules-input-op" value={r.operator} onChange={(e) => updateRow(idx, { operator: e.target.value as "gte" | "lte" })}>
-                      <option value="gte">â‰¥</option>
-                      <option value="lte">â‰¤</option>
+                      <option value="gte">≥ (maior ou igual)</option>
+                      <option value="lte">≤ (menor ou igual)</option>
                     </select>
                   </div>
                 </td>
@@ -1484,7 +1497,7 @@ function ConnectionPanel() {
           </InfoHint>
         </h4>
         {rows.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum extra â€” use Â«AdicionarÂ» para incluir mais leituras.</p>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Nenhum extra — use «Adicionar» para incluir mais leituras.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((r) => (
@@ -1583,7 +1596,7 @@ function ConnectionPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-conn-def"] }),
   });
 
-  if (q.isLoading) return <p>A carregarâ€¦</p>;
+  if (q.isLoading) return <p>A carregar…</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
@@ -1682,7 +1695,7 @@ function ConnectionPanel() {
           </InfoHint>
         </h3>
         <div className="settings-conn-block">
-          <h4>OLT â€” PON / GBIC / ONU</h4>
+          <h4>OLT — PON / GBIC / ONU</h4>
           <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
             <div className="field" style={{ minWidth: 260 }}>
               <label>Total de ONUs</label>
@@ -1908,12 +1921,12 @@ function TelegramPanel({ id, title }: { id: string; title: string }) {
       }),
   });
 
-  if (q.isLoading) return <p>A carregarâ€¦</p>;
+  if (q.isLoading) return <p>A carregar…</p>;
   if (q.isError) return <div className="msg msg--err">{(q.error as Error).message}</div>;
 
   return (
     <div className="card">
-      <h2>Telegram â€” {title}</h2>
+      <h2>Telegram — {title}</h2>
       <p style={{ fontSize: 12, color: "var(--muted)" }}>
         Para alterar o bot, introduza um novo token abaixo. O valor já salvo não é mostrado por segurança.
       </p>

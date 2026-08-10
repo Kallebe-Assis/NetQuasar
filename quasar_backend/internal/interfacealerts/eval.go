@@ -1,9 +1,12 @@
+// Package interfacealerts avalia limiares e transições após snapshots IF-MIB.
+// Inclui: UP→DOWN com confirmação, potência/temperatura SFP MikroTik, queda PPPoE.
 package interfacealerts
 
 import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,12 +32,14 @@ const (
 type Params struct {
 	DeviceID   uuid.UUID
 	Host       string
+	Community  string // para 2.º teste SNMP imediato de ifOperStatus
 	DeviceDesc string
 	Category   string
 	Brand      string
 	Model      string
 	Source     string
 	PrevJSON   []byte // nil ou vazio = sem comparação de transição
+	OlderJSON  []byte // snapshot anterior a Prev (confirmação em 2 ciclos)
 	CurrJSON   []byte
 }
 
@@ -58,7 +63,12 @@ func EvaluateAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		return
 	}
 	prevVars := snapshotwalk.VarsFromJSON(p.PrevJSON)
-	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Category, p.Source, mk, prevVars, currVars, customs)
+	var olderVars []probing.SNMPVar
+	if len(p.OlderJSON) > 0 {
+		olderVars = snapshotwalk.VarsFromJSON(p.OlderJSON)
+	}
+	evaluateInterfaceDownTransitions(ctx, pool, log, p.DeviceID, desc, host, p.Community, p.Category, p.Source, mk,
+		olderVars, prevVars, currVars, customs, snapshotwalk.Truncated(p.CurrJSON))
 }
 
 func isMikrotik(category, brand, model, description string) bool {
@@ -122,6 +132,7 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 			Sfp:               sfp,
 			TxDBm:             copyFloatPtr(op.TxDBm),
 			RxDBm:             copyFloatPtr(op.RxDBm),
+			TemperatureC:      copyFloatPtr(op.TemperatureC),
 		})
 		seen[r.IfIndex] = struct{}{}
 	}
@@ -145,18 +156,20 @@ func evaluateOpticalSFP(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Lo
 			Sfp:               true,
 			TxDBm:             copyFloatPtr(p.TxDBm),
 			RxDBm:             copyFloatPtr(p.RxDBm),
+			TemperatureC:      copyFloatPtr(p.TemperatureC),
 		})
 	}
 	alertthresholds.EvaluateMikrotikSFPAfterSnapshot(ctx, pool, log, deviceID, devDesc, host, sfpEval)
 }
 
 func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
-	deviceID uuid.UUID, devDesc, host, category, source string, mikrotik bool,
-	prevVars, currVars []probing.SNMPVar, customs map[int]string,
+	deviceID uuid.UUID, devDesc, host, community, category, source string, mikrotik bool,
+	olderVars, prevVars, currVars []probing.SNMPVar, customs map[int]string, currTruncated bool,
 ) {
 	th, _, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "iface_down_count", category)
 	prevRows := snmpifparse.BuildIfTable(prevVars)
 	currRows := snmpifparse.BuildIfTable(currVars)
+	olderRows := snmpifparse.BuildIfTable(olderVars)
 	prevBy := map[int]snmpifparse.IfRow{}
 	for _, r := range prevRows {
 		prevBy[r.IfIndex] = r
@@ -165,28 +178,43 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 	for _, r := range currRows {
 		currBy[r.IfIndex] = r
 	}
+	olderBy := map[int]snmpifparse.IfRow{}
+	for _, r := range olderRows {
+		olderBy[r.IfIndex] = r
+	}
+	hasOlder := len(olderBy) > 0
 	src := strings.TrimSpace(source)
 	if src == "" {
 		src = "interface_snapshot"
 	}
 
+	skipDownAlerts := currTruncated || suspectMassInterfaceDrop(prevBy, currBy)
+	if skipDownAlerts {
+		reason := "mass_drop_suspect"
+		if currTruncated {
+			reason = "walk_truncated"
+		}
+		logIfaceDownSkip(log, deviceID.String(), reason, map[string]any{
+			"prev_ifaces": len(prevBy), "curr_ifaces": len(currBy), "truncated": currTruncated,
+		})
+	}
+
 	pppoeDrops := 0
-	if mikrotik {
+	if mikrotik && !skipDownAlerts {
 		// UP→DOWN ainda presente
 		for _, r := range currRows {
 			base, _ := ifaceDisplayName(r, customs)
 			if !isPPPoEIfaceName(base) && !isPPPoEIfaceName(r.Descr) && !isPPPoEIfaceName(r.DisplayName) {
 				continue
 			}
-			p, hasPrev := prevBy[r.IfIndex]
-			if !hasPrev {
+			if !ifaceIsDownKnown(r) {
 				continue
 			}
-			prevUp := snmpifparse.OperStatusLabel(p.OperStatus) == "up"
-			currUp := snmpifparse.OperStatusLabel(r.OperStatus) == "up"
-			if prevUp && !currUp {
-				pppoeDrops++
+			p, hasPrev := prevBy[r.IfIndex]
+			if !hasPrev || !ifaceIsUp(p) {
+				continue
 			}
+			pppoeDrops++
 		}
 		// Sessões que desapareceram do IF-MIB (comum no RouterOS)
 		for _, p := range prevRows {
@@ -194,7 +222,7 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 			if !isPPPoEIfaceName(base) && !isPPPoEIfaceName(p.Descr) && !isPPPoEIfaceName(p.DisplayName) {
 				continue
 			}
-			if snmpifparse.OperStatusLabel(p.OperStatus) != "up" {
+			if !ifaceIsUp(p) {
 				continue
 			}
 			if _, stillThere := currBy[p.IfIndex]; !stillThere {
@@ -218,39 +246,10 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 		if !hasPrev {
 			continue
 		}
-		prevUp := snmpifparse.OperStatusLabel(p.OperStatus) == "up"
-		currUp := snmpifparse.OperStatusLabel(r.OperStatus) == "up"
 		key := fmt.Sprintf("ifdown:%d", r.IfIndex)
-		if prevUp && !currUp {
-			sev := alertthresholds.EvalMetricSeverity(1, th)
-			if sev == "ok" {
-				continue
-			}
-			custom := customs[r.IfIndex]
-			msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN.", devDesc, host, label)
-			meta := alertnotify.WithStatusTransition(map[string]any{
-				"source":             src,
-				"if_index":           r.IfIndex,
-				"display_name":       label,
-				"if_name":            baseName,
-				"if_alias":           strings.TrimSpace(r.IfAlias),
-				"custom_description": custom,
-				"key":                key,
-			}, "interface_up", "interface_down", nil)
-			res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
-				DeviceID: deviceID, Severity: sev, AlertType: alertTypeIfaceDown,
-				Message: msg, IP: host, DeviceName: devDesc, Meta: meta,
-				Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
-			}, &alertstore.NotifyCreate{
-				Log: log, Level: strings.ToUpper(sev), Headline: "Interface DOWN (mudança de estado)",
-			})
-			if err != nil && log != nil {
-				log.Error().Err(err).Str("device", deviceID.String()).Msg("interface_down_transition")
-			} else if res.Created && log != nil {
-				log.Warn().Str("device", deviceID.String()).Int("if_index", r.IfIndex).Msg("alerta: interface UP→DOWN")
-			}
-		}
-		if currUp {
+
+		// Resolução: só fecha com oper UP conhecido (não com status em falta).
+		if ifaceIsUp(r) {
 			_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
 				DeviceID: deviceID, AlertType: alertTypeIfaceDown,
 				Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
@@ -258,6 +257,74 @@ func evaluateInterfaceDownTransitions(ctx context.Context, pool *pgxpool.Pool, l
 					"resolved": "interface_up", "source": src, "key": key,
 				},
 			})
+			continue
+		}
+
+		if skipDownAlerts {
+			continue
+		}
+		if !ifaceIsDownKnown(r) {
+			// Walk parcial sem ifOperStatus — não tratar como DOWN.
+			continue
+		}
+
+		older, hasOlderRow := olderBy[r.IfIndex]
+		confirmed := shouldConfirmIfaceDownAfterStreak(older, p, r, hasOlder && hasOlderRow)
+
+		if !confirmed {
+			// 1.ª observação UP→DOWN: 2.º teste SNMP imediato só para descartar falso positivo
+			// (walk com lixo). Mesmo confirmando DOWN via GET, espera a 2.ª coleta (como latência).
+			if ifaceIsUp(p) {
+				downOK, known, operLabel := confirmIfaceOperDown(ctx, host, community, r.IfIndex, 4*time.Second)
+				if known && !downOK {
+					logIfaceDownSkip(log, deviceID.String(), "snmp_reconfirm_up", map[string]any{
+						"if_index": r.IfIndex, "oper": operLabel,
+					})
+					continue
+				}
+				logIfaceDownSkip(log, deviceID.String(), "awaiting_second_cycle", map[string]any{
+					"if_index": r.IfIndex, "snmp_reconfirm_down": known && downOK, "oper": operLabel,
+				})
+			}
+			continue
+		}
+
+		// Ciclo de confirmação: novo GET antes de abrir o alerta.
+		if downOK, known, operLabel := confirmIfaceOperDown(ctx, host, community, r.IfIndex, 4*time.Second); known && !downOK {
+			logIfaceDownSkip(log, deviceID.String(), "confirm_cycle_snmp_up", map[string]any{
+				"if_index": r.IfIndex, "oper": operLabel,
+			})
+			continue
+		}
+
+		sev := alertthresholds.EvalMetricSeverity(1, th)
+		if sev == "ok" {
+			continue
+		}
+		custom := customs[r.IfIndex]
+		msg := fmt.Sprintf("%s (%s): interface %s mudou de UP para DOWN (confirmado em %d coletas).",
+			devDesc, host, label, MinConsecutiveIfaceDown)
+		meta := alertnotify.WithStatusTransition(map[string]any{
+			"source":             src,
+			"if_index":           r.IfIndex,
+			"display_name":       label,
+			"if_name":            baseName,
+			"if_alias":           strings.TrimSpace(r.IfAlias),
+			"custom_description": custom,
+			"key":                key,
+			"confirmed_cycles":   MinConsecutiveIfaceDown,
+		}, "interface_up", "interface_down", nil)
+		res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
+			DeviceID: deviceID, Severity: sev, AlertType: alertTypeIfaceDown,
+			Message: msg, IP: host, DeviceName: devDesc, Meta: meta,
+			Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		}, &alertstore.NotifyCreate{
+			Log: log, Level: strings.ToUpper(sev), Headline: "Interface DOWN (mudança de estado)",
+		})
+		if err != nil && log != nil {
+			log.Error().Err(err).Str("device", deviceID.String()).Msg("interface_down_transition")
+		} else if res.Created && log != nil {
+			log.Warn().Str("device", deviceID.String()).Int("if_index", r.IfIndex).Msg("alerta: interface UP→DOWN confirmado")
 		}
 	}
 }

@@ -1,3 +1,5 @@
+// Package alertthresholds carrega a regra «Limiar global de alertas» (alert_rules)
+// e avalia métricas de equipamento, SFP, OLT e BNG face aos limiares da UI Configurações → Alertas.
 package alertthresholds
 
 import (

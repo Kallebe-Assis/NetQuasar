@@ -10,20 +10,23 @@ import (
 )
 
 type popRow struct {
-	ID          uuid.UUID  `json:"id"`
-	Description string     `json:"description"`
-	Address     *string    `json:"address"`
-	Latitude    *float64   `json:"latitude"`
-	Longitude   *float64   `json:"longitude"`
-	LocalityID  uuid.UUID  `json:"locality_id"`
-	DeviceCount int64      `json:"device_count"`
+	ID           uuid.UUID  `json:"id"`
+	Description  string     `json:"description"`
+	Address      *string    `json:"address"`
+	Latitude     *float64   `json:"latitude"`
+	Longitude    *float64   `json:"longitude"`
+	LocalityID   *uuid.UUID `json:"locality_id"`
+	LocalityName *string    `json:"locality_name,omitempty"`
+	DeviceCount  int64      `json:"device_count"`
 }
 
 func (s *Server) listPops(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT p.id, p.description, p.address, p.latitude, p.longitude, p.locality_id,
+		SELECT p.id, p.description, p.address, p.latitude, p.longitude, p.locality_id, cl.name,
 			(SELECT COUNT(*) FROM devices d WHERE d.pop_id = p.id)
-		FROM pops p ORDER BY p.description
+		FROM pops p
+		LEFT JOIN commercial_localities cl ON cl.id = p.locality_id
+		ORDER BY p.description
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -33,7 +36,7 @@ func (s *Server) listPops(w http.ResponseWriter, r *http.Request) {
 	var list []popRow
 	for rows.Next() {
 		var pr popRow
-		if err := rows.Scan(&pr.ID, &pr.Description, &pr.Address, &pr.Latitude, &pr.Longitude, &pr.LocalityID, &pr.DeviceCount); err != nil {
+		if err := rows.Scan(&pr.ID, &pr.Description, &pr.Address, &pr.Latitude, &pr.Longitude, &pr.LocalityID, &pr.LocalityName, &pr.DeviceCount); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -44,18 +47,14 @@ func (s *Server) listPops(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createPop(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Description string    `json:"description"`
-		Address     *string   `json:"address"`
-		Latitude    *float64  `json:"latitude"`
-		Longitude   *float64  `json:"longitude"`
-		LocalityID  uuid.UUID `json:"locality_id"`
+		Description string     `json:"description"`
+		Address     *string    `json:"address"`
+		Latitude    *float64   `json:"latitude"`
+		Longitude   *float64   `json:"longitude"`
+		LocalityID  *uuid.UUID `json:"locality_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Description == "" {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "description obrigatória", nil)
-		return
-	}
-	if body.LocalityID == uuid.Nil {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "locality_id obrigatório — todo POP deve ter uma localidade", nil)
 		return
 	}
 	var id uuid.UUID
@@ -78,10 +77,12 @@ func (s *Server) getPop(w http.ResponseWriter, r *http.Request) {
 	}
 	var pr popRow
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT p.id, p.description, p.address, p.latitude, p.longitude, p.locality_id,
+		SELECT p.id, p.description, p.address, p.latitude, p.longitude, p.locality_id, cl.name,
 			(SELECT COUNT(*) FROM devices d WHERE d.pop_id = p.id)
-		FROM pops p WHERE p.id=$1
-	`, id).Scan(&pr.ID, &pr.Description, &pr.Address, &pr.Latitude, &pr.Longitude, &pr.LocalityID, &pr.DeviceCount)
+		FROM pops p
+		LEFT JOIN commercial_localities cl ON cl.id = p.locality_id
+		WHERE p.id=$1
+	`, id).Scan(&pr.ID, &pr.Description, &pr.Address, &pr.Latitude, &pr.Longitude, &pr.LocalityID, &pr.LocalityName, &pr.DeviceCount)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "POP não encontrado", nil)
 		return
@@ -107,7 +108,7 @@ func (s *Server) patchPop(w http.ResponseWriter, r *http.Request) {
 	var desc string
 	var addr *string
 	var lat, lon *float64
-	var localityID uuid.UUID
+	var localityID *uuid.UUID
 	if err := s.DB().QueryRow(r.Context(), `SELECT description, address, latitude, longitude, locality_id FROM pops WHERE id=$1`, id).Scan(&desc, &addr, &lat, &lon, &localityID); err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "POP não encontrado", nil)
 		return
@@ -115,6 +116,7 @@ func (s *Server) patchPop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	before := map[string]any{"description": desc, "address": addr, "latitude": lat, "longitude": lon, "locality_id": localityID}
 	if v, ok := body["description"]; ok {
 		_ = json.Unmarshal(v, &desc)
 	}
@@ -128,13 +130,18 @@ func (s *Server) patchPop(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(v, &lon)
 	}
 	if v, ok := body["locality_id"]; ok {
-		_ = json.Unmarshal(v, &localityID)
+		// null JSON → desvincular; string UUID → vincular
+		if string(v) == "null" {
+			localityID = nil
+		} else {
+			var lid uuid.UUID
+			if err := json.Unmarshal(v, &lid); err != nil || lid == uuid.Nil {
+				writeErr(w, http.StatusBadRequest, "VALIDATION", "locality_id inválido", nil)
+				return
+			}
+			localityID = &lid
+		}
 	}
-	if localityID == uuid.Nil {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "locality_id obrigatório", nil)
-		return
-	}
-	before := map[string]any{"description": desc, "address": addr, "latitude": lat, "longitude": lon, "locality_id": localityID}
 	_, err = s.DB().Exec(r.Context(), `UPDATE pops SET description=$2, address=$3, latitude=$4, longitude=$5, locality_id=$6, updated_at=now() WHERE id=$1`, id, desc, addr, lat, lon, localityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

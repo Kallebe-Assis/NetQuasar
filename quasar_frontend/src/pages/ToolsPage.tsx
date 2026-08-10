@@ -492,6 +492,45 @@ export function ToolsPage() {
     },
     onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
   });
+  const mtQuickMetrics = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/tools/mikrotik/quick-metrics", {
+        method: "POST",
+        json: {
+          host: mtHost.trim(),
+          community: mtComm,
+          timeout_ms: Math.min(120000, Math.max(1000, Number(mtTo) || 8000)),
+          port: 161,
+          version: "2c",
+        },
+      }),
+    onMutate: () => show("info", "A coletar métricas rápidas RouterOS…"),
+    onSuccess: (d) => {
+      const st = isRecord(d) && isRecord(d.status) ? d.status : null;
+      const n = st && typeof st.collected === "number" ? st.collected : undefined;
+      show("ok", n != null ? `Métricas rápidas: ${n} campo(s) coletado(s).` : "Métricas rápidas OK.");
+    },
+    onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
+  });
+  const mtInterfaces = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/tools/mikrotik/interfaces", {
+        method: "POST",
+        json: {
+          host: mtHost.trim(),
+          community: mtComm,
+          timeout_ms: Math.min(120000, Math.max(1000, Number(mtTo) || 8000)),
+          port: 161,
+          version: "2c",
+        },
+      }),
+    onMutate: () => show("info", "A listar interfaces IF-MIB…"),
+    onSuccess: (d) => {
+      const n = isRecord(d) && typeof d.count === "number" ? d.count : undefined;
+      show("ok", n != null ? `Interfaces: ${n} encontrada(s).` : "Interfaces carregadas.");
+    },
+    onError: (e) => show("err", e instanceof Error ? e.message : String(e)),
+  });
 
   return (
     <div className="tools-page">
@@ -1174,15 +1213,27 @@ export function ToolsPage() {
 
       {tab === "mikrotik" && (
         <ToolsPanel
-          title="Mikrotik — walk de interfaces (IF-MIB)"
+          title="Mikrotik — métricas, interfaces e walk IF-MIB"
           description={
             <>
-              Varredura SNMP a partir de <span className="mono">1.3.6.1.2.1.2.2.1</span> (ifTable). O job corre no servidor; use os botões abaixo para ver linhas e
-              amostras agrupadas (útil em RouterOS e outros agentes).
+              Coleta rápida (system/health), lista estruturada de interfaces e walk completo a partir de{" "}
+              <span className="mono">1.3.6.1.2.1.2.2.1</span> (ifTable). O walk corre em job no servidor.
             </>
           }
           results={
             <>
+              <ToolOutputError err={mtQuickMetrics.error as Error | null} />
+              {mtQuickMetrics.data !== undefined ? (
+                <pre className="mono" style={{ margin: 0, marginTop: 8, padding: 10, maxHeight: 280, overflow: "auto", fontSize: 11, background: "var(--panel2)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+                  {JSON.stringify(mtQuickMetrics.data, null, 2)}
+                </pre>
+              ) : null}
+              <ToolOutputError err={mtInterfaces.error as Error | null} />
+              {mtInterfaces.data !== undefined ? (
+                <pre className="mono" style={{ margin: 0, marginTop: 8, padding: 10, maxHeight: 280, overflow: "auto", fontSize: 11, background: "var(--panel2)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+                  {JSON.stringify(mtInterfaces.data, null, 2)}
+                </pre>
+              ) : null}
               <ToolOutputError err={mtWalkIf.error as Error | null} />
               {mtWalkIf.data !== undefined ? <WalkJobQueuedOutput data={mtWalkIf.data} /> : null}
               {mtWalkRows.isError ? <ToolOutputError err={mtWalkRows.error as Error | null} /> : null}
@@ -1201,7 +1252,13 @@ export function ToolsPage() {
             </div>
           </div>
           <div className="tools-panel__actions">
-            <button type="button" className="btn btn--primary" disabled={mtWalkIf.isPending || !mtHost.trim()} onClick={() => mtWalkIf.mutate()}>
+            <button type="button" className="btn btn--primary" disabled={mtQuickMetrics.isPending || !mtHost.trim()} onClick={() => mtQuickMetrics.mutate()}>
+              {mtQuickMetrics.isPending ? "A coletar…" : "Métricas rápidas"}
+            </button>
+            <button type="button" className="btn" disabled={mtInterfaces.isPending || !mtHost.trim()} onClick={() => mtInterfaces.mutate()}>
+              {mtInterfaces.isPending ? "A listar…" : "Listar interfaces"}
+            </button>
+            <button type="button" className="btn" disabled={mtWalkIf.isPending || !mtHost.trim()} onClick={() => mtWalkIf.mutate()}>
               {mtWalkIf.isPending ? "A iniciar…" : "Descobrir interfaces (walk)"}
             </button>
           </div>

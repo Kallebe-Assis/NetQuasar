@@ -33,6 +33,7 @@ export function EventsPage() {
         <PageCountPill label="Eventos" count={(ev.data?.events ?? []).length} />
       </div>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
+        Linha do tempo operacional (alertas abertos/resolvidos e checks).{" "}
         <code className="mono">GET /api/v1/events?limit=</code> (1–200)
       </p>
       <div className="row" style={{ marginBottom: 12 }}>

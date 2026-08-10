@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, Pencil } from "lucide-react";
+import { LocateFixed, Pencil, Search } from "lucide-react";
 import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
@@ -17,6 +17,7 @@ import { can, isAdminUser } from "../lib/auth";
 import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { queryKeys } from "../lib/queryKeys";
 import { fetchUiAppearance, mapColorsFromAppearance, mapIconsFromAppearance, type MapAppearanceColors } from "../lib/uiAppearance";
+import { looksLikeHTTPURL, parseLatLngPair, shouldLocateQuery, type MapLocateHit } from "../lib/mapLocationQuery";
 
 class MapSectionErrorBoundary extends React.Component<Readonly<{ children: React.ReactNode }>, { err: Error | null }> {
   state = { err: null as Error | null };
@@ -212,6 +213,8 @@ export function MapPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTypeFilter, setSearchTypeFilter] = useState("");
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [locationPin, setLocationPin] = useState<{ lat: number; lng: number; label?: string } | null>(null);
   const [localityFlyId, setLocalityFlyId] = useState("");
   const [localityFlyNote, setLocalityFlyNote] = useState<string | null>(null);
   const [localityFlyPending, setLocalityFlyPending] = useState(false);
@@ -331,9 +334,15 @@ export function MapPage() {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
+  const locateQueryEnabled = shouldLocateQuery(searchInput) && debouncedSearch.length >= 2;
+  const entitySearchEnabled =
+    debouncedSearch.length >= 2 &&
+    !looksLikeHTTPURL(searchInput) &&
+    !parseLatLngPair(searchInput);
+
   const mapSearch = useQuery({
     queryKey: ["map-search", debouncedSearch, searchTypeFilter],
-    enabled: debouncedSearch.length >= 2,
+    enabled: entitySearchEnabled,
     queryFn: () => {
       const params = new URLSearchParams({ q: debouncedSearch });
       if (searchTypeFilter) params.set("type", searchTypeFilter);
@@ -341,10 +350,22 @@ export function MapPage() {
     },
   });
 
+  const mapLocate = useQuery({
+    queryKey: ["map-locate", searchInput.trim()],
+    enabled: locateQueryEnabled,
+    queryFn: () =>
+      apiFetch<{ results: MapLocateHit[]; note?: string }>(
+        `/api/v1/map/locate?q=${encodeURIComponent(searchInput.trim())}`,
+      ),
+  });
+
   useEffect(() => {
     if (!searchOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) setSearchOpen(false);
+      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+        setMobileSearchOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -920,7 +941,9 @@ export function MapPage() {
     (row: MapSearchResult) => {
       setSearchInput("");
       setSearchOpen(false);
+      setMobileSearchOpen(false);
       setDebouncedSearch("");
+      setLocationPin(null);
       const existing = displayedPoints.find((p) => p.id === row.map_id);
       if (!existing) {
         const isLogin = row.kind === "login";
@@ -963,6 +986,26 @@ export function MapPage() {
     },
     [displayedPoints],
   );
+
+  const selectLocateResult = useCallback((hit: MapLocateHit) => {
+    setSearchInput("");
+    setSearchOpen(false);
+    setMobileSearchOpen(false);
+    setDebouncedSearch("");
+    setSelId(null);
+    setDetailModalOpen(false);
+    setInfraPanelOpen(false);
+    setLocationPin({
+      lat: hit.lat,
+      lng: hit.lng,
+      label: hit.display || hit.label || "Localização",
+    });
+    userPickedTab.current = true;
+    setView("mapa");
+    setFlyTo({ lat: hit.lat, lng: hit.lng, zoom: 17 });
+    setFlyKey((k) => k + 1);
+    setMapToast({ ok: true, text: `Localizado: ${hit.display || hit.label}` });
+  }, []);
 
   const flyToLocality = useCallback(async () => {
     if (!localityFlyId) return;
@@ -1155,18 +1198,24 @@ export function MapPage() {
               Equipamentos com coordenadas e infraestrutura (CTOs, cabos, etc.) apenas na área visível, com limite por
               zoom para manter o mapa fluido. Use o botão <strong>+</strong> no mapa para adicionar elementos.
             </p>
+            <p>
+              Na pesquisa pode usar nome de equipamento/CTO, endereço, coordenadas (<span className="mono">-21.40, -42.19</span>)
+              ou link do Google Maps.
+            </p>
             <p>Seleccione uma CTO para abrir o painel lateral (localização e edição). Filtros no ícone de filtro.</p>
           </InfoHint>
         </h1>
-        <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
+        <span className="map-page__points-pill">
+          <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
+        </span>
         {showInfrastructure && infraPts.data?.truncated ? (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
             Infra limitada neste zoom
             {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa para ver mais CTOs
           </span>
         ) : null}
         {showConnections && connTotal != null ? (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          <span className="map-page__conn-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
             Conexões na área: {connPts.data?.points?.length ?? 0}
             {connTotal > 0 ? ` / ${connTotal} com coordenadas` : ""}
             {connLimit != null && connLimit > 0 ? ` (limite ${connLimit} neste zoom)` : ""}
@@ -1176,27 +1225,50 @@ export function MapPage() {
         ) : null}
       </div>
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-          <div ref={searchWrapRef} style={{ position: "relative", flex: "2 1 280px", minWidth: 220 }}>
+      <div className="card map-toolbar" style={{ marginBottom: 12 }}>
+        <div className="row map-toolbar__row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+          <button
+            type="button"
+            className={`btn btn--icon btn--icon-menu map-toolbar__search-toggle${mobileSearchOpen || searchOpen ? " btn--primary" : ""}`}
+            title="Pesquisar no mapa"
+            aria-label="Pesquisar no mapa"
+            aria-expanded={mobileSearchOpen || searchOpen}
+            onClick={() => {
+              setMobileSearchOpen((o) => !o);
+              setSearchOpen(true);
+            }}
+          >
+            <Search size={18} aria-hidden />
+          </button>
+          <div
+            ref={searchWrapRef}
+            className={`map-toolbar__search${mobileSearchOpen ? " map-toolbar__search--open" : ""}`}
+            style={{ position: "relative", flex: "2 1 280px", minWidth: 220 }}
+          >
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Pesquisar no mapa</span>
+              <span className="map-toolbar__search-label" style={{ fontSize: 12, color: "var(--muted)" }}>
+                Pesquisar no mapa
+              </span>
               <input
                 className="input"
                 type="search"
-                placeholder="Equipamento, login, CTO, poste… (ex.: cto:centro, login:joao)"
+                placeholder="Endereço, coords, link Maps, CTO, equipamento…"
                 value={searchInput}
                 onChange={(e) => {
                   setSearchInput(e.target.value);
                   setSearchOpen(true);
+                  setMobileSearchOpen(true);
                 }}
-                onFocus={() => setSearchOpen(true)}
+                onFocus={() => {
+                  setSearchOpen(true);
+                  setMobileSearchOpen(true);
+                }}
                 autoComplete="off"
               />
             </label>
-            {searchOpen && (debouncedSearch.length >= 2 || searchInput.trim().length >= 2) ? (
+            {searchOpen && (debouncedSearch.length >= 2 || searchInput.trim().length >= 2 || looksLikeHTTPURL(searchInput)) ? (
               <div
-                className="card"
+                className="card map-toolbar__search-dd"
                 style={{
                   position: "absolute",
                   top: "100%",
@@ -1204,23 +1276,22 @@ export function MapPage() {
                   right: 0,
                   zIndex: 40,
                   marginTop: 4,
-                  maxHeight: 280,
+                  maxHeight: 320,
                   overflow: "auto",
                   padding: 0,
                   boxShadow: "0 8px 24px rgba(0,0,0,.18)",
                 }}
               >
                 <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", fontSize: 11, color: "var(--muted)" }}>
-                  Prefixos: <span className="mono">cto:</span> <span className="mono">poste:</span> <span className="mono">login:</span> <span className="mono">equip:</span>
+                  Prefixo: <span className="mono">cto:</span> <span className="mono">login:</span> · coords · link Maps · endereço
                 </div>
-                {mapSearch.isFetching ? (
+                {(mapLocate.isFetching || mapSearch.isFetching) && (
                   <p style={{ padding: 10, fontSize: 12, margin: 0 }}>A pesquisar…</p>
-                ) : (mapSearch.data?.results?.length ?? 0) === 0 ? (
-                  <p style={{ padding: 10, fontSize: 12, margin: 0, color: "var(--muted)" }}>Nenhum resultado.</p>
-                ) : (
+                )}
+                {(mapLocate.data?.results?.length ?? 0) > 0 ? (
                   <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                    {mapSearch.data!.results.map((row) => (
-                      <li key={`${row.kind}-${row.id}`}>
+                    {mapLocate.data!.results.map((hit, idx) => (
+                      <li key={`loc-${idx}-${hit.lat}-${hit.lng}`}>
                         <button
                           type="button"
                           className="btn"
@@ -1234,17 +1305,63 @@ export function MapPage() {
                             fontSize: 12,
                             background: "transparent",
                           }}
-                          onClick={() => selectSearchResult(row)}
+                          onClick={() => selectLocateResult(hit)}
                         >
                           <span style={{ fontWeight: 600 }}>
-                            {row.project_name?.trim() ? `${row.project_name.trim()} — ${row.label}` : row.label}
+                            {hit.source === "coords" ? "Coordenadas" : hit.source === "maps_url" ? "Link do mapa" : "Endereço"}
                           </span>
-                          <span style={{ color: "var(--muted)", marginLeft: 8 }}>{searchKindLabel(row.kind)}</span>
+                          <span style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>
+                            {hit.label}
+                          </span>
                         </button>
                       </li>
                     ))}
                   </ul>
-                )}
+                ) : null}
+                {mapLocate.data?.note ? (
+                  <p style={{ padding: 10, fontSize: 12, margin: 0, color: "var(--muted)" }}>{mapLocate.data.note}</p>
+                ) : null}
+                {entitySearchEnabled ? (
+                  (mapSearch.data?.results?.length ?? 0) === 0 && !mapSearch.isFetching && (mapLocate.data?.results?.length ?? 0) === 0 ? (
+                    <p style={{ padding: 10, fontSize: 12, margin: 0, color: "var(--muted)" }}>Nenhum resultado.</p>
+                  ) : (
+                    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                      {(mapSearch.data?.results ?? []).map((row) => (
+                        <li key={`${row.kind}-${row.id}`}>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              borderRadius: 0,
+                              border: "none",
+                              borderBottom: "1px solid var(--border)",
+                              padding: "8px 10px",
+                              fontSize: 12,
+                              background: "transparent",
+                            }}
+                            onClick={() => selectSearchResult(row)}
+                          >
+                            <span style={{ fontWeight: 600 }}>
+                              {row.project_name?.trim() ? `${row.project_name.trim()} — ${row.label}` : row.label}
+                            </span>
+                            <span style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>
+                              {searchKindLabel(row.kind)}
+                              {row.category ? ` · ${row.category}` : ""}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                ) : null}
+                {!entitySearchEnabled &&
+                !mapLocate.isFetching &&
+                (mapLocate.data?.results?.length ?? 0) === 0 &&
+                !mapLocate.data?.note ? (
+                  <p style={{ padding: 10, fontSize: 12, margin: 0, color: "var(--muted)" }}>Nenhum resultado.</p>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1603,6 +1720,7 @@ export function MapPage() {
                     connectionClusterForced={connectionClusterForced}
                     highlightedId={mapHighlightIds}
                     userLocation={userLocation}
+                    locationPin={locationPin}
                     placeMode={placeMode}
                     draftPath={draftPath}
                     mapEditMode={mapEditMode}

@@ -160,6 +160,10 @@ func RunTelemetrySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Log
 
 		if snmpOK {
 			ctr.addOK()
+			// Avaliar limiares globais (CPU/mem/temp/uptime) no mesmo ciclo do worker —
+			// antes isto só corria no refresh manual da API.
+			RunPostTelemetryAlertEval(patchCtx, pool, log, row.id, row.description, strings.TrimSpace(row.ip), comm,
+				row.category, row.brand, row.model, c)
 			NudgeMonitoringRuntimeRefresh(patchCtx, pool)
 		} else if telErr != nil && log != nil {
 			log.Warn().Err(telErr).Str("device", row.id.String()).Str("host", strings.TrimSpace(row.ip)).
@@ -216,7 +220,7 @@ func collectedFromMikrotikOrSwitch(metrics map[string]any) bool {
 	if metrics == nil {
 		return false
 	}
-	for _, key := range []string{"mikrotik_collection", "switch_collection"} {
+	for _, key := range []string{"mikrotik_collection", "switch_collection", "mikrotik_telnet_collection", "switch_telnet_collection"} {
 		raw, ok := metrics[key]
 		if !ok || raw == nil {
 			continue

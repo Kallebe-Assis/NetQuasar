@@ -49,6 +49,18 @@ export const queryKeys = {
   integrations: ["integrations"] as const,
   integrationDetail: (slug: string) => ["integration", slug] as const,
   integrationLogs: (slug: string, requestId?: string) => ["integration-logs", slug, requestId ?? ""] as const,
+  fleetDashboard: (from: string, to: string) => ["fleet-dashboard", from, to] as const,
+  fleetCostCenters: ["fleet-cost-centers"] as const,
+  fleetFuels: ["fleet-fuels"] as const,
+  fleetStations: ["fleet-stations"] as const,
+  fleetVehicles: ["fleet-vehicles"] as const,
+  fleetDrivers: ["fleet-drivers"] as const,
+  fleetDriverVehicles: ["fleet-driver-vehicles"] as const,
+  fleetFuelings: ["fleet-fuelings"] as const,
+  fleetAlerts: ["fleet-alerts"] as const,
+  fleetUsers: ["fleet-users"] as const,
+  fleetSettings: ["fleet-settings"] as const,
+  fleetMeDriver: ["fleet-me-driver"] as const,
 } as const;
 
 /** Invalida listas de alertas usadas em Alertas, OLT e Configurações. */

@@ -65,6 +65,36 @@ const IntegrationConsultPage = lazy(() =>
 const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
 );
+const AboutPage = lazy(() =>
+  import("../pages/AboutPage").then((m) => ({ default: m.AboutPage })),
+);
+const FleetDashboardPage = lazy(() =>
+  import("../pages/fleet/FleetDashboardPage").then((m) => ({ default: m.FleetDashboardPage })),
+);
+const FleetVehiclesPage = lazy(() =>
+  import("../pages/fleet/FleetVehiclesPage").then((m) => ({ default: m.FleetVehiclesPage })),
+);
+const FleetDriversPage = lazy(() =>
+  import("../pages/fleet/FleetDriversPage").then((m) => ({ default: m.FleetDriversPage })),
+);
+const FleetFuelingsPage = lazy(() =>
+  import("../pages/fleet/FleetFuelingsPage").then((m) => ({ default: m.FleetFuelingsPage })),
+);
+const FleetFuelsPage = lazy(() =>
+  import("../pages/fleet/FleetFuelsPage").then((m) => ({ default: m.FleetFuelsPage })),
+);
+const FleetStationsPage = lazy(() =>
+  import("../pages/fleet/FleetStationsPage").then((m) => ({ default: m.FleetStationsPage })),
+);
+const FleetCostCentersPage = lazy(() =>
+  import("../pages/fleet/FleetCostCentersPage").then((m) => ({ default: m.FleetCostCentersPage })),
+);
+const FleetAlertsPage = lazy(() =>
+  import("../pages/fleet/FleetAlertsPage").then((m) => ({ default: m.FleetAlertsPage })),
+);
+const FleetReportsPage = lazy(() =>
+  import("../pages/fleet/FleetReportsPage").then((m) => ({ default: m.FleetReportsPage })),
+);
 
 function withSuspense(el: React.ReactNode) {
   return <Suspense fallback={<DelayedGlobeFallback />}>{el}</Suspense>;
@@ -129,6 +159,16 @@ export function AppRouter() {
           <Route path="bng" element={withSuspense(<BngPage />)} />
           <Route path="reports" element={withSuspense(<ReportsPage />)} />
           <Route path="events" element={withSuspense(<EventsPage />)} />
+          <Route path="about" element={withSuspense(<AboutPage />)} />
+          <Route path="fleet/dashboard" element={withSuspense(<FleetDashboardPage />)} />
+          <Route path="fleet/vehicles" element={withSuspense(<FleetVehiclesPage />)} />
+          <Route path="fleet/drivers" element={withSuspense(<FleetDriversPage />)} />
+          <Route path="fleet/fuelings" element={withSuspense(<FleetFuelingsPage />)} />
+          <Route path="fleet/fuels" element={withSuspense(<FleetFuelsPage />)} />
+          <Route path="fleet/stations" element={withSuspense(<FleetStationsPage />)} />
+          <Route path="fleet/cost-centers" element={withSuspense(<FleetCostCentersPage />)} />
+          <Route path="fleet/alerts" element={withSuspense(<FleetAlertsPage />)} />
+          <Route path="fleet/reports" element={withSuspense(<FleetReportsPage />)} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

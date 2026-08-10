@@ -211,7 +211,7 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		arr = ifaceoptical.EnrichSnapshotArray(ctx, s.DB(), id, host, isSwitch, arr, telnetTO)
 	}
 	b, _ := json.Marshal(arr)
-	latestBeforeInsertRaw, latestBeforeInsertAt, _, _, loadPrevErr := loadLatestTwoInterfaceSnapshots(r.Context(), s.DB(), id)
+	latestBeforeInsertRaw, latestBeforeInsertAt, olderBeforeInsertRaw, _, loadPrevErr := loadLatestTwoInterfaceSnapshots(r.Context(), s.DB(), id)
 	if loadPrevErr != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", loadPrevErr.Error(), nil)
 		return
@@ -277,12 +277,14 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 		interfacealerts.EvaluateAfterSnapshot(ctx, s.DB(), &s.Log, interfacealerts.Params{
 			DeviceID:   id,
 			Host:       host,
+			Community:  c,
 			DeviceDesc: devDesc,
 			Category:   devCat,
 			Brand:      devBrand,
 			Model:      devModel,
 			Source:     "interface_snmp_refresh",
 			PrevJSON:   latestBeforeInsertRaw,
+			OlderJSON:  olderBeforeInsertRaw,
 			CurrJSON:   b,
 		})
 	}

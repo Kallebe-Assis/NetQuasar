@@ -23,6 +23,16 @@ export const APP_ROUTES = {
   events: "/events",
   reports: "/reports",
   settings: "/settings",
+  about: "/about",
+  fleetDashboard: "/fleet/dashboard",
+  fleetVehicles: "/fleet/vehicles",
+  fleetDrivers: "/fleet/drivers",
+  fleetFuelings: "/fleet/fuelings",
+  fleetFuels: "/fleet/fuels",
+  fleetStations: "/fleet/stations",
+  fleetCostCenters: "/fleet/cost-centers",
+  fleetAlerts: "/fleet/alerts",
+  fleetReports: "/fleet/reports",
 } as const;
 
 /** URLs antigas / alternativas → rota actual. */
@@ -43,4 +53,5 @@ export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
   "/eventos": APP_ROUTES.events,
   "/events": APP_ROUTES.events,
   "/overview": APP_ROUTES.dashboard,
+  "/sobre": APP_ROUTES.about,
 };

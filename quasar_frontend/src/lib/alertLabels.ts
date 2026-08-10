@@ -1,6 +1,9 @@
 /** Rótulos em português para códigos internos de alertas — evitar mostrar chaves cruas na UI. */
 
 const ALERT_TYPE_PT: Record<string, string> = {
+  "alert.opened": "Alerta aberto",
+  "alert.closed": "Alerta resolvido",
+  "device.checks": "Checks do equipamento",
   ping_unreachable: "Equipamento offline",
   latency_high: "Latência elevada",
   latency_degraded: "Latência degradada",

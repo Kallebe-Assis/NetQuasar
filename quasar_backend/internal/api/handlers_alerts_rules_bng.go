@@ -205,7 +205,12 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 		n++
 	}
 	if from != "" && to != "" {
-		q += ` AND a.active_since <= $` + strconv.Itoa(n+1) + ` AND (a.closed_at IS NULL OR a.closed_at >= $` + strconv.Itoa(n) + `)`
+		// Intervalo inclusivo: alerta aberto ou fechado dentro de [from, to]
+		// (não usar sobreposição de duração — isso misturava dias anteriores).
+		q += ` AND (
+			(a.active_since >= $` + strconv.Itoa(n) + `::timestamptz AND a.active_since <= $` + strconv.Itoa(n+1) + `::timestamptz)
+			OR (a.closed_at IS NOT NULL AND a.closed_at >= $` + strconv.Itoa(n) + `::timestamptz AND a.closed_at <= $` + strconv.Itoa(n+1) + `::timestamptz)
+		)`
 		args = append(args, from, to)
 		n += 2
 	}
@@ -548,7 +553,6 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": list,
-		"note":   "Tabela events é somente leitura nesta versão — sem writers automáticos; dados históricos/legado ou inserções manuais.",
 	})
 }
 

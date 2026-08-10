@@ -300,25 +300,21 @@ func (s *Server) patchLocality(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.CreatePop != nil && *body.CreatePop {
-		var n int
-		_ = tx.QueryRow(r.Context(), `SELECT COUNT(*) FROM pops WHERE locality_id=$1`, id).Scan(&n)
-		if n == 0 {
-			var name string
-			var addr *string
-			var lat, lon *float64
-			_ = tx.QueryRow(r.Context(), `SELECT name, address, latitude, longitude FROM commercial_localities WHERE id=$1`, id).Scan(&name, &addr, &lat, &lon)
-			popName := strings.TrimSpace(name)
-			if body.PopName != nil && strings.TrimSpace(*body.PopName) != "" {
-				popName = strings.TrimSpace(*body.PopName)
-			}
-			_, err = tx.Exec(r.Context(), `
-				INSERT INTO pops (description, address, latitude, longitude, locality_id)
-				VALUES ($1,$2,$3,$4,$5)
-			`, popName, addr, lat, lon, id)
-			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-				return
-			}
+		var name string
+		var addr *string
+		var lat, lon *float64
+		_ = tx.QueryRow(r.Context(), `SELECT name, address, latitude, longitude FROM commercial_localities WHERE id=$1`, id).Scan(&name, &addr, &lat, &lon)
+		popName := strings.TrimSpace(name)
+		if body.PopName != nil && strings.TrimSpace(*body.PopName) != "" {
+			popName = strings.TrimSpace(*body.PopName)
+		}
+		_, err = tx.Exec(r.Context(), `
+			INSERT INTO pops (description, address, latitude, longitude, locality_id)
+			VALUES ($1,$2,$3,$4,$5)
+		`, popName, addr, lat, lon, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
 		}
 	}
 

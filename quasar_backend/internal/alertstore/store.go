@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/sysevents"
 	"github.com/rs/zerolog"
 )
 
@@ -85,6 +86,7 @@ func OpenOrUpdate(ctx context.Context, pool *pgxpool.Pool, spec OpenSpec, notify
 	err = pool.QueryRow(ctx, insertQ, insertArgs...).Scan(&out.ID)
 	if err == nil {
 		out.Created = true
+		sysevents.EmitAlertOpened(ctx, pool, out.ID, spec.DeviceID, spec.AlertType, spec.Severity, spec.Message, spec.Meta)
 		if notify != nil && notify.Log != nil {
 			alertnotify.SendMonitoringTelegramAndPatchMeta(
 				ctx, pool, notify.Log, out.ID, notify.Level, notify.Headline, spec.Message,
@@ -198,6 +200,7 @@ func Close(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, spec Cl
 		}
 		return false, uuid.Nil, err
 	}
+	sysevents.EmitAlertClosed(ctx, pool, id, spec.DeviceID, spec.AlertType, msg)
 	if log != nil {
 		head := alertnotify.ResolutionHeadlineForAlertType(spec.AlertType)
 		alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, id, head, msg)

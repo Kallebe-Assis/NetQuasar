@@ -270,6 +270,7 @@ deriveLoop:
 		alertthresholds.EvaluatePonDownAlerts(ctx, pool, log, deviceID, devDesc, host, prevMaps, pons, "monitor_worker")
 	}
 	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, log, deviceID, devDesc, host, pons)
+	alertthresholds.EvaluateOltPonOpticalFromPons(ctx, pool, log, deviceID, devDesc, host, pons)
 
 	summary := map[string]any{
 		"if_mib_derived_at":    time.Now().UTC().Format(time.RFC3339),

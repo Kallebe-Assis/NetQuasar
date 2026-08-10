@@ -49,11 +49,16 @@ export const DEFAULT_MAP_COLORS: MapColors = {
 };
 
 const STACK_MERGE_M = 22;
-const SPIDER_RADIUS_M = 28;
+const SPIDER_RADIUS_M = 34;
 const FIT_PADDING: [number, number] = [48, 48];
 const FIT_MAX_ZOOM = 16;
 const SINGLE_POINT_ZOOM = 14;
 const CLUSTER_EXPAND_MAX_ZOOM = 17;
+
+/** Raio do spider cresce com o número de elementos empilhados. */
+function spiderRadiusForCount(count: number): number {
+  return SPIDER_RADIUS_M + Math.max(0, count - 3) * 8;
+}
 
 function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
@@ -268,7 +273,7 @@ function devicePopupBody(p: MapPoint, displayMode: MapDisplayMode) {
   const isCto = p.mapKind === "cto";
   const isInfra = !!(p.mapKind && isInfraMapKind(p.mapKind));
   const splitter = (p.splitter ?? "").trim();
-  const meta = isCto
+  const kindLabel = isCto
     ? splitter
       ? `CTO · ${splitter}`
       : "CTO"
@@ -280,12 +285,79 @@ function devicePopupBody(p: MapPoint, displayMode: MapDisplayMode) {
   return (
     <>
       <strong>{p.description}</strong>
-      <div style={{ fontSize: 12 }}>
-        {meta}
-        {displayMode === "status" ? <span style={{ color: "var(--muted)" }}> · Vista online/offline</span> : null}
+      <div style={{ fontSize: 12, marginTop: 2 }}>
+        <div>{kindLabel}</div>
+        {displayMode === "status" ? <div style={{ color: "var(--muted)" }}>Vista online/offline</div> : null}
         {p.ip ? <div className="mono">{p.ip}</div> : null}
+        <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+          {p.lat.toFixed(5)}, {p.lng.toFixed(5)}
+        </div>
+        {!isInfra && p.status ? (
+          <div style={{ marginTop: 2 }}>
+            <span className={`badge ${p.status === "online" ? "badge--ok" : p.status === "offline" ? "badge--err" : "badge--off"}`}>
+              {p.status}
+            </span>
+          </div>
+        ) : null}
       </div>
     </>
+  );
+}
+
+function stackMemberMeta(p: MapPoint): string {
+  const parts: string[] = [];
+  if (p.mapKind && isInfraMapKind(p.mapKind)) {
+    parts.push(INFRA_MAP_KIND_LABELS[p.mapKind as InfraMapKind]);
+    if (p.mapKind === "cto" && (p.splitter ?? "").trim()) parts.push(String(p.splitter).trim());
+  } else {
+    if (p.category) parts.push(p.category);
+    if (p.status && p.status !== p.category) parts.push(p.status);
+  }
+  if (p.ip) parts.push(p.ip);
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** Lista seleccionável quando vários elementos partilham as mesmas coordenadas. */
+function StackMembersPopup({
+  members,
+  onSelectDevice,
+  hint = "Clique num «Detalhe» ou no pin para separar no mapa.",
+}: {
+  members: MapPoint[];
+  onSelectDevice?: (id: string) => void;
+  hint?: string;
+}) {
+  return (
+    <div className="map-stack-popup" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+      <strong>
+        {members.length} no mesmo local
+      </strong>
+      <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 8px" }}>{hint}</p>
+      <ul className="map-stack-popup__list">
+        {members.map((m) => (
+          <li key={m.id} className="map-stack-popup__item">
+            <div className="map-stack-popup__body">
+              <div className="map-stack-popup__name">{m.description}</div>
+              <div className="map-stack-popup__meta">{stackMemberMeta(m)}</div>
+            </div>
+            {onSelectDevice ? (
+              <button
+                type="button"
+                className="btn btn--primary"
+                style={{ padding: "4px 8px", fontSize: 11, flexShrink: 0 }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelectDevice(m.id);
+                }}
+              >
+                Detalhe
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -766,12 +838,15 @@ function ClusterCellMarkers({
         <Popup>
           <strong>{c.members.length} {clusterKindLabel(c.kind, c.members.length).toLowerCase()}</strong>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 6px" }}>Aproxime o mapa ou clique no pin para separar os pontos.</p>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, maxHeight: 200, overflow: "auto" }}>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 0, listStyle: "none", fontSize: 12, maxHeight: 240, overflow: "auto" }}>
             {c.members.map((m) => (
-              <li key={m.id}>
-                {m.description}{" "}
+              <li key={m.id} className="map-stack-popup__item" style={{ paddingLeft: 0 }}>
+                <div className="map-stack-popup__body">
+                  <div className="map-stack-popup__name">{m.description}</div>
+                  <div className="map-stack-popup__meta">{stackMemberMeta(m)}</div>
+                </div>
                 {onSelectDevice && (
-                  <button type="button" className="btn" style={{ marginLeft: 4, padding: "2px 6px", fontSize: 11 }} onClick={() => onSelectDevice(m.id)}>
+                  <button type="button" className="btn btn--primary" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => onSelectDevice(m.id)}>
                     Detalhe
                   </button>
                 )}
@@ -801,8 +876,9 @@ function ClusterCellMarkers({
           );
         }
         if (isSpider && spider) {
+          const radius = spiderRadiusForCount(spider.members.length);
           return spider.members.map((m, i) => {
-            const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
+            const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, radius * spider.phase);
             return (
               <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, iconStyles, highlightedId)}>
                 <Popup>
@@ -834,13 +910,7 @@ function ClusterCellMarkers({
             }}
           >
             <Popup>
-              <strong>{grp.length} no mesmo local</strong>
-              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>Clique no pin para expandir.</p>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-                {grp.map((m) => (
-                  <li key={m.id}>{m.description}</li>
-                ))}
-              </ul>
+              <StackMembersPopup members={grp} onSelectDevice={onSelectDevice} />
             </Popup>
           </Marker>
         );
@@ -954,6 +1024,7 @@ function ScatterStackMarker({
   colors,
   iconStyles,
   highlightedId,
+  onSelectDevice,
 }: {
   sk: string;
   grp: MapPoint[];
@@ -965,6 +1036,7 @@ function ScatterStackMarker({
   colors: MapColors;
   iconStyles: MapIconStyles;
   highlightedId?: string | string[] | null;
+  onSelectDevice?: (id: string) => void;
 }) {
   const map = useMap();
   const [clat, clng] = centroid(grp);
@@ -991,13 +1063,7 @@ function ScatterStackMarker({
       }}
     >
       <Popup>
-        <strong>{grp.length} no mesmo local</strong>
-        <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0" }}>Clique no pin para aproximar e expandir.</p>
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-          {grp.map((m) => (
-            <li key={m.id}>{m.description}</li>
-          ))}
-        </ul>
+        <StackMembersPopup members={grp} onSelectDevice={onSelectDevice} hint="Clique num «Detalhe» ou no pin para aproximar e separar." />
       </Popup>
     </Marker>
   );
@@ -1059,8 +1125,9 @@ function ScatterMarkersLayer({
         }
 
         if (isSpider && spider) {
+          const radius = spiderRadiusForCount(spider.members.length);
           return spider.members.map((m, i) => {
-            const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, SPIDER_RADIUS_M * spider.phase);
+            const [plat, plng] = ringOffsetLatLng(spider.center[0], spider.center[1], i, spider.members.length, radius * spider.phase);
             return (
               <Marker key={`${sk}-${m.id}`} position={[plat, plng]} {...mapMarkerProps(m, displayMode, colors, iconStyles, highlightedId)}>
                 <Popup>
@@ -1085,6 +1152,7 @@ function ScatterMarkersLayer({
             colors={colors}
             iconStyles={iconStyles}
             highlightedId={highlightedId}
+            onSelectDevice={onSelectDevice}
           />
         );
       })}
@@ -1270,6 +1338,35 @@ function UserLocationMarker({ location }: { location: MapLatLng | null | undefin
   );
 }
 
+function locationSearchIcon(): L.DivIcon {
+  const key = "loc-search-pin";
+  const cached = iconCache.get(key);
+  if (cached) return cached;
+  const html = `<div style="width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)"></div>`;
+  const icon = L.divIcon({
+    className: "map-locate-pin-wrap",
+    html,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+  iconCache.set(key, icon);
+  return icon;
+}
+
+function LocationSearchMarker({ pin }: { pin: { lat: number; lng: number; label?: string } | null | undefined }) {
+  if (!pin || !Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) return null;
+  return (
+    <Marker position={[pin.lat, pin.lng]} icon={locationSearchIcon()} zIndexOffset={2100}>
+      <Popup>
+        <strong>{pin.label?.trim() || "Localização"}</strong>
+        <div className="mono" style={{ fontSize: 12 }}>
+          {pin.lat.toFixed(6)}, {pin.lng.toFixed(6)}
+        </div>
+      </Popup>
+    </Marker>
+  );
+}
+
 export function EquipmentMap({
   points,
   displayMode,
@@ -1289,6 +1386,7 @@ export function EquipmentMap({
   mapHeight = 480,
   highlightedId = null,
   userLocation = null,
+  locationPin = null,
   placeMode = null,
   draftPath = [],
   onMapClick,
@@ -1323,6 +1421,8 @@ export function EquipmentMap({
   highlightedId?: string | string[] | null;
   /** Posição GPS do técnico (marcador em tempo real). */
   userLocation?: MapLatLng | null;
+  /** Resultado de pesquisa de endereço / coordenadas / URL do Maps. */
+  locationPin?: { lat: number; lng: number; label?: string } | null;
   /** Modo de adicionar / editar no mapa (cursor + clique). */
   placeMode?: MapPlaceMode;
   /** Trajeto em construção ou edição do cabo. */
@@ -1444,6 +1544,7 @@ export function EquipmentMap({
           onDragEnd={onMapClick}
         />
         <UserLocationMarker location={userLocation} />
+        <LocationSearchMarker pin={locationPin} />
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView

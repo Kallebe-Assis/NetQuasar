@@ -164,7 +164,14 @@ Substitui `quasar` / `netquasar` se alteraste `POSTGRES_USER` / `POSTGRES_DB`.
 
 ## Redis
 
-O serviço `redis` sobe na mesma rede para uso futuro (cache / realtime). O processo `netquasar` atual pode ainda não ligar ao Redis; isso não impede o arranque.
+O serviço `redis` sobe na mesma rede Docker. O Compose define
+`NETQUASAR_REDIS_URL=redis://redis:6379/0` no serviço `netquasar` para:
+
+- broker WebSocket (`GET /realtime/ws`)
+- cache curto do dashboard
+
+Sem Redis o processo arranca na mesma (WS em memória local; cache do dashboard desactivado).
+Não é necessário configurar Redis manualmente no `.env` quando se usa o Compose completo.
 
 ## Proxmox
 

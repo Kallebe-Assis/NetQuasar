@@ -214,3 +214,13 @@ func OperStatusLabel(v int) string {
 		return strconv.Itoa(v)
 	}
 }
+
+// HasKnownOperStatus indica se ifOperStatus veio no walk (1–7). 0 = coluna em falta / walk parcial.
+func HasKnownOperStatus(v int) bool {
+	return v >= 1 && v <= 7
+}
+
+// IsOperUp ifOperStatus == up(1).
+func IsOperUp(v int) bool {
+	return v == 1
+}

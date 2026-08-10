@@ -12,8 +12,8 @@ import { PageCountPill } from "../components/PageCountPill";
 import { PopLocationPicker } from "../components/PopLocationPicker";
 
 const UF_OPTIONS = [
-  "AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG",
-  "PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO",
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
 ];
 
 type Locality = {
@@ -32,6 +32,17 @@ type Locality = {
   pop_description?: string | null;
 };
 
+type PopRow = {
+  id: string;
+  description: string;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  locality_id?: string | null;
+  locality_name?: string | null;
+  device_count?: number;
+};
+
 type SharedVLAN = { vlan: string; localities: string[] };
 
 type LocForm = {
@@ -45,7 +56,17 @@ type LocForm = {
   vlans: string[];
 };
 
-const emptyForm = (): LocForm => ({
+type PopForm = {
+  description: string;
+  address: string;
+  lat: string;
+  lon: string;
+  localityId: string; // "" = sem localidade
+};
+
+type Tab = "localidades" | "pops";
+
+const emptyLocForm = (): LocForm => ({
   name: "",
   uf: "",
   address: "",
@@ -56,6 +77,14 @@ const emptyForm = (): LocForm => ({
   vlans: [],
 });
 
+const emptyPopForm = (): PopForm => ({
+  description: "",
+  address: "",
+  lat: "",
+  lon: "",
+  localityId: "",
+});
+
 function parseCoord(v: string): number | null {
   const s = String(v ?? "").trim().replace(",", ".");
   if (!s) return null;
@@ -63,16 +92,14 @@ function parseCoord(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function formToPayload(f: LocForm, confirmShared = false) {
-  const latitude = parseCoord(f.lat);
-  const longitude = parseCoord(f.lon);
+function locFormToPayload(f: LocForm, confirmShared = false) {
   return {
     name: f.name.trim(),
     uf: f.uf.trim() || null,
     region_code: f.uf.trim() || null,
     address: f.address.trim() || null,
-    latitude,
-    longitude,
+    latitude: parseCoord(f.lat),
+    longitude: parseCoord(f.lon),
     create_pop: f.createPop,
     pop_name: f.popName.trim() || null,
     vlans: f.vlans,
@@ -80,10 +107,22 @@ function formToPayload(f: LocForm, confirmShared = false) {
   };
 }
 
+function popFormToPayload(f: PopForm) {
+  return {
+    description: f.description.trim(),
+    address: f.address.trim() || null,
+    latitude: parseCoord(f.lat),
+    longitude: parseCoord(f.lon),
+    locality_id: f.localityId.trim() || null,
+  };
+}
+
 export function PopsPage() {
   const canMutate = isAdminUser() || can("pops.manage") || can("commercial.manage");
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
+  const [tab, setTab] = useState<Tab>("localidades");
+  const [q, setQ] = useState("");
 
   const list = useQuery({
     queryKey: queryKeys.commercialLocalities,
@@ -97,50 +136,53 @@ export function PopsPage() {
     ),
   });
 
+  const popsList = useQuery({
+    queryKey: queryKeys.pops,
+    queryFn: wrapPageCachedQueryFn(queryKeys.pops, () =>
+      apiFetch<{ pops: PopRow[] }>("/api/v1/pops"),
+    ),
+    ...pageCachedQueryOptions<{ pops: PopRow[] }>(queryKeys.pops, PAGE_DATA_STALE_MS, PAGE_DATA_GC_MS),
+  });
+
   const bngVlans = useQuery({
     queryKey: ["bng-collected-vlans"],
     queryFn: () => apiFetch<{ vlans: string[] }>("/api/v1/commercial/bng-vlans"),
     staleTime: 60_000,
   });
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [edit, setEdit] = useState<Locality | null>(null);
-  const [form, setForm] = useState<LocForm>(emptyForm());
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [createLocOpen, setCreateLocOpen] = useState(false);
+  const [editLoc, setEditLoc] = useState<Locality | null>(null);
+  const [locForm, setLocForm] = useState<LocForm>(emptyLocForm());
+  const [deleteLocId, setDeleteLocId] = useState<string | null>(null);
   const [sharedWarn, setSharedWarn] = useState<{ shared: SharedVLAN[]; pending: "create" | "edit" } | null>(null);
-  const [q, setQ] = useState("");
 
-  const rows = useMemo(() => {
+  const [createPopOpen, setCreatePopOpen] = useState(false);
+  const [editPop, setEditPop] = useState<PopRow | null>(null);
+  const [popForm, setPopForm] = useState<PopForm>(emptyPopForm());
+  const [deletePopId, setDeletePopId] = useState<string | null>(null);
+
+  const locRows = useMemo(() => {
     const all = list.data?.localities ?? [];
     const needle = q.trim().toLowerCase();
-    if (!needle) return all;
+    if (!needle || tab !== "localidades") return all;
     return all.filter((l) => {
-      const blob = [l.name, l.uf, l.address, ...(l.vlans ?? []), l.pop_description]
+      const blob = [l.name, l.uf, l.address, ...(l.vlans ?? []), ...(l.pops ?? []).map((p) => p.description)]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return blob.includes(needle);
     });
-  }, [list.data, q]);
+  }, [list.data, q, tab]);
 
-  const openCreate = () => {
-    setForm(emptyForm());
-    setCreateOpen(true);
-  };
-
-  const openEdit = (l: Locality) => {
-    setEdit(l);
-    setForm({
-      name: l.name,
-      uf: l.uf || l.region_code || "",
-      address: l.address || "",
-      lat: l.latitude != null ? String(l.latitude) : "",
-      lon: l.longitude != null ? String(l.longitude) : "",
-      createPop: false,
-      popName: "",
-      vlans: [...(l.vlans ?? [])],
+  const popRows = useMemo(() => {
+    const all = popsList.data?.pops ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle || tab !== "pops") return all;
+    return all.filter((p) => {
+      const blob = [p.description, p.address, p.locality_name].filter(Boolean).join(" ").toLowerCase();
+      return blob.includes(needle);
     });
-  };
+  }, [popsList.data, q, tab]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: queryKeys.commercialLocalities });
@@ -158,17 +200,52 @@ export function PopsPage() {
     return false;
   };
 
-  const create = useMutation({
+  const openCreateLoc = () => {
+    setLocForm(emptyLocForm());
+    setCreateLocOpen(true);
+  };
+
+  const openEditLoc = (l: Locality) => {
+    setEditLoc(l);
+    setLocForm({
+      name: l.name,
+      uf: l.uf || l.region_code || "",
+      address: l.address || "",
+      lat: l.latitude != null ? String(l.latitude) : "",
+      lon: l.longitude != null ? String(l.longitude) : "",
+      createPop: false,
+      popName: "",
+      vlans: [...(l.vlans ?? [])],
+    });
+  };
+
+  const openCreatePop = () => {
+    setPopForm(emptyPopForm());
+    setCreatePopOpen(true);
+  };
+
+  const openEditPop = (p: PopRow) => {
+    setEditPop(p);
+    setPopForm({
+      description: p.description,
+      address: p.address || "",
+      lat: p.latitude != null ? String(p.latitude) : "",
+      lon: p.longitude != null ? String(p.longitude) : "",
+      localityId: p.locality_id ?? "",
+    });
+  };
+
+  const createLoc = useMutation({
     mutationFn: (confirmShared: boolean) =>
       apiFetch<{ id: string }>("/api/v1/commercial/localities", {
         method: "POST",
-        json: formToPayload(form, confirmShared),
+        json: locFormToPayload(locForm, confirmShared),
       }),
     onSuccess: () => {
       invalidate();
-      setCreateOpen(false);
+      setCreateLocOpen(false);
       setSharedWarn(null);
-      setForm(emptyForm());
+      setLocForm(emptyLocForm());
       toastOk(pushToast, "Localidade criada.");
     },
     onError: (err) => {
@@ -176,15 +253,15 @@ export function PopsPage() {
     },
   });
 
-  const patch = useMutation({
+  const patchLoc = useMutation({
     mutationFn: (confirmShared: boolean) =>
-      apiFetch(`/api/v1/commercial/localities/${edit!.id}`, {
+      apiFetch(`/api/v1/commercial/localities/${editLoc!.id}`, {
         method: "PATCH",
-        json: formToPayload(form, confirmShared),
+        json: locFormToPayload(locForm, confirmShared),
       }),
     onSuccess: () => {
       invalidate();
-      setEdit(null);
+      setEditLoc(null);
       setSharedWarn(null);
       toastOk(pushToast, "Localidade actualizada.");
     },
@@ -193,33 +270,87 @@ export function PopsPage() {
     },
   });
 
-  const del = useMutation({
+  const delLoc = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/commercial/localities/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       invalidate();
-      setDeleteId(null);
+      setDeleteLocId(null);
       toastOk(pushToast, "Localidade eliminada.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao eliminar localidade."),
   });
 
+  const createPop = useMutation({
+    mutationFn: () => apiFetch<{ id: string }>("/api/v1/pops", { method: "POST", json: popFormToPayload(popForm) }),
+    onSuccess: () => {
+      invalidate();
+      setCreatePopOpen(false);
+      setPopForm(emptyPopForm());
+      toastOk(pushToast, "POP criado.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao criar POP."),
+  });
+
+  const patchPop = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/v1/pops/${editPop!.id}`, { method: "PATCH", json: popFormToPayload(popForm) }),
+    onSuccess: () => {
+      invalidate();
+      setEditPop(null);
+      toastOk(pushToast, "POP actualizado.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao actualizar POP."),
+  });
+
+  const unlinkPop = useMutation({
+    mutationFn: (popId: string) =>
+      apiFetch(`/api/v1/pops/${popId}`, { method: "PATCH", json: { locality_id: null } }),
+    onSuccess: (_data, popId) => {
+      invalidate();
+      setEditLoc((prev) =>
+        prev
+          ? {
+              ...prev,
+              pops: (prev.pops ?? []).filter((p) => p.id !== popId),
+              pop_id: prev.pop_id === popId ? null : prev.pop_id,
+              pop_description: prev.pop_id === popId ? null : prev.pop_description,
+            }
+          : null,
+      );
+      toastOk(pushToast, "POP desvinculado da localidade.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao desvincular POP."),
+  });
+
+  const delPop = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/pops/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidate();
+      setDeletePopId(null);
+      toastOk(pushToast, "POP eliminado.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao eliminar POP."),
+  });
+
   const toggleVlan = (vlan: string) => {
-    setForm((f) => ({
+    setLocForm((f) => ({
       ...f,
       vlans: f.vlans.includes(vlan) ? f.vlans.filter((v) => v !== vlan) : [...f.vlans, vlan].sort(),
     }));
   };
 
-  const formModal = (mode: "create" | "edit") => {
-    const open = mode === "create" ? createOpen : !!edit;
+  const localityOptions = list.data?.localities ?? [];
+
+  const locModal = (mode: "create" | "edit") => {
+    const open = mode === "create" ? createLocOpen : !!editLoc;
     if (!open) return null;
     const title = mode === "create" ? "Nova localidade" : "Editar localidade";
-    const busy = create.isPending || patch.isPending;
+    const busy = createLoc.isPending || patchLoc.isPending;
     const collected = bngVlans.data?.vlans ?? [];
-    const hasPop = mode === "edit" && (edit?.pops?.length ?? 0) > 0;
+    const linkedPops = mode === "edit" ? editLoc?.pops ?? [] : [];
 
     return (
-      <div className="modal-backdrop" role="presentation" onMouseDown={() => (mode === "create" ? setCreateOpen(false) : setEdit(null))}>
+      <div className="modal-backdrop" role="presentation" onMouseDown={() => (mode === "create" ? setCreateLocOpen(false) : setEditLoc(null))}>
         <div
           className="modal"
           role="dialog"
@@ -230,59 +361,85 @@ export function PopsPage() {
           <h3 style={{ marginTop: 0 }}>{title}</h3>
           <div className="field">
             <label>Nome</label>
-            <input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            <input className="input" value={locForm.name} onChange={(e) => setLocForm((f) => ({ ...f, name: e.target.value }))} />
           </div>
           <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
             <div className="field" style={{ flex: "1 1 120px" }}>
               <label>UF</label>
-              <select className="input" value={form.uf} onChange={(e) => setForm((f) => ({ ...f, uf: e.target.value }))}>
+              <select className="input" value={locForm.uf} onChange={(e) => setLocForm((f) => ({ ...f, uf: e.target.value }))}>
                 <option value="">—</option>
                 {UF_OPTIONS.map((uf) => (
-                  <option key={uf} value={uf}>
-                    {uf}
-                  </option>
+                  <option key={uf} value={uf}>{uf}</option>
                 ))}
               </select>
             </div>
             <div className="field" style={{ flex: "3 1 240px" }}>
               <label>Endereço</label>
-              <input className="input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+              <input className="input" value={locForm.address} onChange={(e) => setLocForm((f) => ({ ...f, address: e.target.value }))} />
             </div>
           </div>
           <div className="field">
             <label>Coordenadas</label>
             <div className="row" style={{ gap: 8 }}>
-              <input className="input mono" placeholder="Latitude" value={form.lat} onChange={(e) => setForm((f) => ({ ...f, lat: e.target.value }))} />
-              <input className="input mono" placeholder="Longitude" value={form.lon} onChange={(e) => setForm((f) => ({ ...f, lon: e.target.value }))} />
+              <input className="input mono" placeholder="Latitude" value={locForm.lat} onChange={(e) => setLocForm((f) => ({ ...f, lat: e.target.value }))} />
+              <input className="input mono" placeholder="Longitude" value={locForm.lon} onChange={(e) => setLocForm((f) => ({ ...f, lon: e.target.value }))} />
             </div>
             <div style={{ marginTop: 8 }}>
               <PopLocationPicker
-                latitude={parseCoord(form.lat)}
-                longitude={parseCoord(form.lon)}
-                onChange={(la, lo) => setForm((f) => ({ ...f, lat: String(la), lon: String(lo) }))}
+                latitude={parseCoord(locForm.lat)}
+                longitude={parseCoord(locForm.lon)}
+                onChange={(la, lo) => setLocForm((f) => ({ ...f, lat: String(la), lon: String(lo) }))}
               />
             </div>
           </div>
+
+          {linkedPops.length > 0 && (
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>POPs vinculados ({linkedPops.length})</label>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {linkedPops.map((p) => (
+                  <li key={p.id} style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span>{p.description}</span>
+                    <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+                      {p.device_count} equip.
+                    </span>
+                    {canMutate && (
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        disabled={unlinkPop.isPending}
+                        onClick={() => unlinkPop.mutate(p.id)}
+                      >
+                        Desvincular
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 0" }}>
+                Desvincular mantém o POP (aba POPs) sem localidade. Pode voltar a associá-lo depois.
+              </p>
+            </div>
+          )}
 
           <div className="field" style={{ marginTop: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
                 type="checkbox"
-                checked={hasPop || form.createPop}
-                disabled={hasPop}
-                onChange={(e) => setForm((f) => ({ ...f, createPop: e.target.checked }))}
+                checked={locForm.createPop}
+                onChange={(e) => setLocForm((f) => ({ ...f, createPop: e.target.checked }))}
               />
-              {hasPop
-                ? `POP associado: ${edit?.pops?.map((p) => p.description).join(", ")}`
+              {mode === "edit" && linkedPops.length > 0
+                ? "Criar outro POP nesta localidade"
                 : "Criar POP para esta localidade (opcional)"}
             </label>
-            {!hasPop && form.createPop && (
+            {locForm.createPop && (
               <input
                 className="input"
                 style={{ marginTop: 6 }}
                 placeholder="Nome do POP (predefinido = nome da localidade)"
-                value={form.popName}
-                onChange={(e) => setForm((f) => ({ ...f, popName: e.target.value }))}
+                value={locForm.popName}
+                onChange={(e) => setLocForm((f) => ({ ...f, popName: e.target.value }))}
               />
             )}
           </div>
@@ -290,7 +447,7 @@ export function PopsPage() {
           <div className="field">
             <label>VLANs do BNG</label>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>
-              Seleccione VLANs colectadas no BNG para atrelar a esta localidade. A mesma VLAN pode existir em várias localidades (com aviso).
+              Seleccione VLANs colectadas no BNG para atrelar a esta localidade.
             </p>
             {collected.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -299,7 +456,7 @@ export function PopsPage() {
             ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 160, overflow: "auto" }}>
                 {collected.map((v) => {
-                  const on = form.vlans.includes(v);
+                  const on = locForm.vlans.includes(v);
                   return (
                     <button
                       key={v}
@@ -313,22 +470,98 @@ export function PopsPage() {
                 })}
               </div>
             )}
-            {form.vlans.length > 0 && (
+            {locForm.vlans.length > 0 && (
               <p style={{ fontSize: 12, marginTop: 8 }}>
-                Seleccionadas: <span className="mono">{form.vlans.join(", ")}</span>
+                Seleccionadas: <span className="mono">{locForm.vlans.join(", ")}</span>
               </p>
             )}
           </div>
 
           <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => (mode === "create" ? setCreateOpen(false) : setEdit(null))}>
+            <button type="button" className="btn" onClick={() => (mode === "create" ? setCreateLocOpen(false) : setEditLoc(null))}>
               Cancelar
             </button>
             <button
               type="button"
               className="btn btn--primary"
-              disabled={!form.name.trim() || busy}
-              onClick={() => (mode === "create" ? create.mutate(false) : patch.mutate(false))}
+              disabled={!locForm.name.trim() || busy}
+              onClick={() => (mode === "create" ? createLoc.mutate(false) : patchLoc.mutate(false))}
+            >
+              {busy ? "A guardar…" : "Guardar"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const popModal = (mode: "create" | "edit") => {
+    const open = mode === "create" ? createPopOpen : !!editPop;
+    if (!open) return null;
+    const title = mode === "create" ? "Novo POP" : "Editar POP";
+    const busy = createPop.isPending || patchPop.isPending;
+
+    return (
+      <div className="modal-backdrop" role="presentation" onMouseDown={() => (mode === "create" ? setCreatePopOpen(false) : setEditPop(null))}>
+        <div
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          style={{ maxWidth: 640, width: "min(96vw, 640px)", maxHeight: "92vh", overflow: "auto" }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <h3 style={{ marginTop: 0 }}>{title}</h3>
+          <div className="field">
+            <label>Nome / descrição</label>
+            <input
+              className="input"
+              value={popForm.description}
+              onChange={(e) => setPopForm((f) => ({ ...f, description: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label>Localidade</label>
+            <select
+              className="input"
+              value={popForm.localityId}
+              onChange={(e) => setPopForm((f) => ({ ...f, localityId: e.target.value }))}
+            >
+              <option value="">— Sem localidade —</option>
+              {localityOptions.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 0" }}>
+              Pode deixar sem localidade ou mudar a associação a qualquer momento.
+            </p>
+          </div>
+          <div className="field">
+            <label>Endereço</label>
+            <input className="input" value={popForm.address} onChange={(e) => setPopForm((f) => ({ ...f, address: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>Coordenadas</label>
+            <div className="row" style={{ gap: 8 }}>
+              <input className="input mono" placeholder="Latitude" value={popForm.lat} onChange={(e) => setPopForm((f) => ({ ...f, lat: e.target.value }))} />
+              <input className="input mono" placeholder="Longitude" value={popForm.lon} onChange={(e) => setPopForm((f) => ({ ...f, lon: e.target.value }))} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <PopLocationPicker
+                latitude={parseCoord(popForm.lat)}
+                longitude={parseCoord(popForm.lon)}
+                onChange={(la, lo) => setPopForm((f) => ({ ...f, lat: String(la), lon: String(lo) }))}
+              />
+            </div>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button type="button" className="btn" onClick={() => (mode === "create" ? setCreatePopOpen(false) : setEditPop(null))}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!popForm.description.trim() || busy}
+              onClick={() => (mode === "create" ? createPop.mutate() : patchPop.mutate())}
             >
               {busy ? "A guardar…" : "Guardar"}
             </button>
@@ -344,100 +577,203 @@ export function PopsPage() {
         <div>
           <h1 style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
             Localidades
-            <PageCountPill label="Localidades" count={rows.length} />
+            <PageCountPill
+              label={tab === "localidades" ? "Localidades" : "POPs"}
+              count={tab === "localidades" ? locRows.length : popRows.length}
+            />
           </h1>
           <p style={{ color: "var(--muted)", fontSize: 13, margin: "6px 0 0" }}>
-            Cadastro unificado com endereço, UF, coordenadas, POP opcional e VLANs do BNG. Contagem de clientes vem dos registos mensais.
+            Cada localidade pode ter 0, 1 ou vários POPs. POPs podem existir sem localidade.
           </p>
         </div>
         {canMutate && (
-          <button type="button" className="btn btn--primary" onClick={openCreate}>
-            Nova localidade
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => (tab === "localidades" ? openCreateLoc() : openCreatePop())}
+          >
+            {tab === "localidades" ? "Nova localidade" : "Novo POP"}
           </button>
         )}
+      </div>
+
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <button type="button" className={tab === "localidades" ? "active" : ""} onClick={() => { setTab("localidades"); setQ(""); }}>
+          Localidades
+        </button>
+        <button type="button" className={tab === "pops" ? "active" : ""} onClick={() => { setTab("pops"); setQ(""); }}>
+          POPs
+        </button>
       </div>
 
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
         <input
           className="input"
-          placeholder="Pesquisar por nome, UF, VLAN, POP…"
+          placeholder={tab === "localidades" ? "Pesquisar por nome, UF, VLAN, POP…" : "Pesquisar POP ou localidade…"}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
 
-      {list.isLoading ? (
-        <p style={{ color: "var(--muted)" }}>A carregar…</p>
-      ) : rows.length === 0 ? (
-        <p style={{ color: "var(--muted)" }}>Ainda não há localidades cadastradas.</p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>UF</th>
-                <th>Endereço</th>
-                <th>Coords</th>
-                <th>POP</th>
-                <th>VLANs</th>
-                <th>Clientes</th>
-                <th style={{ width: 80 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.name}</td>
-                  <td className="mono">{l.uf || l.region_code || "—"}</td>
-                  <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{l.address || "—"}</td>
-                  <td className="mono" style={{ fontSize: 11 }}>
-                    {l.latitude != null && l.longitude != null
-                      ? `${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}`
-                      : "—"}
-                  </td>
-                  <td>{l.pop_description || (l.pops?.length ? l.pops.map((p) => p.description).join(", ") : "—")}</td>
-                  <td className="mono" style={{ fontSize: 11 }}>
-                    {(l.vlans ?? []).length ? l.vlans!.join(", ") : "—"}
-                  </td>
-                  <td>
-                    {l.client_count != null ? (
-                      <span title={l.client_month ? `Mês ${l.client_month}` : undefined}>
-                        {l.client_count.toLocaleString("pt-BR")}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td>
-                    {canMutate && (
-                      <ActionMenu
-                        items={[
-                          { id: "edit", label: "Editar", onClick: () => openEdit(l) },
-                          { id: "del", label: "Eliminar", danger: true, onClick: () => setDeleteId(l.id) },
-                        ]}
-                      />
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {tab === "localidades" && (
+        <>
+          {list.isLoading ? (
+            <p style={{ color: "var(--muted)" }}>A carregar…</p>
+          ) : locRows.length === 0 ? (
+            <p style={{ color: "var(--muted)" }}>Ainda não há localidades cadastradas.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>UF</th>
+                    <th>Endereço</th>
+                    <th>Coords</th>
+                    <th>POPs</th>
+                    <th>VLANs</th>
+                    <th>Clientes</th>
+                    <th style={{ width: 80 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {locRows.map((l) => {
+                    const pops = l.pops ?? [];
+                    return (
+                      <tr key={l.id}>
+                        <td>{l.name}</td>
+                        <td className="mono">{l.uf || l.region_code || "—"}</td>
+                        <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{l.address || "—"}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>
+                          {l.latitude != null && l.longitude != null
+                            ? `${l.latitude.toFixed(5)}, ${l.longitude.toFixed(5)}`
+                            : "—"}
+                        </td>
+                        <td>
+                          {pops.length === 0 ? (
+                            <span style={{ color: "var(--muted)" }}>0</span>
+                          ) : (
+                            <span title={pops.map((p) => p.description).join(", ")}>
+                              {pops.length}: {pops.map((p) => p.description).join(", ")}
+                            </span>
+                          )}
+                        </td>
+                        <td className="mono" style={{ fontSize: 11 }}>
+                          {(l.vlans ?? []).length ? l.vlans!.join(", ") : "—"}
+                        </td>
+                        <td>
+                          {l.client_count != null ? (
+                            <span title={l.client_month ? `Mês ${l.client_month}` : undefined}>
+                              {l.client_count.toLocaleString("pt-BR")}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {canMutate && (
+                            <ActionMenu
+                              items={[
+                                { id: "edit", label: "Editar", onClick: () => openEditLoc(l) },
+                                { id: "del", label: "Eliminar", danger: true, onClick: () => setDeleteLocId(l.id) },
+                              ]}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {formModal("create")}
-      {formModal("edit")}
+      {tab === "pops" && (
+        <>
+          {popsList.isLoading ? (
+            <p style={{ color: "var(--muted)" }}>A carregar…</p>
+          ) : popRows.length === 0 ? (
+            <p style={{ color: "var(--muted)" }}>Ainda não há POPs cadastrados.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Localidade</th>
+                    <th>Endereço</th>
+                    <th>Coords</th>
+                    <th>Equipamentos</th>
+                    <th style={{ width: 80 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {popRows.map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.description}</td>
+                      <td>
+                        {p.locality_name ? (
+                          p.locality_name
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>Sem localidade</span>
+                        )}
+                      </td>
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{p.address || "—"}</td>
+                      <td className="mono" style={{ fontSize: 11 }}>
+                        {p.latitude != null && p.longitude != null
+                          ? `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`
+                          : "—"}
+                      </td>
+                      <td>{p.device_count ?? 0}</td>
+                      <td>
+                        {canMutate && (
+                          <ActionMenu
+                            items={[
+                              { id: "edit", label: "Editar", onClick: () => openEditPop(p) },
+                              ...(p.locality_id
+                                ? [{ id: "unlink", label: "Desvincular localidade", onClick: () => unlinkPop.mutate(p.id) }]
+                                : []),
+                              { id: "del", label: "Eliminar", danger: true, onClick: () => setDeletePopId(p.id) },
+                            ]}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {locModal("create")}
+      {locModal("edit")}
+      {popModal("create")}
+      {popModal("edit")}
 
       <ConfirmModal
-        open={!!deleteId}
+        open={!!deleteLocId}
         title="Eliminar localidade"
-        message="Isto remove a localidade e as VLANs associadas. Registos mensais de clientes também serão removidos (CASCADE). POPs associados bloqueiam a exclusão."
+        message="Isto remove a localidade e as VLANs associadas. Registos mensais de clientes também serão removidos (CASCADE). POPs ainda vinculados bloqueiam a exclusão — desvincule-os antes."
         confirmLabel="Eliminar"
         danger
-        busy={del.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={() => deleteId && del.mutate(deleteId)}
+        busy={delLoc.isPending}
+        onCancel={() => setDeleteLocId(null)}
+        onConfirm={() => deleteLocId && delLoc.mutate(deleteLocId)}
+      />
+
+      <ConfirmModal
+        open={!!deletePopId}
+        title="Eliminar POP"
+        message="Equipamentos associados a este POP ficarão sem POP (pop_id). Confirma a eliminação?"
+        confirmLabel="Eliminar"
+        danger
+        busy={delPop.isPending}
+        onCancel={() => setDeletePopId(null)}
+        onConfirm={() => deletePopId && delPop.mutate(deletePopId)}
       />
 
       <ConfirmModal
@@ -451,12 +787,12 @@ export function PopsPage() {
             : ""
         }
         confirmLabel="Confirmar e guardar"
-        busy={create.isPending || patch.isPending}
+        busy={createLoc.isPending || patchLoc.isPending}
         onCancel={() => setSharedWarn(null)}
         onConfirm={() => {
           if (!sharedWarn) return;
-          if (sharedWarn.pending === "create") create.mutate(true);
-          else patch.mutate(true);
+          if (sharedWarn.pending === "create") createLoc.mutate(true);
+          else patchLoc.mutate(true);
         }}
       />
     </div>

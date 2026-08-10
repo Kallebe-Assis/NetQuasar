@@ -17,8 +17,14 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   interface_down_transition: "interface",
   mikrotik_sfp_tx: "optical",
   mikrotik_sfp_rx: "optical",
+  mikrotik_sfp_temp: "optical",
   olt_onu_drop: "olt",
   olt_onu_rise: "olt",
+  olt_onu_rx: "olt",
+  olt_onu_tx: "olt",
+  olt_pon_tx: "olt",
+  olt_pon_rx: "olt",
+  olt_pon_temp: "olt",
   bng_subscriber_drop: "equipment",
   mikrotik_pppoe_drop: "interface",
   pon_down: "olt",
@@ -62,12 +68,26 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "Potência TX - SFP";
     case "mikrotik_sfp_rx":
       return "Potência RX - SFP";
+    case "mikrotik_sfp_temp":
+      return "Temperatura SFP";
     case "telemetry_threshold":
       return "Limiar de métrica";
     case "olt_onu_drop":
       return "Queda de ONUs";
     case "olt_onu_rise":
       return "Subida de ONUs";
+    case "olt_onu_rx":
+      return "ONU RX óptico";
+    case "olt_onu_tx":
+      return "ONU TX óptico";
+    case "olt_pon_tx":
+      return "PON TX óptico";
+    case "olt_pon_rx":
+      return "PON RX óptico";
+    case "olt_pon_temp":
+      return "Temperatura da PON";
+    case "pon_down":
+      return "PON DOWN";
     case "bng_subscriber_drop":
       return "Queda de logins BNG";
     case "mikrotik_pppoe_drop":
@@ -176,9 +196,17 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "interface_down_transition", label: "Interface mudou para DOWN" },
   { value: "mikrotik_sfp_tx", label: "SFP — TX" },
   { value: "mikrotik_sfp_rx", label: "SFP — RX" },
+  { value: "mikrotik_sfp_temp", label: "SFP — temperatura" },
   { value: "olt_onu_drop", label: "OLT — queda de ONUs" },
-  { value: "bng_subscriber_drop", label: "BNG — queda de logins" },
   { value: "olt_onu_rise", label: "OLT — subida de ONUs" },
+  { value: "olt_onu_rx", label: "OLT — ONU RX" },
+  { value: "olt_onu_tx", label: "OLT — ONU TX" },
+  { value: "olt_pon_tx", label: "OLT — PON TX" },
+  { value: "olt_pon_rx", label: "OLT — PON RX" },
+  { value: "olt_pon_temp", label: "OLT — temperatura PON" },
+  { value: "pon_down", label: "OLT — PON DOWN" },
+  { value: "bng_subscriber_drop", label: "BNG — queda de logins" },
+  { value: "mikrotik_pppoe_drop", label: "MikroTik — queda PPPoE" },
 ];
 
 export const ALERT_SEVERITY_FILTER_OPTIONS: { value: string; label: string }[] = [

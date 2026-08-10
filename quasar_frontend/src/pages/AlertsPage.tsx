@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, ShieldAlert, SquareStack } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { flushSync } from "react-dom";
 import { apiFetch } from "../lib/api";
@@ -116,9 +117,12 @@ export function AlertsPage() {
   const { push: pushToast } = useAppToast();
   const [tab, setTab] = useState<"active" | "hist">("active");
   const [ignoredOpen, setIgnoredOpen] = useState(false);
+  const [ignoredSearch, setIgnoredSearch] = useState("");
+  const [ignoredDevice, setIgnoredDevice] = useState("");
+  const [confirmVerifyAll, setConfirmVerifyAll] = useState(false);
+  const [reactivateId, setReactivateId] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [agoTick, setAgoTick] = useState(0);
-  const [refreshTick, setRefreshTick] = useState(0);
   const [sev, setSev] = useState("");
   const [typ, setTyp] = useState("");
   const [limitActive] = useState("5000");
@@ -127,6 +131,11 @@ export function AlertsPage() {
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
   const [searchActive, setSearchActive] = useState("");
+  /** Agrupa a lista por tipo de alerta (offline, latência, SFP…). Ligado por defeito. */
+  const [groupByType, setGroupByType] = useState(true);
+  const [sevMenuOpen, setSevMenuOpen] = useState(false);
+  const [typMenuOpen, setTypMenuOpen] = useState(false);
+  const toolbarFiltersRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (tab !== "active") return;
@@ -135,9 +144,17 @@ export function AlertsPage() {
   }, [tab]);
 
   useEffect(() => {
-    const id = window.setInterval(() => setRefreshTick((n) => n + 1), Math.max(ALERTS_ACTIVE_REFRESH_MS, 15000));
-    return () => window.clearInterval(id);
-  }, []);
+    if (!sevMenuOpen && !typMenuOpen) return;
+    const onDoc = (ev: MouseEvent) => {
+      const el = toolbarFiltersRef.current;
+      if (el && !el.contains(ev.target as Node)) {
+        setSevMenuOpen(false);
+        setTypMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [sevMenuOpen, typMenuOpen]);
 
   const monState = useQuery({
     queryKey: queryKeys.monState,
@@ -170,27 +187,6 @@ export function AlertsPage() {
     refetchOnWindowFocus: true,
     refetchInterval: tab === "active" ? ALERTS_ACTIVE_REFRESH_MS : false,
     refetchIntervalInBackground: tab === "active",
-  });
-
-  const histRange = useMemo(() => {
-    const to = Date.now();
-    const from = to - 24 * 3600 * 1000;
-    return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
-  }, [refreshTick]);
-
-  const resolved24h = useQuery({
-    queryKey: ["alerts-resolved-window", histRange.from, histRange.to],
-    queryFn: () => {
-      const p = new URLSearchParams({
-        limit: "400",
-        from: histRange.from,
-        to: histRange.to,
-      });
-      return apiFetch<{ events: HistoryEvent[] }>(`/api/v1/alerts/history?${p}`);
-    },
-    staleTime: Math.min(ALERTS_ACTIVE_REFRESH_MS / 2, 5_000),
-    enabled: tab === "active",
-    refetchInterval: tab === "active" ? ALERTS_ACTIVE_REFRESH_MS : false,
   });
 
   const hist = useQuery({
@@ -228,7 +224,6 @@ export function AlertsPage() {
       }>("/api/v1/alerts/verify-all", { method: "POST", json: {}, timeoutMs: 15 * 60_000 });
       await active.refetch();
       await incidents.refetch();
-      await resolved24h.refetch();
       return res;
     },
     onSuccess: (res) => {
@@ -309,27 +304,22 @@ export function AlertsPage() {
     });
   }, [rawAlerts, searchActive]);
 
-
-  const stats = useMemo(() => {
-    const openOnly = rawAlerts.filter((a) => !a.closed_at);
-    const crit = openOnly.filter((a) => a.severity === "critical").length;
-    const warn = openOnly.filter((a) => a.severity === "warning").length;
-    const info = openOnly.filter((a) => a.severity === "info").length;
-    const events = resolved24h.data?.events ?? [];
-    const cutoff = Date.now() - 24 * 3600 * 1000;
-    const resolvedN = events.filter((e) => {
-      if (!e.closed_at) return false;
-      const t = new Date(e.closed_at).getTime();
-      return !Number.isNaN(t) && t >= cutoff;
-    }).length;
-    return {
-      active: openOnly.length,
-      critical: crit,
-      warning: warn,
-      info,
-      resolved24h: resolvedN,
-    };
-  }, [rawAlerts, resolved24h.data?.events]);
+  const groupedActive = useMemo(() => {
+    const map = new Map<string, ActiveAlert[]>();
+    for (const a of filteredActive) {
+      const key = String(a.type || "").trim() || "_other";
+      const list = map.get(key);
+      if (list) list.push(a);
+      else map.set(key, [a]);
+    }
+    return [...map.entries()]
+      .map(([type, items]) => ({
+        type,
+        title: alertProblemTitle(type === "_other" ? "" : type),
+        items,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title, "pt"));
+  }, [filteredActive]);
 
 
   const filteredHistory = useMemo(() => {
@@ -351,6 +341,46 @@ export function AlertsPage() {
     });
   }, [hist.data?.events, histSearch]);
 
+  const ignoredRows = ignoredQ.data?.ignored ?? [];
+  const ignoredDeviceOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of ignoredRows) {
+      const label = alertEquipmentPrimary(row.type, row.device_name ?? null, row.message ?? "", row.meta).trim();
+      if (label && label !== "-") names.add(label);
+      else if (row.device_name?.trim()) names.add(row.device_name.trim());
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "pt"));
+  }, [ignoredRows]);
+
+  const filteredIgnored = useMemo(() => {
+    const q = ignoredSearch.trim().toLowerCase();
+    return ignoredRows.filter((row) => {
+      const equip = alertEquipmentPrimary(row.type, row.device_name ?? null, row.message ?? "", row.meta).trim();
+      if (ignoredDevice && equip !== ignoredDevice && (row.device_name ?? "").trim() !== ignoredDevice) {
+        return false;
+      }
+      if (!q) return true;
+      const hay = [
+        row.message ?? "",
+        row.type,
+        row.severity ?? "",
+        row.device_name ?? "",
+        row.ip ?? "",
+        equip,
+        alertProblemTitle(row.type),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [ignoredRows, ignoredSearch, ignoredDevice]);
+
+  function openIgnoredModal() {
+    setIgnoredSearch("");
+    setIgnoredDevice("");
+    setIgnoredOpen(true);
+  }
+
 
   return (
     <div className="alerts-page">
@@ -364,29 +394,6 @@ export function AlertsPage() {
             </p>
           </InfoHint>
         </h1>
-      </div>
-
-      <div className="alerts-stat-grid">
-        <div className="alerts-stat-card alerts-stat-card--active">
-          <span className="alerts-stat-card__lab">Alertas ativos</span>
-          <span className="alerts-stat-card__val">{stats.active}</span>
-        </div>
-        <div className="alerts-stat-card alerts-stat-card--critical">
-          <span className="alerts-stat-card__lab">Crítico</span>
-          <span className="alerts-stat-card__val">{stats.critical}</span>
-        </div>
-        <div className="alerts-stat-card alerts-stat-card--warning">
-          <span className="alerts-stat-card__lab">Atenção</span>
-          <span className="alerts-stat-card__val">{stats.warning}</span>
-        </div>
-        <div className="alerts-stat-card alerts-stat-card--info">
-          <span className="alerts-stat-card__lab">Informação</span>
-          <span className="alerts-stat-card__val">{stats.info}</span>
-        </div>
-        <div className="alerts-stat-card alerts-stat-card--resolved">
-          <span className="alerts-stat-card__lab">Resolvidos (24 h)</span>
-          <span className="alerts-stat-card__val">{resolved24h.isLoading ? "…" : stats.resolved24h}</span>
-        </div>
       </div>
 
       <div className="tabs" style={{ marginBottom: "0.65rem", flexWrap: "wrap" }}>
@@ -437,55 +444,113 @@ export function AlertsPage() {
 
       {tab === "active" && (
         <>
-          <div className="alerts-toolbar">
-            <div className="field alerts-toolbar__search" style={{ margin: 0 }}>
-              <label style={{ fontSize: 11, color: "var(--muted)" }}>Buscar</label>
-              <input
-                className="input"
-                placeholder="Equipamento, IP, tipo de problema…"
-                value={searchActive}
-                onChange={(e) => setSearchActive(e.target.value)}
-              />
+          <div className="alerts-toolbar" ref={toolbarFiltersRef}>
+            <input
+              className="input alerts-toolbar__search"
+              aria-label="Pesquisar alertas"
+              placeholder="Pesquisar equipamento, IP, tipo de problema…"
+              value={searchActive}
+              onChange={(e) => setSearchActive(e.target.value)}
+            />
+            <div className="alerts-toolbar__actions">
+              <button
+                type="button"
+                className="btn btn--icon btn--icon-menu"
+                disabled={verifyAll.isPending}
+                title="Verificar alertas"
+                aria-label="Verificar alertas"
+                onClick={() => setConfirmVerifyAll(true)}
+              >
+                {verifyAll.isPending ? <Loader2 size={18} className="map-refresh-spin" aria-hidden /> : <ShieldAlert size={18} aria-hidden />}
+              </button>
+
+              <div className="alerts-toolbar__menu-wrap">
+                <button
+                  type="button"
+                  className={`btn btn--icon btn--icon-menu${sev ? " btn--filter-active" : ""}${sevMenuOpen ? " btn--primary" : ""}`}
+                  title="Severidade"
+                  aria-label="Filtrar por severidade"
+                  aria-expanded={sevMenuOpen}
+                  onClick={() => {
+                    setSevMenuOpen((o) => !o);
+                    setTypMenuOpen(false);
+                  }}
+                >
+                  <FileExclamationPoint size={18} aria-hidden />
+                </button>
+                {sevMenuOpen ? (
+                  <div className="alerts-toolbar__menu" role="listbox" aria-label="Severidade">
+                    {ALERT_SEVERITY_FILTER_OPTIONS.map((o) => (
+                      <button
+                        key={o.value || "all-sev"}
+                        type="button"
+                        className={`alerts-toolbar__menu-item${sev === o.value ? " is-active" : ""}`}
+                        onClick={() => {
+                          setSev(o.value);
+                          setSevMenuOpen(false);
+                        }}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="alerts-toolbar__menu-wrap">
+                <button
+                  type="button"
+                  className={`btn btn--icon btn--icon-menu${typ ? " btn--filter-active" : ""}${typMenuOpen ? " btn--primary" : ""}`}
+                  title="Tipo"
+                  aria-label="Filtrar por tipo"
+                  aria-expanded={typMenuOpen}
+                  onClick={() => {
+                    setTypMenuOpen((o) => !o);
+                    setSevMenuOpen(false);
+                  }}
+                >
+                  <LayoutGrid size={18} aria-hidden />
+                </button>
+                {typMenuOpen ? (
+                  <div className="alerts-toolbar__menu alerts-toolbar__menu--wide alerts-toolbar__menu--end" role="listbox" aria-label="Tipo">
+                    {ALERT_TYPE_FILTER_OPTIONS.map((o) => (
+                      <button
+                        key={o.value || "all"}
+                        type="button"
+                        className={`alerts-toolbar__menu-item${typ === o.value ? " is-active" : ""}`}
+                        onClick={() => {
+                          setTyp(o.value);
+                          setTypMenuOpen(false);
+                        }}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                className={`btn btn--icon btn--icon-menu${groupByType ? " btn--primary" : ""}`}
+                title={groupByType ? "Categorizar: ligado (lista separada por tipo)" : "Categorizar: desligado (lista unificada)"}
+                aria-label="Categorizar alertas por tipo"
+                aria-pressed={groupByType}
+                onClick={() => setGroupByType((v) => !v)}
+              >
+                <SquareStack size={18} aria-hidden />
+              </button>
+
+              <button
+                type="button"
+                className="btn btn--icon btn--icon-menu"
+                title="Alertas ignorados"
+                aria-label="Alertas ignorados"
+                onClick={openIgnoredModal}
+              >
+                <MessageCircleX size={18} aria-hidden />
+              </button>
             </div>
-            <div className="field" style={{ margin: 0, minWidth: 160 }}>
-              <label style={{ fontSize: 11, color: "var(--muted)" }}>Tipo</label>
-              <select className="input" value={typ} onChange={(e) => setTyp(e.target.value)}>
-                {ALERT_TYPE_FILTER_OPTIONS.map((o) => (
-                  <option key={o.value || "all"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field" style={{ margin: 0, minWidth: 140 }}>
-              <label style={{ fontSize: 11, color: "var(--muted)" }}>Severidade</label>
-              <select className="input" value={sev} onChange={(e) => setSev(e.target.value)}>
-                {ALERT_SEVERITY_FILTER_OPTIONS.map((o) => (
-                  <option key={o.value || "all-sev"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={verifyAll.isPending}
-              title="Recolecta dados ao vivo (ping, interfaces, OLT, BNG…) e reavalia cada alerta activo"
-              onClick={() => verifyAll.mutate()}
-            >
-              {verifyAll.isPending ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Loader2 size={16} className="map-refresh-spin" aria-hidden />
-                  A recolectar e verificar…
-                </span>
-              ) : (
-                "Verificar alertas"
-              )}
-            </button>
-            <button type="button" className="btn" onClick={() => setIgnoredOpen(true)}>
-              Alertas ignorados
-            </button>
           </div>
           {verifyAll.isError && <div className="msg msg--err margin-bottom mb-12">{(verifyAll.error as Error).message}</div>}
           {verifyAll.isPending ? (
@@ -519,7 +584,29 @@ export function AlertsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredActive.map((a) => {
+                      {(groupByType
+                        ? groupedActive.flatMap((g) => [
+                            {
+                              kind: "group" as const,
+                              key: `g-${g.type}`,
+                              title: g.title,
+                              count: g.items.length,
+                            },
+                            ...g.items.map((a) => ({ kind: "row" as const, key: a.id, alert: a })),
+                          ])
+                        : filteredActive.map((a) => ({ kind: "row" as const, key: a.id, alert: a }))
+                      ).map((entry) => {
+                        if (entry.kind === "group") {
+                          return (
+                            <tr key={entry.key} className="alerts-group-row">
+                              <td colSpan={9}>
+                                <span className="alerts-group-row__title">{entry.title}</span>
+                                <span className="alerts-group-row__count">{entry.count}</span>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        const a = entry.alert;
                         const cat = alertCategoryFromType(a.type);
                         const resolved = Boolean(a.closed_at);
                         const timeRef = resolved ? (a.closed_at as string) : a.active_since;
@@ -649,7 +736,8 @@ export function AlertsPage() {
             </button>
           </div>
           <p style={{ color: "var(--muted)", fontSize: 12, marginTop: -4 }}>
-            Sem datas: mostra os eventos mais recentes (limite no servidor). Com datas, o filtro aplica-se no intervalo escolhido.
+            Sem datas: mostra os eventos mais recentes (limite no servidor). Com datas, lista alertas que
+            <strong> abriram ou fecharam</strong> dentro do intervalo (hora local convertida para UTC).
           </p>
 
           <div className="alerts-panel">
@@ -738,6 +826,28 @@ export function AlertsPage() {
             <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
               Estes padrões de alerta estão silenciados na UI e no Telegram até serem reactivados.
             </p>
+            <div className="ignored-alerts-toolbar">
+              <input
+                className="input ignored-alerts-toolbar__search"
+                aria-label="Pesquisar alertas ignorados"
+                placeholder="Pesquisar problema, equipamento, IP…"
+                value={ignoredSearch}
+                onChange={(e) => setIgnoredSearch(e.target.value)}
+              />
+              <select
+                className="input ignored-alerts-toolbar__device"
+                aria-label="Filtrar por equipamento"
+                value={ignoredDevice}
+                onChange={(e) => setIgnoredDevice(e.target.value)}
+              >
+                <option value="">Todos os equipamentos</option>
+                {ignoredDeviceOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
             {ignoredQ.isLoading ? <p>A carregar…</p> : null}
             {ignoredQ.isError ? <div className="msg msg--err">{(ignoredQ.error as Error).message}</div> : null}
             {ignoredQ.data ? (
@@ -755,7 +865,7 @@ export function AlertsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(ignoredQ.data.ignored ?? []).map((row) => (
+                    {filteredIgnored.map((row) => (
                       <tr key={row.id}>
                         <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDateTimePt(row.ignored_at)}</td>
                         <td>
@@ -780,7 +890,7 @@ export function AlertsPage() {
                             type="button"
                             className="btn"
                             disabled={reactivateMut.isPending}
-                            onClick={() => reactivateMut.mutate(row.id)}
+                            onClick={() => setReactivateId(row.id)}
                           >
                             Reactivar
                           </button>
@@ -789,8 +899,10 @@ export function AlertsPage() {
                     ))}
                   </tbody>
                 </table>
-                {(ignoredQ.data.ignored ?? []).length === 0 ? (
-                  <p style={{ padding: 16, color: "var(--muted)" }}>Nenhum alerta ignorado.</p>
+                {filteredIgnored.length === 0 ? (
+                  <p style={{ padding: 16, color: "var(--muted)" }}>
+                    {(ignoredQ.data.ignored ?? []).length === 0 ? "Nenhum alerta ignorado." : "Nenhum resultado com este filtro."}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -799,6 +911,36 @@ export function AlertsPage() {
             document.body,
           )
         : null}
+
+      <ConfirmModal
+        open={confirmVerifyAll}
+        title="Verificar todos os alertas?"
+        message="O sistema vai recolectar dados ao vivo (ping, interfaces, OLT, BNG…) e reavaliar cada alerta activo. Isto pode demorar alguns minutos."
+        confirmLabel="Verificar"
+        cancelLabel="Cancelar"
+        busy={verifyAll.isPending}
+        onCancel={() => setConfirmVerifyAll(false)}
+        onConfirm={() => {
+          setConfirmVerifyAll(false);
+          verifyAll.mutate();
+        }}
+      />
+
+      <ConfirmModal
+        open={reactivateId != null}
+        title="Reactivar alerta ignorado?"
+        message="Este padrão voltará a gerar alertas na lista e notificações Telegram quando a condição ocorrer."
+        confirmLabel="Reactivar"
+        cancelLabel="Cancelar"
+        busy={reactivateMut.isPending}
+        onCancel={() => setReactivateId(null)}
+        onConfirm={() => {
+          if (!reactivateId) return;
+          const id = reactivateId;
+          setReactivateId(null);
+          reactivateMut.mutate(id);
+        }}
+      />
     </div>
   );
 }

@@ -39,13 +39,28 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 		total = cfg.interfaceTimeout(false, false)
 	}
 
-	var prevRaw []byte
-	_ = pool.QueryRow(ctx, `
+	var prevRaw, olderRaw []byte
+	if rows, qerr := pool.Query(ctx, `
 		SELECT interfaces FROM interface_snapshots
 		WHERE device_id = $1
 		ORDER BY collected_at DESC
-		LIMIT 1
-	`, deviceID).Scan(&prevRaw)
+		LIMIT 2
+	`, deviceID); qerr == nil {
+		n := 0
+		for rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				break
+			}
+			if n == 0 {
+				prevRaw = raw
+			} else {
+				olderRaw = raw
+			}
+			n++
+		}
+		rows.Close()
+	}
 
 	isSwitch := workerLikelySwitch(cat)
 	isMk := workerLikelyMikrotik(cat, brand, model, description)
@@ -97,12 +112,14 @@ func CollectInterfaceSnapshotWorker(ctx context.Context, pool *pgxpool.Pool, log
 	interfacealerts.EvaluateAfterSnapshot(ctx, pool, log, interfacealerts.Params{
 		DeviceID:   deviceID,
 		Host:       h,
+		Community:  c,
 		DeviceDesc: description,
 		Category:   cat,
 		Brand:      brand,
 		Model:      model,
 		Source:     "monitor_worker",
 		PrevJSON:   prevRaw,
+		OlderJSON:  olderRaw,
 		CurrJSON:   currRaw,
 	})
 }
