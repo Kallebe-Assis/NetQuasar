@@ -1,11 +1,50 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
+import { Archive, Ban, Check, CirclePlus, KeyRound, Pause, PenLine, Wrench, X } from "lucide-react";
+import { APP_ROUTES } from "../../app/routes";
+import { ActionMenu } from "../../components/ActionMenu";
+import { ConfirmModal } from "../../components/ConfirmModal";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
-import { UF_OPTIONS, VEHICLE_STATUS } from "./fleetUtils";
+import { formatFleetPlate, isValidFleetPlate, UF_OPTIONS, VEHICLE_STATUS } from "./fleetUtils";
+
+function VehicleStatusIcon({ status }: { status: string }) {
+  const label = VEHICLE_STATUS.find((s) => s.value === status)?.label ?? status;
+  const cls =
+    status === "active"
+      ? "fleet-vehicle-status fleet-vehicle-status--ok"
+      : status === "inactive"
+        ? "fleet-vehicle-status fleet-vehicle-status--off"
+        : "fleet-vehicle-status fleet-vehicle-status--other";
+  const icon =
+    status === "active" ? (
+      <Check size={18} strokeWidth={2.5} aria-hidden />
+    ) : status === "inactive" ? (
+      <X size={18} strokeWidth={2.5} aria-hidden />
+    ) : status === "maintenance" ? (
+      <Wrench size={18} aria-hidden />
+    ) : status === "stopped" ? (
+      <Pause size={18} aria-hidden />
+    ) : status === "sold" ? (
+      <Ban size={18} aria-hidden />
+    ) : status === "written_off" ? (
+      <Archive size={18} aria-hidden />
+    ) : status === "rented" ? (
+      <KeyRound size={18} aria-hidden />
+    ) : (
+      <X size={18} aria-hidden />
+    );
+  return (
+    <span className={cls} title={label} aria-label={label}>
+      {icon}
+    </span>
+  );
+}
 
 type Vehicle = {
   id: string;
@@ -64,10 +103,14 @@ function numOrNull(s: string) {
 export function FleetVehiclesPage() {
   const { push } = useAppToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const canMutate = can("fleet.manage") || isAdminUser();
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [editing, setEditing] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<Form>(empty());
+  const [inactivateTarget, setInactivateTarget] = useState<Vehicle | null>(null);
 
   const vehicles = useQuery({
     queryKey: queryKeys.fleetVehicles,
@@ -86,7 +129,7 @@ export function FleetVehiclesPage() {
     mutationFn: async () => {
       const payload = {
         description: form.description.trim(),
-        plate: form.plate.trim(),
+        plate: formatFleetPlate(form.plate),
         year: numOrNull(form.year),
         model: form.model.trim() || null,
         color: form.color.trim() || null,
@@ -106,25 +149,106 @@ export function FleetVehiclesPage() {
       else await apiFetch("/api/v1/fleet/vehicles", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: async () => {
-      toastOk(push, editing ? "Veículo actualizado" : "Veículo criado");
+      toastOk(push, editing ? "Veículo atualizado" : "Veículo criado");
       setEditing(null);
+      setFormOpen(false);
       setForm(empty());
       await qc.invalidateQueries({ queryKey: queryKeys.fleetVehicles });
     },
     onError: (e) => toastErr(push, e),
   });
 
+  const inactivate = useMutation({
+    mutationFn: async (v: Vehicle) => {
+      await apiFetch(`/api/v1/fleet/vehicles/${v.id}`, {
+        method: "PATCH",
+        json: {
+          description: v.description,
+          plate: formatFleetPlate(v.plate),
+          year: v.year,
+          model: v.model,
+          color: v.color,
+          city: v.city,
+          uf: v.uf,
+          primary_fuel_id: v.primary_fuel_id,
+          tank_capacity_liters: v.tank_capacity_liters,
+          expected_km_per_liter: v.expected_km_per_liter,
+          min_km_per_liter: v.min_km_per_liter,
+          max_km_per_liter: v.max_km_per_liter,
+          odometer_current: v.odometer_current,
+          cost_center_id: v.cost_center_id,
+          status: "inactive",
+          notes: v.notes,
+        },
+      });
+    },
+    onSuccess: async () => {
+      toastOk(push, "Veículo inativado");
+      setInactivateTarget(null);
+      await qc.invalidateQueries({ queryKey: queryKeys.fleetVehicles });
+    },
+    onError: (e) => toastErr(push, e),
+  });
+
+  const reactivate = useMutation({
+    mutationFn: async (v: Vehicle) => {
+      await apiFetch(`/api/v1/fleet/vehicles/${v.id}`, {
+        method: "PATCH",
+        json: {
+          description: v.description,
+          plate: formatFleetPlate(v.plate),
+          year: v.year,
+          model: v.model,
+          color: v.color,
+          city: v.city,
+          uf: v.uf,
+          primary_fuel_id: v.primary_fuel_id,
+          tank_capacity_liters: v.tank_capacity_liters,
+          expected_km_per_liter: v.expected_km_per_liter,
+          min_km_per_liter: v.min_km_per_liter,
+          max_km_per_liter: v.max_km_per_liter,
+          odometer_current: v.odometer_current,
+          cost_center_id: v.cost_center_id,
+          status: "active",
+          notes: v.notes,
+        },
+      });
+    },
+    onSuccess: async () => {
+      toastOk(push, "Veículo reativado");
+      await qc.invalidateQueries({ queryKey: queryKeys.fleetVehicles });
+    },
+    onError: (e) => toastErr(push, e),
+  });
+
   const filtered = (vehicles.data?.items ?? []).filter((v) => {
+    if (statusFilter && v.status !== statusFilter) return false;
     const s = q.trim().toLowerCase();
     if (!s) return true;
-    return v.plate.toLowerCase().includes(s) || v.description.toLowerCase().includes(s) || (v.model ?? "").toLowerCase().includes(s);
+    const plate = formatFleetPlate(v.plate).toLowerCase();
+    const plateKey = plate.replace(/-/g, "");
+    const qKey = s.replace(/-/g, "");
+    return plate.includes(s) || plateKey.includes(qKey) || v.description.toLowerCase().includes(s) || (v.model ?? "").toLowerCase().includes(s);
   });
+
+  function openCreate() {
+    setEditing(null);
+    setForm(empty());
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditing(null);
+    setForm(empty());
+  }
 
   function startEdit(v: Vehicle) {
     setEditing(v.id);
+    setFormOpen(true);
     setForm({
       description: v.description,
-      plate: v.plate,
+      plate: formatFleetPlate(v.plate),
       year: v.year != null ? String(v.year) : "",
       model: v.model ?? "",
       color: v.color ?? "",
@@ -144,17 +268,29 @@ export function FleetVehiclesPage() {
 
   return (
     <div className="fleet-page">
-      <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>Frota — Veículos</h1>
-        <input className="input" placeholder="Pesquisar placa/descrição…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 220 }} />
+      <h1>Frota — Veículos</h1>
+      <div className="fleet-vehicles-toolbar">
+        <input className="input" placeholder="Pesquisar placa/descrição…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filtrar status">
+          <option value="">Todos os status</option>
+          {VEHICLE_STATUS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+        {canMutate ? (
+          <button type="button" className="btn btn--icon btn--icon-menu btn--primary" title="Novo veículo" aria-label="Novo veículo" onClick={openCreate}>
+            <CirclePlus size={18} aria-hidden />
+          </button>
+        ) : null}
       </div>
 
-      {canMutate ? (
-        <div className="card" style={{ marginBottom: 12 }}>
+      {formOpen && canMutate ? createPortal(
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeForm}>
+          <div className="modal modal--wide" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
           <h3>{editing ? "Editar veículo" : "Novo veículo"}</h3>
           <div className="fleet-form-grid">
             <label>Descrição*<input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-            <label>Placa*<input className="input" value={form.plate} onChange={(e) => setForm({ ...form, plate: e.target.value.toUpperCase() })} /></label>
+            <label>Placa*<input className="input" placeholder="AAA-0000 ou AAA-0A00" value={form.plate} onChange={(e) => setForm({ ...form, plate: formatFleetPlate(e.target.value) })} /></label>
             <label>Ano<input className="input" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} /></label>
             <label>Modelo<input className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
             <label>Cor<input className="input" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label>
@@ -165,37 +301,83 @@ export function FleetVehiclesPage() {
             <label>Consumo esperado KM/L<input className="input" value={form.expected_km_per_liter} onChange={(e) => setForm({ ...form, expected_km_per_liter: e.target.value })} /></label>
             <label>Consumo mín. KM/L<input className="input" value={form.min_km_per_liter} onChange={(e) => setForm({ ...form, min_km_per_liter: e.target.value })} /></label>
             <label>Consumo máx. KM/L<input className="input" value={form.max_km_per_liter} onChange={(e) => setForm({ ...form, max_km_per_liter: e.target.value })} /></label>
-            <label>Hodómetro actual<input className="input" value={form.odometer_current} onChange={(e) => setForm({ ...form, odometer_current: e.target.value })} /></label>
+            <label>Hodômetro atual<input className="input" value={form.odometer_current} onChange={(e) => setForm({ ...form, odometer_current: e.target.value })} /></label>
             <label>Centro de custo<select className="input" value={form.cost_center_id} onChange={(e) => setForm({ ...form, cost_center_id: e.target.value })}><option value="">—</option>{(ccs.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.code} — {c.description}</option>)}</select></label>
             <label>Status<select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{VEHICLE_STATUS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select></label>
             <label className="fleet-form-span">Observação<input className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
           </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button type="button" className="btn btn--primary" disabled={save.isPending || !form.description.trim() || !form.plate.trim()} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
-            {editing ? <button type="button" className="btn" onClick={() => { setEditing(null); setForm(empty()); }}>Cancelar</button> : null}
+          <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+            <button type="button" className="btn" onClick={closeForm}>Cancelar</button>
+            <button type="button" className="btn btn--primary" disabled={save.isPending || !form.description.trim() || !isValidFleetPlate(form.plate)} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
           </div>
-        </div>
+          </div>
+        </div>,
+        document.body,
       ) : null}
 
       <div className="card table-wrap">
         <table>
-          <thead><tr><th>Placa</th><th>Descrição</th><th>Modelo</th><th>Combustível</th><th>Hodómetro</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Placa</th><th>Descrição</th><th>Modelo</th><th>Hodômetro</th><th>Status</th><th /></tr></thead>
           <tbody>
             {filtered.map((v) => (
               <tr key={v.id}>
-                <td><strong>{v.plate}</strong></td>
+                <td><strong>{formatFleetPlate(v.plate)}</strong></td>
                 <td>{v.description}</td>
                 <td>{v.model ?? "—"}</td>
-                <td>{v.primary_fuel_name ?? "—"}</td>
                 <td>{v.odometer_current?.toLocaleString("pt-BR")}</td>
-                <td>{VEHICLE_STATUS.find((s) => s.value === v.status)?.label ?? v.status}</td>
-                <td>{canMutate ? <button type="button" className="btn btn--sm" onClick={() => startEdit(v)}>Editar</button> : null}</td>
+                <td><VehicleStatusIcon status={v.status} /></td>
+                <td>
+                  <ActionMenu
+                    title="Opções do veículo"
+                    icon={<PenLine size={16} aria-hidden />}
+                    items={[
+                      ...(canMutate ? [{ id: "edit", label: "Editar", onClick: () => startEdit(v) }] : []),
+                      {
+                        id: "dashboard",
+                        label: "Dashboard",
+                        onClick: () =>
+                          navigate(`${APP_ROUTES.fleetDashboard}?vehicle_id=${encodeURIComponent(v.id)}`),
+                      },
+                      ...(canMutate && v.status !== "inactive"
+                        ? [{ id: "inactivate", label: "Inativar", danger: true, onClick: () => setInactivateTarget(v) }]
+                        : []),
+                      ...(canMutate && v.status === "inactive"
+                        ? [{ id: "reactivate", label: "Reativar", onClick: () => reactivate.mutate(v) }]
+                        : []),
+                    ]}
+                  />
+                </td>
               </tr>
             ))}
-            {filtered.length === 0 ? <tr><td colSpan={7} className="muted">Nenhum veículo.</td></tr> : null}
+            {vehicles.isLoading ? (
+              <tr><td colSpan={6} className="muted">A carregar…</td></tr>
+            ) : vehicles.isError ? (
+              <tr><td colSpan={6} className="err">Falha ao carregar veículos.</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="muted">
+                  {q.trim() || statusFilter ? "Nenhum veículo para a busca/filtro." : "Nenhum veículo cadastrado."}
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={!!inactivateTarget}
+        title="Inativar veículo"
+        message={
+          inactivateTarget
+            ? `Inativar ${formatFleetPlate(inactivateTarget.plate)} — ${inactivateTarget.description}? O veículo deixa de contar como ativo na frota.`
+            : ""
+        }
+        confirmLabel="Inativar"
+        danger
+        busy={inactivate.isPending}
+        onCancel={() => setInactivateTarget(null)}
+        onConfirm={() => inactivateTarget && inactivate.mutate(inactivateTarget)}
+      />
     </div>
   );
 }

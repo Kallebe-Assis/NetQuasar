@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { apiFetch, ApiError } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
 import { can, isAdminUser } from "../lib/auth";
-import { toastErr, toastOk } from "../lib/operationToast";
+import { copyTextToClipboard } from "../lib/clipboard";
+import { formatLatLng, googleMapsUrl } from "../lib/geoClipboard";
+import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
 import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
 import { queryKeys } from "../lib/queryKeys";
 import { ActionMenu } from "../components/ActionMenu";
@@ -160,6 +162,32 @@ export function PopsPage() {
   const [editPop, setEditPop] = useState<PopRow | null>(null);
   const [popForm, setPopForm] = useState<PopForm>(emptyPopForm());
   const [deletePopId, setDeletePopId] = useState<string | null>(null);
+
+  function hasCoords(lat?: number | null, lon?: number | null) {
+    return lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
+  }
+
+  async function copyCoords(lat?: number | null, lon?: number | null) {
+    if (!hasCoords(lat, lon)) {
+      toastInfo(pushToast, "Este POP ainda não possui coordenadas.");
+      return;
+    }
+    const txt = formatLatLng(lat!, lon!);
+    const ok = await copyTextToClipboard(txt);
+    if (ok) toastOk(pushToast, "Coordenadas copiadas.");
+    else toastErr(pushToast, new Error(`Não foi possível copiar automaticamente. Copie manualmente: ${txt}`));
+  }
+
+  async function copyMapsLink(lat?: number | null, lon?: number | null) {
+    if (!hasCoords(lat, lon)) {
+      toastInfo(pushToast, "Este POP ainda não possui coordenadas.");
+      return;
+    }
+    const url = googleMapsUrl(lat!, lon!);
+    const ok = await copyTextToClipboard(url);
+    if (ok) toastOk(pushToast, "Link do Google Maps copiado.");
+    else toastErr(pushToast, new Error(`Não foi possível copiar automaticamente. Copie manualmente: ${url}`));
+  }
 
   const locRows = useMemo(() => {
     const all = list.data?.localities ?? [];
@@ -728,17 +756,35 @@ export function PopsPage() {
                       </td>
                       <td>{p.device_count ?? 0}</td>
                       <td>
-                        {canMutate && (
-                          <ActionMenu
-                            items={[
-                              { id: "edit", label: "Editar", onClick: () => openEditPop(p) },
-                              ...(p.locality_id
-                                ? [{ id: "unlink", label: "Desvincular localidade", onClick: () => unlinkPop.mutate(p.id) }]
-                                : []),
-                              { id: "del", label: "Eliminar", danger: true, onClick: () => setDeletePopId(p.id) },
-                            ]}
-                          />
-                        )}
+                        <ActionMenu
+                          items={[
+                            {
+                              id: "copy",
+                              label: "Copiar coordenadas",
+                              onClick: () => void copyCoords(p.latitude, p.longitude),
+                            },
+                            {
+                              id: "maps",
+                              label: "Copiar link Google Maps",
+                              onClick: () => void copyMapsLink(p.latitude, p.longitude),
+                            },
+                            ...(canMutate
+                              ? [
+                                  { id: "edit", label: "Editar", onClick: () => openEditPop(p) },
+                                  ...(p.locality_id
+                                    ? [
+                                        {
+                                          id: "unlink",
+                                          label: "Desvincular localidade",
+                                          onClick: () => unlinkPop.mutate(p.id),
+                                        },
+                                      ]
+                                    : []),
+                                  { id: "del", label: "Eliminar", danger: true, onClick: () => setDeletePopId(p.id) },
+                                ]
+                              : []),
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

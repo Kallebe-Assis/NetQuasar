@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/fleetvalidate"
+	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 )
 
 type fleetFueling struct {
@@ -89,6 +91,7 @@ func (s *Server) listFleetFuelings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
+		it.Plate = fleetDisplayPlate(it.Plate)
 		list = append(list, it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
@@ -146,16 +149,21 @@ func (s *Server) createFleetFueling(w http.ResponseWriter, r *http.Request) {
 	var veh fleetvalidate.VehicleCtx
 	var odo float64
 	var costCenter *uuid.UUID
+	var vehStatus string
 	err := s.DB().QueryRow(r.Context(), `
-		SELECT tank_capacity_liters, expected_km_per_liter, min_km_per_liter, max_km_per_liter, odometer_current, cost_center_id
+		SELECT tank_capacity_liters, expected_km_per_liter, min_km_per_liter, max_km_per_liter, odometer_current, cost_center_id, status
 		FROM fleet_vehicles WHERE id=$1
-	`, body.VehicleID).Scan(&veh.TankCapacityLiters, &veh.ExpectedKmPerLiter, &veh.MinKmPerLiter, &veh.MaxKmPerLiter, &odo, &costCenter)
+	`, body.VehicleID).Scan(&veh.TankCapacityLiters, &veh.ExpectedKmPerLiter, &veh.MinKmPerLiter, &veh.MaxKmPerLiter, &odo, &costCenter, &vehStatus)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "veículo não encontrado", nil)
 		return
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if fleetStatusBlocksLaunch(vehStatus) {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", fleetLaunchBlockedMsg("abastecimento"), nil)
 		return
 	}
 	veh.OdometerCurrent = odo
@@ -374,6 +382,7 @@ func (s *Server) patchFleetSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	vehicleID := strings.TrimSpace(r.URL.Query().Get("vehicle_id"))
 	if from == "" {
 		from = time.Now().Format("2006-01") + "-01"
 	}
@@ -382,16 +391,28 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var vehiclesTotal, vehiclesActive int64
-	_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles`).Scan(&vehiclesTotal)
-	_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles WHERE status='active'`).Scan(&vehiclesActive)
+	if vehicleID != "" {
+		_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles WHERE id::text=$1`, vehicleID).Scan(&vehiclesTotal)
+		_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles WHERE id::text=$1 AND status='active'`, vehicleID).Scan(&vehiclesActive)
+	} else {
+		_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles`).Scan(&vehiclesTotal)
+		_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_vehicles WHERE status='active'`).Scan(&vehiclesActive)
+	}
 
-	var liters, amount float64
-	var count int64
+	var liters, fuelAmount, expAmount float64
+	var fuelCount, expCount int64
 	_ = s.DB().QueryRow(r.Context(), `
 		SELECT COALESCE(SUM(liters),0), COALESCE(SUM(total_amount),0), COUNT(*)
 		FROM fleet_fuelings
 		WHERE fueled_at >= $1::date AND fueled_at < ($2::date + interval '1 day')
-	`, from, to).Scan(&liters, &amount, &count)
+		  AND ($3 = '' OR vehicle_id::text = $3)
+	`, from, to, vehicleID).Scan(&liters, &fuelAmount, &fuelCount)
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT COALESCE(SUM(total_amount),0), COUNT(*)
+		FROM fleet_expenses
+		WHERE occurred_at >= $1::date AND occurred_at < ($2::date + interval '1 day')
+		  AND ($3 = '' OR vehicle_id::text = $3)
+	`, from, to, vehicleID).Scan(&expAmount, &expCount)
 
 	var avgPrice, avgKPL, avgCPK *float64
 	_ = s.DB().QueryRow(r.Context(), `
@@ -400,7 +421,8 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 			AVG(cost_per_km) FILTER (WHERE cost_per_km IS NOT NULL)
 		FROM fleet_fuelings
 		WHERE fueled_at >= $1::date AND fueled_at < ($2::date + interval '1 day')
-	`, from, to).Scan(&avgPrice, &avgKPL, &avgCPK)
+		  AND ($3 = '' OR vehicle_id::text = $3)
+	`, from, to, vehicleID).Scan(&avgPrice, &avgKPL, &avgCPK)
 
 	type rank struct {
 		VehicleID   uuid.UUID `json:"vehicle_id"`
@@ -411,7 +433,7 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 		Amount      float64   `json:"amount,omitempty"`
 	}
 	loadRank := func(sql string) []rank {
-		rows, err := s.DB().Query(r.Context(), sql, from, to)
+		rows, err := s.DB().Query(r.Context(), sql, from, to, vehicleID)
 		if err != nil {
 			return nil
 		}
@@ -431,17 +453,36 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 		SELECT v.id, v.plate, v.description, AVG(f.km_per_liter), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
 		FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
 		WHERE f.km_per_liter IS NOT NULL AND f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+		  AND ($3 = '' OR f.vehicle_id::text = $3)
 		GROUP BY v.id, v.plate, v.description ORDER BY AVG(f.km_per_liter) DESC LIMIT 10`)
 	thirsty := loadRank(`
-		SELECT v.id, v.plate, v.description, AVG(f.km_per_liter), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
+		SELECT v.id, v.plate, v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
 		FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
-		WHERE f.km_per_liter IS NOT NULL AND f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
-		GROUP BY v.id, v.plate, v.description ORDER BY AVG(f.km_per_liter) ASC LIMIT 10`)
+		WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+		  AND ($3 = '' OR f.vehicle_id::text = $3)
+		GROUP BY v.id, v.plate, v.description ORDER BY SUM(f.liters) DESC LIMIT 10`)
 	costly := loadRank(`
-		SELECT v.id, v.plate, v.description, AVG(f.cost_per_km), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
-		FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
-		WHERE f.cost_per_km IS NOT NULL AND f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
-		GROUP BY v.id, v.plate, v.description ORDER BY AVG(f.cost_per_km) DESC LIMIT 10`)
+		SELECT v.id, v.plate, v.description,
+			COALESCE(SUM(f.fuel_amt),0) + COALESCE(SUM(e.exp_amt),0),
+			COALESCE(SUM(f.liters),0),
+			COALESCE(SUM(f.fuel_amt),0) + COALESCE(SUM(e.exp_amt),0)
+		FROM fleet_vehicles v
+		LEFT JOIN (
+			SELECT vehicle_id, SUM(liters) AS liters, SUM(total_amount) AS fuel_amt
+			FROM fleet_fuelings
+			WHERE fueled_at >= $1::date AND fueled_at < ($2::date + interval '1 day')
+			GROUP BY vehicle_id
+		) f ON f.vehicle_id = v.id
+		LEFT JOIN (
+			SELECT vehicle_id, SUM(total_amount) AS exp_amt
+			FROM fleet_expenses
+			WHERE occurred_at >= $1::date AND occurred_at < ($2::date + interval '1 day')
+			GROUP BY vehicle_id
+		) e ON e.vehicle_id = v.id
+		WHERE ($3 = '' OR v.id::text = $3)
+		  AND (COALESCE(f.fuel_amt,0) + COALESCE(e.exp_amt,0)) > 0
+		GROUP BY v.id, v.plate, v.description
+		ORDER BY 4 DESC LIMIT 10`)
 
 	type stationRank struct {
 		StationID   uuid.UUID `json:"station_id"`
@@ -450,11 +491,13 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 		Liters      float64   `json:"liters"`
 	}
 	stationRows, _ := s.DB().Query(r.Context(), `
-		SELECT st.id, st.description, AVG(f.price_per_liter), COALESCE(SUM(f.liters),0)
+		SELECT COALESCE(st.id, '00000000-0000-0000-0000-000000000000'::uuid),
+			COALESCE(st.description, '(sem posto)'), AVG(f.price_per_liter), COALESCE(SUM(f.liters),0)
 		FROM fleet_fuelings f JOIN fleet_stations st ON st.id=f.station_id
 		WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
-		GROUP BY st.id, st.description ORDER BY AVG(f.price_per_liter) ASC LIMIT 10
-	`, from, to)
+		  AND ($3 = '' OR f.vehicle_id::text = $3)
+		GROUP BY 1, 2 ORDER BY AVG(f.price_per_liter) ASC LIMIT 10
+	`, from, to, vehicleID)
 	cheapStations := []stationRank{}
 	if stationRows != nil {
 		defer stationRows.Close()
@@ -466,43 +509,76 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	type monthPoint struct {
-		Month  string  `json:"month"`
-		Liters float64 `json:"liters"`
-		Amount float64 `json:"amount"`
+	type dayPoint struct {
+		Date          string  `json:"date"`
+		Liters        float64 `json:"liters"`
+		FuelAmount    float64 `json:"fuel_amount"`
+		ExpenseAmount float64 `json:"expense_amount"`
+		Amount        float64 `json:"amount"`
 	}
-	mrows, _ := s.DB().Query(r.Context(), `
-		SELECT to_char(date_trunc('month', fueled_at), 'YYYY-MM'), COALESCE(SUM(liters),0), COALESCE(SUM(total_amount),0)
-		FROM fleet_fuelings
-		WHERE fueled_at >= (date_trunc('month', now()) - interval '11 months')
-		GROUP BY 1 ORDER BY 1
-	`)
-	series := []monthPoint{}
-	if mrows != nil {
-		defer mrows.Close()
-		for mrows.Next() {
-			var it monthPoint
-			if err := mrows.Scan(&it.Month, &it.Liters, &it.Amount); err == nil {
+	drows, _ := s.DB().Query(r.Context(), `
+		WITH days AS (
+			SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d
+		),
+		fuel AS (
+			SELECT fueled_at::date AS d, SUM(liters) AS liters, SUM(total_amount) AS amount
+			FROM fleet_fuelings
+			WHERE fueled_at >= $1::date AND fueled_at < ($2::date + interval '1 day')
+			  AND ($3 = '' OR vehicle_id::text = $3)
+			GROUP BY 1
+		),
+		exp AS (
+			SELECT occurred_at::date AS d, SUM(total_amount) AS amount
+			FROM fleet_expenses
+			WHERE occurred_at >= $1::date AND occurred_at < ($2::date + interval '1 day')
+			  AND ($3 = '' OR vehicle_id::text = $3)
+			GROUP BY 1
+		)
+		SELECT to_char(days.d, 'YYYY-MM-DD'),
+			COALESCE(fuel.liters, 0),
+			COALESCE(fuel.amount, 0),
+			COALESCE(exp.amount, 0),
+			COALESCE(fuel.amount, 0) + COALESCE(exp.amount, 0)
+		FROM days
+		LEFT JOIN fuel ON fuel.d = days.d
+		LEFT JOIN exp ON exp.d = days.d
+		ORDER BY 1
+	`, from, to, vehicleID)
+	series := []dayPoint{}
+	if drows != nil {
+		defer drows.Close()
+		for drows.Next() {
+			var it dayPoint
+			if err := drows.Scan(&it.Date, &it.Liters, &it.FuelAmount, &it.ExpenseAmount, &it.Amount); err == nil {
 				series = append(series, it)
 			}
 		}
 	}
 
 	var openAlerts int64
-	_ = s.DB().QueryRow(r.Context(), `SELECT COUNT(*) FROM fleet_alerts WHERE acknowledged_at IS NULL`).Scan(&openAlerts)
+	_ = s.DB().QueryRow(r.Context(), `
+		SELECT COUNT(*) FROM fleet_alerts
+		WHERE acknowledged_at IS NULL AND ($1 = '' OR vehicle_id::text = $1)
+	`, vehicleID).Scan(&openAlerts)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"period": map[string]string{"from": from, "to": to},
+		"period":     map[string]string{"from": from, "to": to},
+		"vehicle_id": vehicleID,
 		"fleet": map[string]any{"vehicles_total": vehiclesTotal, "vehicles_active": vehiclesActive},
 		"fuel": map[string]any{
-			"liters": liters, "amount": amount, "count": count,
+			"liters": liters, "amount": fuelAmount, "count": fuelCount,
 			"avg_price_per_liter": avgPrice, "avg_km_per_liter": avgKPL, "avg_cost_per_km": avgCPK,
+		},
+		"expenses": map[string]any{"amount": expAmount, "count": expCount},
+		"totals": map[string]any{
+			"fuel_amount": fuelAmount, "expense_amount": expAmount, "grand_total": fuelAmount + expAmount,
+			"fuel_count": fuelCount, "expense_count": expCount,
 		},
 		"rankings": map[string]any{
 			"most_efficient": eco, "highest_consumption": thirsty, "highest_cost_per_km": costly, "cheapest_stations": cheapStations,
 		},
-		"monthly_series": series,
-		"open_alerts":    openAlerts,
+		"daily_series": series,
+		"open_alerts":  openAlerts,
 	})
 }
 
@@ -686,4 +762,180 @@ func fmtPtr(v *float64) string {
 		return ""
 	}
 	return fmt.Sprintf("%.4f", *v)
+}
+
+func (s *Server) fleetReportTelegram(w http.ResponseWriter, r *http.Request) {
+	kind := chi.URLParam(r, "kind")
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	if from == "" {
+		from = time.Now().AddDate(0, -1, 0).Format("2006-01-02")
+	}
+	if to == "" {
+		to = time.Now().Format("2006-01-02")
+	}
+	cfg, err := telegramclient.LoadConfig(r.Context(), s.DB(), "reports")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !cfg.Ready() {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "Telegram de relatórios não configurado (bot_token/chat_id).", nil)
+		return
+	}
+	text, err := s.composeFleetReportTelegram(r.Context(), kind, from, to)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
+		return
+	}
+	if err := telegramclient.SendMessageChunks(r.Context(), cfg, text); err != nil {
+		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(r.Context(), "fleet_report", kind, "telegram_send", s.actorFromRequest(r), nil, map[string]any{"kind": kind, "from": from, "to": to})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kind": kind})
+}
+
+func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to string) (string, error) {
+	title := map[string]string{
+		"fuelings":       "Abastecimentos",
+		"by-vehicle":     "Por veículo",
+		"by-driver":      "Por motorista",
+		"by-station":     "Por posto",
+		"by-cost-center": "Por centro de custo",
+	}[kind]
+	if title == "" {
+		return "", fmt.Errorf("kind inválido")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Frota — %s\nPeríodo: %s a %s\n\n", title, from, to)
+
+	switch kind {
+	case "fuelings":
+		rows, err := s.DB().Query(ctx, `
+			SELECT f.fueled_at, v.plate, fu.description, f.liters, f.total_amount
+			FROM fleet_fuelings f
+			JOIN fleet_vehicles v ON v.id=f.vehicle_id
+			JOIN fleet_fuels fu ON fu.id=f.fuel_id
+			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+			ORDER BY f.fueled_at DESC LIMIT 80
+		`, from, to)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var at time.Time
+			var plate, fuel string
+			var liters, total float64
+			if err := rows.Scan(&at, &plate, &fuel, &liters, &total); err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s  %s  %s  %.1f L  R$ %.2f\n", at.Format("02/01"), fleetDisplayPlate(plate), fuel, liters, total)
+			n++
+		}
+		if n == 0 {
+			b.WriteString("Sem abastecimentos no período.")
+		}
+	case "by-vehicle":
+		rows, err := s.DB().Query(ctx, `
+			SELECT v.plate, v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
+			FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
+			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+			GROUP BY v.plate, v.description ORDER BY SUM(f.total_amount) DESC LIMIT 40
+		`, from, to)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var plate, desc string
+			var liters, amount float64
+			if err := rows.Scan(&plate, &desc, &liters, &amount); err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s — %s\n%.1f L · R$ %.2f\n\n", fleetDisplayPlate(plate), desc, liters, amount)
+			n++
+		}
+		if n == 0 {
+			b.WriteString("Sem dados no período.")
+		}
+	case "by-driver":
+		rows, err := s.DB().Query(ctx, `
+			SELECT COALESCE(d.name,'(sem motorista)'), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0), COUNT(*)
+			FROM fleet_fuelings f LEFT JOIN fleet_drivers d ON d.id=f.driver_id
+			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+			GROUP BY 1 ORDER BY SUM(f.total_amount) DESC LIMIT 40
+		`, from, to)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var name string
+			var liters, amount float64
+			var cnt int64
+			if err := rows.Scan(&name, &liters, &amount, &cnt); err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s\n%.1f L · R$ %.2f · %d abast.\n\n", name, liters, amount, cnt)
+			n++
+		}
+		if n == 0 {
+			b.WriteString("Sem dados no período.")
+		}
+	case "by-station":
+		rows, err := s.DB().Query(ctx, `
+			SELECT COALESCE(st.description,'(sem posto)'), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0), AVG(f.price_per_liter)
+			FROM fleet_fuelings f LEFT JOIN fleet_stations st ON st.id=f.station_id
+			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+			GROUP BY 1 ORDER BY SUM(f.total_amount) DESC LIMIT 40
+		`, from, to)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var name string
+			var liters, amount, avg float64
+			if err := rows.Scan(&name, &liters, &amount, &avg); err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s\n%.1f L · R$ %.2f · média R$ %.3f/L\n\n", name, liters, amount, avg)
+			n++
+		}
+		if n == 0 {
+			b.WriteString("Sem dados no período.")
+		}
+	case "by-cost-center":
+		rows, err := s.DB().Query(ctx, `
+			SELECT COALESCE(cc.description,'(sem centro)'), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0), COUNT(*)
+			FROM fleet_fuelings f LEFT JOIN fleet_cost_centers cc ON cc.id=f.cost_center_id
+			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
+			GROUP BY 1 ORDER BY SUM(f.total_amount) DESC LIMIT 40
+		`, from, to)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var name string
+			var liters, amount float64
+			var cnt int64
+			if err := rows.Scan(&name, &liters, &amount, &cnt); err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s\n%.1f L · R$ %.2f · %d abast.\n\n", name, liters, amount, cnt)
+			n++
+		}
+		if n == 0 {
+			b.WriteString("Sem dados no período.")
+		}
+	}
+	return strings.TrimSpace(b.String()), nil
 }

@@ -48,7 +48,7 @@ var permissionCatalog = []permissionDefinition{
 	{Key: "reports.send", Module: "reports", ModuleLabel: "Relatórios", Label: "Enviar relatórios"},
 	{Key: "reports.manage", Module: "reports", ModuleLabel: "Relatórios", Label: "Gerir agendamentos"},
 	{Key: "fleet.view", Module: "fleet", ModuleLabel: "Frota", Label: "Visualizar"},
-	{Key: "fleet.manage", Module: "fleet", ModuleLabel: "Frota", Label: "Criar, editar e lançar abastecimentos"},
+	{Key: "fleet.manage", Module: "fleet", ModuleLabel: "Frota", Label: "Criar, editar e lançar despesas"},
 	{Key: "settings.view", Module: "settings", ModuleLabel: "Configurações", Label: "Visualizar"},
 	{Key: "settings.system", Module: "settings", ModuleLabel: "Configurações", Label: "Base de dados, rede e aparência"},
 	{Key: "settings.monitoring", Module: "settings", ModuleLabel: "Configurações", Label: "Monitoramento, alertas e coletas"},

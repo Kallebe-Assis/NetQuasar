@@ -1,9 +1,11 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MapPin, Pencil, Trash2 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { LocationMapModal, infraVariantToMapKind, type LocationMapPreview } from "../../components/LocationMapModal";
+import { OltInterfaceSelects } from "../../components/OltInterfaceSelects";
+import { formatOltPonLabel, matchOltByTransmitter, type OltPonCatalog } from "../../lib/oltPonInterfaces";
 import { MaintenanceStatusCell } from "../../components/MaintenanceStatusCell";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
@@ -141,6 +143,17 @@ const VARIANT_META: Record<
 
 type Row = NetworkCto | NetworkSpliceBox | NetworkCable | NetworkPole;
 
+function ctoInterfaceCell(r: Record<string, unknown>): string {
+  const pon = Number(r.pon);
+  if (!Number.isFinite(pon) || pon <= 0) return "—";
+  return formatOltPonLabel(pon, String(r.pon_description ?? "").trim(), "");
+}
+
+function ctoVlanCell(r: Record<string, unknown>): string {
+  if (r.vlan == null || r.vlan === "") return "—";
+  return String(r.vlan);
+}
+
 function boolLabel(v: boolean): string {
   return v ? "sim" : "nao";
 }
@@ -237,6 +250,9 @@ export function InfrastructureTab({
   const [mapPreview, setMapPreview] = useState<LocationMapPreview | null>(null);
   const [cableFibersRow, setCableFibersRow] = useState<NetworkCable | null>(null);
   const [spliceBoxRow, setSpliceBoxRow] = useState<NetworkSpliceBox | null>(null);
+  const [selectedCtoIds, setSelectedCtoIds] = useState<string[]>([]);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkForm, setLinkForm] = useState({ olt_device_id: "", transmitter: "", pon: "" });
 
   const debouncedQ = useDebouncedValue(filters.q, 320);
   const filterKey = useMemo(
@@ -253,6 +269,14 @@ export function InfrastructureTab({
 
   const { localities, projects } = useConnectionsLookups(formOpen);
 
+  const oltsQ = useQuery({
+    queryKey: queryKeys.oltDevices,
+    queryFn: () => apiFetch<{ olts: OltPonCatalog[] }>("/api/v1/olt/devices"),
+    enabled: variant === "cto",
+    staleTime: 5 * 60 * 1000,
+  });
+  const olts = oltsQ.data?.olts ?? [];
+
   const rows = listQ.data?.[meta.listKey] ?? [];
 
   const filteredRows = useMemo(() => {
@@ -268,6 +292,11 @@ export function InfrastructureTab({
     filterKey,
   );
 
+  useEffect(() => {
+    setSelectedCtoIds([]);
+    setLinkOpen(false);
+  }, [variant, filterKey]);
+
   function emptyForm(): Record<string, string | boolean> {
     const base: Record<string, string | boolean> = {
       description: "",
@@ -278,7 +307,7 @@ export function InfrastructureTab({
       notes: "",
     };
     if (variant === "cto") {
-      return { ...base, splitter: "", transmitter: "", fiber_color: "Desconhecido", locality_id: "" };
+      return { ...base, splitter: "", transmitter: "", olt_device_id: "", pon: "", fiber_color: "Desconhecido", locality_id: "" };
     }
     if (variant === "splice") {
       return { ...base, fiber_count: "12", box_model: "emenda" };
@@ -301,6 +330,8 @@ export function InfrastructureTab({
     if (variant === "cto") {
       f.splitter = r.splitter ? normalizeSplitterInput(String(r.splitter)) ?? String(r.splitter) : "";
       f.transmitter = r.transmitter ? String(r.transmitter) : "";
+      f.olt_device_id = r.olt_device_id ? String(r.olt_device_id) : "";
+      f.pon = r.pon != null && Number(r.pon) > 0 ? String(r.pon) : "";
       f.fiber_color = r.fiber_color ? String(r.fiber_color) : "Desconhecido";
       f.locality_id = r.locality_id ? String(r.locality_id) : "";
     }
@@ -335,7 +366,11 @@ export function InfrastructureTab({
     }
     if (variant === "cto") {
       payload.splitter = normalizeSplitterInput(String(form.splitter));
-      payload.transmitter = String(form.transmitter).trim() || null;
+      const matched = matchOltByTransmitter(olts, String(form.transmitter), String(form.olt_device_id) || null);
+      payload.transmitter = String(form.transmitter).trim() || matched?.description?.trim() || null;
+      payload.olt_device_id = String(form.olt_device_id).trim() || matched?.id || null;
+      const ponN = Number(String(form.pon).trim());
+      payload.pon = Number.isFinite(ponN) && ponN > 0 ? ponN : null;
       payload.fiber_color = String(form.fiber_color).trim() || "Desconhecido";
       payload.locality_id = String(form.locality_id).trim() || null;
     }
@@ -376,6 +411,25 @@ export function InfrastructureTab({
       toastOk(pushToast, editId ? `${meta.singular} actualizada.` : `${meta.singular} criada.`);
     },
     onError: (e) => toastErr(pushToast, e, "Falha ao guardar."),
+  });
+
+  const linkOltMut = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/commercial/network/ctos/link-olt", {
+        method: "POST",
+        json: {
+          ids: selectedCtoIds,
+          olt_device_id: linkForm.olt_device_id,
+          pon: Number(linkForm.pon),
+        },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [...meta.queryKey] });
+      setLinkOpen(false);
+      setSelectedCtoIds([]);
+      toastOk(pushToast, selectedCtoIds.length > 1 ? "CTOs vinculadas à interface." : "CTO vinculada à interface.");
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao vincular interface."),
   });
 
   const deleteMut = useMutation({
@@ -531,6 +585,20 @@ export function InfrastructureTab({
             >
               Nova {meta.singular.toLowerCase()}
             </button>
+            {variant === "cto" ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={selectedCtoIds.length === 0}
+                title={selectedCtoIds.length === 0 ? "Seleccione uma ou mais CTOs na tabela" : "Vincular as CTOs seleccionadas a uma interface da OLT"}
+                onClick={() => {
+                  setLinkForm({ olt_device_id: "", transmitter: "", pon: "" });
+                  setLinkOpen(true);
+                }}
+              >
+                Vincular interface{selectedCtoIds.length ? ` (${selectedCtoIds.length})` : ""}
+              </button>
+            ) : null}
             <ActionMenu
               align="start"
               title="CSV — importar, modelo e exportar"
@@ -582,12 +650,32 @@ export function InfrastructureTab({
         <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
             <tr>
+              {variant === "cto" && canMutate ? (
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={pageRows.length > 0 && pageRows.every((r) => selectedCtoIds.includes(String(r.id)))}
+                    onChange={(e) => {
+                      const ids = pageRows.map((r) => String(r.id));
+                      if (e.target.checked) {
+                        setSelectedCtoIds((prev) => Array.from(new Set([...prev, ...ids])));
+                      } else {
+                        const drop = new Set(ids);
+                        setSelectedCtoIds((prev) => prev.filter((id) => !drop.has(id)));
+                      }
+                    }}
+                    aria-label="Seleccionar página"
+                  />
+                </th>
+              ) : null}
               <th>ID</th>
               <th>Descrição</th>
               {variant === "cto" ? (
                 <>
                   <th>Splitter</th>
                   <th>Transmissor</th>
+                  <th>Interface</th>
+                  <th>VLAN</th>
                   <th>Cor fibra</th>
                   <th>Localidade</th>
                   <th>Manutenção</th>
@@ -626,6 +714,21 @@ export function InfrastructureTab({
               const lng = hasCoords ? Number(r.longitude) : NaN;
               return (
                 <tr key={String(r.id)}>
+                  {variant === "cto" && canMutate ? (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedCtoIds.includes(String(r.id))}
+                        onChange={(e) => {
+                          const id = String(r.id);
+                          setSelectedCtoIds((prev) =>
+                            e.target.checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id),
+                          );
+                        }}
+                        aria-label={`Seleccionar ${row.description}`}
+                      />
+                    </td>
+                  ) : null}
                   <td className="mono">
                     {meta.idPrefix} {row.display_number}
                   </td>
@@ -634,6 +737,8 @@ export function InfrastructureTab({
                     <>
                       <td>{formatSplitterDisplay(r.splitter as string | null)}</td>
                       <td>{(r.transmitter as string) ?? "—"}</td>
+                      <td>{ctoInterfaceCell(r)}</td>
+                      <td>{ctoVlanCell(r)}</td>
                       <td>{(r.fiber_color as string) || "Desconhecido"}</td>
                       <td>{(r.locality_name as string) ?? "—"}</td>
                       <td>
@@ -816,10 +921,14 @@ export function InfrastructureTab({
                         placeholder="ex. 1x8"
                       />
                     </div>
-                    <div className="conn-form-modal__field">
-                      <span className="conn-form-modal__field-label">Transmissor</span>
-                      <input className="input" value={String(form.transmitter)} onChange={(e) => setForm({ ...form, transmitter: e.target.value })} placeholder="ex. OLT-01" />
-                    </div>
+                    <OltInterfaceSelects
+                      olts={olts}
+                      oltDeviceId={String(form.olt_device_id ?? "")}
+                      transmitter={String(form.transmitter ?? "")}
+                      pon={String(form.pon ?? "")}
+                      disabled={saveMut.isPending}
+                      onChange={(next) => setForm({ ...form, ...next })}
+                    />
                     <FiberColorSelect
                       value={String(form.fiber_color)}
                       onChange={(v) => setForm({ ...form, fiber_color: v })}
@@ -1191,6 +1300,51 @@ export function InfrastructureTab({
             void qc.invalidateQueries({ queryKey: meta.queryKey });
           }}
         />
+      ) : null}
+
+      {linkOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !linkOltMut.isPending && setLinkOpen(false)}>
+          <div
+            className="modal conn-form-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cto-link-olt-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="conn-form-modal__head">
+              <h2 id="cto-link-olt-title">Vincular interface da OLT</h2>
+              <p>
+                {selectedCtoIds.length} CTO{selectedCtoIds.length === 1 ? "" : "s"} serão vinculadas à interface
+                seleccionada. A VLAN é a da PON cadastrada na OLT.
+              </p>
+            </div>
+            <div className="conn-form-modal__body">
+              <div className="conn-form-modal__grid">
+                <OltInterfaceSelects
+                  olts={olts}
+                  oltDeviceId={linkForm.olt_device_id}
+                  transmitter={linkForm.transmitter}
+                  pon={linkForm.pon}
+                  disabled={linkOltMut.isPending}
+                  onChange={setLinkForm}
+                />
+              </div>
+            </div>
+            <div className="conn-form-modal__foot">
+              <button type="button" className="btn" disabled={linkOltMut.isPending} onClick={() => setLinkOpen(false)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={linkOltMut.isPending || !linkForm.olt_device_id || !linkForm.pon}
+                onClick={() => linkOltMut.mutate()}
+              >
+                {linkOltMut.isPending ? "A vincular…" : "Vincular"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );

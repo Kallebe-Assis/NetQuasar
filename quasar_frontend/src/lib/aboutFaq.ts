@@ -275,8 +275,8 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     cat: "funcoes",
   },
   {
-    q: "O que é a tela Eventos?",
-    a: "Linha do tempo de eventos do sistema (abertura/fecho de alertas, checks, etc.) para acompanhar a operação.",
+    q: "Onde vejo o histórico operacional?",
+    a: "Na tela Alertas (histórico) e no histórico do equipamento. A linha do tempo global de eventos deixou de ser um menu separado.",
     cat: "funcoes",
   },
   {
@@ -557,6 +557,21 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   {
     q: "Como contacto o desenvolvedor?",
     a: "Via landing page https://portfolio-kallebe-assis.vercel.app/ (Kallebe Assis Nogueira).",
+    cat: "como_funciona",
+  },
+  {
+    q: "O que o módulo Frota faz?",
+    a: "Controla veículos, motoristas, postos, combustíveis, centros de custo e tipos de despesa. Permite lançar abastecimentos e outras despesas, ver o dashboard de gastos, alertas de consumo/preço e exportar relatórios (CSV ou Telegram).",
+    cat: "funcoes",
+  },
+  {
+    q: "Como importo o histórico da frota?",
+    a: "Em Configurações → Frota, use a importação em massa: baixe o modelo CSV (Excel), preencha e importe veículos, motoristas e lançamentos. A importação aceita veículos inativos; lançamentos manuais novos em veículo inativo, vendido ou baixado são recusados.",
+    cat: "configurar",
+  },
+  {
+    q: "O hodômetro do veículo atualiza sozinho?",
+    a: "No abastecimento, o KM atual do lançamento atualiza o cadastro. Na despesa, se você alterar o KM em relação ao valor do veículo, o sistema pergunta se deve atualizar. A importação CSV não altera o hodômetro do cadastro, para não distorcer histórico antigo.",
     cat: "como_funciona",
   },
   {

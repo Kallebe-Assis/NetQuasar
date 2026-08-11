@@ -299,25 +299,38 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 		outputs = []map[string]any{}
 	}
 
-	if !script.OK {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":              false,
-			"olt_id":          id,
-			"olt_description": sess.Desc,
-			"commands":        outputs,
-			"output":          script.Output,
-			"error":           script.Error,
-		})
-		return
+	ponN := body.Pon
+	onuN := body.Onu
+	if ponN <= 0 {
+		gpon := target.GponOnu
+		if gpon == "" {
+			gpon = oltcollect.ParseGponOnuFromOutput(script.Output)
+		}
+		if p, o := oltcollect.ParsePonOnuFromGponOnu(gpon); p > 0 {
+			ponN = p
+			if onuN <= 0 {
+				onuN = o
+			}
+		}
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
+	ponDesc := s.devicePonDescription(ctx, id, ponN)
+	ponVlan := s.devicePonVlan(ctx, id, ponN)
+	meta := map[string]any{
+		"ok":              script.OK,
 		"olt_id":          id,
 		"olt_description": sess.Desc,
+		"pon":             ponN,
+		"onu":             onuN,
+		"serial":          strings.TrimSpace(body.Serial),
+		"pon_description": ponDesc,
+		"pon_vlan":        ponVlan,
 		"commands":        outputs,
 		"output":          script.Output,
-	})
+	}
+	if !script.OK {
+		meta["error"] = script.Error
+	}
+	writeJSON(w, http.StatusOK, meta)
 }
 
 func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {

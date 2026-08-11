@@ -1353,7 +1353,13 @@ function locationSearchIcon(): L.DivIcon {
   return icon;
 }
 
-function LocationSearchMarker({ pin }: { pin: { lat: number; lng: number; label?: string } | null | undefined }) {
+function LocationSearchMarker({
+  pin,
+  onRemove,
+}: {
+  pin: { lat: number; lng: number; label?: string } | null | undefined;
+  onRemove?: () => void;
+}) {
   if (!pin || !Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) return null;
   return (
     <Marker position={[pin.lat, pin.lng]} icon={locationSearchIcon()} zIndexOffset={2100}>
@@ -1362,6 +1368,11 @@ function LocationSearchMarker({ pin }: { pin: { lat: number; lng: number; label?
         <div className="mono" style={{ fontSize: 12 }}>
           {pin.lat.toFixed(6)}, {pin.lng.toFixed(6)}
         </div>
+        {onRemove ? (
+          <button type="button" className="btn btn--sm" style={{ marginTop: 8 }} onClick={onRemove}>
+            Remover marcador
+          </button>
+        ) : null}
       </Popup>
     </Marker>
   );
@@ -1387,6 +1398,7 @@ export function EquipmentMap({
   highlightedId = null,
   userLocation = null,
   locationPin = null,
+  onClearLocationPin,
   placeMode = null,
   draftPath = [],
   onMapClick,
@@ -1423,6 +1435,7 @@ export function EquipmentMap({
   userLocation?: MapLatLng | null;
   /** Resultado de pesquisa de endereço / coordenadas / URL do Maps. */
   locationPin?: { lat: number; lng: number; label?: string } | null;
+  onClearLocationPin?: () => void;
   /** Modo de adicionar / editar no mapa (cursor + clique). */
   placeMode?: MapPlaceMode;
   /** Trajeto em construção ou edição do cabo. */
@@ -1544,7 +1557,7 @@ export function EquipmentMap({
           onDragEnd={onMapClick}
         />
         <UserLocationMarker location={userLocation} />
-        <LocationSearchMarker pin={locationPin} />
+        <LocationSearchMarker pin={locationPin} onRemove={onClearLocationPin} />
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView

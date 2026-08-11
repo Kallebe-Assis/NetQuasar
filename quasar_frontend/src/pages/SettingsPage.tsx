@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Blend, ClockFading, Cpu, Filter, Plus, Shield, Sun, ThermometerSun } from "lucide-react";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
@@ -15,6 +16,7 @@ import { MikrotikSettingsPanel } from "./settings/MikrotikSettingsPanel";
 import { SwitchSettingsPanel } from "./settings/SwitchSettingsPanel";
 import { BngCollectionPanel } from "./settings/BngCollectionPanel";
 import { DatabasePanel } from "./settings/DatabasePanel";
+import { FleetSettingsPanel } from "./settings/FleetSettingsPanel";
 import { OltVendorsPanel } from "./settings/OltVendorsPanel";
 import { PermissionProfilesModal } from "./settings/PermissionProfilesModal";
 import type { PermissionProfile } from "../lib/permissions";
@@ -33,10 +35,27 @@ type SettingsTab =
   | "mikrotik"
   | "switch"
   | "bng"
+  | "fleet"
   | "automation";
 
+const SETTINGS_TABS: SettingsTab[] = [
+  "database", "logs", "users", "alerts", "monitoring", "appearance", "connection",
+  "telegram", "olt", "mikrotik", "switch", "bng", "fleet", "automation",
+];
+
 export function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>("database");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    const raw = searchParams.get("tab");
+    return SETTINGS_TABS.includes(raw as SettingsTab) ? (raw as SettingsTab) : "database";
+  });
+
+  function selectTab(next: SettingsTab) {
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  }
   return (
     <>
       <h1>Configurações</h1>
@@ -58,10 +77,11 @@ export function SettingsPage() {
             ["mikrotik", "MikroTik"],
             ["switch", "Switch"],
             ["bng", "BNG"],
+            ["fleet", "Frota"],
             ["automation", "Automações"],
           ] as const
         ).map(([k, lab]) => (
-          <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
+          <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => selectTab(k)}>
             {lab}
           </button>
         ))}
@@ -83,6 +103,7 @@ export function SettingsPage() {
       {tab === "mikrotik" && <MikrotikSettingsPanel />}
       {tab === "switch" && <SwitchSettingsPanel />}
       {tab === "bng" && <BngCollectionPanel />}
+      {tab === "fleet" && <FleetSettingsPanel />}
       {tab === "automation" && <ScheduledReportsPanel />}
     </>
   );

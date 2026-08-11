@@ -49,7 +49,7 @@ export const queryKeys = {
   integrations: ["integrations"] as const,
   integrationDetail: (slug: string) => ["integration", slug] as const,
   integrationLogs: (slug: string, requestId?: string) => ["integration-logs", slug, requestId ?? ""] as const,
-  fleetDashboard: (from: string, to: string) => ["fleet-dashboard", from, to] as const,
+  fleetDashboard: (from: string, to: string, vehicleId = "") => ["fleet-dashboard", from, to, vehicleId] as const,
   fleetCostCenters: ["fleet-cost-centers"] as const,
   fleetFuels: ["fleet-fuels"] as const,
   fleetStations: ["fleet-stations"] as const,
@@ -57,11 +57,23 @@ export const queryKeys = {
   fleetDrivers: ["fleet-drivers"] as const,
   fleetDriverVehicles: ["fleet-driver-vehicles"] as const,
   fleetFuelings: ["fleet-fuelings"] as const,
+  fleetExpenses: ["fleet-expenses"] as const,
+  fleetExpenseTypes: ["fleet-expense-types"] as const,
   fleetAlerts: ["fleet-alerts"] as const,
   fleetUsers: ["fleet-users"] as const,
   fleetSettings: ["fleet-settings"] as const,
   fleetMeDriver: ["fleet-me-driver"] as const,
 } as const;
+
+export function invalidateFleetOperationalQueries(qc: QueryClient): Promise<void> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: queryKeys.fleetExpenses }),
+    qc.invalidateQueries({ queryKey: queryKeys.fleetFuelings }),
+    qc.invalidateQueries({ queryKey: ["fleet-dashboard"] }),
+    qc.invalidateQueries({ queryKey: queryKeys.fleetVehicles }),
+    qc.invalidateQueries({ queryKey: queryKeys.fleetAlerts }),
+  ]).then(() => undefined);
+}
 
 /** Invalida listas de alertas usadas em Alertas, OLT e Configurações. */
 export function invalidateAlertListQueries(qc: QueryClient): Promise<void> {

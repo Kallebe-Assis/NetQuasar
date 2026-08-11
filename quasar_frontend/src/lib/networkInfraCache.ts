@@ -13,6 +13,9 @@ type InfraRow = {
   needs_maintenance?: boolean;
   splitter?: string | null;
   transmitter?: string | null;
+  pon?: number | null;
+  pon_description?: string | null;
+  vlan?: number | string | null;
   fiber_color?: string | null;
   cable_type?: string | null;
   status?: string;
@@ -25,7 +28,15 @@ function matchesInfraSearch(row: InfraRow, q: string, variant: InfraVariant): bo
   const num = String(row.display_number);
   if (num === q || desc.includes(q)) return true;
   if (variant === "cto") {
-    return (row.splitter ?? "").toLowerCase().includes(q) || (row.transmitter ?? "").toLowerCase().includes(q);
+    const vlan = String(row.vlan ?? "").toLowerCase();
+    const pon = row.pon != null && row.pon > 0 ? `pon ${row.pon}` : "";
+    return (
+      (row.splitter ?? "").toLowerCase().includes(q) ||
+      (row.transmitter ?? "").toLowerCase().includes(q) ||
+      (row.pon_description ?? "").toLowerCase().includes(q) ||
+      vlan.includes(q) ||
+      pon.includes(q)
+    );
   }
   return false;
 }

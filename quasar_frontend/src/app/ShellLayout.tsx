@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  History,
   Bolt,
   CircleHelp,
   FileBarChart,
@@ -16,7 +15,8 @@ import {
   ClockCheck,
   Component,
   Cpu,
-  Fuel,
+  BanknoteArrowDown,
+  Layers,
   MapPin,
   MonitorSmartphone,
   Network,
@@ -83,7 +83,6 @@ const nav: NavEntry[] = [
     ],
   },
   { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
-  { kind: "link", to: APP_ROUTES.events, label: "Eventos", icons: [History] },
   { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
   {
     kind: "group",
@@ -93,11 +92,8 @@ const nav: NavEntry[] = [
     children: [
       { to: APP_ROUTES.fleetDashboard, label: "Dashboard", icons: [ChartPie] },
       { to: APP_ROUTES.fleetVehicles, label: "Veículos", icons: [Truck] },
-      { to: APP_ROUTES.fleetDrivers, label: "Motoristas", icons: [UsersRound] },
-      { to: APP_ROUTES.fleetFuelings, label: "Abastecimentos", icons: [Fuel] },
-      { to: APP_ROUTES.fleetFuels, label: "Combustíveis", icons: [Fuel] },
-      { to: APP_ROUTES.fleetStations, label: "Postos", icons: [MapPin] },
-      { to: APP_ROUTES.fleetCostCenters, label: "Centros de custo", icons: [Warehouse] },
+      { to: APP_ROUTES.fleetFuelings, label: "Despesas", icons: [BanknoteArrowDown] },
+      { to: APP_ROUTES.fleetElements, label: "Elementos", icons: [Layers] },
       { to: APP_ROUTES.fleetAlerts, label: "Alertas", icons: [TriangleAlert] },
       { to: APP_ROUTES.fleetReports, label: "Relatórios", icons: [FileBarChart] },
     ],

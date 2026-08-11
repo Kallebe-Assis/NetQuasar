@@ -506,6 +506,8 @@ type networkCtoInput struct {
 	Longitude        *float64 `json:"longitude"`
 	Splitter         *string  `json:"splitter"`
 	Transmitter      *string  `json:"transmitter"`
+	OltDeviceID      *string  `json:"olt_device_id"`
+	Pon              *int     `json:"pon"`
 	FiberColor       *string  `json:"fiber_color"`
 	Notes            *string  `json:"notes"`
 	NeedsMaintenance *bool    `json:"needs_maintenance"`
@@ -537,13 +539,14 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	var displayNumber int
 	var description string
 	var splitter, transmitter, fiberColor, notes *string
-	var projectID, localityID *uuid.UUID
+	var projectID, localityID, oltDeviceID *uuid.UUID
+	var pon *int
 	var needsMaintenance bool
 	var lat, lon *float64
 	var splitterPorts []byte
 	var created, updated time.Time
 	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &splitter, &transmitter, &fiberColor, &notes,
-		&needsMaintenance, &projectID, &localityID, &splitterPorts, &created, &updated)
+		&needsMaintenance, &projectID, &localityID, &splitterPorts, &oltDeviceID, &pon, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -553,6 +556,12 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	}
 	setOptionalStr(m, "splitter", splitter)
 	setOptionalStr(m, "transmitter", transmitter)
+	if oltDeviceID != nil {
+		m["olt_device_id"] = *oltDeviceID
+	}
+	if pon != nil && *pon > 0 {
+		m["pon"] = *pon
+	}
 	if fiberColor != nil && strings.TrimSpace(*fiberColor) != "" {
 		m["fiber_color"] = strings.TrimSpace(*fiberColor)
 	} else {
@@ -586,8 +595,105 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	return m, nil
 }
 
+type oltPonCatalog struct {
+	ID          uuid.UUID
+	Description string
+	Desc        map[string]string
+	Vlan        map[string]int
+}
+
+func (s *Server) loadOltPonCatalog(ctx context.Context) (map[string]oltPonCatalog, map[string]oltPonCatalog, error) {
+	rows, err := s.DB().Query(ctx, `
+		SELECT id, COALESCE(description,''), COALESCE(pon_descriptions::text,'{}'), COALESCE(pon_vlans::text,'{}')
+		FROM devices WHERE lower(trim(category)) = 'olt'
+	`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	byID := map[string]oltPonCatalog{}
+	byDesc := map[string]oltPonCatalog{}
+	for rows.Next() {
+		var c oltPonCatalog
+		var descRaw, vlanRaw string
+		if err := rows.Scan(&c.ID, &c.Description, &descRaw, &vlanRaw); err != nil {
+			continue
+		}
+		c.Desc = map[string]string{}
+		c.Vlan = map[string]int{}
+		_ = json.Unmarshal(normalizePonDescriptionsJSON(json.RawMessage(descRaw)), &c.Desc)
+		_ = json.Unmarshal(normalizePonVlansJSON(json.RawMessage(vlanRaw)), &c.Vlan)
+		byID[c.ID.String()] = c
+		key := strings.ToLower(strings.TrimSpace(c.Description))
+		if key != "" {
+			byDesc[key] = c
+		}
+	}
+	return byID, byDesc, nil
+}
+
+func (s *Server) attachCtoOltMeta(ctx context.Context, items []map[string]any) {
+	if len(items) == 0 {
+		return
+	}
+	byID, byDesc, err := s.loadOltPonCatalog(ctx)
+	if err != nil {
+		return
+	}
+	for _, m := range items {
+		var cat oltPonCatalog
+		ok := false
+		switch idRaw := m["olt_device_id"].(type) {
+		case uuid.UUID:
+			cat, ok = byID[idRaw.String()]
+		case string:
+			cat, ok = byID[idRaw]
+		}
+		if !ok {
+			if tx, has := m["transmitter"].(string); has {
+				cat, ok = byDesc[strings.ToLower(strings.TrimSpace(tx))]
+				if ok {
+					if _, exists := m["olt_device_id"]; !exists {
+						m["olt_device_id"] = cat.ID
+					}
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		m["olt_description"] = cat.Description
+		ponN := 0
+		switch v := m["pon"].(type) {
+		case int:
+			ponN = v
+		case int32:
+			ponN = int(v)
+		case int64:
+			ponN = int(v)
+		}
+		if ponN <= 0 {
+			continue
+		}
+		key := strconv.Itoa(ponN)
+		if d := strings.TrimSpace(cat.Desc[key]); d != "" {
+			m["pon_description"] = d
+		}
+		if vid, has := cat.Vlan[key]; has {
+			m["vlan"] = vid
+		}
+	}
+}
+
+func optionalPon(p *int) *int {
+	if p == nil || *p <= 0 {
+		return nil
+	}
+	return p
+}
+
 const networkCtoSelect = `id, display_number, description, latitude, longitude, splitter, transmitter, fiber_color, notes,
-	needs_maintenance, project_id, locality_id, splitter_ports, created_at, updated_at`
+	needs_maintenance, project_id, locality_id, splitter_ports, olt_device_id, pon, created_at, updated_at`
 
 func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -647,6 +753,7 @@ func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
 		}
 		list = append(list, item)
 	}
+	s.attachCtoOltMeta(ctx, list)
 	writeJSON(w, http.StatusOK, map[string]any{"ctos": list})
 }
 
@@ -667,6 +774,7 @@ func (s *Server) getNetworkCto(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	s.attachCtoOltMeta(ctx, []map[string]any{item})
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -698,13 +806,32 @@ func (s *Server) createNetworkCto(w http.ResponseWriter, r *http.Request) {
 	if body.FiberColor != nil && strings.TrimSpace(*body.FiberColor) != "" {
 		fiberColor = strings.TrimSpace(*body.FiberColor)
 	}
+	oltID, err := optionalUUIDFromString(networkStrPtr(body.OltDeviceID))
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
+		return
+	}
+	transmitter := trimPtr(body.Transmitter)
+	if oltID != nil {
+		var desc string
+		qerr := s.DB().QueryRow(r.Context(), `SELECT description FROM devices WHERE id=$1 AND lower(trim(category))='olt'`, *oltID).Scan(&desc)
+		if qerr == pgx.ErrNoRows {
+			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "OLT não encontrada", nil)
+			return
+		}
+		if qerr != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", qerr.Error(), nil)
+			return
+		}
+		transmitter = &desc
+	}
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_ctos (description, latitude, longitude, splitter, transmitter, fiber_color, notes, needs_maintenance, project_id, locality_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, display_number`,
-		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), trimPtr(body.Transmitter), fiberColor,
-		trimPtr(body.Notes), needsMaint, projectID, localityID,
+		INSERT INTO network_ctos (description, latitude, longitude, splitter, transmitter, fiber_color, notes, needs_maintenance, project_id, locality_id, olt_device_id, pon)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, display_number`,
+		strings.TrimSpace(body.Description), body.Latitude, body.Longitude, trimPtr(body.Splitter), transmitter, fiberColor,
+		trimPtr(body.Notes), needsMaint, projectID, localityID, oltID, optionalPon(body.Pon),
 	).Scan(&id, &displayNumber)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -716,6 +843,45 @@ func (s *Server) createNetworkCto(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) patchNetworkCto(w http.ResponseWriter, r *http.Request) {
 	s.patchNetworkRow(w, r, "network_ctos", "network_cto", networkCtoPatch)
+}
+
+func (s *Server) linkNetworkCtosOlt(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs         []uuid.UUID `json:"ids"`
+		OltDeviceID uuid.UUID   `json:"olt_device_id"`
+		Pon         int         `json:"pon"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.IDs) == 0 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "informe ids, olt_device_id e pon", nil)
+		return
+	}
+	if body.OltDeviceID == uuid.Nil || body.Pon <= 0 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "OLT e interface (PON) obrigatórios", nil)
+		return
+	}
+	var desc string
+	err := s.DB().QueryRow(r.Context(), `SELECT description FROM devices WHERE id=$1 AND lower(trim(category))='olt'`, body.OltDeviceID).Scan(&desc)
+	if err == pgx.ErrNoRows {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "OLT não encontrada", nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	tag, err := s.DB().Exec(r.Context(), `
+		UPDATE network_ctos
+		SET olt_device_id=$2, pon=$3, transmitter=$4, updated_at=now()
+		WHERE id = ANY($1)
+	`, body.IDs, body.OltDeviceID, body.Pon, desc)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(r.Context(), "network_cto", "bulk", "link_olt", s.actorFromRequest(r), nil, map[string]any{
+		"count": tag.RowsAffected(), "olt_device_id": body.OltDeviceID, "pon": body.Pon,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"updated": tag.RowsAffected(), "transmitter": desc, "pon": body.Pon})
 }
 
 func networkCtoPatch(body map[string]json.RawMessage) ([]string, []any, int, error) {
@@ -746,6 +912,42 @@ func networkCtoPatch(body map[string]json.RawMessage) ([]string, []any, int, err
 		} else {
 			sets = append(sets, "fiber_color = $"+strconv.Itoa(n))
 			args = append(args, nil)
+			n++
+		}
+	}
+	if raw, ok := body["olt_device_id"]; ok {
+		if string(raw) == "null" || string(raw) == `""` {
+			sets = append(sets, "olt_device_id = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var v string
+			_ = json.Unmarshal(raw, &v)
+			id, err := optionalUUIDFromString(v)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			sets = append(sets, "olt_device_id = $"+strconv.Itoa(n))
+			args = append(args, id)
+			n++
+		}
+	}
+	if raw, ok := body["pon"]; ok {
+		if string(raw) == "null" {
+			sets = append(sets, "pon = $"+strconv.Itoa(n))
+			args = append(args, nil)
+			n++
+		} else {
+			var v int
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return nil, nil, 0, errors.New("pon inválido")
+			}
+			sets = append(sets, "pon = $"+strconv.Itoa(n))
+			if v <= 0 {
+				args = append(args, nil)
+			} else {
+				args = append(args, v)
+			}
 			n++
 		}
 	}

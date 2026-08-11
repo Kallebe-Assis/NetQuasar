@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,19 @@ func fleetQ(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("q"))
 }
 
+func fleetStatusBlocksLaunch(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "inactive", "sold", "written_off":
+		return true
+	default:
+		return false
+	}
+}
+
+func fleetLaunchBlockedMsg(kind string) string {
+	return fmt.Sprintf("não é possível lançar %s em veículo inativo, vendido ou baixado", kind)
+}
+
 func fleetStatusFilter(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("status"))
 }
@@ -23,7 +37,10 @@ func fleetStatusFilter(r *http.Request) string {
 func fleetLimitOffset(r *http.Request) (limit, offset int) {
 	limit = 200
 	offset = 0
-	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
+		if v > 10000 {
+			v = 10000
+		}
 		limit = v
 	}
 	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
@@ -49,6 +66,46 @@ func emptyToNil(s string) *string {
 		return nil
 	}
 	return &t
+}
+
+func fleetNormalizePlate(raw string) (string, error) {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(strings.TrimSpace(raw)) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if len(s) != 7 {
+		return "", errValidation("placa inválida: use AAA-0000 ou AAA-0A00")
+	}
+	if s[0] < 'A' || s[0] > 'Z' || s[1] < 'A' || s[1] > 'Z' || s[2] < 'A' || s[2] > 'Z' {
+		return "", errValidation("placa inválida: use AAA-0000 ou AAA-0A00")
+	}
+	if s[3] < '0' || s[3] > '9' || s[5] < '0' || s[5] > '9' || s[6] < '0' || s[6] > '9' {
+		return "", errValidation("placa inválida: use AAA-0000 ou AAA-0A00")
+	}
+	if !((s[4] >= '0' && s[4] <= '9') || (s[4] >= 'A' && s[4] <= 'Z')) {
+		return "", errValidation("placa inválida: use AAA-0000 ou AAA-0A00")
+	}
+	return s[:3] + "-" + s[3:], nil
+}
+
+func fleetDisplayPlate(raw string) string {
+	if p, err := fleetNormalizePlate(raw); err == nil {
+		return p
+	}
+	s := strings.ToUpper(strings.TrimSpace(raw))
+	alnum := strings.Map(func(r rune) rune {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, s)
+	if len(alnum) > 3 {
+		return alnum[:3] + "-" + alnum[3:]
+	}
+	return s
 }
 
 // --- Cost centers ---
@@ -484,7 +541,7 @@ func parseTimeFlexible(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	layouts := []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"}
+	layouts := []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02", "02/01/2006"}
 	for _, l := range layouts {
 		if t, err := time.ParseInLocation(l, s, time.Local); err == nil {
 			return t, nil

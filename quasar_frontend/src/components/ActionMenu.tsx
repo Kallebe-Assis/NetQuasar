@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { DropdownMenu } from "./DropdownMenu";
 
 export type ActionMenuItem = {
@@ -13,11 +14,13 @@ export function ActionMenu({
   title = "Opções",
   align = "end",
   buttonLabel,
+  icon,
 }: {
   items: ActionMenuItem[];
   title?: string;
   align?: "start" | "end";
   buttonLabel?: string;
+  icon?: ReactNode;
 }) {
   return (
     <DropdownMenu
@@ -26,14 +29,14 @@ export function ActionMenu({
       trigger={({ toggle, open }) => (
         <button
           type="button"
-          className={buttonLabel ? "btn" : "btn btn--icon btn--icon-menu"}
+          className={buttonLabel && !icon ? "btn" : "btn btn--icon btn--icon-menu"}
           title={title}
           aria-label={title}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={toggle}
         >
-          {buttonLabel ?? "⋮"}
+          {icon ?? buttonLabel ?? "⋮"}
         </button>
       )}
     >

@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { APP_ROUTES } from "../../app/routes";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
-import { queryKeys } from "../../lib/queryKeys";
+import { invalidateFleetOperationalQueries, queryKeys } from "../../lib/queryKeys";
+import { formatFleetPlate } from "./fleetUtils";
 
 type Alert = {
   id: string;
@@ -24,26 +27,12 @@ export function FleetAlertsPage() {
     queryKey: queryKeys.fleetAlerts,
     queryFn: () => apiFetch<{ items: Alert[] }>("/api/v1/fleet/alerts?open=1"),
   });
-  const settings = useQuery({
-    queryKey: queryKeys.fleetSettings,
-    queryFn: () => apiFetch<{ consumption_tolerance_pct: number; price_tolerance_pct: number; min_minutes_between_fuelings: number }>("/api/v1/fleet/settings"),
-  });
 
   const ack = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/fleet/alerts/${id}/ack`, { method: "POST" }),
     onSuccess: async () => {
       toastOk(push, "Alerta reconhecido");
-      await qc.invalidateQueries({ queryKey: queryKeys.fleetAlerts });
-    },
-    onError: (e) => toastErr(push, e),
-  });
-
-  const saveSettings = useMutation({
-    mutationFn: (body: { consumption_tolerance_pct: number; price_tolerance_pct: number; min_minutes_between_fuelings: number }) =>
-      apiFetch("/api/v1/fleet/settings", { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: async () => {
-      toastOk(push, "Regras actualizadas");
-      await qc.invalidateQueries({ queryKey: queryKeys.fleetSettings });
+      await invalidateFleetOperationalQueries(qc);
     },
     onError: (e) => toastErr(push, e),
   });
@@ -51,51 +40,39 @@ export function FleetAlertsPage() {
   return (
     <div className="fleet-page">
       <h1>Frota — Alertas</h1>
-      {canMutate && settings.data ? (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h3>Regras de validação</h3>
-          <div className="fleet-form-grid">
-            <label>Tolerância consumo (%)
-              <input className="input" id="tol-c" defaultValue={settings.data.consumption_tolerance_pct} />
-            </label>
-            <label>Tolerância preço (%)
-              <input className="input" id="tol-p" defaultValue={settings.data.price_tolerance_pct} />
-            </label>
-            <label>Minutos mínimos entre abastecimentos
-              <input className="input" id="tol-m" defaultValue={settings.data.min_minutes_between_fuelings} />
-            </label>
-          </div>
-          <button
-            type="button"
-            className="btn btn--primary"
-            style={{ marginTop: 10 }}
-            onClick={() => {
-              const c = Number((document.getElementById("tol-c") as HTMLInputElement).value);
-              const p = Number((document.getElementById("tol-p") as HTMLInputElement).value);
-              const m = Number((document.getElementById("tol-m") as HTMLInputElement).value);
-              saveSettings.mutate({ consumption_tolerance_pct: c, price_tolerance_pct: p, min_minutes_between_fuelings: m });
-            }}
-          >
-            Guardar regras
-          </button>
-        </div>
-      ) : null}
-
+      <p className="muted" style={{ marginTop: 0 }}>
+        Anomalias de abastecimento. As tolerâncias de consumo e preço ficam em{" "}
+        <Link to={`${APP_ROUTES.settings}?tab=fleet`}>Configurações → Frota</Link>.
+      </p>
       <div className="card">
-        {(q.data?.items ?? []).length === 0 ? <p className="muted">Sem alertas abertos.</p> : (
+        {q.isLoading ? <p className="muted">A carregar…</p> : null}
+        {q.isError ? <p className="err">Falha ao carregar alertas.</p> : null}
+        {!q.isLoading && !q.isError && (q.data?.items ?? []).length === 0 ? <p className="muted">Sem alertas abertos.</p> : null}
+        {(q.data?.items ?? []).length > 0 ? (
           <ul className="fleet-alert-list">
             {(q.data?.items ?? []).map((a) => (
               <li key={a.id} className={`fleet-alert fleet-alert--${a.severity}`}>
                 <div>
                   <strong>{a.title}</strong>
-                  <span className="muted">{a.plate ? ` · ${a.plate}` : ""} · {new Date(a.created_at).toLocaleString("pt-BR")}</span>
+                  <span className="muted">
+                    {a.plate ? ` · ${formatFleetPlate(a.plate)}` : ""} · {new Date(a.created_at).toLocaleString("pt-BR")}
+                  </span>
                   <p>{a.message}</p>
                 </div>
-                {canMutate ? <button type="button" className="btn btn--sm" onClick={() => ack.mutate(a.id)}>Reconhecer</button> : null}
+                {canMutate ? (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    disabled={ack.isPending && ack.variables === a.id}
+                    onClick={() => ack.mutate(a.id)}
+                  >
+                    {ack.isPending && ack.variables === a.id ? "…" : "Reconhecer"}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </div>
     </div>
   );

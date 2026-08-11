@@ -65,6 +65,7 @@ func (s *Server) listFleetVehicles(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
+		it.Plate = fleetDisplayPlate(it.Plate)
 		list = append(list, it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
@@ -97,6 +98,7 @@ func (s *Server) getFleetVehicle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	it.Plate = fleetDisplayPlate(it.Plate)
 	writeJSON(w, http.StatusOK, it)
 }
 
@@ -106,21 +108,30 @@ func (s *Server) createFleetVehicle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "description e plate obrigatórios", nil)
 		return
 	}
+	plate, err := fleetNormalizePlate(body.Plate)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
+		return
+	}
 	if body.Status == "" {
 		body.Status = "active"
 	}
 	var id uuid.UUID
-	err := s.DB().QueryRow(r.Context(), `
+	err = s.DB().QueryRow(r.Context(), `
 		INSERT INTO fleet_vehicles (
 			description, plate, year, model, color, city, uf, vehicle_type, category, primary_fuel_id,
 			tank_capacity_liters, expected_km_per_liter, min_km_per_liter, max_km_per_liter,
 			odometer_current, hourmeter_current, cost_center_id, status, notes, created_by, updated_by
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20) RETURNING id
-	`, strings.TrimSpace(body.Description), strings.ToUpper(strings.TrimSpace(body.Plate)), body.Year, ptrTrim(body.Model),
+	`, strings.TrimSpace(body.Description), plate, body.Year, ptrTrim(body.Model),
 		ptrTrim(body.Color), ptrTrim(body.City), ptrTrim(body.UF), ptrTrim(body.VehicleType), ptrTrim(body.Category),
 		body.PrimaryFuelID, body.TankCapacityLiters, body.ExpectedKmPerLiter, body.MinKmPerLiter, body.MaxKmPerLiter,
 		body.OdometerCurrent, body.HourmeterCurrent, body.CostCenterID, body.Status, ptrTrim(body.Notes), s.userIDFromRequest(r)).Scan(&id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeErr(w, http.StatusConflict, "CONFLICT", "placa já cadastrada", nil)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "DB", err.Error(), nil)
 		return
 	}
@@ -138,20 +149,33 @@ func (s *Server) patchFleetVehicle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
+	plate := strings.TrimSpace(body.Plate)
+	if plate != "" {
+		norm, nerr := fleetNormalizePlate(plate)
+		if nerr != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", nerr.Error(), nil)
+			return
+		}
+		plate = norm
+	}
 	tag, err := s.DB().Exec(r.Context(), `
 		UPDATE fleet_vehicles SET
 			description=COALESCE(NULLIF(trim($2),''), description),
-			plate=COALESCE(NULLIF(upper(trim($3)),''), plate),
+			plate=COALESCE(NULLIF($3,''), plate),
 			year=$4, model=$5, color=$6, city=$7, uf=$8, vehicle_type=$9, category=$10, primary_fuel_id=$11,
 			tank_capacity_liters=$12, expected_km_per_liter=$13, min_km_per_liter=$14, max_km_per_liter=$15,
-			odometer_current=COALESCE($16, odometer_current), hourmeter_current=$17, cost_center_id=$18,
+			odometer_current=COALESCE($16, odometer_current), hourmeter_current=COALESCE($17, hourmeter_current), cost_center_id=$18,
 			status=COALESCE(NULLIF($19,''), status), notes=$20, updated_at=now(), updated_by=$21
 		WHERE id=$1
-	`, id, body.Description, body.Plate, body.Year, ptrTrim(body.Model), ptrTrim(body.Color), ptrTrim(body.City), ptrTrim(body.UF),
+	`, id, body.Description, plate, body.Year, ptrTrim(body.Model), ptrTrim(body.Color), ptrTrim(body.City), ptrTrim(body.UF),
 		ptrTrim(body.VehicleType), ptrTrim(body.Category), body.PrimaryFuelID, body.TankCapacityLiters, body.ExpectedKmPerLiter,
 		body.MinKmPerLiter, body.MaxKmPerLiter, body.OdometerCurrent, body.HourmeterCurrent, body.CostCenterID,
 		body.Status, ptrTrim(body.Notes), s.userIDFromRequest(r))
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeErr(w, http.StatusConflict, "CONFLICT", "placa já cadastrada", nil)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "DB", err.Error(), nil)
 		return
 	}

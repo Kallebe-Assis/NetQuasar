@@ -8,35 +8,37 @@ import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 
-type CC = { id: string; code: string; description: string; parent_id?: string | null; status: string; notes?: string | null };
+type ExpenseType = { id: string; description: string; code?: string | null; active: boolean; notes?: string | null };
 
-const empty = () => ({ code: "", description: "", parent_id: "", status: "active", notes: "" });
+const empty = () => ({ description: "", code: "", active: true, notes: "" });
 
-export function FleetCostCentersPage({ embedded }: { embedded?: boolean } = {}) {
+export function FleetExpenseTypesPage({ embedded }: { embedded?: boolean } = {}) {
   const { push } = useAppToast();
   const qc = useQueryClient();
   const canMutate = can("fleet.manage") || isAdminUser();
   const [editing, setEditing] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(empty());
-  const q = useQuery({ queryKey: queryKeys.fleetCostCenters, queryFn: () => apiFetch<{ items: CC[] }>("/api/v1/fleet/cost-centers") });
+  const q = useQuery({
+    queryKey: queryKeys.fleetExpenseTypes,
+    queryFn: () => apiFetch<{ items: ExpenseType[] }>("/api/v1/fleet/expense-types"),
+  });
 
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
-        code: form.code.trim(),
         description: form.description.trim(),
-        parent_id: form.parent_id || null,
-        status: form.status,
+        code: form.code.trim() || null,
+        active: form.active,
         notes: form.notes.trim() || null,
       };
-      if (editing) await apiFetch(`/api/v1/fleet/cost-centers/${editing}`, { method: "PATCH", body: JSON.stringify(payload) });
-      else await apiFetch("/api/v1/fleet/cost-centers", { method: "POST", body: JSON.stringify(payload) });
+      if (editing) await apiFetch(`/api/v1/fleet/expense-types/${editing}`, { method: "PATCH", body: JSON.stringify(payload) });
+      else await apiFetch("/api/v1/fleet/expense-types", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: async () => {
-      toastOk(push, editing ? "Centro de custo atualizado" : "Centro de custo criado");
+      toastOk(push, editing ? "Tipo atualizado" : "Tipo criado");
       closeForm();
-      await qc.invalidateQueries({ queryKey: queryKeys.fleetCostCenters });
+      await qc.invalidateQueries({ queryKey: queryKeys.fleetExpenseTypes });
     },
     onError: (e) => toastErr(push, e),
   });
@@ -50,13 +52,13 @@ export function FleetCostCentersPage({ embedded }: { embedded?: boolean } = {}) 
   const body = (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
-        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Centros de custo</h1>}
+        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Tipos de despesa</h1>}
         {canMutate ? (
           <button
             type="button"
             className="btn btn--icon btn--icon-menu btn--primary"
-            title="Novo centro de custo"
-            aria-label="Novo centro de custo"
+            title="Novo tipo de despesa"
+            aria-label="Novo tipo de despesa"
             onClick={() => { setEditing(null); setForm(empty()); setFormOpen(true); }}
           >
             <Plus size={18} aria-hidden />
@@ -67,22 +69,19 @@ export function FleetCostCentersPage({ embedded }: { embedded?: boolean } = {}) 
       {formOpen && canMutate ? createPortal(
         <div className="modal-backdrop" role="presentation" onMouseDown={closeForm}>
           <div className="modal modal--wide" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-            <h3>{editing ? "Editar centro de custo" : "Novo centro de custo"}</h3>
+            <h3>{editing ? "Editar tipo de despesa" : "Novo tipo de despesa"}</h3>
             <div className="fleet-form-grid">
-              <label>Código*<input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></label>
               <label>Descrição*<input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-              <label>Pai<select className="input" value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: e.target.value })}>
-                <option value="">Nenhum</option>
-                {(q.data?.items ?? []).filter((c) => c.id !== editing).map((c) => <option key={c.id} value={c.id}>{c.code} — {c.description}</option>)}
-              </select></label>
-              <label>Status<select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="active">Ativo</option><option value="inactive">Inativo</option>
-              </select></label>
+              <label>Código<input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></label>
+              <label className="row" style={{ alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+                Ativo
+              </label>
               <label className="fleet-form-span">Observação<input className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
             </div>
             <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button type="button" className="btn" onClick={closeForm}>Cancelar</button>
-              <button type="button" className="btn btn--primary" disabled={!form.code.trim() || !form.description.trim() || save.isPending} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
+              <button type="button" className="btn btn--primary" disabled={!form.description.trim() || save.isPending} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
             </div>
           </div>
         </div>,
@@ -91,15 +90,17 @@ export function FleetCostCentersPage({ embedded }: { embedded?: boolean } = {}) 
 
       <div className="card table-wrap">
         <table>
-          <thead><tr><th>Código</th><th>Descrição</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Descrição</th><th>Código</th><th>Ativo</th><th /></tr></thead>
           <tbody>
-            {(q.data?.items ?? []).map((c) => (
-              <tr key={c.id}>
-                <td>{c.code}</td><td>{c.description}</td><td>{c.status === "active" ? "Ativo" : c.status === "inactive" ? "Inativo" : c.status}</td>
+            {(q.data?.items ?? []).map((t) => (
+              <tr key={t.id}>
+                <td>{t.description}</td>
+                <td>{t.code ?? "—"}</td>
+                <td>{t.active ? "Sim" : "Não"}</td>
                 <td>{canMutate ? <button type="button" className="btn btn--sm" onClick={() => {
-                  setEditing(c.id);
+                  setEditing(t.id);
                   setFormOpen(true);
-                  setForm({ code: c.code, description: c.description, parent_id: c.parent_id ?? "", status: c.status, notes: c.notes ?? "" });
+                  setForm({ description: t.description, code: t.code ?? "", active: t.active, notes: t.notes ?? "" });
                 }}>Editar</button> : null}</td>
               </tr>
             ))}

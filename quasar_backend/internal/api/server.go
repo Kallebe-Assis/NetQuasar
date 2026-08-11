@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -296,6 +297,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Delete("/network/projects/{id}", s.deleteNetworkProject)
 				r.Post("/network/ctos", s.createNetworkCto)
 				r.Post("/network/ctos/bulk", s.bulkNetworkCtos)
+				r.Post("/network/ctos/link-olt", s.linkNetworkCtosOlt)
 				r.Patch("/network/ctos/{id}", s.patchNetworkCto)
 				r.Delete("/network/ctos/{id}", s.deleteNetworkCto)
 				r.Post("/network/splice-boxes", s.createNetworkSpliceBox)
@@ -533,8 +535,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/drivers", s.listFleetDrivers)
 			r.Get("/driver-vehicles", s.listFleetDriverVehicles)
 			r.Get("/fuelings", s.listFleetFuelings)
+			r.Get("/expenses", s.listFleetExpenses)
+			r.Get("/expenses/export/csv", s.exportFleetExpensesCSV)
+			r.Get("/expense-types", s.listFleetExpenseTypes)
 			r.Get("/alerts", s.listFleetAlerts)
 			r.Get("/reports/{kind}", s.fleetReportCSV)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("fleet.manage", "reports.send", "*"))
+				r.Post("/reports/{kind}/telegram", s.fleetReportTelegram)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("fleet.manage", "*"))
 				r.Patch("/settings", s.patchFleetSettings)
@@ -545,20 +554,41 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/stations", s.createFleetStation)
 				r.Patch("/stations/{id}", s.patchFleetStation)
 				r.Post("/vehicles", s.createFleetVehicle)
+				r.Post("/vehicles/import/csv", s.importFleetVehiclesCSV)
 				r.Patch("/vehicles/{id}", s.patchFleetVehicle)
 				r.Post("/drivers", s.createFleetDriver)
+				r.Post("/drivers/import/csv", s.importFleetDriversCSV)
 				r.Patch("/drivers/{id}", s.patchFleetDriver)
 				r.Post("/driver-vehicles", s.createFleetDriverVehicle)
 				r.Delete("/driver-vehicles/{id}", s.deleteFleetDriverVehicle)
 				r.Post("/fuelings", s.createFleetFueling)
 				r.Post("/fuelings/quick", s.createFleetFueling)
+				r.Post("/expenses", s.createFleetExpense)
+				r.Post("/expenses/import/csv", s.importFleetExpensesCSV)
+				r.Post("/expenses/purge", s.purgeFleetExpenses)
+				r.Post("/expense-types", s.createFleetExpenseType)
+				r.Patch("/expense-types/{id}", s.patchFleetExpenseType)
 				r.Post("/alerts/{id}/ack", s.ackFleetAlert)
 			})
 		})
 	})
 
 	if cfg.EmbeddedUI {
-		r.Handle("/*", embedui.Handler(log))
+		ui := embedui.Handler(log)
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				writeErr(w, http.StatusNotFound, "NOT_FOUND", "rota não encontrada", nil)
+				return
+			}
+			ui.ServeHTTP(w, req)
+		})
+		r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				writeErr(w, http.StatusMethodNotAllowed, "METHOD", "método não permitido", nil)
+				return
+			}
+			ui.ServeHTTP(w, req)
+		})
 	}
 
 	if s.DB() != nil {

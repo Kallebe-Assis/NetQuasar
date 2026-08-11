@@ -10,7 +10,7 @@ import { ApiError, apiFetch } from "../../lib/api";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
-import { OltOnuTelnetReportModal } from "./OltOnuTelnetReportModal";
+import { OltOnuTelnetReportModal, type OltOnuReportPonMeta } from "./OltOnuTelnetReportModal";
 import {
   buildTelnetReportSections,
   buildUnifiedReportTable,
@@ -164,6 +164,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTitle, setReportTitle] = useState("");
   const [reportSteps, setReportSteps] = useState<OltTelnetReportStep[]>([]);
+  const [reportPonMeta, setReportPonMeta] = useState<OltOnuReportPonMeta | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [errorModal, setErrorModal] = useState<ParsedApiError | null>(null);
   const [telnetResult, setTelnetResult] = useState<TelnetSerialResult | null>(null);
@@ -358,12 +359,17 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     setReportOpen(true);
     setReportTitle(`${row.olt_description ?? "OLT"} — PON ${row.pon ?? "?"} / ONU ${row.onu ?? "?"} ${row.serial ? `(${row.serial})` : ""}`);
     setReportSteps([]);
+    setReportPonMeta({ pon: row.pon, onu: row.onu });
     try {
       const res = await apiFetch<{
         ok: boolean;
         output?: string;
         error?: string;
         commands?: OltTelnetReportStep[];
+        pon?: number;
+        onu?: number;
+        pon_description?: string;
+        pon_vlan?: string | number;
       }>(
         `/api/v1/olt/devices/${row.olt_id}/onu-report`,
         {
@@ -381,6 +387,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         ? res.commands
         : [{ command: "onu-report", ok: res.ok, output: res.output ?? "", error: res.error }];
       setReportSteps(steps);
+      setReportPonMeta({
+        pon: res.pon ?? row.pon,
+        onu: res.onu ?? row.onu,
+        pon_description: res.pon_description,
+        pon_vlan: res.pon_vlan,
+      });
       const updated = applyTelnetFieldsToRow(row, steps);
       setRowOverrides((prev) => ({ ...prev, [rowKey(row)]: updated }));
     } catch (e) {
@@ -816,6 +828,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           loading={reportLoading}
           title={reportTitle}
           steps={reportSteps}
+          ponMeta={reportPonMeta}
           onClose={() => setReportOpen(false)}
         />
       ) : null}

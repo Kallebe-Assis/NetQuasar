@@ -52,7 +52,7 @@ func Compute(in Input) (Computed, error) {
 	out := Computed{TotalAmount: round2(in.Liters * in.PricePerLiter)}
 	if in.OdometerCurr != nil && in.OdometerPrev != nil {
 		if *in.OdometerCurr < *in.OdometerPrev {
-			return out, fmt.Errorf("hodómetro actual não pode ser menor que o anterior")
+			return out, fmt.Errorf("hodômetro atual não pode ser menor que o anterior")
 		}
 		km := *in.OdometerCurr - *in.OdometerPrev
 		out.KmDriven = &km

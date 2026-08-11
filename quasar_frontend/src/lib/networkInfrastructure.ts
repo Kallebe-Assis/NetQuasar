@@ -59,6 +59,11 @@ export type NetworkCto = {
   longitude?: number | null;
   splitter?: string | null;
   transmitter?: string | null;
+  olt_device_id?: string | null;
+  pon?: number | null;
+  pon_description?: string | null;
+  vlan?: number | string | null;
+  olt_description?: string | null;
   fiber_color?: string | null;
   notes?: string | null;
   needs_maintenance: boolean;

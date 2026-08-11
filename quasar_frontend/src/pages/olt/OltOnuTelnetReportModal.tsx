@@ -4,22 +4,46 @@ import {
   buildTelnetReportSections,
   buildUnifiedReportTable,
   formatTelnetReportPlainText,
+  type OltTelnetReportField,
   type OltTelnetReportStep,
 } from "../../lib/oltTelnetReportFormat";
 import { EM_DASH } from "../../lib/formatDisplay";
+
+export type OltOnuReportPonMeta = {
+  pon?: number | null;
+  onu?: number | null;
+  pon_description?: string | null;
+  pon_vlan?: string | number | null;
+};
 
 type Props = {
   open: boolean;
   loading: boolean;
   title: string;
   steps: OltTelnetReportStep[];
+  ponMeta?: OltOnuReportPonMeta | null;
   onClose: () => void;
 };
 
-export function OltOnuTelnetReportModal({ open, loading, title, steps, onClose }: Props) {
+function ponMetaRows(meta?: OltOnuReportPonMeta | null): OltTelnetReportField[] {
+  if (!meta) return [];
+  const pon = meta.pon != null && Number(meta.pon) > 0 ? String(meta.pon) : "";
+  return [
+    { label: "PON", value: pon || EM_DASH },
+    { label: "Descrição da PON", value: String(meta.pon_description ?? "").trim() || EM_DASH },
+    { label: "VLAN", value: String(meta.pon_vlan ?? "").trim() || EM_DASH },
+  ];
+}
+
+export function OltOnuTelnetReportModal({ open, loading, title, steps, ponMeta, onClose }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const sections = useMemo(() => buildTelnetReportSections(steps), [steps]);
-  const rows = useMemo(() => buildUnifiedReportTable(sections), [sections]);
+  const rows = useMemo(() => {
+    const extra = ponMetaRows(ponMeta);
+    const extraKeys = new Set(extra.map((r) => r.label.toLowerCase()));
+    const parsed = buildUnifiedReportTable(sections).filter((r) => !extraKeys.has(r.label.toLowerCase()));
+    return [...extra, ...parsed];
+  }, [sections, ponMeta]);
 
   if (!open) return null;
 

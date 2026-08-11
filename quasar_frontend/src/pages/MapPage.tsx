@@ -1702,8 +1702,24 @@ export function MapPage() {
                     </div>
                   ) : null}
 
+                  {locationPin ? (
+                    <div className="map-hidden-chip map-locate-chip">
+                      <span>{locationPin.label?.trim() || "Ponto da pesquisa"}</span>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() => {
+                          setLocationPin(null);
+                          setMapToast({ ok: true, text: "Marcador da pesquisa removido." });
+                        }}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ) : null}
+
                   {hiddenMapIds.size > 0 ? (
-                    <div className="map-hidden-chip">
+                    <div className="map-hidden-chip" style={locationPin ? { top: 108 } : undefined}>
                       <span>{hiddenMapIds.size} oculto{hiddenMapIds.size === 1 ? "" : "s"}</span>
                       <button type="button" className="btn btn--sm" onClick={() => setHiddenMapIds(new Set())}>
                         Mostrar todos
@@ -1721,6 +1737,10 @@ export function MapPage() {
                     highlightedId={mapHighlightIds}
                     userLocation={userLocation}
                     locationPin={locationPin}
+                    onClearLocationPin={() => {
+                      setLocationPin(null);
+                      setMapToast({ ok: true, text: "Marcador da pesquisa removido." });
+                    }}
                     placeMode={placeMode}
                     draftPath={draftPath}
                     mapEditMode={mapEditMode}

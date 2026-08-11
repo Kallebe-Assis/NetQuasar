@@ -26,6 +26,9 @@ import {
   type NetworkSpliceBox,
 } from "../lib/networkInfrastructure";
 import { APP_ROUTES } from "../app/routes";
+import { OltInterfaceSelects } from "./OltInterfaceSelects";
+import { formatOltPonLabel, type OltPonCatalog } from "../lib/oltPonInterfaces";
+import { queryKeys } from "../lib/queryKeys";
 import type { InfraMapKind } from "../lib/mapInfrastructureIcons";
 import { INFRA_MAP_KIND_LABELS } from "../lib/mapInfrastructureIcons";
 
@@ -119,6 +122,8 @@ export function MapInfraSidePanel({
     longitude: "",
     splitter: "",
     transmitter: "",
+    olt_device_id: "",
+    pon: "",
     fiber_color: "",
     notes: "",
     needs_maintenance: false,
@@ -130,6 +135,14 @@ export function MapInfraSidePanel({
     enabled: open && parsed?.kind === "cto" && !!parsed.id,
     queryFn: () => apiFetch<NetworkCto>(`/api/v1/commercial/network/ctos/${parsed!.id}`),
   });
+
+  const oltsQ = useQuery({
+    queryKey: queryKeys.oltDevices,
+    queryFn: () => apiFetch<{ olts: OltPonCatalog[] }>("/api/v1/olt/devices"),
+    enabled: open && parsed?.kind === "cto",
+    staleTime: 5 * 60 * 1000,
+  });
+  const olts = oltsQ.data?.olts ?? [];
 
   const cableQ = useQuery({
     queryKey: ["map-cable-detail", parsed?.id],
@@ -219,6 +232,8 @@ export function MapInfraSidePanel({
       longitude: c.longitude != null ? String(c.longitude) : "",
       splitter: c.splitter ? normalizeSplitterInput(c.splitter) ?? c.splitter : "",
       transmitter: c.transmitter ?? "",
+      olt_device_id: c.olt_device_id ?? "",
+      pon: c.pon != null && Number(c.pon) > 0 ? String(c.pon) : "",
       fiber_color: c.fiber_color?.trim() ? c.fiber_color : "Desconhecido",
       notes: c.notes ?? "",
       needs_maintenance: !!c.needs_maintenance,
@@ -241,6 +256,11 @@ export function MapInfraSidePanel({
           longitude: lng,
           splitter: normalizeSplitterInput(form.splitter) || null,
           transmitter: form.transmitter.trim() || null,
+          olt_device_id: form.olt_device_id.trim() || null,
+          pon: (() => {
+            const n = Number(form.pon.trim());
+            return Number.isFinite(n) && n > 0 ? n : null;
+          })(),
           fiber_color: form.fiber_color.trim() || null,
           notes: form.notes.trim() || null,
           needs_maintenance: form.needs_maintenance,
@@ -253,6 +273,7 @@ export function MapInfraSidePanel({
       setErr(null);
       await qc.invalidateQueries({ queryKey: ["map-cto-detail", parsed?.id] });
       await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      await qc.invalidateQueries({ queryKey: queryKeys.networkCtos });
       onSaved?.(next);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
@@ -377,6 +398,18 @@ export function MapInfraSidePanel({
               <dd>{ctoQ.data?.transmitter || "—"}</dd>
             </div>
             <div>
+              <dt>Interface</dt>
+              <dd>
+                {ctoQ.data?.pon
+                  ? formatOltPonLabel(Number(ctoQ.data.pon), String(ctoQ.data.pon_description ?? "").trim(), "")
+                  : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>VLAN</dt>
+              <dd>{ctoQ.data?.vlan != null && ctoQ.data.vlan !== "" ? String(ctoQ.data.vlan) : "—"}</dd>
+            </div>
+            <div>
               <dt>Cor da fibra</dt>
               <dd>{feedFiberLabel}</dd>
             </div>
@@ -465,10 +498,16 @@ export function MapInfraSidePanel({
             <span>Splitter</span>
             <input className="input" value={form.splitter} onChange={(e) => setForm({ ...form, splitter: e.target.value })} placeholder="1x8" />
           </label>
-          <label className="map-infra-panel__field">
-            <span>Transmissor</span>
-            <input className="input" value={form.transmitter} onChange={(e) => setForm({ ...form, transmitter: e.target.value })} />
-          </label>
+          <OltInterfaceSelects
+            olts={olts}
+            oltDeviceId={form.olt_device_id}
+            transmitter={form.transmitter}
+            pon={form.pon}
+            disabled={saveMut.isPending}
+            fieldClassName="map-infra-panel__field"
+            labelClassName=""
+            onChange={(next) => setForm({ ...form, ...next })}
+          />
           <label className="map-infra-panel__field">
             <span>Cor da fibra</span>
             <select className="select" value={form.fiber_color} onChange={(e) => setForm({ ...form, fiber_color: e.target.value })}>
