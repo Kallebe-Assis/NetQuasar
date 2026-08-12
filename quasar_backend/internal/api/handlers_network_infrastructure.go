@@ -21,7 +21,7 @@ var networkFiberColors = []string{
 }
 
 var networkProjectStatuses = []string{
-	"planejamento", "em_andamento", "concluido", "pausado", "cancelado",
+	"planejamento", "em_andamento", "concluido", "pausado", "cancelado", "inativo",
 }
 
 var networkCableStatuses = []string{
@@ -161,6 +161,24 @@ func (in *networkProjectInput) validate() error {
 	}
 	in.Status = st
 	return validateCoords(in.Latitude, in.Longitude)
+}
+
+func (s *Server) localityLatLng(ctx context.Context, locID *uuid.UUID) (lat, lon *float64) {
+	if locID == nil {
+		return nil, nil
+	}
+	_ = s.DB().QueryRow(ctx, `SELECT latitude, longitude FROM commercial_localities WHERE id=$1`, *locID).Scan(&lat, &lon)
+	return
+}
+
+func fillCoordsFromLocality(lat, lon *float64, locLat, locLon *float64) (*float64, *float64) {
+	if lat != nil || lon != nil {
+		return lat, lon
+	}
+	if locLat != nil && locLon != nil {
+		return locLat, locLon
+	}
+	return lat, lon
 }
 
 func scanNetworkProject(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
@@ -317,6 +335,8 @@ func (s *Server) createNetworkProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
 		return
 	}
+	locLat, locLon := s.localityLatLng(r.Context(), locID)
+	body.Latitude, body.Longitude = fillCoordsFromLocality(body.Latitude, body.Longitude, locLat, locLon)
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `

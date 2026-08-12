@@ -162,6 +162,13 @@ func severityGteMetric(v float64, t GteMetricThreshold) string {
 	return "ok"
 }
 
+func capRxToWarning(sev string) string {
+	if sev == "critical" {
+		return "warning"
+	}
+	return sev
+}
+
 // EvalMetricSeverity avalia severidade de um valor face a um limiar global (exportado para interfacealerts e verify).
 func EvalMetricSeverity(v float64, t GteMetricThreshold) string {
 	return severityGteMetric(v, t)
@@ -196,13 +203,17 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): %s está em %.2f — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, value, sevPt)
-	meta := alertnotify.WithStatusTransition(map[string]any{
+	base := map[string]any{
 		"source":     "monitoring_telemetry",
 		"key":        key,
 		"metric_id":  metricID,
 		"value":      value,
 		"value_text": formatTelemetryValueText(metricID, value),
-	}, "metric_normal", "threshold_"+sev, nil)
+	}
+	if strings.Contains(strings.ToLower(metricID), "temp") {
+		base["temperature_c"] = value
+	}
+	meta := alertnotify.WithStatusTransition(base, "metric_normal", "threshold_"+sev, nil)
 	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
 		DeviceID: deviceID, Severity: sev, AlertType: alertTypeTelemetryThreshold,
 		Message: msg, IP: ip, DeviceName: desc, Meta: meta,

@@ -22,6 +22,7 @@ export const PROJECT_STATUSES = [
   { value: "concluido", label: "Concluído" },
   { value: "pausado", label: "Pausado" },
   { value: "cancelado", label: "Cancelado" },
+  { value: "inativo", label: "Inativo" },
 ] as const;
 
 export const CABLE_STATUSES = [
@@ -31,7 +32,13 @@ export const CABLE_STATUSES = [
   { value: "manutencao", label: "Manutenção" },
 ] as const;
 
-export type CommercialLocality = { id: string; name: string; region_code?: string | null };
+export type CommercialLocality = {
+  id: string;
+  name: string;
+  region_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
 
 export type NetworkProject = {
   id: string;

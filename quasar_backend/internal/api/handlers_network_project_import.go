@@ -75,6 +75,8 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
 		return
 	}
+	locLat, locLon := s.localityLatLng(r.Context(), locID)
+	body.Latitude, body.Longitude = fillCoordsFromLocality(body.Latitude, body.Longitude, locLat, locLon)
 
 	total := len(body.Elements.Ctos) + len(body.Elements.SpliceBoxes) + len(body.Elements.Poles) + len(body.Elements.Cables)
 	if total == 0 {
@@ -231,7 +233,7 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		}
 		status := strings.TrimSpace(item.Status)
 		if status == "" {
-			status = "planejado"
+			status = "ativo"
 		}
 		stCable, ok := normalizeCableStatus(status)
 		if !ok {

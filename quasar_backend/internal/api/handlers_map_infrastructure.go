@@ -59,6 +59,14 @@ func infraMapProjectSQL(projectID *uuid.UUID, n *int, args *[]any) string {
 	return clause
 }
 
+// Projetos inativos e os respectivos elementos não aparecem no mapa.
+func infraMapHideInactiveSQL(table string) string {
+	if table == "network_projects" {
+		return ` AND status <> 'inativo'`
+	}
+	return ` AND (project_id IS NULL OR EXISTS (SELECT 1 FROM network_projects np WHERE np.id = project_id AND np.status <> 'inativo'))`
+}
+
 func parseInfraMapProjectID(r *http.Request) (*uuid.UUID, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get("project_id"))
 	if raw == "" {
@@ -119,6 +127,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		n := 1
 		q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 		q += infraMapProjectSQL(projectID, &n, &args)
+		q += infraMapHideInactiveSQL(table)
 		q += orderNearCenter(&n, &args)
 		q += fmt.Sprintf(` LIMIT $%d`, n)
 		args = append(args, capN)
@@ -173,6 +182,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 			q += infraMapProjectSQL(projectID, &n, &args)
+			q += infraMapHideInactiveSQL("network_ctos")
 			q += orderNearCenter(&n, &args)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
@@ -232,6 +242,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 			q += infraMapProjectSQL(projectID, &n, &args)
+			q += infraMapHideInactiveSQL("network_cables")
 			q += orderNearCenter(&n, &args)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
@@ -287,7 +298,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			if capN > 0 {
 				q := `SELECT id, description, display_number, latitude, longitude, color
 					FROM network_projects
-					WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND id = $1`
+					WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND id = $1 AND status <> 'inativo'`
 				args := []any{*projectID}
 				n := 2
 				q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)

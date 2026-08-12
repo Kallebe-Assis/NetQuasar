@@ -107,20 +107,55 @@ func VerifyAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, a
 			alertnotify.SendResolutionTelegramAndPatchMeta(ctx, pool, log, closedID, head, msg)
 		}
 	} else {
-		if v, ok := collected["dbm"]; ok {
+		stripDbm := isTemperatureAlert(row.AlertType, row.Meta) || isTemperatureAlert(row.AlertType, collected)
+		if stripDbm {
+			if patch == nil {
+				patch = map[string]any{}
+			}
+			tempVal := collected["temperature_c"]
+			if tempVal == nil {
+				tempVal = collected["value"]
+			}
+			if tempVal == nil {
+				tempVal = row.Meta["temperature_c"]
+			}
+			if tempVal == nil {
+				tempVal = row.Meta["value"]
+			}
+			if tempVal != nil {
+				patch["temperature_c"] = tempVal
+				patch["value"] = tempVal
+				if vt := formatTempC(tempVal); vt != "" {
+					patch["value_text"] = vt
+				}
+			}
+		} else if v, ok := collected["dbm"]; ok {
 			if patch == nil {
 				patch = map[string]any{}
 			}
 			patch["dbm"] = v
 			patch["value"] = v
 		}
-		if len(patch) > 0 {
+		if row.AlertType == "olt_onu_rise" {
+			_, _ = pool.Exec(ctx, `
+				UPDATE alert_instances SET severity = 'info'
+				WHERE id = $1::uuid AND closed_at IS NULL AND severity <> 'info'
+			`, alertID)
+		}
+		if len(patch) > 0 || stripDbm {
+			if patch == nil {
+				patch = map[string]any{}
+			}
 			patch["source"] = "alert_verify"
 			patch["verify"] = collected
 			metaRaw, _ := json.Marshal(patch)
 			newMsg := buildUpdatedMessage(row, collected)
+			metaSQL := `COALESCE(meta,'{}'::jsonb) || $2::jsonb`
+			if stripDbm {
+				metaSQL = `(COALESCE(meta,'{}'::jsonb) - 'dbm') || $2::jsonb`
+			}
 			_, _ = pool.Exec(ctx, `
-				UPDATE alert_instances SET message = $3, meta = COALESCE(meta,'{}'::jsonb) || $2::jsonb
+				UPDATE alert_instances SET message = $3, meta = `+metaSQL+`
 				WHERE id = $1::uuid AND closed_at IS NULL
 			`, alertID, metaRaw, newMsg)
 			out.UpdatedMeta = patch
@@ -188,6 +223,13 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		return resolved, summary, collected, patch
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
 		return verifySfp(ctx, pool, log, row)
+	case "mikrotik_sfp_temp":
+		return verifySfpTemp(ctx, pool, log, row)
+	case "olt_pon_temp":
+		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
+		resolved, summary, collected, patch = verifyOltPonTemp(ctx, pool, row)
+		collected["refreshed"] = true
+		return resolved, summary, collected, patch
 	case "interface_down_transition", "interface_down":
 		return verifyInterfaceDown(ctx, pool, log, row)
 	default:
@@ -280,18 +322,27 @@ func verifyTelemetry(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bo
 	if val != nil {
 		collected["value"] = *val
 		collected["metric_id"] = metricID
+		if strings.Contains(strings.ToLower(metricID), "temp") {
+			collected["temperature_c"] = *val
+		}
 	}
 	var devCat string
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
 	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, metricID, devCat)
+	patch := map[string]any{"value": val, "metric_id": metricID}
+	if val != nil && strings.Contains(strings.ToLower(metricID), "temp") {
+		patch["temperature_c"] = *val
+		patch["value_text"] = fmt.Sprintf("%.1f °C", *val)
+	}
 	if !ok || val == nil {
-		return false, "Sem amostra recente de telemetria.", collected, map[string]any{"value": val, "metric_id": metricID}
+		return false, "Sem amostra recente de telemetria.", collected, patch
 	}
 	sev := severityGte(*val, th)
+	patch["value"] = *val
 	if sev == "ok" {
-		return true, fmt.Sprintf("%s: %.2f — dentro do limiar.", label, *val), collected, map[string]any{"value": *val, "metric_id": metricID}
+		return true, fmt.Sprintf("%s: %.2f — dentro do limiar.", label, *val), collected, patch
 	}
-	return false, fmt.Sprintf("%s: %.2f — ainda em %s.", label, *val, sev), collected, map[string]any{"value": *val, "metric_id": metricID}
+	return false, fmt.Sprintf("%s: %.2f — ainda em %s.", label, *val, sev), collected, patch
 }
 
 func verifyUptimeRestartLow(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
@@ -537,6 +588,92 @@ func verifySfp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, row
 	return false, fmt.Sprintf("%s: %.2f dBm — ainda fora do limiar.", label, *dbm), collected, patch
 }
 
+func verifySfpTemp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, row *alertRow) (bool, string, map[string]any, map[string]any) {
+	collected := map[string]any{}
+	ifIndex := metaIfIndex(row.Meta)
+	host, comm, cat, brand, model, desc := loadDeviceSnmpFields(ctx, pool, row.DeviceID)
+	if host != "" && comm != "" {
+		monitorworker.CollectInterfaceSnapshotWorker(ctx, pool, log, row.DeviceID, host, comm, cat, brand, model, desc)
+		collected["snapshot_refreshed"] = true
+	}
+	if !alertStillOpen(ctx, pool, row.ID) {
+		return true, "Temperatura SFP dentro do limiar.", collected, nil
+	}
+	temp, snapAt := loadSfpTempFromSnapshot(ctx, pool, row.DeviceID, ifIndex)
+	if snapAt != "" {
+		collected["snapshot_at"] = snapAt
+	}
+	if temp == nil {
+		if old := toFloat(row.Meta["temperature_c"]); old != nil {
+			temp = old
+			collected["note"] = "sem leitura nova — valor do alerta"
+		} else if old := toFloat(row.Meta["value"]); old != nil {
+			temp = old
+		} else {
+			return false, "Sem leitura de temperatura SFP.", collected, nil
+		}
+	}
+	collected["temperature_c"] = *temp
+	collected["value"] = *temp
+	var devCat string
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "mikrotik_sfp_temp_c", devCat)
+	patch := map[string]any{"temperature_c": *temp, "value": *temp, "value_text": fmt.Sprintf("%.1f °C", *temp)}
+	if !ok {
+		return false, fmt.Sprintf("Temperatura actual %.1f °C (sem limiar global).", *temp), collected, patch
+	}
+	sev := severityGte(*temp, th)
+	if sev == "ok" {
+		return true, fmt.Sprintf("%s: %.1f °C — dentro do limiar.", label, *temp), collected, patch
+	}
+	return false, fmt.Sprintf("%s: %.1f °C — ainda fora do limiar.", label, *temp), collected, patch
+}
+
+func verifyOltPonTemp(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+	collected := map[string]any{}
+	pon := strings.TrimSpace(fmt.Sprint(row.Meta["pon"]))
+	var ponsRaw []byte
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, row.DeviceID).Scan(&ponsRaw)
+	collected["pon"] = pon
+	var arr []map[string]any
+	_ = json.Unmarshal(ponsRaw, &arr)
+	var temp *float64
+	for _, p := range arr {
+		k := strings.TrimSpace(fmt.Sprint(p["pon_compact"]))
+		if k == "" {
+			k = strings.TrimSpace(fmt.Sprint(p["id"]))
+		}
+		if k != pon && pon != "" {
+			continue
+		}
+		if f := toFloat(p["temperature"]); f != nil {
+			temp = f
+			break
+		}
+	}
+	if temp == nil {
+		temp = toFloat(row.Meta["temperature_c"])
+		if temp == nil {
+			temp = toFloat(row.Meta["value"])
+		}
+	}
+	if temp == nil {
+		return false, "Sem leitura de temperatura da PON.", collected, nil
+	}
+	collected["temperature_c"] = *temp
+	collected["value"] = *temp
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "olt_pon_temp_c", "olt")
+	patch := map[string]any{"temperature_c": *temp, "value": *temp, "value_text": fmt.Sprintf("%.1f °C", *temp)}
+	if !ok {
+		return false, fmt.Sprintf("Temperatura PON %.1f °C (sem limiar global).", *temp), collected, patch
+	}
+	sev := severityGte(*temp, th)
+	if sev == "ok" {
+		return true, fmt.Sprintf("%s: %.1f °C — dentro do limiar.", label, *temp), collected, patch
+	}
+	return false, fmt.Sprintf("%s: %.1f °C — ainda fora do limiar.", label, *temp), collected, patch
+}
+
 func metaIfIndex(meta map[string]any) int {
 	if meta == nil {
 		return 0
@@ -609,6 +746,32 @@ func loadSfpDbmFromSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 	return nil, at.UTC().Format(time.RFC3339)
 }
 
+func loadSfpTempFromSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, ifIndex int) (*float64, string) {
+	if pool == nil || ifIndex <= 0 {
+		return nil, ""
+	}
+	var raw []byte
+	var at time.Time
+	err := pool.QueryRow(ctx, `
+		SELECT interfaces::text, collected_at FROM interface_snapshots
+		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
+	`, deviceID).Scan(&raw, &at)
+	if err != nil || len(raw) == 0 {
+		return nil, ""
+	}
+	vars := snmpVarsFromSnapshotJSON(raw)
+	if len(vars) == 0 {
+		return nil, ""
+	}
+	ifRows := snmpifparse.BuildIfTable(vars)
+	optMap := snmpmikrotik.OpticalPowerByIfIndex(ifRows, vars)
+	if op, ok := optMap[ifIndex]; ok && op.TemperatureC != nil {
+		v := *op.TemperatureC
+		return &v, at.UTC().Format(time.RFC3339)
+	}
+	return nil, at.UTC().Format(time.RFC3339)
+}
+
 func snmpVarsFromSnapshotJSON(raw []byte) []probing.SNMPVar {
 	var arr []map[string]any
 	if json.Unmarshal(raw, &arr) != nil {
@@ -659,12 +822,43 @@ func toFloat(v any) *float64 {
 	return nil
 }
 
+func isTemperatureAlert(alertType string, meta map[string]any) bool {
+	t := strings.ToLower(strings.TrimSpace(alertType))
+	if t == "mikrotik_sfp_temp" || t == "olt_pon_temp" || t == "temperature_high" || t == "temperature_low" {
+		return true
+	}
+	if strings.Contains(t, "temp") {
+		return true
+	}
+	mid := ""
+	if meta != nil {
+		mid, _ = meta["metric_id"].(string)
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(mid)), "temp")
+}
+
+func formatTempC(v any) string {
+	if f := toFloat(v); f != nil {
+		return fmt.Sprintf("%.1f °C", *f)
+	}
+	return ""
+}
+
 func buildUpdatedMessage(row *alertRow, collected map[string]any) string {
 	if row.AlertType == "ping_unreachable" {
 		return row.Message
 	}
 	if v, ok := collected["latency_ms"]; ok {
 		return fmt.Sprintf("%s (%s): latência actual %v ms.", row.DeviceName, row.IP, v)
+	}
+	if isTemperatureAlert(row.AlertType, collected) || isTemperatureAlert(row.AlertType, row.Meta) {
+		tempVal := collected["temperature_c"]
+		if tempVal == nil {
+			tempVal = collected["value"]
+		}
+		if f := toFloat(tempVal); f != nil {
+			return fmt.Sprintf("%s (%s): temperatura actual %.1f °C.", row.DeviceName, row.IP, *f)
+		}
 	}
 	if v, ok := collected["dbm"]; ok {
 		if f := toFloat(v); f != nil {
@@ -688,6 +882,11 @@ func VerifyAllOpen(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	_, _ = pool.Exec(ctx, `
+		UPDATE alert_instances
+		SET severity = 'info'
+		WHERE closed_at IS NULL AND alert_type = 'olt_onu_rise' AND severity <> 'info'
+	`)
 	rows, err := pool.Query(ctx, `
 		SELECT a.id FROM alert_instances a
 		WHERE a.closed_at IS NULL
@@ -761,7 +960,19 @@ func formatResolvedValueText(alertType string, collected map[string]any) string 
 	if collected == nil {
 		return ""
 	}
-	if v, ok := collected["dbm"]; ok && v != nil {
+	if isTemperatureAlert(alertType, collected) {
+		if v, ok := collected["temperature_c"]; ok && v != nil {
+			if s := formatTempC(v); s != "" {
+				return s
+			}
+		}
+		if v, ok := collected["value"]; ok && v != nil {
+			if s := formatTempC(v); s != "" {
+				return s
+			}
+		}
+	}
+	if v, ok := collected["dbm"]; ok && v != nil && !isTemperatureAlert(alertType, collected) {
 		return fmt.Sprintf("%v dBm", v)
 	}
 	if v, ok := collected["latency_ms"]; ok && v != nil {

@@ -367,15 +367,32 @@ func resolvedValueFromMeta(alertType string, meta map[string]any) string {
 	if ms := formatLatencyMsFromMeta(meta, "curr_latency_ms", "probe_latency_ms"); ms != "" {
 		return ms
 	}
+	tempAlert := strings.Contains(strings.ToLower(alertType), "temp") || strings.Contains(strings.ToLower(fmt.Sprint(meta["metric_id"])), "temp")
 	if verify, ok := meta["verify"].(map[string]any); ok {
 		if ms := formatLatencyMsFromMeta(verify, "latency_ms"); ms != "" {
 			return ms
 		}
-		if v, ok := verify["dbm"]; ok && v != nil {
+		if tempAlert {
+			if v, ok := verify["temperature_c"]; ok && v != nil {
+				return fmt.Sprintf("%v °C", v)
+			}
+			if v, ok := verify["value"]; ok && v != nil {
+				return fmt.Sprintf("%v °C", v)
+			}
+		}
+		if v, ok := verify["dbm"]; ok && v != nil && !tempAlert {
 			return fmt.Sprintf("%v dBm", v)
 		}
 		if v, ok := verify["value"]; ok && v != nil {
 			return fmt.Sprint(v)
+		}
+	}
+	if tempAlert {
+		if v, ok := meta["temperature_c"]; ok && v != nil {
+			return fmt.Sprintf("%v °C", v)
+		}
+		if v, ok := meta["value"]; ok && v != nil {
+			return fmt.Sprintf("%v °C", v)
 		}
 	}
 	if alertType != "latency_high" {
@@ -383,7 +400,7 @@ func resolvedValueFromMeta(alertType string, meta map[string]any) string {
 			return fmt.Sprint(v)
 		}
 	}
-	if v, ok := meta["dbm"]; ok && v != nil {
+	if v, ok := meta["dbm"]; ok && v != nil && !tempAlert {
 		return fmt.Sprintf("%v dBm", v)
 	}
 	_ = alertType
@@ -750,12 +767,16 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		if n := metaInt(meta, "drop_count"); n > 0 {
 			parts = append(parts, fmt.Sprintf("• Sessões desconectadas: %d", n))
 		}
-	case "interface_down_transition", "interface_down", "mikrotik_sfp_tx", "mikrotik_sfp_rx":
+	case "interface_down_transition", "interface_down", "mikrotik_sfp_tx", "mikrotik_sfp_rx", "mikrotik_sfp_temp":
 		if tgt := interfaceTargetFromMeta(meta, inc); tgt != "" {
 			parts = append(parts, "• "+tgt)
 		}
-		if val != "-" && (alertType == "mikrotik_sfp_tx" || alertType == "mikrotik_sfp_rx") {
+		if val != "-" && (alertType == "mikrotik_sfp_tx" || alertType == "mikrotik_sfp_rx" || alertType == "mikrotik_sfp_temp") {
 			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
+		} else if alertType == "mikrotik_sfp_temp" {
+			if vt := metaString(meta, "value_text"); vt != "" {
+				parts = append(parts, "• Temperatura = "+vt)
+			}
 		}
 	default:
 		if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {

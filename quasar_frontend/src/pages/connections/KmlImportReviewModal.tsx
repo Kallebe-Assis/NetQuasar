@@ -56,7 +56,7 @@ function changeKind(item: KmlReviewItem, next: KmlElementKind): KmlReviewItem | 
       latitude: path[0].lat,
       longitude: path[0].lng,
       fiber_count: item.fiber_count || "12",
-      cable_status: item.cable_status || "planejado",
+      cable_status: item.cable_status || "ativo",
     };
   }
   // Entre tipos pontuais
@@ -87,7 +87,7 @@ export function KmlImportReviewModal({
   const [bulkSplitter, setBulkSplitter] = useState("1x8");
   const [bulkCableType, setBulkCableType] = useState("");
   const [bulkFiberCount, setBulkFiberCount] = useState("12");
-  const [bulkCableStatus, setBulkCableStatus] = useState("planejado");
+  const [bulkCableStatus, setBulkCableStatus] = useState("ativo");
   const [bulkBoxModel, setBulkBoxModel] = useState<"emenda" | "distribuicao">("emenda");
   const [bulkFiberColor, setBulkFiberColor] = useState("Desconhecido");
   const [q, setQ] = useState("");

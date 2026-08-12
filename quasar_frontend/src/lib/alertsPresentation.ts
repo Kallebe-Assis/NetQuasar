@@ -155,7 +155,7 @@ export function alertEquipmentPrimary(type: string | null | undefined, deviceNam
     if (desc && !looksLikeIpOrOnlyDigits(desc)) return desc;
     const ifIdx = m?.if_index;
     if (typeof ifIdx === "number" && Number.isFinite(ifIdx)) return `ifIndex ${Math.round(ifIdx)}`;
-    const sfpIf = msgStr.match(/\binterface\s+(.+?)\s+[—\-]\s*potência/i);
+    const sfpIf = msgStr.match(/\binterface\s+(.+?)\s+[—\-]\s*(?:potência|temperatura)/i);
     if (sfpIf?.[1]?.trim() && !looksLikeIpOrOnlyDigits(sfpIf[1])) return sfpIf[1].trim();
     const mudouIf = msgStr.match(/\binterface\s+(.+?)\s+mudou/i);
     if (mudouIf?.[1]?.trim() && !looksLikeIpOrOnlyDigits(mudouIf[1])) return mudouIf[1].trim();
@@ -164,7 +164,7 @@ export function alertEquipmentPrimary(type: string | null | undefined, deviceNam
     return "";
   }
 
-  if (t === "mikrotik_sfp_tx" || t === "mikrotik_sfp_rx") {
+  if (t === "mikrotik_sfp_tx" || t === "mikrotik_sfp_rx" || t === "mikrotik_sfp_temp") {
     let equip = equipName;
     if (!equip) {
       const head = msgStr.match(/^\s*(.+?)\s*\([^)]+\)\s*:/);
@@ -283,8 +283,18 @@ export function alertValueText(type: string | null | undefined, message: string 
     if (cntOnly !== null) return fmtByUnit(cntOnly, "ONUs");
   }
 
+  const metricId = String(m?.metric_id ?? "").toLowerCase();
+  const isSfpTemp = t === "mikrotik_sfp_temp" || t === "olt_pon_temp";
+  const isTempAlert =
+    isSfpTemp || t.includes("temperature") || t.includes("temp") || metricId.includes("temp");
+  const tempN = coerceFiniteNumber(m?.temperature_c);
+  if (tempN !== null) return fmtByUnit(tempN, "°C");
+  const vt = String(m?.value_text ?? "").trim();
+  if (isTempAlert && /°\s*c/i.test(vt)) return vt.replace(/\s+/g, " ");
+  if (isTempAlert && vt && !/dbm/i.test(vt)) return vt.replace(/\s+/g, " ");
+
   const dbmN = coerceFiniteNumber(m?.dbm);
-  if (dbmN !== null) return fmtByUnit(dbmN, "dBm");
+  if (dbmN !== null && !isTempAlert) return fmtByUnit(dbmN, "dBm");
   const latN = coerceFiniteNumber(m?.curr_latency_ms);
   if (latN !== null) return fmtByUnit(latN, "ms");
   const cntN = coerceFiniteNumber(m?.drop_online_count);
@@ -294,18 +304,17 @@ export function alertValueText(type: string | null | undefined, message: string 
   const upN = coerceFiniteNumber(m?.observed_uptime_minutes);
   if (upN !== null) return fmtByUnit(upN, "min");
 
-  const metricId = String(m?.metric_id ?? "").toLowerCase();
   const generic = coerceFiniteNumber(m?.value);
   if (generic !== null) {
     if (metricId.includes("uptime") || metricId === "uptime_minutes") return fmtByUnit(generic, "min");
     if (t.includes("latency")) return fmtByUnit(generic, "ms");
-    if (t.includes("sfp")) return fmtByUnit(generic, "dBm");
+    if (isSfpTemp || metricId.includes("temp") || t.includes("temperature")) return fmtByUnit(generic, "°C");
+    if (t === "mikrotik_sfp_tx" || t === "mikrotik_sfp_rx" || t.includes("sfp")) return fmtByUnit(generic, "dBm");
     if (metricId.includes("cpu") || t.includes("cpu")) return fmtByUnit(generic, "%");
     if (metricId.includes("mem") || t.includes("memory")) return fmtByUnit(generic, "%");
-    if (metricId.includes("temp") || t.includes("telemetry") || t.includes("temperature")) return fmtByUnit(generic, "°C");
+    if (t.includes("telemetry")) return fmtByUnit(generic, "°C");
     if (t.includes("uptime")) return fmtByUnit(generic, "min");
     if (t.includes("onu") || t.includes("pon")) return fmtByUnit(generic, "ONUs");
-    if (t.includes("cpu") || t.includes("memory")) return fmtByUnit(generic, "%");
   }
 
   if (metricId === "latency_ms") {
@@ -319,15 +328,16 @@ export function alertValueText(type: string | null | undefined, message: string 
     const n = Number(String(num[1]).replace(",", "."));
     if (Number.isFinite(n)) {
       const unitRaw = String(num[2] ?? "").toLowerCase();
-      if (unitRaw === "dbm") return fmtByUnit(n, "dBm");
+      if (unitRaw === "dbm" && !isTempAlert) return fmtByUnit(n, "dBm");
       if (unitRaw === "ms") return fmtByUnit(n, "ms");
-      if (unitRaw === "°c") return fmtByUnit(n, "°C");
+      if (unitRaw === "°c" || isTempAlert) return fmtByUnit(n, "°C");
       if (unitRaw === "%") return fmtByUnit(n, "%");
       if (unitRaw.startsWith("onu")) return fmtByUnit(n, "ONUs");
       if (unitRaw.startsWith("min")) return fmtByUnit(n, "min");
       if (t.includes("latency")) return fmtByUnit(n, "ms");
-      if (t.includes("sfp")) return fmtByUnit(n, "dBm");
-      if (t.includes("telemetry") || t.includes("temperature")) return fmtByUnit(n, "°C");
+      if (isSfpTemp || t.includes("temperature")) return fmtByUnit(n, "°C");
+      if (t === "mikrotik_sfp_tx" || t === "mikrotik_sfp_rx" || t.includes("sfp")) return fmtByUnit(n, "dBm");
+      if (t.includes("telemetry")) return fmtByUnit(n, "°C");
     }
   }
   return "-";

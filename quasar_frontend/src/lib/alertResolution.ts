@@ -58,13 +58,21 @@ export function formatAlertResolvedValue(
     if (v) return v;
   }
 
-  if (verify.dbm != null || m.dbm != null) {
+  const metricId = String(verify.metric_id ?? collected.metric_id ?? m.metric_id ?? "").toLowerCase();
+  const isSfpTemp = t === "mikrotik_sfp_temp" || t === "olt_pon_temp";
+  const isTempAlert =
+    isSfpTemp || t.includes("temperature") || t.includes("temp") || metricId.includes("temp");
+  if (isTempAlert || verify.temperature_c != null || m.temperature_c != null) {
+    const v = numFmt(verify.temperature_c ?? m.temperature_c ?? verify.value ?? collected.value ?? m.value, " °C");
+    if (v) return v;
+  }
+
+  if (!isTempAlert && (verify.dbm != null || m.dbm != null)) {
     const v = numFmt(verify.dbm ?? m.dbm, " dBm");
     if (v) return v;
   }
 
   const metricVal = verify.value ?? collected.value ?? m.value;
-  const metricId = String(verify.metric_id ?? collected.metric_id ?? m.metric_id ?? "").toLowerCase();
   if (metricVal != null) {
     if (metricId.includes("cpu") || t.includes("cpu")) {
       const v = numFmt(metricVal, "%");
@@ -74,7 +82,7 @@ export function formatAlertResolvedValue(
       const v = numFmt(metricVal, "%");
       if (v) return v;
     }
-    if (metricId.includes("temp") || t.includes("temperature")) {
+    if (isSfpTemp || metricId.includes("temp") || t.includes("temperature")) {
       const v = numFmt(metricVal, " °C");
       if (v) return v;
     }

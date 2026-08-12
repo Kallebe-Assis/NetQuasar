@@ -421,8 +421,15 @@ export function MapPage() {
 
   const projectsList = useQuery({
     queryKey: queryKeys.networkProjects,
-    queryFn: () => apiFetch<{ projects: { id: string; display_number: number; description: string }[] }>("/api/v1/commercial/network/projects"),
+    queryFn: () =>
+      apiFetch<{ projects: { id: string; display_number: number; description: string; status?: string }[] }>(
+        "/api/v1/commercial/network/projects",
+      ),
   });
+  const mapProjects = useMemo(
+    () => (projectsList.data?.projects ?? []).filter((p) => p.status !== "inativo"),
+    [projectsList.data],
+  );
 
   const infraPts = useQuery({
     queryKey: [
@@ -1088,6 +1095,13 @@ export function MapPage() {
     setFitBoundsVersion((v) => v + 1);
   }, [projectFilterId, infraPts.isFetching, infraPts.data]);
 
+  useEffect(() => {
+    const pid = projectFilterId.trim();
+    if (!pid || !projectsList.data?.projects) return;
+    const p = projectsList.data.projects.find((x) => x.id === pid);
+    if (p?.status === "inativo") setProjectFilterId("");
+  }, [projectFilterId, projectsList.data]);
+
   const filterActiveCount = useMemo(() => {
     let n = 0;
     if (popId) n++;
@@ -1429,7 +1443,7 @@ export function MapPage() {
         onCategory={setCategory}
         projectId={projectFilterId}
         onProjectId={setProjectFilterId}
-        projectsOptions={projectsList.data?.projects ?? []}
+        projectsOptions={mapProjects}
         showEquipment={showEquipment}
         onShowEquipment={setShowEquipment}
         showCtos={showCtos}
@@ -1929,7 +1943,7 @@ export function MapPage() {
         <MapProjectKmlImport
           open={kmlImportOpen}
           defaultProjectId={projectFilterId}
-          projects={projectsList.data?.projects ?? []}
+          projects={mapProjects}
           onClose={() => setKmlImportOpen(false)}
           onImported={(info) => {
             const n =

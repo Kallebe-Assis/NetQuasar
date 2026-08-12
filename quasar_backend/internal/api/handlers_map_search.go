@@ -18,7 +18,7 @@ func (s *Server) mapProjectCenter(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var desc string
 	var displayNum int
-	err = s.DB().QueryRow(ctx, `SELECT description, display_number FROM network_projects WHERE id=$1`, id).Scan(&desc, &displayNum)
+	err = s.DB().QueryRow(ctx, `SELECT description, display_number FROM network_projects WHERE id=$1 AND status <> 'inativo'`, id).Scan(&desc, &displayNum)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "projeto não encontrado", nil)
 		return
@@ -224,6 +224,7 @@ func (s *Server) mapSearch(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN network_projects p ON p.id = t.project_id
 			WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
 			  AND t.description ILIKE $1
+			  AND (t.project_id IS NULL OR p.status IS NULL OR p.status <> 'inativo')
 			ORDER BY t.display_number
 			LIMIT $2`
 		} else {
@@ -232,6 +233,7 @@ func (s *Server) mapSearch(w http.ResponseWriter, r *http.Request) {
 			FROM ` + ik.table + `
 			WHERE latitude IS NOT NULL AND longitude IS NOT NULL
 			  AND description ILIKE $1
+			  AND status <> 'inativo'
 			ORDER BY display_number
 			LIMIT $2`
 		}

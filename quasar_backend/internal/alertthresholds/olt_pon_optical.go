@@ -64,6 +64,9 @@ func evaluateOltPonMetric(
 		return
 	}
 	sev := severityGteMetric(value, th)
+	if metricID == "olt_pon_rx_dbm" {
+		sev = capRxToWarning(sev)
+	}
 	metaKey := metricID + ":" + ponKey
 	if sev == "ok" {
 		closeOltPonOpticalAlert(ctx, pool, log, deviceID, alertType, metaKey)
@@ -76,14 +79,21 @@ func evaluateOltPonMetric(
 		descOrEmpty(strings.TrimSpace(deviceDesc), "?"),
 		addrOrEmpty(strings.TrimSpace(deviceIP), "?"),
 		ponKey, label, value, unit, sev)
-	meta := alertnotify.WithStatusTransition(map[string]any{
+	base := map[string]any{
 		"source":     "monitor_worker_olt",
 		"key":        metaKey,
 		"metric_id":  metricID,
 		"pon":        ponKey,
 		"value":      value,
 		"value_text": fmt.Sprintf("%.2f %s", value, unit),
-	}, "pon_metric_normal", "threshold_"+sev, nil)
+	}
+	if unit == "dBm" {
+		base["dbm"] = value
+	}
+	if unit == "°C" {
+		base["temperature_c"] = value
+	}
+	meta := alertnotify.WithStatusTransition(base, "pon_metric_normal", "threshold_"+sev, nil)
 	_, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
 		DeviceID: deviceID, Severity: sev, AlertType: alertType,
 		Message: msg, IP: deviceIP, DeviceName: deviceDesc, Meta: meta,

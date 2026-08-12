@@ -423,7 +423,15 @@ export function ProjectsTab({
                   <LocalitySelect
                     value={form.locality_id}
                     localities={localities}
-                    onChange={(id) => setForm({ ...form, locality_id: id })}
+                    onChange={(id) => {
+                      const loc = localities.find((l) => l.id === id);
+                      setForm({
+                        ...form,
+                        locality_id: id,
+                        latitude: loc?.latitude != null ? String(loc.latitude) : form.latitude,
+                        longitude: loc?.longitude != null ? String(loc.longitude) : form.longitude,
+                      });
+                    }}
                   />
                   <div className="conn-form-modal__field">
                     <span className="conn-form-modal__field-label">Cor</span>

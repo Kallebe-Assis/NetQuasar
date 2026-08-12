@@ -65,7 +65,7 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
     queryFn: () => apiFetch<{ projects: NetworkProject[] }>("/api/v1/commercial/network/projects"),
     enabled: !!session && needsProject,
   });
-  const projects = projectsQ.data?.projects ?? [];
+  const projects = (projectsQ.data?.projects ?? []).filter((p) => p.status !== "inativo");
 
   useEffect(() => {
     if (!session) return;

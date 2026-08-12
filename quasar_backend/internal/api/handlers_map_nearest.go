@@ -51,7 +51,8 @@ func (s *Server) mapNearestCtos(w http.ResponseWriter, r *http.Request) {
 		SELECT id, description, display_number, latitude, longitude,
 			splitter, fiber_color, ` + distExpr + ` AS distance_m
 		FROM network_ctos
-		WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		  AND (project_id IS NULL OR EXISTS (SELECT 1 FROM network_projects np WHERE np.id = project_id AND np.status <> 'inativo'))`
 	args := []any{lat, lng}
 	n := 3
 	if projectID != nil {

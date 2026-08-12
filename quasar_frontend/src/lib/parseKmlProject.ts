@@ -177,7 +177,7 @@ function emptyReviewFields(
     fiber_color: "Desconhecido",
     fiber_count: "",
     cable_type: "",
-    cable_status: "planejado",
+    cable_status: "ativo",
     box_model: "emenda",
     pole_type: "",
     notes: "",
@@ -263,7 +263,7 @@ export function parseKmlToReviewItems(xmlText: string): ParsedKmlReview {
             folder,
             fiber_count: "12",
             cable_type: "",
-            cable_status: "planejado",
+            cable_status: "ativo",
           }),
         );
       } else {
@@ -388,7 +388,7 @@ export function reviewItemsToImportElements(items: KmlReviewItem[]) {
         path: path.map((p) => ({ lat: p.lat, lng: p.lng })),
         cable_type: it.cable_type.trim() || null,
         fiber_count: Number.isFinite(fc as number) ? fc : null,
-        status: it.cable_status.trim() || "planejado",
+        status: it.cable_status.trim() || "ativo",
       });
     }
   }
