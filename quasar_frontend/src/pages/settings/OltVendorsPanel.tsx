@@ -1838,11 +1838,19 @@ function OltVendorsPanel() {
                 className="input mono"
                 value={onuReportSerialSearchText}
                 onChange={(e) => setOnuReportSerialSearchText(e.target.value)}
-                placeholder={brand.toUpperCase().includes("ZTE") ? "show gpon onu by sn {serial}" : "show onu info {pon}"}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "show gpon onu by sn {serial}"
+                    : brand.toUpperCase().includes("VSOL")
+                      ? "onu search {serial}"
+                      : "show onu info {pon}"
+                }
               />
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
-                Com <code>{"{serial}"}</code> a OLT procura directamente (ZTE). Sem <code>{"{serial}"}</code>, lista e filtra no
-                NetQuasar (VSOL). Use <code>{"{pon}"}</code> para uma porta; na Pesquisa pode escolher «Todas».
+                Com <code>{"{serial}"}</code> a OLT procura directamente (ZTE:{" "}
+                <code>show gpon onu by sn {"{serial}"}</code>; VSOL: <code>onu search {"{serial}"}</code> em modo{" "}
+                <code>config</code> — use os pré-comandos do bloco 1, ex. <code>enable</code> + <code>configure terminal</code>
+                ). Sem <code>{"{serial}"}</code>, lista e filtra no NetQuasar. Use <code>{"{pon}"}</code> para uma porta.
               </p>
             </div>
           </div>

@@ -241,7 +241,7 @@ func runDirectSerialSearch(
 ) SerialSearchRunResult {
 	res := SerialSearchRunResult{Mode: "direct"}
 	lookupCmd := cfg.RenderSerialSearchCommand(target, secrets)
-	preRendered := cfg.RenderPreCommands(target, secrets)
+	preRendered := ensureConfigModeForOnuSearch(cfg.RenderPreCommands(target, secrets), lookupCmd)
 	tel := probing.TelnetRunCommand(ctx, probing.TelnetRunParams{
 		Host: host, Port: "23", Timeout: timeout,
 		User: user, Password: password, Enable: enable,
@@ -254,28 +254,56 @@ func runDirectSerialSearch(
 		res.Error = tel.Error
 		return res
 	}
-	gponOnu := ParseGponOnuFromOutput(tel.Output)
-	pon, onu := 0, 0
-	if gponOnu != "" {
-		pon, onu = ParsePonOnuFromGponOnu(gponOnu)
+
+	entries := ParseOnuListFromTelnetOutput(tel.Output)
+	if len(entries) == 0 {
+		gponOnu := ParseGponOnuFromOutput(tel.Output)
+		pon, onu := 0, 0
+		if gponOnu != "" {
+			pon, onu = ParsePonOnuFromGponOnu(gponOnu)
+		}
+		if pon > 0 || onu > 0 || gponOnu != "" {
+			entry := SerialSearchOnuEntry{Serial: target.Serial, GponOnu: gponOnu, Pon: pon, Onu: onu}
+			parsed := ExtractTelnetKVFieldsPublic(tel.Output)
+			if v := parsed["SN"]; v != "" {
+				entry.Serial = v
+			}
+			if v := parsed["Modelo"]; v != "" {
+				entry.Model = v
+			}
+			entries = []SerialSearchOnuEntry{entry}
+		}
 	}
-	entry := SerialSearchOnuEntry{Serial: target.Serial, GponOnu: gponOnu, Pon: pon, Onu: onu}
-	parsed := ExtractTelnetKVFieldsPublic(tel.Output)
-	if v := parsed["SN"]; v != "" {
-		entry.Serial = v
+	if target.Pon > 0 {
+		var filtered []SerialSearchOnuEntry
+		for _, e := range entries {
+			if e.Pon == 0 || e.Pon == target.Pon {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(entries) > 0 && len(filtered) == 0 {
+			res.OK = false
+			res.Error = fmt.Sprintf("ONU encontrada na PON %d, não na PON %d filtrada", entries[0].Pon, target.Pon)
+			return res
+		}
+		entries = filtered
 	}
-	if v := parsed["Modelo"]; v != "" {
-		entry.Model = v
-	}
-	if target.Pon > 0 && entry.Pon > 0 && entry.Pon != target.Pon {
-		res.OK = false
-		res.Error = fmt.Sprintf("ONU encontrada na PON %d, não na PON %d filtrada", entry.Pon, target.Pon)
-		return res
-	}
-	if entry.Pon > 0 || entry.Onu > 0 || entry.Serial != "" {
-		res.Matches = []SerialSearchOnuEntry{entry}
-	}
+	res.Matches = entries
 	return res
+}
+
+// ensureConfigModeForOnuSearch: na VSOL, "onu search" só existe em (config)#.
+func ensureConfigModeForOnuSearch(pre []string, cmd string) []string {
+	low := strings.ToLower(strings.TrimSpace(cmd))
+	if !strings.HasPrefix(low, "onu search") {
+		return pre
+	}
+	blob := strings.ToLower(strings.Join(pre, "\n"))
+	if strings.Contains(blob, "configure t") || strings.Contains(blob, "conf t") {
+		return pre
+	}
+	out := append([]string{}, pre...)
+	return append(out, "configure terminal")
 }
 
 // FirstSerialSearchMatch devolve a primeira correspondência ou entrada vazia.

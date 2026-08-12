@@ -1,6 +1,7 @@
 package oltcollect
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -78,6 +79,26 @@ func onuListEntryKey(e SerialSearchOnuEntry) string {
 }
 
 func parseOnuListLine(line string) (SerialSearchOnuEntry, bool) {
+	// VSOL: onu search SERIAL → pon 3 onu 29 sn ZTEGDA1CCA51 Online
+	if m := telnetVsolOnuSearchRE.FindStringSubmatch(line); m != nil {
+		pon, _ := strconv.Atoi(m[1])
+		onu, _ := strconv.Atoi(m[2])
+		serial := strings.TrimSpace(m[3])
+		state := ""
+		if len(m) > 4 {
+			state = strings.TrimSpace(m[4])
+		}
+		if pon > 0 && onu > 0 && looksLikeSerial(serial) {
+			return SerialSearchOnuEntry{
+				Pon:     pon,
+				Onu:     onu,
+				Serial:  serial,
+				Mode:    state,
+				GponOnu: fmt.Sprintf("GPON0/%d:%d", pon, onu),
+			}, true
+		}
+	}
+
 	// Formato ZTE uncfg: gpon_olt-1/1/9  R1v2  ITBSCF8F197E  123456789
 	if m := telnetZtePonUncfgRE.FindStringSubmatch(line); m != nil {
 		pon, _ := strconv.Atoi(strings.TrimSpace(m[2]))

@@ -16,6 +16,8 @@ var (
 	telnetVsolAutoFindRE = regexp.MustCompile(`^(?i)(GPON\d+/\d+:\d+)\s+(\S+)\s+(\S+)\s*$`)
 	// show pon onu uncfg: gpon_olt-1/1/9  Model  SERIAL  PW
 	telnetZtePonUncfgRE = regexp.MustCompile(`^(?i)(gpon_olt-\d+/\d+/(\d+))\s+(\S+)\s+([A-Za-z0-9]{6,})\s+(\S+)\s*$`)
+	// VSOL: onu search SERIAL → "pon 3 onu 29 sn ZTEGDA1CCA51 Online"
+	telnetVsolOnuSearchRE = regexp.MustCompile(`(?i)^pon\s+(\d+)\s+onu\s+(\d+)\s+sn\s+(\S+)(?:\s+(\S+))?`)
 	telnetVsolStateRE   = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
 	telnetOnuNumberRE   = regexp.MustCompile(`ONU Number:\s*(\S+)`)
 	telnetFloatRE       = regexp.MustCompile(`-?\d+(?:\.\d+)?`)

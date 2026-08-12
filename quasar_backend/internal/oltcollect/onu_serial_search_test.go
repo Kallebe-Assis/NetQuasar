@@ -1,6 +1,9 @@
 package oltcollect
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseOnuListFromTelnetOutput_vsol(t *testing.T) {
 	out := `Onuindex         Model                Profile                Mode    AuthInfo
@@ -101,6 +104,43 @@ func TestSerialSearchModeDetection(t *testing.T) {
 	}
 	if !list.SerialSearchUsesPonPlaceholder() {
 		t.Fatal("expected pon placeholder")
+	}
+}
+
+func TestParseOnuListFromTelnetOutput_vsolOnuSearch(t *testing.T) {
+	out := `gpon-olt(config)# onu search ZTEGDA1CCA51
+
+pon 3 onu 29 sn ZTEGDA1CCA51 Online
+--------------search end----------------
+`
+	entries := ParseOnuListFromTelnetOutput(out)
+	if len(entries) != 1 {
+		t.Fatalf("entries=%d want 1, got %+v", len(entries), entries)
+	}
+	if entries[0].Pon != 3 || entries[0].Onu != 29 || entries[0].Serial != "ZTEGDA1CCA51" {
+		t.Fatalf("entry=%+v", entries[0])
+	}
+	if !strings.EqualFold(entries[0].Mode, "Online") {
+		t.Fatalf("mode=%q", entries[0].Mode)
+	}
+	filtered := FilterSerialSearchEntries(entries, "ZTEGDA1CCA51", 0)
+	if len(filtered) != 1 {
+		t.Fatalf("filter=%+v", filtered)
+	}
+}
+
+func TestEnsureConfigModeForOnuSearch(t *testing.T) {
+	got := ensureConfigModeForOnuSearch([]string{"enable"}, "onu search ZTEGDA1CCA51")
+	if len(got) != 2 || got[1] != "configure terminal" {
+		t.Fatalf("got=%v", got)
+	}
+	keep := ensureConfigModeForOnuSearch([]string{"enable", "configure terminal"}, "onu search ABC")
+	if len(keep) != 2 {
+		t.Fatalf("keep=%v", keep)
+	}
+	noop := ensureConfigModeForOnuSearch([]string{"enable"}, "show gpon onu by sn ABC")
+	if len(noop) != 1 {
+		t.Fatalf("noop=%v", noop)
 	}
 }
 
