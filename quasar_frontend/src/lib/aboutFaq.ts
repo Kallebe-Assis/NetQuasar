@@ -405,8 +405,8 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     cat: "funcoes",
   },
   {
-    q: "O mapa aceita KML?",
-    a: "Há fluxos de importação/revisão KML no módulo de elementos/projetos, conforme a versão instalada.",
+    q: "O mapa aceita KML ou KMZ?",
+    a: "Sim. Em Elementos → Projetos pode importar .kml ou .kmz; abre-se um ecrã de revisão para classificar CTO, emenda, poste e cabo.",
     cat: "funcoes",
   },
   {

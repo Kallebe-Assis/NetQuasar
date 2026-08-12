@@ -1,4 +1,6 @@
-/** Parser de KML para importação de projectos FTTH (CTO, foguete/emenda, poste, cabo). */
+/** Parser de KML/KMZ para importação de projectos FTTH (CTO, foguete/emenda, poste, cabo). */
+
+import { readKmlTextsFromFile } from "./readKmlArchive";
 
 export type KmlLatLng = { lat: number; lng: number };
 
@@ -293,6 +295,29 @@ export function parseKmlToReviewItems(xmlText: string): ParsedKmlReview {
   }
 
   return { projectName, items, skipped };
+}
+
+/** Lê .kml ou .kmz e devolve a lista plana para o modal de revisão. */
+export async function parseKmlOrKmzFile(file: File): Promise<ParsedKmlReview> {
+  const texts = await readKmlTextsFromFile(file);
+  let projectName = "";
+  const items: KmlReviewItem[] = [];
+  let skipped = 0;
+  let lastParseError: unknown = null;
+
+  for (const text of texts) {
+    try {
+      const parsed = parseKmlToReviewItems(text);
+      if (!projectName && parsed.projectName) projectName = parsed.projectName;
+      items.push(...parsed.items);
+      skipped += parsed.skipped;
+    } catch (e) {
+      lastParseError = e;
+    }
+  }
+
+  if (items.length === 0 && lastParseError) throw lastParseError;
+  return { projectName: projectName || "Projecto importado", items, skipped };
 }
 
 export function kmlImportSummary(p: ParsedKmlProject): string {

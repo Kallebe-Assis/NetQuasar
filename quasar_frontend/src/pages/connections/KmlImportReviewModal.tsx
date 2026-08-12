@@ -232,7 +232,7 @@ export function KmlImportReviewModal({
       >
         <div className="kml-review__head">
           <div>
-            <h2 id="kml-review-title">Revisão da importação KML</h2>
+            <h2 id="kml-review-title">Revisão da importação KML / KMZ</h2>
             <p className="kml-review__sub">
               {fileName ? <strong>{fileName}</strong> : null}
               {fileName ? " · " : null}

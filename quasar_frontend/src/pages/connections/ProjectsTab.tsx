@@ -21,7 +21,7 @@ import {
 } from "../../lib/networkInfrastructure";
 import {
   kmlReviewSummary,
-  parseKmlToReviewItems,
+  parseKmlOrKmzFile,
   reviewItemsToImportElements,
   type KmlReviewItem,
 } from "../../lib/parseKmlProject";
@@ -200,10 +200,9 @@ export function ProjectsTab({
   async function onKmlFile(file: File | null) {
     if (!file) return;
     try {
-      const text = await file.text();
-      const parsed = parseKmlToReviewItems(text);
+      const parsed = await parseKmlOrKmzFile(file);
       if (parsed.items.length === 0) {
-        throw new Error("O KML não contém elementos reconhecidos.");
+        throw new Error("O KML/KMZ não contém elementos reconhecidos.");
       }
       setKmlReviewDraft({
         projectName: parsed.projectName,
@@ -450,15 +449,15 @@ export function ProjectsTab({
               </section>
               {!editId ? (
                 <section className="conn-form-modal__section">
-                  <h3 className="conn-form-modal__section-title">Importar KML</h3>
+                  <h3 className="conn-form-modal__section-title">Importar KML / KMZ</h3>
                   <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)" }}>
-                    Após escolher o ficheiro, abre-se um modal para rever e corrigir em massa o tipo e os atributos de
-                    cada elemento (CTO, emenda, poste, cabo).
+                    Aceita .kml ou .kmz. Após escolher o ficheiro, abre-se um modal para rever e corrigir em massa o
+                    tipo e os atributos de cada elemento (CTO, emenda, poste, cabo).
                   </p>
                   <input
                     ref={kmlInputRef}
                     type="file"
-                    accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml"
+                    accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz,application/xml,text/xml"
                     style={{ display: "none" }}
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null;
@@ -474,7 +473,7 @@ export function ProjectsTab({
                       onClick={() => kmlInputRef.current?.click()}
                     >
                       <FileUp size={15} style={{ marginRight: 6 }} />
-                      Importar KML
+                      Importar KML / KMZ
                     </button>
                     {kmlItems ? (
                       <>
@@ -488,7 +487,7 @@ export function ProjectsTab({
                               projectName: form.description.trim() || "Projecto importado",
                               items: kmlItems,
                               skipped: kmlSkipped,
-                              fileName: kmlFileName ?? "KML",
+                              fileName: kmlFileName ?? "KML/KMZ",
                             });
                             setKmlReviewOpen(true);
                           }}
@@ -496,7 +495,7 @@ export function ProjectsTab({
                           <Pencil size={15} style={{ marginRight: 6 }} />
                           Rever elementos
                         </button>
-                        <button type="button" className="btn btn--icon" title="Remover KML" onClick={clearKml}>
+                        <button type="button" className="btn btn--icon" title="Remover KML/KMZ" onClick={clearKml}>
                           <X size={15} />
                         </button>
                       </>
@@ -513,7 +512,7 @@ export function ProjectsTab({
                         fontSize: 12,
                       }}
                     >
-                      <div style={{ fontWeight: 600 }}>{kmlFileName ?? "KML"}</div>
+                      <div style={{ fontWeight: 600 }}>{kmlFileName ?? "KML/KMZ"}</div>
                       <div style={{ color: "var(--muted)", marginTop: 4 }}>{kmlReviewSummary(kmlItems)}</div>
                     </div>
                   ) : null}
