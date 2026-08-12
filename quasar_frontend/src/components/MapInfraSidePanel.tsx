@@ -36,7 +36,7 @@ import { INFRA_MAP_KIND_LABELS } from "../lib/mapInfrastructureIcons";
 export function parseInfraMapId(mapId: string): { kind: InfraMapKind; id: string } | null {
   if (!mapId.startsWith("infra-")) return null;
   const rest = mapId.slice("infra-".length);
-  const kinds: InfraMapKind[] = ["splice_box", "project", "cable", "pole", "cto"];
+  const kinds: InfraMapKind[] = ["splice_box", "project", "cable", "pole", "cto", "pop"];
   for (const kind of kinds) {
     if (rest.startsWith(`${kind}-`)) {
       return { kind, id: rest.slice(kind.length + 1) };
@@ -164,6 +164,21 @@ export function MapInfraSidePanel({
     queryFn: () => apiFetch<NetworkPole>(`/api/v1/commercial/network/poles/${parsed!.id}`),
   });
 
+  const popQ = useQuery({
+    queryKey: ["map-pop-detail", parsed?.id],
+    enabled: open && parsed?.kind === "pop" && !!parsed.id,
+    queryFn: () =>
+      apiFetch<{
+        id: string;
+        description: string;
+        address?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
+        locality_name?: string | null;
+        device_count?: number;
+      }>(`/api/v1/pops/${parsed!.id}`),
+  });
+
   useEffect(() => {
     setEditing(false);
     setSplitterOpen(false);
@@ -258,7 +273,9 @@ export function MapInfraSidePanel({
             ? (spliceQ.data?.description ?? fallback?.description ?? "")
             : parsed?.kind === "pole"
               ? (poleQ.data?.description ?? fallback?.description ?? "")
-              : (fallback?.description ?? "");
+              : parsed?.kind === "pop"
+                ? (popQ.data?.description ?? fallback?.description ?? "")
+                : (fallback?.description ?? "");
     setDescDraft(next);
   }, [
     parsed?.kind,
@@ -266,6 +283,7 @@ export function MapInfraSidePanel({
     cableQ.data?.description,
     spliceQ.data?.description,
     poleQ.data?.description,
+    popQ.data?.description,
     fallback?.description,
   ]);
 
@@ -320,13 +338,16 @@ export function MapInfraSidePanel({
               ? `/api/v1/commercial/network/splice-boxes/${parsed.id}`
               : parsed.kind === "pole"
                 ? `/api/v1/commercial/network/poles/${parsed.id}`
-                : null;
+                : parsed.kind === "pop"
+                  ? `/api/v1/pops/${parsed.id}`
+                  : null;
       if (!path) throw new Error("Este tipo não pode ser excluído aqui.");
       await apiFetch(path, { method: "DELETE" });
     },
     onSuccess: async () => {
       setConfirmDelete(false);
       await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      await qc.invalidateQueries({ queryKey: queryKeys.pops });
       if (mapId) onDeleted?.(mapId);
       onClose();
     },
@@ -347,7 +368,9 @@ export function MapInfraSidePanel({
               ? `/api/v1/commercial/network/splice-boxes/${parsed.id}`
               : parsed.kind === "pole"
                 ? `/api/v1/commercial/network/poles/${parsed.id}`
-                : null;
+                : parsed.kind === "pop"
+                  ? `/api/v1/pops/${parsed.id}`
+                  : null;
       if (!path) throw new Error("Este tipo não pode ser editado aqui.");
       await apiFetch(path, { method: "PATCH", json: { description } });
       return description;
@@ -358,10 +381,12 @@ export function MapInfraSidePanel({
       await qc.invalidateQueries({ queryKey: ["map-cable-detail", parsed?.id] });
       await qc.invalidateQueries({ queryKey: ["map-splice-detail", parsed?.id] });
       await qc.invalidateQueries({ queryKey: ["map-pole-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-pop-detail", parsed?.id] });
       await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       await qc.invalidateQueries({ queryKey: queryKeys.networkCtos });
-      const lat = Number(ctoQ.data?.latitude ?? cableQ.data?.latitude ?? spliceQ.data?.latitude ?? poleQ.data?.latitude ?? fallback?.lat ?? 0);
-      const lng = Number(ctoQ.data?.longitude ?? cableQ.data?.longitude ?? spliceQ.data?.longitude ?? poleQ.data?.longitude ?? fallback?.lng ?? 0);
+      await qc.invalidateQueries({ queryKey: queryKeys.pops });
+      const lat = Number(ctoQ.data?.latitude ?? cableQ.data?.latitude ?? spliceQ.data?.latitude ?? poleQ.data?.latitude ?? popQ.data?.latitude ?? fallback?.lat ?? 0);
+      const lng = Number(ctoQ.data?.longitude ?? cableQ.data?.longitude ?? spliceQ.data?.longitude ?? poleQ.data?.longitude ?? popQ.data?.longitude ?? fallback?.lng ?? 0);
       onSaved?.({ lat, lng, description });
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar a descrição."),
@@ -369,7 +394,7 @@ export function MapInfraSidePanel({
 
   if (!open || !parsed) return null;
 
-  const editableKinds: InfraMapKind[] = ["cto", "cable", "splice_box", "pole"];
+  const editableKinds: InfraMapKind[] = ["cto", "cable", "splice_box", "pole", "pop"];
   const canMapEditActions = mapEditMode && canEdit && editableKinds.includes(parsed.kind);
 
   const title =
@@ -381,7 +406,9 @@ export function MapInfraSidePanel({
           ? spliceQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
           : parsed.kind === "pole"
             ? poleQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
-            : fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind];
+            : parsed.kind === "pop"
+              ? popQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
+              : fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind];
 
   const lat = ctoQ.data?.latitude ?? fallback?.lat;
   const lng = ctoQ.data?.longitude ?? fallback?.lng;
@@ -445,7 +472,7 @@ export function MapInfraSidePanel({
     <aside className="map-infra-panel" aria-label="Painel de infraestrutura">
       <div className="map-infra-panel__head">
         <div>
-          <div className="map-infra-panel__kind">CTO</div>
+          <div className="map-infra-panel__kind">{INFRA_MAP_KIND_LABELS[parsed.kind]}</div>
           <h2 className="map-infra-panel__title">{parsed.kind === "cto" ? panelTitle : title}</h2>
           {parsed.kind === "cto" && panelSubtitle && panelSubtitle !== panelTitle ? (
             <p className="map-infra-panel__muted" style={{ marginTop: 2 }}>
@@ -754,10 +781,15 @@ export function MapInfraSidePanel({
         <div className="map-infra-panel__body">
           {renderMapEditActions()}
           {parsed.kind === "pole" && poleQ.isLoading ? <p className="map-infra-panel__muted">A carregar poste…</p> : null}
+          {parsed.kind === "pop" && popQ.isLoading ? <p className="map-infra-panel__muted">A carregar POP…</p> : null}
           <dl className="map-infra-panel__dl">
             <div>
               <dt>Descrição</dt>
-              <dd>{poleQ.data?.description || fallback?.description || "—"}</dd>
+              <dd>
+                {parsed.kind === "pop"
+                  ? popQ.data?.description || fallback?.description || "—"
+                  : poleQ.data?.description || fallback?.description || "—"}
+              </dd>
             </div>
             {parsed.kind === "pole" ? (
               <div>
@@ -765,16 +797,44 @@ export function MapInfraSidePanel({
                 <dd>{poleQ.data?.pole_type || fallback?.category || "Poste"}</dd>
               </div>
             ) : null}
+            {parsed.kind === "pop" ? (
+              <>
+                <div>
+                  <dt>Localidade</dt>
+                  <dd>{popQ.data?.locality_name || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Equipamentos</dt>
+                  <dd>{popQ.data?.device_count ?? 0}</dd>
+                </div>
+                {popQ.data?.address ? (
+                  <div>
+                    <dt>Endereço</dt>
+                    <dd>{popQ.data.address}</dd>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <div>
               <dt>Localização</dt>
               <dd className="mono">
-                {fmtCoord(poleQ.data?.latitude ?? fallback?.lat)}, {fmtCoord(poleQ.data?.longitude ?? fallback?.lng)}
+                {fmtCoord(
+                  parsed.kind === "pop"
+                    ? (popQ.data?.latitude ?? fallback?.lat)
+                    : (poleQ.data?.latitude ?? fallback?.lat),
+                )}
+                ,{" "}
+                {fmtCoord(
+                  parsed.kind === "pop"
+                    ? (popQ.data?.longitude ?? fallback?.lng)
+                    : (poleQ.data?.longitude ?? fallback?.lng),
+                )}
               </dd>
             </div>
           </dl>
           <div className="map-infra-panel__actions">
-            <Link className="btn" to={APP_ROUTES.connections}>
-              Abrir em Conexões
+            <Link className="btn" to={parsed.kind === "pop" ? APP_ROUTES.pops : APP_ROUTES.connections}>
+              {parsed.kind === "pop" ? "Abrir em POPs" : "Abrir em Conexões"}
             </Link>
           </div>
         </div>

@@ -1,4 +1,4 @@
-/** Parser de KML/KMZ para importação de projectos FTTH (CTO, foguete/emenda, poste, cabo). */
+/** Parser de KML/KMZ para importação de projectos FTTH (CTO, foguete/emenda, poste, cabo, POP). */
 
 import { readKmlTextsFromFile } from "./readKmlArchive";
 
@@ -23,10 +23,11 @@ export type ParsedKmlProject = {
   splice_boxes: KmlParsedPoint[];
   poles: KmlParsedPoint[];
   cables: KmlParsedCable[];
+  pops: KmlParsedPoint[];
   skipped: number;
 };
 
-export type KmlElementKind = "cto" | "splice_box" | "pole" | "cable";
+export type KmlElementKind = "cto" | "splice_box" | "pole" | "cable" | "pop";
 
 /** Item editável no modal de revisão pós-KML. */
 export type KmlReviewItem = {
@@ -55,6 +56,7 @@ export const KML_KIND_LABELS: Record<KmlElementKind, string> = {
   splice_box: "Emenda / foguete",
   pole: "Poste",
   cable: "Cabo",
+  pop: "POP",
 };
 
 function textContent(el: Element | null | undefined): string {
@@ -97,10 +99,16 @@ function classifyFromText(text: string): KmlElementKind | null {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  if (/\b(line|linha|cabo|cable|fibra|backbone|drop|feeder)\b/.test(t) && !/\b(cto|poste|emenda|foguete)\b/.test(t)) {
+  if (/(^|[\s/\-_])pops?($|[\s/\-_])/.test(t)) {
+    return "pop";
+  }
+  if (/\b(line|linha|cabo|cable|fibra|backbone|drop|feeder)\b/.test(t) && !/\b(cto|poste|emenda|foguete|pop)\b/.test(t)) {
     return "cable";
   }
   if (/\b(cto|nap|ceo\s*termino|caixa\s*de\s*atendimento|caixa\s*termino|terminacao)\b/.test(t)) {
+    return "cto";
+  }
+  if (/\bc\s*\d{1,2}\s*[-_.]\s*\d{1,2}\b/.test(t)) {
     return "cto";
   }
   if (/\b(foguete|emenda|splice|caixa\s*de\s*emenda|ce\b|ceo\s*emenda)\b/.test(t)) {
@@ -120,6 +128,7 @@ export function classifyKmlPlacemark(name: string, folder: string, hasLine: bool
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  if (/(^|[\s/\-_])pops?($|[\s/\-_])/.test(f)) return "pop";
   if (/\bcto|nap\b/.test(f)) return "cto";
   if (/\bemenda|foguete|splice\b/.test(f)) return "splice_box";
   if (/\bposte|pole\b/.test(f)) return "pole";
@@ -194,6 +203,7 @@ export function parseKmlProject(xmlText: string): ParsedKmlProject {
     splice_boxes: [],
     poles: [],
     cables: [],
+    pops: [],
     skipped: items.skipped,
   };
   for (const it of items.items) {
@@ -203,6 +213,8 @@ export function parseKmlProject(xmlText: string): ParsedKmlProject {
       result.splice_boxes.push({ description: it.description, latitude: it.latitude, longitude: it.longitude });
     } else if (it.kind === "pole") {
       result.poles.push({ description: it.description, latitude: it.latitude, longitude: it.longitude });
+    } else if (it.kind === "pop") {
+      result.pops.push({ description: it.description, latitude: it.latitude, longitude: it.longitude });
     } else if (it.kind === "cable" && it.path && it.path.length >= 2) {
       result.cables.push({
         description: it.description,
@@ -326,6 +338,7 @@ export function kmlImportSummary(p: ParsedKmlProject): string {
     `${p.splice_boxes.length} emenda`,
     `${p.poles.length} poste`,
     `${p.cables.length} cabo`,
+    `${p.pops.length} POP`,
   ];
   let s = parts.join(" · ");
   if (p.skipped > 0) s += ` · ${p.skipped} ignorado(s)`;
@@ -334,9 +347,9 @@ export function kmlImportSummary(p: ParsedKmlProject): string {
 
 export function kmlReviewSummary(items: KmlReviewItem[]): string {
   const included = items.filter((i) => i.include);
-  const counts = { cto: 0, splice_box: 0, pole: 0, cable: 0 };
+  const counts = { cto: 0, splice_box: 0, pole: 0, cable: 0, pop: 0 };
   for (const it of included) counts[it.kind]++;
-  return `${counts.cto} CTO · ${counts.splice_box} emenda · ${counts.pole} poste · ${counts.cable} cabo`;
+  return `${counts.cto} CTO · ${counts.splice_box} emenda · ${counts.pole} poste · ${counts.cable} cabo · ${counts.pop} POP`;
 }
 
 /** Agrupa items do modal de revisão no payload da API de importação. */
@@ -345,6 +358,7 @@ export function reviewItemsToImportElements(items: KmlReviewItem[]) {
   const splice_boxes: Array<Record<string, unknown>> = [];
   const poles: Array<Record<string, unknown>> = [];
   const cables: Array<Record<string, unknown>> = [];
+  const pops: Array<Record<string, unknown>> = [];
 
   for (const it of items) {
     if (!it.include) continue;
@@ -377,6 +391,12 @@ export function reviewItemsToImportElements(items: KmlReviewItem[]) {
         longitude: it.longitude,
         pole_type: it.pole_type.trim() || null,
       });
+    } else if (it.kind === "pop") {
+      pops.push({
+        description: desc,
+        latitude: it.latitude,
+        longitude: it.longitude,
+      });
     } else if (it.kind === "cable") {
       const path = it.path && it.path.length >= 2 ? it.path : null;
       if (!path) continue;
@@ -393,5 +413,5 @@ export function reviewItemsToImportElements(items: KmlReviewItem[]) {
     }
   }
 
-  return { ctos, splice_boxes, poles, cables };
+  return { ctos, splice_boxes, poles, cables, pops };
 }

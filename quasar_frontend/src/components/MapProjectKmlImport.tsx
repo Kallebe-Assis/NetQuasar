@@ -63,7 +63,11 @@ export function MapProjectKmlImport({ open, defaultProjectId, projects, onClose,
     mutationFn: async (items: KmlReviewItem[]) => {
       const elements = reviewItemsToImportElements(items);
       const total =
-        elements.ctos.length + elements.splice_boxes.length + elements.poles.length + elements.cables.length;
+        elements.ctos.length +
+        elements.splice_boxes.length +
+        elements.poles.length +
+        elements.cables.length +
+        elements.pops.length;
       if (total === 0) throw new Error("Nenhum elemento seleccionado para importar.");
       const center = centroidOf(items);
       if (mode === "replace") {

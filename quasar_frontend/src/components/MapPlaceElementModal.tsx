@@ -3,10 +3,10 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { CABLE_FIBER_COUNTS } from "../lib/fiberSplitter";
-import { FiberColorSelect, ProjectSelect } from "../pages/connections/ConnectionsFormFields";
+import { FiberColorSelect, LocalitySelect, ProjectSelect } from "../pages/connections/ConnectionsFormFields";
 import { INFRA_MAP_KIND_LABELS, type InfraMapKind } from "../lib/mapInfrastructureIcons";
 import { queryKeys } from "../lib/queryKeys";
-import type { NetworkProject } from "../lib/networkInfrastructure";
+import type { CommercialLocality, NetworkProject } from "../lib/networkInfrastructure";
 
 export type PlaceableKind = InfraMapKind;
 
@@ -27,6 +27,7 @@ const API: Record<PlaceableKind, string> = {
   splice_box: "/api/v1/commercial/network/splice-boxes",
   pole: "/api/v1/commercial/network/poles",
   project: "/api/v1/commercial/network/projects",
+  pop: "/api/v1/pops",
 };
 
 const SPLITTERS = ["1x2", "1x4", "1x8", "1x16", "1x32", "1x64"];
@@ -47,11 +48,13 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
   const qc = useQueryClient();
   const kind = session ? sessionKind(session) : null;
   const coords = session ? sessionCoords(session) : null;
-  const needsProject = kind != null && kind !== "project";
-  const projectRequired = session?.mode === "create" || session?.mode === "create-cable-path";
+  const needsProject = kind != null && kind !== "project" && kind !== "pop";
+  const needsLocality = kind === "pop";
+  const projectRequired = (session?.mode === "create" || session?.mode === "create-cable-path") && needsProject;
 
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [localityId, setLocalityId] = useState("");
   const [splitter, setSplitter] = useState("1x8");
   const [fiberColor, setFiberColor] = useState("Desconhecido");
   const [fiberCount, setFiberCount] = useState("12");
@@ -67,10 +70,18 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
   });
   const projects = (projectsQ.data?.projects ?? []).filter((p) => p.status !== "inativo");
 
+  const localitiesQ = useQuery({
+    queryKey: queryKeys.commercialLocalities,
+    queryFn: () => apiFetch<{ localities: CommercialLocality[] }>("/api/v1/commercial/localities"),
+    enabled: !!session && needsLocality,
+  });
+  const localities = localitiesQ.data?.localities ?? [];
+
   useEffect(() => {
     if (!session) return;
     setDescription(session.mode === "edit-cable" ? session.initialDescription ?? "" : "");
     setProjectId("");
+    setLocalityId("");
     setSplitter("1x8");
     setFiberColor("Desconhecido");
     setFiberCount("12");
@@ -107,6 +118,7 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
         longitude: coords.lng,
       };
       if (needsProject) payload.project_id = projectId.trim();
+      if (kind === "pop" && localityId.trim()) payload.locality_id = localityId.trim();
 
       if (kind === "cto") {
         payload.fiber_color = fiberColor.trim() || "Desconhecido";
@@ -138,6 +150,7 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
     },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      if (res.kind === "pop") await qc.invalidateQueries({ queryKey: queryKeys.pops });
       onSaved(res);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
@@ -176,11 +189,20 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
               autoFocus
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={kind === "cable" ? "Ex.: Cabo backbone setor A" : "Ex.: CTO Rua das Flores"}
+              placeholder={
+                kind === "cable"
+                  ? "Ex.: Cabo backbone setor A"
+                  : kind === "pop"
+                    ? "Ex.: POP Miracema"
+                    : "Ex.: CTO Rua das Flores"
+              }
             />
           </label>
           {needsProject ? (
             <ProjectSelect value={projectId} projects={projects} onChange={setProjectId} />
+          ) : null}
+          {needsLocality ? (
+            <LocalitySelect value={localityId} localities={localities} onChange={setLocalityId} />
           ) : null}
           {kind === "cto" || (kind === "splice_box" && boxModel === "distribuicao") ? (
             <>

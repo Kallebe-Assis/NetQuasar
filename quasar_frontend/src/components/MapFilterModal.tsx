@@ -35,6 +35,8 @@ type Props = {
   onShowPoles: (v: boolean) => void;
   showProjects: boolean;
   onShowProjects: (v: boolean) => void;
+  showPops: boolean;
+  onShowPops: (v: boolean) => void;
   ctoColorByFeed: boolean;
   onCtoColorByFeed: (v: boolean) => void;
   localities: Locality[];
@@ -168,6 +170,7 @@ export function MapFilterModal(props: Props) {
             <LayerToggle checked={props.showCables} onChange={props.onShowCables} label="Cabos (viewport)" />
             <LayerToggle checked={props.showSpliceBoxes} onChange={props.onShowSpliceBoxes} label="Caixas de emenda / foguete" />
             <LayerToggle checked={props.showPoles} onChange={props.onShowPoles} label="Postes" />
+            <LayerToggle checked={props.showPops} onChange={props.onShowPops} label="POPs" />
             <LayerToggle checked={props.showProjects} onChange={props.onShowProjects} label="Projetos" />
             <LayerToggle checked={props.showConnections} onChange={props.onShowConnections} label="Logins no mapa" />
           </div>

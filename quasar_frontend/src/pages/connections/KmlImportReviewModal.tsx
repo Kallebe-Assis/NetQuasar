@@ -21,7 +21,7 @@ type Props = {
   onConfirm: (items: KmlReviewItem[]) => void;
 };
 
-const KIND_TABS: KmlElementKind[] = ["cto", "splice_box", "pole", "cable"];
+const KIND_TABS: KmlElementKind[] = ["cto", "splice_box", "pole", "cable", "pop"];
 
 function changeKind(item: KmlReviewItem, next: KmlElementKind): KmlReviewItem | null {
   if (item.kind === next) return item;
@@ -103,7 +103,7 @@ export function KmlImportReviewModal({
   }, [open, initialItems]);
 
   const counts = useMemo(() => {
-    const c = { cto: 0, splice_box: 0, pole: 0, cable: 0, excluded: 0 };
+    const c = { cto: 0, splice_box: 0, pole: 0, cable: 0, pop: 0, excluded: 0 };
     for (const it of items) {
       if (!it.include) c.excluded++;
       else c[it.kind]++;

@@ -139,6 +139,7 @@ function parseMapSearchInput(raw: string): { q: string; type: string } {
   const rules: [RegExp, string][] = [
     [/^cto\s*:\s*/i, "cto"],
     [/^poste\s*:\s*/i, "pole"],
+    [/^pop\s*:\s*/i, "pop"],
     [/^login\s*:\s*/i, "login"],
     [/^logins\s*:\s*/i, "login"],
     [/^equip(?:amento)?s?\s*:\s*/i, "equipment"],
@@ -166,6 +167,8 @@ function searchKindLabel(kind: string): string {
       return "Cabo";
     case "project":
       return "Projeto";
+    case "pop":
+      return "POP";
     default:
       return kind;
   }
@@ -200,6 +203,7 @@ export function MapPage() {
   const [showSpliceBoxes, setShowSpliceBoxes] = useState(false);
   const [showPoles, setShowPoles] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
+  const [showPops, setShowPops] = useState(true);
   const [showEquipment, setShowEquipment] = useState(true);
   const [projectFilterId, setProjectFilterId] = useState("");
   const [filterModalOpen, setFilterModalOpen] = useState(false);
@@ -414,8 +418,9 @@ export function MapPage() {
     if (showSpliceBoxes) kinds.push("splice_boxes");
     if (showPoles) kinds.push("poles");
     if (showProjects) kinds.push("projects");
+    if (showPops) kinds.push("pops");
     return kinds;
-  }, [showCtos, showCables, showSpliceBoxes, showPoles, showProjects]);
+  }, [showCtos, showCables, showSpliceBoxes, showPoles, showProjects, showPops]);
 
   const showInfrastructure = infraKinds.length > 0;
 
@@ -506,7 +511,12 @@ export function MapPage() {
         const spliceColor = mapPrefsDraft.splice_box;
         return {
           id: `infra-${p.point_type}-${p.id}`,
-          description: p.point_type === "cto" ? p.description : p.id_prefix ? `${p.id_prefix} ${p.display_number} — ${p.description}` : p.description,
+          description:
+            p.point_type === "cto" || p.point_type === "pop"
+              ? p.description
+              : p.id_prefix
+                ? `${p.id_prefix} ${p.display_number} — ${p.description}`
+                : p.description,
           category: p.point_type === "cto" ? "CTO" : INFRA_MAP_KIND_LABELS[p.point_type],
           lat: Number(p.lat),
           lng: Number(p.lng),
@@ -771,7 +781,9 @@ export function MapPage() {
                 ? `/api/v1/commercial/network/poles/${entityId}`
                 : kind === "project"
                   ? `/api/v1/commercial/network/projects/${entityId}`
-                  : null;
+                  : kind === "pop"
+                    ? `/api/v1/pops/${entityId}`
+                    : null;
       if (!endpoint) throw new Error("Tipo não suportado.");
       const json: Record<string, unknown> = { latitude: lat, longitude: lng };
       if (kind === "cable" && path && path.length >= 2) {
@@ -872,6 +884,7 @@ export function MapPage() {
     else if (kind === "splice_box") setShowSpliceBoxes(true);
     else if (kind === "pole") setShowPoles(true);
     else if (kind === "project") setShowProjects(true);
+    else if (kind === "pop") setShowPops(true);
   }, []);
 
   const startAddKind = useCallback((kind: PlaceableKind) => {
@@ -987,6 +1000,7 @@ export function MapPage() {
         else if (row.kind === "splice_box") setShowSpliceBoxes(true);
         else if (row.kind === "pole") setShowPoles(true);
         else if (row.kind === "project") setShowProjects(true);
+        else if (row.kind === "pop") setShowPops(true);
         setInfraPanelOpen(true);
         setDetailModalOpen(false);
       }
@@ -1107,7 +1121,7 @@ export function MapPage() {
     if (popId) n++;
     if (category) n++;
     if (projectFilterId) n++;
-    if (!showEquipment || showConnections || !showCtos || !showCables || showSpliceBoxes || showPoles || showProjects) n++;
+    if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || showSpliceBoxes || showPoles || showProjects) n++;
     if (displayMode !== "cluster") n++;
     return n;
   }, [
@@ -1121,6 +1135,7 @@ export function MapPage() {
     showSpliceBoxes,
     showPoles,
     showProjects,
+    showPops,
     displayMode,
   ]);
 
@@ -1140,7 +1155,7 @@ export function MapPage() {
   useEffect(() => {
     setFitBoundsVersion((v) => v + 1);
     setListPage(0);
-  }, [popId, category, projectFilterId, showConnections, showEquipment, showCtos, showCables, showSpliceBoxes, showPoles, showProjects]);
+  }, [popId, category, projectFilterId, showConnections, showEquipment, showCtos, showCables, showSpliceBoxes, showPoles, showProjects, showPops]);
 
   useEffect(() => {
     setListPage(0);
@@ -1458,6 +1473,8 @@ export function MapPage() {
         onShowPoles={setShowPoles}
         showProjects={showProjects}
         onShowProjects={setShowProjects}
+        showPops={showPops}
+        onShowPops={setShowPops}
         ctoColorByFeed={ctoColorByFeed}
         onCtoColorByFeed={setCtoColorByFeed}
         localities={localities.data?.localities ?? []}
@@ -1630,6 +1647,7 @@ export function MapPage() {
                               ["cable", "Cabo"],
                               ["splice_box", "Caixa de emenda"],
                               ["pole", "Poste"],
+                              ["pop", "POP"],
                               ["project", "Projeto"],
                             ] as const
                           ).map(([id, label]) => (
@@ -1950,7 +1968,8 @@ export function MapPage() {
               (info.imported.ctos ?? 0) +
               (info.imported.splice_boxes ?? 0) +
               (info.imported.poles ?? 0) +
-              (info.imported.cables ?? 0);
+              (info.imported.cables ?? 0) +
+              (info.imported.pops ?? 0);
             setMapToast({
               ok: true,
               text: info.replaced
@@ -1963,6 +1982,7 @@ export function MapPage() {
               setShowCables(true);
               setShowSpliceBoxes(true);
               setShowPoles(true);
+              setShowPops(true);
             }
           }}
         />

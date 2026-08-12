@@ -16,6 +16,7 @@ var validInfraMapKinds = map[string]string{
 	"cables":       "cable",
 	"poles":        "pole",
 	"projects":     "project",
+	"pops":         "pop",
 }
 
 func parseInfraMapKindsQuery(r *http.Request) []string {
@@ -342,6 +343,49 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	if kindSet["pops"] {
+		capN := take("pop")
+		if capN > 0 {
+			q := `SELECT id, description, latitude, longitude
+				FROM pops
+				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
+			args := []any{}
+			n := 1
+			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+			q += orderNearCenter(&n, &args)
+			q += fmt.Sprintf(` LIMIT $%d`, n)
+			args = append(args, capN)
+			rows, err := s.DB().Query(ctx, q, args...)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			for rows.Next() {
+				var id uuid.UUID
+				var desc string
+				var lat, lon float64
+				if err := rows.Scan(&id, &desc, &lat, &lon); err != nil {
+					rows.Close()
+					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+					return
+				}
+				pts = append(pts, map[string]any{
+					"id":             id.String(),
+					"description":    desc,
+					"display_number": 0,
+					"lat":            lat,
+					"lng":            lon,
+					"point_type":     "pop",
+					"id_prefix":      "POP",
+				})
+				remaining--
+				if remaining <= 0 {
+					break
+				}
+			}
+			rows.Close()
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"points":    pts,
@@ -419,7 +463,7 @@ func mapInfraKindCap(kind string, zoom float64, remaining int) int {
 		} else if capN > 150 {
 			capN = 150
 		}
-	case "project":
+	case "project", "pop":
 		if capN > 40 {
 			capN = 40
 		}

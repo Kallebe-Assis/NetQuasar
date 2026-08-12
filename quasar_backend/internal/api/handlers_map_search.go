@@ -104,6 +104,9 @@ func (s *Server) mapLocalityCenter(w http.ResponseWriter, r *http.Request) {
 			UNION ALL
 			SELECT latitude, longitude FROM network_projects
 			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT latitude, longitude FROM pops
+			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
 		) t
 	`, id).Scan(&lat, &lng)
 	if err != nil {
@@ -254,6 +257,32 @@ func (s *Server) mapSearch(w http.ResponseWriter, r *http.Request) {
 							row["project_name"] = projectName
 						}
 						appendIfRoom(row)
+					}
+				}
+			}()
+		}
+	}
+
+	if typeFilter == "" || typeFilter == "infra" || typeFilter == "infrastructure" || typeFilter == "pop" || typeFilter == "pops" {
+		rows, err := s.DB().Query(ctx, `
+			SELECT id::text, description, latitude, longitude
+			FROM pops
+			WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+			  AND description ILIKE $1
+			ORDER BY description
+			LIMIT $2
+		`, pattern, perKind)
+		if err == nil {
+			func() {
+				defer rows.Close()
+				for rows.Next() {
+					var id, desc string
+					var lat, lng float64
+					if rows.Scan(&id, &desc, &lat, &lng) == nil {
+						appendIfRoom(map[string]any{
+							"id": id, "label": desc, "kind": "pop", "category": "POP",
+							"lat": lat, "lng": lng, "map_id": "infra-pop-" + id,
+						})
 					}
 				}
 			}()

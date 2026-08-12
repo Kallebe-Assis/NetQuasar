@@ -34,7 +34,6 @@ CAIXA_NUM_RE = re.compile(
 )
 EQUIP_KEYS = (
     "olt",
-    "pop",
     "escrit",
     "mikrotik",
     "concentrador",
@@ -46,6 +45,7 @@ EQUIP_KEYS = (
     "roteador",
     "energia",
     "conex",
+    # POP é tipo próprio (is_pop)
 )
 
 
@@ -65,6 +65,14 @@ def set_name(el: ET.Element, text: str) -> None:
     if nm is None:
         nm = ET.SubElement(el, f"{NS}name")
     nm.text = text
+
+
+def force_visible(el: ET.Element) -> None:
+    """Revisão G2 grava visibility=0; no KMZ final todos os pins/pastas têm de aparecer."""
+    vis = el.find(f"{NS}visibility")
+    if vis is None:
+        vis = ET.SubElement(el, f"{NS}visibility")
+    vis.text = "1"
 
 
 def geom_kind(pm: ET.Element) -> str:
@@ -255,7 +263,7 @@ def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 
 def normalize_cto_name(name: str) -> str | None:
-    n = name.strip()
+    n = name.strip().lstrip("¿?¡!").strip()
     m = CTO_RE.match(n)
     if not m:
         m = CTO_BARE_RE.match(n)
@@ -278,6 +286,11 @@ def folder_cell(path: str) -> int | None:
     if m:
         return int(m.group(1))
     return None
+
+
+def is_pop(name: str, path: str) -> bool:
+    blob = f"{name} {path}".lower()
+    return bool(re.search(r"(^|[\s/\-_])pops?($|[\s/\-_])", blob))
 
 
 def is_equipamento(name: str, path: str) -> bool:
@@ -309,7 +322,6 @@ def equip_group(name: str, path: str) -> str:
         ("OLT", ("olt",)),
         ("PTP", ("ptp",)),
         ("Torre", ("torre",)),
-        ("POP", ("pop",)),
         ("Escritório", ("escrit",)),
         ("MikroTik", ("mikrotik", "concentrador")),
         ("BNG / Borda", ("bng", "bgp", "borda")),
@@ -349,6 +361,9 @@ def classify(name: str, path: str, kind: str) -> tuple[str, int | None]:
         if m:
             return "caixa", int(m.group(1))
         return "caixa", cell
+
+    if is_pop(n, path):
+        return "pop", None
 
     if is_equipamento(n, path):
         return "equip", None
@@ -575,7 +590,7 @@ def typed_subfolders(parent: ET.Element) -> dict[str, ET.Element]:
 
 GENERIC_CABLE_RE = re.compile(
     r"^(medida(\s+do\s+caminho)?|caminho(\s+sem\s+t[ií]tulo)?|linha|cabo(\s*\d+)?|"
-    r"marcador(\s+\d+)?|marcador\s+sem\s+t[ií]tulo)$",
+    r"marcador(\s+\d+)?|marcador\s+sem\s+t[ií]tulo|as(\s+\d+)?)$",
     re.IGNORECASE,
 )
 
@@ -589,22 +604,118 @@ def is_junk_point(tipo: str, name: str, kind: str) -> bool:
     return (not n) or n.startswith("marcador")
 
 
+def cto_has_photo(pm: ET.Element) -> bool:
+    return "<img" in (pm.findtext(f"{NS}description") or "").lower()
+
+
+def cto_keep_score(pm: ET.Element) -> tuple[int, int]:
+    """Menor = melhor: foto de campo primeiro, depois estilo mais recente."""
+    return (0 if cto_has_photo(pm) else 1, -style_id_num(pm.findtext(f"{NS}styleUrl") or ""))
+
+
+def unify_same_name_ctos(
+    resolved: list[tuple[str, int | None, str, ET.Element]],
+    merge_m: float = 80.0,
+) -> list[tuple[str, int | None, str, ET.Element]]:
+    """Um pin por C{n}-{nn}. Cópia sem foto (dump do app) sai; duas fotos longe são renomeadas."""
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, (tipo, _cell, name, _pm) in enumerate(resolved):
+        if tipo == "cto":
+            groups[name].append(i)
+    drop: set[int] = set()
+    rename: dict[int, str] = {}
+    used = set(groups)
+    extra_names: set[str] = set()
+
+    def next_free(cell: int | None) -> str:
+        c = cell if cell and cell > 0 else 1
+        n = 1
+        while True:
+            cand = f"C{c}-{n:02d}"
+            if cand not in used and cand not in extra_names:
+                return cand
+            n += 1
+
+    for _name, idxs in groups.items():
+        if len(idxs) < 2:
+            continue
+        ranked = sorted(idxs, key=lambda i: cto_keep_score(resolved[i][3]))
+        primary = ranked[0]
+        prim_pt = first_coord(resolved[primary][3])
+        for i in ranked[1:]:
+            pm = resolved[i][3]
+            pt = first_coord(pm)
+            close = bool(prim_pt and pt and haversine_m(prim_pt, pt) <= merge_m)
+            if (not cto_has_photo(pm)) or close:
+                drop.add(i)
+                continue
+            new = next_free(resolved[i][1])
+            extra_names.add(new)
+            used.add(new)
+            rename[i] = new
+
+    out: list[tuple[str, int | None, str, ET.Element]] = []
+    for i, (tipo, cell, name, pm) in enumerate(resolved):
+        if i in drop:
+            continue
+        if i in rename:
+            name = rename[i]
+            set_name(pm, name)
+            m = CTO_RE.match(name)
+            if m:
+                cell = int(m.group(1))
+        out.append((tipo, cell, name, pm))
+    return out
+
+
 def polish_city_items(
     resolved: list[tuple[str, int | None, str, ET.Element]],
 ) -> list[tuple[str, int | None, str, ET.Element]]:
-    """Um CTO por nome/célula, cabos Cabo 01…, sem pinos vazios."""
+    """Um CTO por nome/célula, cabos Cabo 01…; pinos da área não são descartados."""
+    resolved = unify_same_name_ctos(resolved)
     kept: list[tuple[str, int | None, str, ET.Element]] = []
-    seen_cto: set[tuple[int | None, str]] = set()
+    leftovers: list[tuple[str, int | None, str, ET.Element]] = []
     for tipo, cell, name, pm in resolved:
         kind = geom_kind(pm)
         if is_junk_point(tipo, name, kind):
+            leftovers.append((tipo, cell, name, pm))
             continue
-        if tipo == "cto":
-            key = (cell, name)
-            if key in seen_cto:
-                continue
-            seen_cto.add(key)
         kept.append((tipo, cell, name, pm))
+
+    cto_pts: list[tuple[float, float]] = []
+    used_names: set[str] = set()
+    for tipo, cell, name, pm in kept:
+        if tipo == "cto":
+            used_names.add(name)
+            pt = first_coord(pm)
+            if pt:
+                cto_pts.append(pt)
+
+    def next_cto_name(cell: int | None) -> str:
+        c = cell if cell and cell > 0 else 1
+        n = 1
+        while True:
+            cand = f"C{c}-{n:02d}"
+            if cand not in used_names:
+                used_names.add(cand)
+                return cand
+            n += 1
+
+    for tipo, cell, name, pm in leftovers:
+        if tipo in ("pop", "equip"):
+            kept.append((tipo, cell, name, pm))
+            continue
+        pt = first_coord(pm)
+        if pt is None:
+            continue
+        if any(haversine_m(pt, other) <= 12.0 for other in cto_pts):
+            continue
+        if cell is None:
+            continue
+        new = next_cto_name(cell)
+        set_name(pm, new)
+        kept.append(("cto", cell, new, pm))
+        cto_pts.append(pt)
 
     cable_n: dict[int | None, int] = defaultdict(int)
     caixa_n: dict[tuple[int | None, str], int] = defaultdict(int)
@@ -661,6 +772,15 @@ def fill_locality_folders(
     resolved: list[tuple[str, int | None, str, ET.Element]],
 ) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
+    pop_folder: ET.Element | None = None
+    for tipo, _cell, _name, pm in resolved:
+        if tipo != "pop":
+            continue
+        if pop_folder is None:
+            pop_folder = mk_folder(parent, "POPs", True)
+        force_visible(pm)
+        pop_folder.append(pm)
+        counts["POPs"] += 1
     cells = sorted({c for _, c, _, _ in resolved if c is not None})
     cell_folders: dict[int, dict[str, ET.Element]] = {}
     for c in cells:
@@ -669,8 +789,9 @@ def fill_locality_folders(
     outros = mk_folder(parent, "Outros")
     outros_map = typed_subfolders(outros)
     for tipo, cell, name, pm in resolved:
-        if tipo == "equip":
+        if tipo in ("equip", "pop"):
             continue
+        force_visible(pm)
         dest_kind = tipo if tipo in outros_map else "outro"
         if cell in cell_folders:
             cell_folders[cell][dest_kind].append(pm)
@@ -678,13 +799,24 @@ def fill_locality_folders(
         else:
             outros_map[dest_kind].append(pm)
             counts[f"Outros/{dest_kind}"] += 1
+    for folder in parent.iter(f"{NS}Folder"):
+        force_visible(folder)
     return counts
 
 
+def load_kml_bytes(src: Path) -> bytes:
+    raw = src.read_bytes()
+    if raw[:2] == b"PK":
+        with zipfile.ZipFile(src) as zf:
+            kml_name = next(n for n in zf.namelist() if n.lower().endswith(".kml"))
+            return zf.read(kml_name)
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw[3:]
+    return raw
+
+
 def load_kml_root(src: Path) -> tuple[ET.Element, object]:
-    with zipfile.ZipFile(src) as zf:
-        kml_name = next(n for n in zf.namelist() if n.lower().endswith(".kml"))
-        raw = zf.read(kml_name)
+    raw = load_kml_bytes(src)
     root = ET.fromstring(raw)
     parent_of = {child: parent for parent in root.iter() for child in list(parent)}
 
@@ -702,7 +834,215 @@ def load_kml_root(src: Path) -> tuple[ET.Element, object]:
     return root, path_of
 
 
+def is_padua_source_kml(path: Path) -> bool:
+    n = path.name.lower()
+    if path.suffix.lower() != ".kml":
+        return False
+    if n.startswith("padua_c"):
+        return True
+    has_city = "padua" in n or "pdua" in n or "santo" in n
+    return has_city and ("06" in n or "célula" in n or "celula" in n)
+
+
+def cells_hinted_by_filename(name: str) -> list[int]:
+    n = name.lower()
+    found: list[int] = []
+    for m in re.finditer(r"(?:^|[_\-\s])c(\d+)(?=$|[_\-\s.])", n):
+        found.append(int(m.group(1)))
+    for m in re.finditer(r"c[eé]lula[\s_\-]*0*(\d+)", n):
+        found.append(int(m.group(1)))
+    out: list[int] = []
+    seen: set[int] = set()
+    for c in found:
+        if 1 <= c <= 99 and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def reassign_to_nearest_allowed_cells(
+    resolved: list[tuple[str, int | None, str, ET.Element]],
+    allowed: set[int],
+) -> list[tuple[str, int | None, str, ET.Element]]:
+    centroids: dict[int, tuple[float, float]] = {}
+    acc: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for tipo, cell, _name, pm in resolved:
+        if tipo != "cto" or cell not in allowed:
+            continue
+        pt = first_coord(pm)
+        if pt:
+            acc[cell].append(pt)
+    for cell, pts in acc.items():
+        centroids[cell] = (
+            sum(p[0] for p in pts) / len(pts),
+            sum(p[1] for p in pts) / len(pts),
+        )
+    if not centroids:
+        return resolved
+    out: list[tuple[str, int | None, str, ET.Element]] = []
+    for tipo, cell, name, pm in resolved:
+        if tipo == "cto":
+            out.append((tipo, cell, name, pm))
+            continue
+        raw = name.strip()
+        generic = (
+            not raw
+            or GENERIC_CABLE_RE.fullmatch(raw)
+            or raw.lower().startswith("medida")
+            or raw.lower().startswith("caminho")
+            or raw.lower().startswith("marcador")
+            or raw.lower().startswith("as")
+        )
+        if tipo in ("cabo", "marcador", "sem_nome", "outro") and generic:
+            pt = first_coord(pm)
+            if pt:
+                near = nearest_cell(pt, centroids, max_km=8.0)
+                if near in allowed:
+                    cell = near
+        out.append((tipo, cell, name, pm))
+    return out
+
+
+def build_from_source_kmls(
+    sources: list[Path],
+    dst: Path,
+    city_name: str,
+    include_backbone: bool = True,
+) -> dict[str, int]:
+    """Une vários KML/KMZ num KMZ organizado por Célula 01, Célula 02, …"""
+    all_styles: list[ET.Element] = []
+    all_pms: list[ET.Element] = []
+    path_map: dict[int, str] = {}
+    mixed_ids: set[int] = set()
+    mixed_allowed: set[int] = set()
+
+    for i, src in enumerate(sources):
+        root, path_of = load_kml_root(src)
+        prefix_style_ids(root, f"s{i}_")
+        all_styles.extend(collect_styles(root))
+        file_cells = cells_hinted_by_filename(src.name)
+        # C7+C8 vêm no mesmo ficheiro/pasta «Célula 08» — cabos sem nome vão à célula mais próxima.
+        mixed = 7 in file_cells and 8 in file_cells
+        for pm in list(root.iter(f"{NS}Placemark")):
+            path_map[id(pm)] = f"{src.name} / {path_of(pm)}"
+            all_pms.append(pm)
+            if mixed:
+                mixed_ids.add(id(pm))
+                mixed_allowed.update(file_cells)
+
+    def path_of_merged(el: ET.Element) -> str:
+        return path_map.get(id(el), "")
+
+    fake = ET.Element(f"{NS}kml")
+    for st in all_styles:
+        fake.append(st)
+    color_by_id = collect_style_colors(fake)
+
+    resolved, skipped_dup = organize_group(all_pms, path_of_merged, color_by_id)
+    if mixed_ids and mixed_allowed:
+        mixed_items = [it for it in resolved if id(it[3]) in mixed_ids]
+        others = [it for it in resolved if id(it[3]) not in mixed_ids]
+        mixed_items = reassign_to_nearest_allowed_cells(mixed_items, mixed_allowed)
+        resolved = others + mixed_items
+    resolved = polish_city_items(resolved)
+
+    kml = ET.Element(f"{NS}kml")
+    doc = ET.SubElement(kml, f"{NS}Document")
+    ET.SubElement(doc, f"{NS}name").text = city_name
+    ET.SubElement(doc, f"{NS}open").text = "1"
+    for st in all_styles:
+        doc.append(st)
+
+    counts: dict[str, int] = defaultdict(int)
+    counts.update(fill_locality_folders(doc, resolved))
+
+    if include_backbone:
+        backbone_dir = sources[0].parent / "backbone"
+        if backbone_dir.is_dir():
+            for fp in sorted(backbone_dir.iterdir()):
+                if fp.suffix.lower() not in (".kml", ".kmz"):
+                    continue
+                if backbone_city_from_filename(fp.name) != city_name:
+                    continue
+                prefix = "bb" + re.sub(r"[^a-z0-9]+", "", city_name.lower()) + "_"
+                bb = load_backbone_folder(fp, prefix)
+                name_backbone_placemarks(bb)
+                doc.append(bb)
+                counts["backbone"] = counts.get("backbone", 0) + 1
+
+    prune_empty_folders(doc)
+    write_kmz(dst, kml)
+    cells = sorted({c for _, c, _, _ in resolved if c is not None})
+    stats = {
+        "sources": len(sources),
+        "kept_raw": len(all_pms),
+        "kept_after_dedup": len(resolved),
+        "skipped_dup": skipped_dup,
+        "cells": len(cells),
+    }
+    stats.update(counts)
+    return stats
+
+
+def build_padua_from_project_kmls(base: Path) -> dict[str, int]:
+    sources = sorted((p for p in base.iterdir() if is_padua_source_kml(p)), key=lambda p: p.name.lower())
+    if not sources:
+        raise FileNotFoundError("nenhum KML de Pádua (padua_C*.kml / Célula 06) em " + str(base))
+    dst = base / "Santo Antônio de Pádua.kmz"
+    stats = build_from_source_kmls(sources, dst, "Santo Antônio de Pádua")
+    stats["saida"] = str(dst)
+    for i, p in enumerate(sources, start=1):
+        stats[f"src_{i}"] = p.name
+    return stats
+
+
+def fix_city_kmz(src: Path) -> dict[str, int]:
+    """Remove CTOs duplicadas dum KMZ já organizado (fica a cópia com foto)."""
+    root, path_of = load_kml_root(src)
+    parent_of = {child: parent for parent in root.iter() for child in list(parent)}
+    items: list[tuple[str, int | None, str, ET.Element]] = []
+    for pm in list(root.iter(f"{NS}Placemark")):
+        name = el_name(pm)
+        kind = geom_kind(pm)
+        cto = normalize_cto_name(name)
+        if cto:
+            set_name(pm, cto)
+            m = CTO_RE.match(cto)
+            items.append(("cto", int(m.group(1)) if m else None, cto, pm))
+            continue
+        tipo, cell = classify(name, path_of(pm), kind)
+        items.append((tipo, cell, name, pm))
+    before = sum(1 for t, _c, _n, _pm in items if t == "cto")
+    kept = unify_same_name_ctos(items)
+    keep_ids = {id(pm) for _t, _c, _n, pm in kept}
+    removed = 0
+    for tipo, _cell, _name, pm in items:
+        if tipo != "cto" or id(pm) in keep_ids:
+            continue
+        parent = parent_of.get(pm)
+        if parent is None:
+            continue
+        parent.remove(pm)
+        removed += 1
+    prune_empty_folders(root)
+    write_kmz(src, root)
+    after = sum(1 for t, _c, _n, _pm in kept if t == "cto")
+    before_names = {n for t, _c, n, _pm in items if t == "cto"}
+    after_names = {n for t, _c, n, _pm in kept if t == "cto"}
+    return {
+        "cto_antes": before,
+        "cto_depois": after,
+        "removidas": removed,
+        "nomes_antes": len(before_names),
+        "nomes_depois": len(after_names),
+    }
+
+
 def write_kmz(dst: Path, kml: ET.Element) -> None:
+    for el in kml.iter():
+        tag = local(el.tag)
+        if tag in ("Placemark", "Folder", "Document"):
+            force_visible(el)
     xml = ET.tostring(kml, encoding="utf-8", xml_declaration=True)
     dst.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -743,6 +1083,7 @@ def build_city_kmz(
     for tipo, cell, name, pm in resolved:
         if tipo != "equip":
             continue
+        force_visible(pm)
         gname = equip_group(name, path_of(pm))
         if gname not in equip_subs:
             equip_subs[gname] = mk_folder(equip_root, gname, True)
@@ -921,7 +1262,7 @@ def build_completo_kmz(src: Path, dst: Path) -> dict[str, int]:
         if is_tourist(name, path):
             skipped_tourist += 1
             continue
-        if is_equipamento(name, path):
+        if is_equipamento(name, path) and not is_pop(name, path):
             equip.append(pm)
             continue
         city = assign_city(pm, path, cities)
@@ -979,6 +1320,8 @@ def build_completo_kmz(src: Path, dst: Path) -> dict[str, int]:
             resolved, dups = organize_group(
                 pms, path_of, color_by_id, autoname=cname != "Fora das localidades"
             )
+            if cname != "Fora das localidades":
+                resolved = polish_city_items(resolved)
             counts = fill_locality_folders(loc, resolved)
             stats[f"{cname}/items"] = len(resolved)
             stats[f"{cname}/dups"] = dups
@@ -1006,10 +1349,11 @@ CITIES: dict[str, tuple[str, list[tuple[float, float]]]] = {
     "miracema": (
         "Miracema",
         [
-            (dms_to_dec(42, 12, 35.46, "W"), dms_to_dec(21, 22, 43.09, "S")),
-            (dms_to_dec(42, 9, 24.37, "W"), dms_to_dec(21, 23, 25.08, "S")),
-            (dms_to_dec(42, 11, 44.96, "W"), dms_to_dec(21, 27, 14.59, "S")),
-            (dms_to_dec(42, 14, 50.68, "W"), dms_to_dec(21, 26, 23.76, "S")),
+            # superior esquerda → direita → inferior direita → esquerda
+            (dms_to_dec(42, 13, 56.79, "W"), dms_to_dec(21, 22, 49.43, "S")),
+            (dms_to_dec(42, 9, 3.11, "W"), dms_to_dec(21, 23, 0.54, "S")),
+            (dms_to_dec(42, 8, 51.06, "W"), dms_to_dec(21, 27, 31.56, "S")),
+            (dms_to_dec(42, 15, 27.89, "W"), dms_to_dec(21, 26, 57.75, "S")),
         ],
     ),
     "paraiso": (
@@ -1086,6 +1430,28 @@ def main() -> int:
     key = (sys.argv[1] if len(sys.argv) > 1 else "completo").strip().lower()
     origem = base / "Completo.origem.kmz"
     src = base / "Completo.kmz"
+    if key in ("padua-real", "padua-cidade", "padua-files"):
+        stats = build_padua_from_project_kmls(base)
+        print("origem:")
+        for k in sorted(stats):
+            if str(k).startswith("src_"):
+                print(f"  {stats[k]}")
+        print(f"saida:  {stats.get('saida', '')}")
+        for k in sorted(stats):
+            if str(k).startswith("src_") or k == "saida":
+                continue
+            print(f"  {k}: {stats[k]}")
+        return 0
+    if key in ("miracema-fix", "fix-miracema"):
+        dst = base / "Miracema.kmz"
+        if not dst.exists():
+            print(f"ficheiro inexistente: {dst}")
+            return 2
+        stats = fix_city_kmz(dst)
+        print(f"saida:  {dst}")
+        for k in sorted(stats):
+            print(f"  {k}: {stats[k]}")
+        return 0
     if key in ("completo", "all", "tudo"):
         if not origem.exists():
             shutil.copy2(src, origem)
@@ -1097,7 +1463,7 @@ def main() -> int:
             print(f"  {k}: {stats[k]}")
         return 0
     if key not in CITIES:
-        print(f"cidade desconhecida: {key}; use: completo, {', '.join(sorted(CITIES))}")
+        print(f"cidade desconhecida: {key}; use: completo, padua-real, {', '.join(sorted(CITIES))}")
         return 2
     city_name, ring = CITIES[key]
     src_city = origem if origem.exists() else src

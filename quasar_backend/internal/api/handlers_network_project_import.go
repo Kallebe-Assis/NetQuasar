@@ -37,6 +37,7 @@ type projectImportElements struct {
 	SpliceBoxes []projectImportPoint `json:"splice_boxes"`
 	Poles       []projectImportPoint `json:"poles"`
 	Cables      []projectImportCable `json:"cables"`
+	Pops        []projectImportPoint `json:"pops"`
 }
 
 type projectImportBody struct {
@@ -50,7 +51,7 @@ type projectImportBody struct {
 	Elements         projectImportElements `json:"elements"`
 }
 
-// importNetworkProject cria um projeto e importa CTOs, emendas, postes e cabos numa única transacção.
+// importNetworkProject cria um projeto e importa CTOs, emendas, postes, cabos e POPs numa única transacção.
 func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 	var body projectImportBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -78,7 +79,7 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 	locLat, locLon := s.localityLatLng(r.Context(), locID)
 	body.Latitude, body.Longitude = fillCoordsFromLocality(body.Latitude, body.Longitude, locLat, locLon)
 
-	total := len(body.Elements.Ctos) + len(body.Elements.SpliceBoxes) + len(body.Elements.Poles) + len(body.Elements.Cables)
+	total := len(body.Elements.Ctos) + len(body.Elements.SpliceBoxes) + len(body.Elements.Poles) + len(body.Elements.Cables) + len(body.Elements.Pops)
 	if total == 0 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "nenhum elemento para importar", nil)
 		return
@@ -147,7 +148,7 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	counts := map[string]int{"ctos": 0, "splice_boxes": 0, "poles": 0, "cables": 0}
+	counts := map[string]int{"ctos": 0, "splice_boxes": 0, "poles": 0, "cables": 0, "pops": 0}
 	var failed []networkImportFail
 
 	for i, item := range body.Elements.Ctos {
@@ -278,7 +279,49 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		counts["cables"]++
 	}
 
-	imported := counts["ctos"] + counts["splice_boxes"] + counts["poles"] + counts["cables"]
+	for i, item := range body.Elements.Pops {
+		d := strings.TrimSpace(item.Description)
+		if d == "" {
+			d = "POP importado"
+		}
+		if err := validateCoords(item.Latitude, item.Longitude); err != nil {
+			failed = append(failed, networkImportFail{Index: i, Description: d, Error: err.Error()})
+			continue
+		}
+		var existing uuid.UUID
+		err = tx.QueryRow(ctx, `
+			SELECT id FROM pops
+			WHERE lower(trim(description)) = lower(trim($1))
+			  AND locality_id IS NOT DISTINCT FROM $2
+			LIMIT 1`, d, locID).Scan(&existing)
+		if err == nil && existing != uuid.Nil {
+			_, err = tx.Exec(ctx, `
+				UPDATE pops SET latitude=$2, longitude=$3, updated_at=now()
+				WHERE id=$1`, existing, item.Latitude, item.Longitude)
+			if err != nil {
+				failed = append(failed, networkImportFail{Index: i, Description: d, Error: err.Error()})
+				continue
+			}
+			counts["pops"]++
+			continue
+		}
+		if err != nil && err != pgx.ErrNoRows {
+			failed = append(failed, networkImportFail{Index: i, Description: d, Error: err.Error()})
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO pops (description, latitude, longitude, locality_id)
+			VALUES ($1,$2,$3,$4)`,
+			d, item.Latitude, item.Longitude, locID,
+		)
+		if err != nil {
+			failed = append(failed, networkImportFail{Index: i, Description: d, Error: err.Error()})
+			continue
+		}
+		counts["pops"]++
+	}
+
+	imported := counts["ctos"] + counts["splice_boxes"] + counts["poles"] + counts["cables"] + counts["pops"]
 	if imported == 0 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "nenhum elemento válido para importar", nil)
 		return

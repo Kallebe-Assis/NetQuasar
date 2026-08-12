@@ -1,7 +1,7 @@
 import L from "leaflet";
 import { buildPinSvg, normalizeMapPinStyle, pinLayout, type MapPinRole } from "./mapPinStyles";
 
-export type InfraMapKind = "cto" | "splice_box" | "cable" | "pole" | "project";
+export type InfraMapKind = "cto" | "splice_box" | "cable" | "pole" | "project" | "pop";
 
 export const INFRA_MAP_KIND_LABELS: Record<InfraMapKind, string> = {
   cto: "CTO",
@@ -9,6 +9,7 @@ export const INFRA_MAP_KIND_LABELS: Record<InfraMapKind, string> = {
   cable: "Cabo",
   pole: "Poste",
   project: "Projeto",
+  pop: "POP",
 };
 
 /** Cor padrão do alfinete CTO no mapa. */
@@ -20,15 +21,17 @@ export const DEFAULT_INFRA_MAP_COLORS: Record<InfraMapKind, string> = {
   cable: "#0891b2",
   pole: "#475569",
   project: "#2563eb",
+  pop: "#7c3aed",
 };
 
-const LEGACY_STROKE: Record<"cable" | "pole" | "project", string> = {
+const LEGACY_STROKE: Record<"cable" | "pole" | "project" | "pop", string> = {
   pole: `<path d="M10 9H4L2 7l2-2h6"/><path d="M14 5h6l2 2-2 2h-6"/><path d="M10 22V4a2 2 0 1 1 4 0v18"/><path d="M8 22h8"/>`,
   cable: `<path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"/><path d="M17 21v-2"/><path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"/><path d="M21 21v-2"/><path d="M3 5V3"/><path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z"/><path d="M7 5V3"/>`,
   project: `<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>`,
+  pop: `<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/>`,
 };
 
-function legacyInfraSvg(kind: "cable" | "pole" | "project", color: string, size: number): string {
+function legacyInfraSvg(kind: "cable" | "pole" | "project" | "pop", color: string, size: number): string {
   const inner = LEGACY_STROKE[kind];
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 }
@@ -98,5 +101,5 @@ export function infrastructurePinIcon(
 }
 
 export function isInfraMapKind(v: string): v is InfraMapKind {
-  return v === "cto" || v === "splice_box" || v === "cable" || v === "pole" || v === "project";
+  return v === "cto" || v === "splice_box" || v === "cable" || v === "pole" || v === "project" || v === "pop";
 }

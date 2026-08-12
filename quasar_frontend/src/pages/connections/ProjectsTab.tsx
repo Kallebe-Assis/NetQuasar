@@ -146,7 +146,11 @@ export function ProjectsTab({
       if (kmlItems) {
         const elements = reviewItemsToImportElements(kmlItems);
         const total =
-          elements.ctos.length + elements.splice_boxes.length + elements.poles.length + elements.cables.length;
+          elements.ctos.length +
+          elements.splice_boxes.length +
+          elements.poles.length +
+          elements.cables.length +
+          elements.pops.length;
         if (total === 0) throw new Error("Nenhum elemento seleccionado para importar.");
         if (payload.latitude == null || payload.longitude == null) {
           const pts = kmlItems.filter((i) => i.include);
@@ -191,7 +195,7 @@ export function ProjectsTab({
       if (imported) {
         toastOk(
           pushToast,
-          `${wasEdit ? "Projecto substituído" : "Projecto criado"} com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s).`,
+          `${wasEdit ? "Projecto substituído" : "Projecto criado"} com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s), ${imported.pops ?? 0} POP(s).`,
         );
       } else {
         toastOk(pushToast, wasEdit ? "Projeto actualizado." : "Projeto criado.");
