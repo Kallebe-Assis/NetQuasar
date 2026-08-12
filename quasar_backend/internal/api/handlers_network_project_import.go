@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type projectImportPoint struct {
@@ -39,13 +40,14 @@ type projectImportElements struct {
 }
 
 type projectImportBody struct {
-	Description string                `json:"description"`
-	LocalityID  *string               `json:"locality_id"`
-	Color       *string               `json:"color"`
-	Status      string                `json:"status"`
-	Latitude    *float64              `json:"latitude"`
-	Longitude   *float64              `json:"longitude"`
-	Elements    projectImportElements `json:"elements"`
+	Description      string                `json:"description"`
+	LocalityID       *string               `json:"locality_id"`
+	Color            *string               `json:"color"`
+	Status           string                `json:"status"`
+	Latitude         *float64              `json:"latitude"`
+	Longitude        *float64              `json:"longitude"`
+	ReplaceProjectID *string               `json:"replace_project_id,omitempty"`
+	Elements         projectImportElements `json:"elements"`
 }
 
 // importNetworkProject cria um projeto e importa CTOs, emendas, postes e cabos numa única transacção.
@@ -84,6 +86,11 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	replaceID := ""
+	if body.ReplaceProjectID != nil {
+		replaceID = strings.TrimSpace(*body.ReplaceProjectID)
+	}
+
 	ctx := r.Context()
 	tx, err := s.DB().Begin(ctx)
 	if err != nil {
@@ -94,15 +101,48 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 
 	var projectID uuid.UUID
 	var displayNumber int
-	err = tx.QueryRow(ctx, `
-		INSERT INTO network_projects (description, locality_id, color, status, latitude, longitude)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, display_number`,
-		desc, locID, trimPtr(body.Color), st, body.Latitude, body.Longitude,
-	).Scan(&projectID, &displayNumber)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
+	if replaceID != "" {
+		pid, perr := uuid.Parse(replaceID)
+		if perr != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_ID", "replace_project_id inválido", nil)
+			return
+		}
+		err = tx.QueryRow(ctx, `SELECT id, display_number FROM network_projects WHERE id=$1`, pid).Scan(&projectID, &displayNumber)
+		if err == pgx.ErrNoRows {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "projeto a substituir não encontrado", nil)
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE network_projects
+			SET description=$2, locality_id=$3, color=$4, status=$5, latitude=$6, longitude=$7, updated_at=now()
+			WHERE id=$1`,
+			projectID, desc, locID, trimPtr(body.Color), st, body.Latitude, body.Longitude,
+		)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		for _, table := range []string{"network_ctos", "network_splice_boxes", "network_cables", "network_poles"} {
+			if _, err = tx.Exec(ctx, `DELETE FROM `+table+` WHERE project_id=$1`, projectID); err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+		}
+	} else {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO network_projects (description, locality_id, color, status, latitude, longitude)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, display_number`,
+			desc, locID, trimPtr(body.Color), st, body.Latitude, body.Longitude,
+		).Scan(&projectID, &displayNumber)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
 	}
 
 	counts := map[string]int{"ctos": 0, "splice_boxes": 0, "poles": 0, "cables": 0}
@@ -247,13 +287,20 @@ func (s *Server) importNetworkProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.appendAuditLog(ctx, "network_project", projectID.String(), "import_kml", s.actorFromRequest(r), nil, map[string]any{
-		"counts": counts, "failed": len(failed),
+	action := "import_kml"
+	status := http.StatusCreated
+	if replaceID != "" {
+		action = "replace_kml"
+		status = http.StatusOK
+	}
+	s.appendAuditLog(ctx, "network_project", projectID.String(), action, s.actorFromRequest(r), nil, map[string]any{
+		"counts": counts, "failed": len(failed), "replaced": replaceID != "",
 	})
-	writeJSON(w, http.StatusCreated, map[string]any{
+	writeJSON(w, status, map[string]any{
 		"id":             projectID,
 		"display_number": displayNumber,
 		"imported":       counts,
 		"failed":         failed,
+		"replaced":       replaceID != "",
 	})
 }

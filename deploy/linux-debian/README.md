@@ -134,8 +134,13 @@ Ficheiros: `deploy/linux-debian/Caddyfile` e `deploy/linux-debian/docker-compose
 ```bash
 cd /caminho/netquasar
 git pull
+# Sem HTTPS:
 docker compose up -d --build
+# Com Caddy (NETQUASAR_DOMAIN no .env):
+docker compose -f docker-compose.yml -f deploy/linux-debian/docker-compose.caddy.yml up -d --build
 ```
+
+No Windows, o `update.bat` sobe o Caddy por defeito (`NETQUASAR_DOMAIN` no `.env`). Use `update.bat --no-caddy` só para HTTP na porta da app.
 
 A imagem `netquasar` inclui **traceroute** e **nmap** (Ferramentas → Tracert / Nmap). Se aparecer «não encontrado no PATH», reconstrua a imagem com o comando acima — não basta reiniciar o contentor sem `--build`.
 

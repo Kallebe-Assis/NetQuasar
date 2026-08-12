@@ -487,7 +487,7 @@ function MapPointPopupActions({
   const showSplitter = !!(onOpenSplitter && isCto);
   const showCableFibers = !!(onOpenCableFibers && isCable);
   const showSplice = !!(onOpenSplice && isSplice);
-  const showEdit = !!(onEditPosition && isCto);
+  const showEdit = !!(onEditPosition && isInfra);
   const showCoords = !!(onCopyCoords && isInfra && Number.isFinite(p.lat) && Number.isFinite(p.lng));
 
   if (isInfra) {
@@ -515,7 +515,7 @@ function MapPointPopupActions({
           </MapPopupIconBtn>
         ) : null}
         {showEdit ? (
-          <MapPopupIconBtn title="Editar" onClick={() => onEditPosition!(p.id)}>
+          <MapPopupIconBtn title="Editar descrição" onClick={() => onEditPosition!(p.id)}>
             <IconEdit />
           </MapPopupIconBtn>
         ) : null}

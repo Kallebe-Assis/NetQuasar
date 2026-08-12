@@ -69,6 +69,7 @@ export function ProjectsTab({
     skipped: number;
     fileName: string;
   } | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const kmlInputRef = useRef<HTMLInputElement>(null);
 
   const debouncedQ = useDebouncedValue(filters.q, 320);
@@ -142,9 +143,6 @@ export function ProjectsTab({
         longitude: parseCoordInput(form.longitude),
       };
       if (!payload.description) throw new Error("Descrição obrigatória.");
-      if (editId) {
-        return apiFetch(`/api/v1/commercial/network/projects/${editId}`, { method: "PATCH", json: payload });
-      }
       if (kmlItems) {
         const elements = reviewItemsToImportElements(kmlItems);
         const total =
@@ -157,16 +155,20 @@ export function ProjectsTab({
             payload.longitude = pts.reduce((s, p) => s + p.longitude, 0) / pts.length;
           }
         }
-        return apiFetch<{ id: string; display_number: number; imported: Record<string, number> }>(
+        return apiFetch<{ id: string; display_number: number; imported: Record<string, number>; replaced?: boolean }>(
           "/api/v1/commercial/network/projects/import/kml",
           {
             method: "POST",
             json: {
               ...payload,
+              ...(editId ? { replace_project_id: editId } : {}),
               elements,
             },
           },
         );
+      }
+      if (editId) {
+        return apiFetch(`/api/v1/commercial/network/projects/${editId}`, { method: "PATCH", json: payload });
       }
       return apiFetch("/api/v1/commercial/network/projects", { method: "POST", json: payload });
     },
@@ -185,10 +187,11 @@ export function ProjectsTab({
       setKmlFileName(null);
       setKmlSkipped(0);
       setKmlReviewDraft(null);
+      setConfirmReplace(false);
       if (imported) {
         toastOk(
           pushToast,
-          `Projecto criado com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s).`,
+          `${wasEdit ? "Projecto substituído" : "Projecto criado"} com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s).`,
         );
       } else {
         toastOk(pushToast, wasEdit ? "Projeto actualizado." : "Projeto criado.");
@@ -366,6 +369,7 @@ export function ProjectsTab({
                               latitude: p.latitude != null ? String(p.latitude) : "",
                               longitude: p.longitude != null ? String(p.longitude) : "",
                             });
+                            clearKml();
                             setFormOpen(true);
                           }}
                         >
@@ -447,12 +451,14 @@ export function ProjectsTab({
                   />
                 </div>
               </section>
-              {!editId ? (
-                <section className="conn-form-modal__section">
+              <section className="conn-form-modal__section">
                   <h3 className="conn-form-modal__section-title">Importar KML / KMZ</h3>
                   <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)" }}>
                     Aceita .kml ou .kmz. Após escolher o ficheiro, abre-se um modal para rever e corrigir em massa o
                     tipo e os atributos de cada elemento (CTO, emenda, poste, cabo).
+                    {editId
+                      ? " Num projeto existente, a importação substitui todos os elementos actuais e mantém o mesmo número."
+                      : ""}
                   </p>
                   <input
                     ref={kmlInputRef}
@@ -514,17 +520,32 @@ export function ProjectsTab({
                     >
                       <div style={{ fontWeight: 600 }}>{kmlFileName ?? "KML/KMZ"}</div>
                       <div style={{ color: "var(--muted)", marginTop: 4 }}>{kmlReviewSummary(kmlItems)}</div>
+                      {editId ? (
+                        <div style={{ color: "var(--danger, #b45309)", marginTop: 6 }}>
+                          Os elementos actuais deste projeto serão apagados e substituídos pelos do ficheiro.
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </section>
-              ) : null}
             </div>
             <div className="conn-form-modal__foot">
               <button type="button" className="btn" onClick={() => setFormOpen(false)} disabled={saveMut.isPending}>
                 Cancelar
               </button>
-              <button type="button" className="btn btn--primary" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
-                {kmlItems && !editId ? "Criar e importar" : "Guardar"}
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  if (editId && kmlItems) {
+                    setConfirmReplace(true);
+                    return;
+                  }
+                  saveMut.mutate();
+                }}
+                disabled={saveMut.isPending}
+              >
+                {kmlItems ? (editId ? "Substituir com KML" : "Criar e importar") : "Guardar"}
               </button>
             </div>
           </div>
@@ -573,6 +594,19 @@ export function ProjectsTab({
         />
       ) : null}
 
+      {confirmReplace ? (
+        <ConfirmModal
+          open
+          title="Substituir projeto"
+          message="Os CTOs, emendas, cabos e postes actuais deste projeto serão apagados e substituídos pelos do ficheiro. O número do projeto mantém-se."
+          confirmLabel="Substituir"
+          danger
+          busy={saveMut.isPending}
+          onCancel={() => setConfirmReplace(false)}
+          onConfirm={() => saveMut.mutate()}
+        />
+      ) : null}
+
       {kmlReviewDraft ? (
         <KmlImportReviewModal
           open={kmlReviewOpen}
@@ -580,6 +614,12 @@ export function ProjectsTab({
           projectName={kmlReviewDraft.projectName}
           skipped={kmlReviewDraft.skipped}
           initialItems={kmlReviewDraft.items}
+          confirmLabel={editId ? "Confirmar substituição" : "Confirmar e continuar"}
+          warning={
+            editId
+              ? "Num projeto existente, a importação substitui todos os elementos actuais."
+              : null
+          }
           onCancel={() => {
             setKmlReviewOpen(false);
             // Se ainda não havia confirmação prévia, limpa o draft.

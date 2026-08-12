@@ -15,6 +15,8 @@ type Props = {
   projectName: string;
   skipped: number;
   initialItems: KmlReviewItem[];
+  confirmLabel?: string;
+  warning?: string | null;
   onCancel: () => void;
   onConfirm: (items: KmlReviewItem[]) => void;
 };
@@ -73,6 +75,8 @@ export function KmlImportReviewModal({
   projectName,
   skipped,
   initialItems,
+  confirmLabel = "Confirmar e continuar",
+  warning,
   onCancel,
   onConfirm,
 }: Props) {
@@ -240,6 +244,11 @@ export function KmlImportReviewModal({
               {skipped > 0 ? ` · ${skipped} placemark(s) ignorado(s)` : ""}
             </p>
             <p className="kml-review__sub">{kmlReviewSummary(items)}</p>
+            {warning ? (
+              <p className="kml-review__sub" style={{ color: "var(--danger, #b45309)", marginTop: 6 }}>
+                {warning}
+              </p>
+            ) : null}
           </div>
           <button type="button" className="btn btn--icon" aria-label="Fechar" onClick={onCancel}>
             ×
@@ -626,7 +635,7 @@ export function KmlImportReviewModal({
               disabled={includedCount === 0}
               onClick={() => onConfirm(items)}
             >
-              Confirmar e continuar
+              {confirmLabel}
             </button>
           </div>
         </div>

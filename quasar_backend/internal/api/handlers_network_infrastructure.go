@@ -1847,6 +1847,26 @@ func scanNetworkPole(s *Server, ctx context.Context, rows interface{ Scan(dest .
 	return m, nil
 }
 
+func (s *Server) getNetworkPole(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
+		return
+	}
+	row := s.DB().QueryRow(ctx, `SELECT `+networkPoleSelect+` FROM network_poles WHERE id=$1`, id)
+	item, err := scanNetworkPole(s, ctx, row)
+	if err == pgx.ErrNoRows {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "", nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (s *Server) listNetworkPoles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q, projectID, localityID, _, qerr := networkListQuery(r)

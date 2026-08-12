@@ -271,6 +271,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/network/cables", s.listNetworkCables)
 			r.Get("/network/cables/{id}", s.getNetworkCable)
 			r.Get("/network/poles", s.listNetworkPoles)
+			r.Get("/network/poles/{id}", s.getNetworkPole)
 			r.Get("/aggregates", s.commercialAggregates)
 			r.Get("/totals-history", s.commercialTotalsHistory)
 			r.Get("/comparison", s.commercialMonthComparison)

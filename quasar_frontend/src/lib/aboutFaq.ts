@@ -406,7 +406,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O mapa aceita KML ou KMZ?",
-    a: "Sim. Em Elementos → Projetos pode importar .kml ou .kmz; abre-se um ecrã de revisão para classificar CTO, emenda, poste e cabo.",
+    a: "Sim. No mapa, o botão Importar abre um KML/KMZ com revisão em massa; pode criar um projeto novo ou substituir um já existente (os elementos actuais são apagados, o número do projeto mantém-se). Em Elementos → Projetos a mesma importação está disponível ao criar ou editar.",
     cat: "funcoes",
   },
   {
@@ -491,7 +491,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que é modo edição no mapa?",
-    a: "Permite reposicionar CTOs/elementos e editar trajetos de cabo quando tem permissão de gestão do mapa.",
+    a: "Permite alterar a descrição de um elemento, reposicionar CTOs/postes/emendas, editar trajetos de cabo, ocultar ou excluir, quando tem permissão de gestão do mapa.",
     cat: "funcoes",
   },
   {

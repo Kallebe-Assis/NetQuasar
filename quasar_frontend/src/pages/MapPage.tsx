@@ -1,11 +1,12 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, Pencil, Search } from "lucide-react";
+import { FileUp, LocateFixed, Pencil, Search } from "lucide-react";
 import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
 import { MapInfraSidePanel, parseInfraMapId } from "../components/MapInfraSidePanel";
 import { MapPlaceElementModal, type MapPlaceSession, type PlaceableKind } from "../components/MapPlaceElementModal";
+import { MapProjectKmlImport } from "../components/MapProjectKmlImport";
 import { MapSettingsButton, MapSettingsModal } from "../components/MapSettingsModal";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
@@ -236,6 +237,7 @@ export function MapPage() {
   const addMenuRef = useRef<HTMLDivElement>(null);
   const canEditMap = isAdminUser() || can("connections.manage") || can("map.manage");
   const [mapEditMode, setMapEditMode] = useState(false);
+  const [kmlImportOpen, setKmlImportOpen] = useState(false);
   const [hiddenMapIds, setHiddenMapIds] = useState<Set<string>>(() => new Set());
   const [repositionTarget, setRepositionTarget] = useState<{
     mapId: string;
@@ -1570,7 +1572,7 @@ export function MapPage() {
             <MapSectionErrorBoundary>
               <div className={`map-workspace${infraPanelOpen && isInfraPoint ? " map-workspace--with-panel" : ""}`}>
                 <div className="map-workspace__map">
-                  {canEditMap ? (
+                  {canEditMap && !addKind && !editingCable && !repositionTarget ? (
                     <div className="map-edit-toggle">
                       <button
                         type="button"
@@ -1582,9 +1584,18 @@ export function MapPage() {
                         <Pencil size={15} strokeWidth={2.25} />
                         {mapEditMode ? "Modo edição" : "Editar"}
                       </button>
+                      <button
+                        type="button"
+                        className="map-edit-toggle__btn"
+                        title="Importar KML/KMZ ou substituir um projeto existente"
+                        onClick={() => setKmlImportOpen(true)}
+                      >
+                        <FileUp size={15} strokeWidth={2.25} />
+                        Importar
+                      </button>
                     </div>
                   ) : null}
-                  {canEditMap && !mapEditMode ? (
+                  {canEditMap && !mapEditMode && !addKind && !editingCable && !repositionTarget ? (
                     <div className="map-add" ref={addMenuRef}>
                       <button
                         type="button"
@@ -1694,7 +1705,7 @@ export function MapPage() {
                   ) : mapEditMode ? (
                     <div className="map-place-hint" role="status">
                       <span>
-                        Modo edição activo — seleccione um elemento e use o painel para reposicionar, ocultar ou excluir.
+                        Modo edição activo — seleccione um elemento para alterar a descrição, reposicionar, ocultar ou excluir.
                       </span>
                       <button type="button" className="btn btn--sm" onClick={toggleMapEditMode}>
                         Sair
@@ -1772,14 +1783,8 @@ export function MapPage() {
                       canEditMap && mapEditMode
                         ? (id) => {
                             if (!id) return;
-                            const parsed = parseInfraMapId(id);
-                            if (parsed) {
-                              startReposition(id, parsed.kind, parsed.id);
-                              openPointDetail(id, false);
-                              return;
-                            }
                             setAutoOpenEdit(true);
-                            openPointDetail(id);
+                            openPointDetail(id, false);
                           }
                         : undefined
                     }
@@ -1883,18 +1888,18 @@ export function MapPage() {
                       setInfraPanelOpen(false);
                     }}
                     onSaved={(next) => {
-                      setMapToast({ ok: true, text: "CTO actualizada." });
+                      setMapToast({ ok: true, text: "Elemento actualizado." });
                       setFlyTo({ lat: next.lat, lng: next.lng, zoom: 17 });
                       setFlyKey((k) => k + 1);
                       if (selId) {
                         setDetailFallback({
                           id: selId,
                           description: next.description,
-                          category: "CTO",
+                          category: selPoint?.category ?? "CTO",
                           lat: next.lat,
                           lng: next.lng,
                           status: selPoint?.status ?? "—",
-                          mapKind: "cto",
+                          mapKind: selPoint?.mapKind ?? "cto",
                         });
                       }
                     }}
@@ -1920,6 +1925,34 @@ export function MapPage() {
           openPointDetail(mapId, false);
         }}
       />
+      {canEditMap ? (
+        <MapProjectKmlImport
+          open={kmlImportOpen}
+          defaultProjectId={projectFilterId}
+          projects={projectsList.data?.projects ?? []}
+          onClose={() => setKmlImportOpen(false)}
+          onImported={(info) => {
+            const n =
+              (info.imported.ctos ?? 0) +
+              (info.imported.splice_boxes ?? 0) +
+              (info.imported.poles ?? 0) +
+              (info.imported.cables ?? 0);
+            setMapToast({
+              ok: true,
+              text: info.replaced
+                ? `Projeto substituído (${n} elemento(s) importados).`
+                : `Projeto criado (${n} elemento(s) importados).`,
+            });
+            if (info.projectId) {
+              setProjectFilterId(info.projectId);
+              setShowCtos(true);
+              setShowCables(true);
+              setShowSpliceBoxes(true);
+              setShowPoles(true);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

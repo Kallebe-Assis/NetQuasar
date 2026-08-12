@@ -23,6 +23,7 @@ import {
   parseCoordInput,
   type NetworkCable,
   type NetworkCto,
+  type NetworkPole,
   type NetworkSpliceBox,
 } from "../lib/networkInfrastructure";
 import { APP_ROUTES } from "../app/routes";
@@ -129,6 +130,7 @@ export function MapInfraSidePanel({
     needs_maintenance: false,
   });
   const [err, setErr] = useState<string | null>(null);
+  const [descDraft, setDescDraft] = useState("");
 
   const ctoQ = useQuery({
     queryKey: ["map-cto-detail", parsed?.id],
@@ -154,6 +156,12 @@ export function MapInfraSidePanel({
     queryKey: ["map-splice-detail", parsed?.id],
     enabled: open && parsed?.kind === "splice_box" && !!parsed.id,
     queryFn: () => apiFetch<NetworkSpliceBox>(`/api/v1/commercial/network/splice-boxes/${parsed!.id}`),
+  });
+
+  const poleQ = useQuery({
+    queryKey: ["map-pole-detail", parsed?.id],
+    enabled: open && parsed?.kind === "pole" && !!parsed.id,
+    queryFn: () => apiFetch<NetworkPole>(`/api/v1/commercial/network/poles/${parsed!.id}`),
   });
 
   useEffect(() => {
@@ -184,10 +192,10 @@ export function MapInfraSidePanel({
   }, [open, autoOpenSplice, mapId, parsed?.kind, onSpliceAutoOpened]);
 
   useEffect(() => {
-    if (!open || !autoOpenEdit || parsed?.kind !== "cto" || !canEdit) return;
-    setEditing(true);
+    if (!open || !autoOpenEdit || !canEdit) return;
+    if (parsed?.kind === "cto" && !mapEditMode) setEditing(true);
     onEditAutoOpened?.();
-  }, [open, autoOpenEdit, mapId, parsed?.kind, canEdit, onEditAutoOpened]);
+  }, [open, autoOpenEdit, mapId, parsed?.kind, canEdit, mapEditMode, onEditAutoOpened]);
 
   const splitterPorts = useMemo(() => {
     const n = parseSplitterOutputs(ctoQ.data?.splitter) ?? undefined;
@@ -239,6 +247,27 @@ export function MapInfraSidePanel({
       needs_maintenance: !!c.needs_maintenance,
     });
   }, [ctoQ.data]);
+
+  useEffect(() => {
+    const next =
+      parsed?.kind === "cto"
+        ? (ctoQ.data?.description ?? fallback?.description ?? "")
+        : parsed?.kind === "cable"
+          ? (cableQ.data?.description ?? fallback?.description ?? "")
+          : parsed?.kind === "splice_box"
+            ? (spliceQ.data?.description ?? fallback?.description ?? "")
+            : parsed?.kind === "pole"
+              ? (poleQ.data?.description ?? fallback?.description ?? "")
+              : (fallback?.description ?? "");
+    setDescDraft(next);
+  }, [
+    parsed?.kind,
+    ctoQ.data?.description,
+    cableQ.data?.description,
+    spliceQ.data?.description,
+    poleQ.data?.description,
+    fallback?.description,
+  ]);
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -304,6 +333,40 @@ export function MapInfraSidePanel({
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao excluir."),
   });
 
+  const saveDescMut = useMutation({
+    mutationFn: async () => {
+      if (!parsed) throw new Error("Elemento inválido.");
+      const description = descDraft.trim();
+      if (!description) throw new Error("Descrição obrigatória.");
+      const path =
+        parsed.kind === "cto"
+          ? `/api/v1/commercial/network/ctos/${parsed.id}`
+          : parsed.kind === "cable"
+            ? `/api/v1/commercial/network/cables/${parsed.id}`
+            : parsed.kind === "splice_box"
+              ? `/api/v1/commercial/network/splice-boxes/${parsed.id}`
+              : parsed.kind === "pole"
+                ? `/api/v1/commercial/network/poles/${parsed.id}`
+                : null;
+      if (!path) throw new Error("Este tipo não pode ser editado aqui.");
+      await apiFetch(path, { method: "PATCH", json: { description } });
+      return description;
+    },
+    onSuccess: async (description) => {
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["map-cto-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-cable-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-splice-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-pole-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      await qc.invalidateQueries({ queryKey: queryKeys.networkCtos });
+      const lat = Number(ctoQ.data?.latitude ?? cableQ.data?.latitude ?? spliceQ.data?.latitude ?? poleQ.data?.latitude ?? fallback?.lat ?? 0);
+      const lng = Number(ctoQ.data?.longitude ?? cableQ.data?.longitude ?? spliceQ.data?.longitude ?? poleQ.data?.longitude ?? fallback?.lng ?? 0);
+      onSaved?.({ lat, lng, description });
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar a descrição."),
+  });
+
   if (!open || !parsed) return null;
 
   const editableKinds: InfraMapKind[] = ["cto", "cable", "splice_box", "pole"];
@@ -312,7 +375,13 @@ export function MapInfraSidePanel({
   const title =
     parsed.kind === "cto"
       ? ctoQ.data?.description ?? fallback?.description ?? "CTO"
-      : fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind];
+      : parsed.kind === "cable"
+        ? cableQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
+        : parsed.kind === "splice_box"
+          ? spliceQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
+          : parsed.kind === "pole"
+            ? poleQ.data?.description ?? fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind]
+            : fallback?.description ?? INFRA_MAP_KIND_LABELS[parsed.kind];
 
   const lat = ctoQ.data?.latitude ?? fallback?.lat;
   const lng = ctoQ.data?.longitude ?? fallback?.lng;
@@ -333,6 +402,26 @@ export function MapInfraSidePanel({
         <p className="map-infra-panel__muted" style={{ margin: "0 0 6px" }}>
           Modo edição
         </p>
+        {err ? <div className="msg msg--err">{err}</div> : null}
+        <label className="map-infra-panel__field">
+          <span>Descrição</span>
+          <input
+            className="input"
+            value={descDraft}
+            onChange={(e) => setDescDraft(e.target.value)}
+            disabled={saveDescMut.isPending}
+          />
+        </label>
+        <div className="map-infra-panel__actions" style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={saveDescMut.isPending || !descDraft.trim()}
+            onClick={() => saveDescMut.mutate()}
+          >
+            {saveDescMut.isPending ? "A guardar…" : "Guardar descrição"}
+          </button>
+        </div>
         <div className="map-infra-panel__actions">
           <button
             type="button"
@@ -378,6 +467,7 @@ export function MapInfraSidePanel({
 
       {parsed.kind === "cto" && !editing ? (
         <div className="map-infra-panel__body">
+          {renderMapEditActions()}
           <dl className="map-infra-panel__dl">
             <div>
               <dt>Nº</dt>
@@ -436,7 +526,7 @@ export function MapInfraSidePanel({
             <button type="button" className="btn btn--primary" onClick={() => setSplitterOpen(true)}>
               Visualizar splitter
             </button>
-            {canEdit && !mapEditMode ? (
+            {canEdit ? (
               <button type="button" className="btn" onClick={() => setEditing(true)}>
                 Editar dados
               </button>
@@ -455,7 +545,6 @@ export function MapInfraSidePanel({
               </a>
             ) : null}
           </div>
-          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -545,6 +634,7 @@ export function MapInfraSidePanel({
 
       {parsed.kind === "cable" ? (
         <div className="map-infra-panel__body">
+          {renderMapEditActions()}
           {cableQ.isLoading ? <p className="map-infra-panel__muted">A carregar cabo…</p> : null}
           {cableQ.isError ? <div className="msg msg--err">Não foi possível carregar o cabo.</div> : null}
           <dl className="map-infra-panel__dl">
@@ -583,7 +673,6 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
-          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -601,6 +690,7 @@ export function MapInfraSidePanel({
 
       {parsed.kind === "splice_box" ? (
         <div className="map-infra-panel__body">
+          {renderMapEditActions()}
           {spliceQ.isLoading ? <p className="map-infra-panel__muted">A carregar caixa…</p> : null}
           {spliceQ.isError ? <div className="msg msg--err">Não foi possível carregar a caixa de emenda.</div> : null}
           <dl className="map-infra-panel__dl">
@@ -641,7 +731,6 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
-          {renderMapEditActions()}
         </div>
       ) : null}
 
@@ -663,11 +752,23 @@ export function MapInfraSidePanel({
 
       {parsed.kind !== "cto" && parsed.kind !== "cable" && parsed.kind !== "splice_box" ? (
         <div className="map-infra-panel__body">
+          {renderMapEditActions()}
+          {parsed.kind === "pole" && poleQ.isLoading ? <p className="map-infra-panel__muted">A carregar poste…</p> : null}
           <dl className="map-infra-panel__dl">
+            <div>
+              <dt>Descrição</dt>
+              <dd>{poleQ.data?.description || fallback?.description || "—"}</dd>
+            </div>
+            {parsed.kind === "pole" ? (
+              <div>
+                <dt>Tipo</dt>
+                <dd>{poleQ.data?.pole_type || fallback?.category || "Poste"}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Localização</dt>
               <dd className="mono">
-                {fmtCoord(fallback?.lat)}, {fmtCoord(fallback?.lng)}
+                {fmtCoord(poleQ.data?.latitude ?? fallback?.lat)}, {fmtCoord(poleQ.data?.longitude ?? fallback?.lng)}
               </dd>
             </div>
           </dl>
@@ -676,7 +777,6 @@ export function MapInfraSidePanel({
               Abrir em Conexões
             </Link>
           </div>
-          {renderMapEditActions()}
         </div>
       ) : null}
 
