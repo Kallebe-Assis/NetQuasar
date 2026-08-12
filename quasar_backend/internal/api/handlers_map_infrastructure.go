@@ -240,7 +240,6 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 				return
 			}
-			includePath := zoom >= 13
 			for rows.Next() {
 				var id uuid.UUID
 				var desc string
@@ -261,7 +260,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					"point_type":     "cable",
 					"id_prefix":      "Cabo",
 				}
-				if includePath && len(pathRaw) > 0 && string(pathRaw) != "null" {
+				if len(pathRaw) > 0 && string(pathRaw) != "null" {
 					var path any
 					if err := json.Unmarshal(pathRaw, &path); err == nil {
 						pt["path"] = path

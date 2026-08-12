@@ -1179,24 +1179,56 @@ function MapPlaceClickLayer({
 function CablePathsLayer({
   points,
   editingCableId,
+  highlightedId,
+  displayMode,
+  onSelectDevice,
+  onOpenCableFibers,
+  onCopyCoords,
 }: {
   points: MapPoint[];
   editingCableId?: string | null;
+  highlightedId?: string | string[] | null;
+  displayMode: MapDisplayMode;
+  onSelectDevice?: (id: string) => void;
+  onOpenCableFibers?: (id: string) => void;
+  onCopyCoords?: (lat: number, lng: number) => void;
 }) {
   const cables = useMemo(
     () => points.filter((p) => p.mapKind === "cable" && Array.isArray(p.path) && p.path.length >= 2),
     [points],
   );
+  const selected = highlightSet(highlightedId);
   return (
     <>
       {cables.map((c) => {
         if (editingCableId && c.id === editingCableId) return null;
+        const active = selected.has(c.id);
         return (
           <Polyline
             key={`cable-path-${c.id}`}
             positions={c.path!.map((pt) => [pt.lat, pt.lng] as [number, number])}
-            pathOptions={{ color: "#0f766e", weight: 4, opacity: 0.85 }}
-          />
+            pathOptions={{
+              color: active ? "#0369a1" : "#0f766e",
+              weight: active ? 6 : 4,
+              opacity: 0.9,
+            }}
+            eventHandlers={{
+              click: (e) => {
+                L.DomEvent.stopPropagation(e);
+                onSelectDevice?.(c.id);
+              },
+            }}
+          >
+            <Popup>
+              {devicePopupBody(c, displayMode)}
+              <MapPointPopupActions
+                p={c}
+                onSelectDevice={onSelectDevice}
+                onOpenCableFibers={onOpenCableFibers}
+                onCopyCoords={onCopyCoords}
+              />
+            </Popup>
+          </Polyline>
         );
       })}
     </>
@@ -1453,8 +1485,9 @@ export function EquipmentMap({
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const iconStyles = mapIconStyles ?? DEFAULT_MAP_ICON_STYLES;
   const valid = useMemo(() => points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)), [points]);
-  const equipValid = useMemo(() => valid.filter((p) => !isConnectionPoint(p)), [valid]);
-  const connValid = useMemo(() => valid.filter(isConnectionPoint), [valid]);
+  const markerPoints = useMemo(() => valid.filter((p) => p.mapKind !== "cable"), [valid]);
+  const equipValid = useMemo(() => markerPoints.filter((p) => !isConnectionPoint(p)), [markerPoints]);
+  const connValid = useMemo(() => markerPoints.filter(isConnectionPoint), [markerPoints]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
   const placing =
     placeMode === "place" || placeMode === "cable" || placeMode === "reposition" || placeMode === "edit-cable";
@@ -1546,7 +1579,15 @@ export function EquipmentMap({
         <MapPlaceClickLayer enabled={placing} onMapClick={onMapClick} />
         <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-        <CablePathsLayer points={valid} editingCableId={editingCableMapId} />
+        <CablePathsLayer
+          points={valid}
+          editingCableId={editingCableMapId}
+          highlightedId={highlightedId}
+          displayMode={displayMode}
+          onSelectDevice={selectHandler}
+          onOpenCableFibers={cableFibersHandler}
+          onCopyCoords={copyCoordsHandler}
+        />
         <DraftCableLayer
           draftPath={draftPath}
           editable={placeMode === "edit-cable"}
@@ -1561,7 +1602,7 @@ export function EquipmentMap({
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView
-            points={valid}
+            points={markerPoints}
             displayMode={displayMode}
             onSelectDevice={selectHandler}
             onOpenSplitter={splitterHandler}
