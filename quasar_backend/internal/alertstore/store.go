@@ -110,6 +110,7 @@ func OpenOrUpdate(ctx context.Context, pool *pgxpool.Pool, spec OpenSpec, notify
 		WHERE device_id = $1::uuid
 		  AND alert_type = $2::text
 		  AND closed_at IS NULL%s
+		  AND (severity IS DISTINCT FROM $3::text OR message IS DISTINCT FROM $4)
 	`, spec.Match.whereClause(whereParam))
 
 	_, err = pool.Exec(ctx, updateQ, updateArgs...)

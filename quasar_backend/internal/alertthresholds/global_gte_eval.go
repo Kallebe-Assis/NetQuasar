@@ -53,15 +53,15 @@ func metricApplyCategoriesAcceptDevice(categories []string, deviceCategory strin
 }
 
 type globalMetricRow struct {
-	ID                string   `json:"id"`
-	Label             string   `json:"label"`
-	Unit              string   `json:"unit"`
-	Enabled           *bool    `json:"enabled"`
-	Operator          string   `json:"operator"`
-	GreenMin          string   `json:"green_min"`
-	WarningMin        string   `json:"warning_min"`
-	CriticalMin       string   `json:"critical_min"`
-	ApplyCategories   []string `json:"apply_categories"`
+	ID              string   `json:"id"`
+	Label           string   `json:"label"`
+	Unit            string   `json:"unit"`
+	Enabled         *bool    `json:"enabled"`
+	Operator        string   `json:"operator"`
+	GreenMin        string   `json:"green_min"`
+	WarningMin      string   `json:"warning_min"`
+	CriticalMin     string   `json:"critical_min"`
+	ApplyCategories []string `json:"apply_categories"`
 }
 
 // GlobalThresholdRuleName é o nome da regra em `alert_rules` usada pela UI de limiares globais.
@@ -104,7 +104,7 @@ func LoadGlobalGteMetricForDevice(ctx context.Context, pool *pgxpool.Pool, metri
 		return out, "", false
 	}
 	var root struct {
-		Schema  string           `json:"schema"`
+		Schema  string            `json:"schema"`
 		Metrics []globalMetricRow `json:"metrics"`
 	}
 	if json.Unmarshal(raw, &root) != nil {
@@ -239,7 +239,7 @@ func EvaluateNamedGteMetricWithThreshold(
 	if alertignore.IsMuted(ctx, pool, deviceID, alertType, key) {
 		return
 	}
-	msg := fmt.Sprintf("%s (%s): %s está em %.2f — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, value, sevPt)
+	msg := fmt.Sprintf("%s (%s): %s está em %s — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, formatTelemetryValueText(metricID, value), sevPt)
 	base := map[string]any{
 		"source":     "monitoring_telemetry",
 		"key":        key,

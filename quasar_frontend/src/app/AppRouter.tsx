@@ -33,6 +33,9 @@ const AlertsPage = lazy(() =>
 const NetworkEventsPage = lazy(() =>
   import("../pages/NetworkEventsPage").then((m) => ({ default: m.NetworkEventsPage })),
 );
+const RecordsPage = lazy(() =>
+  import("../pages/RecordsPage").then((m) => ({ default: m.RecordsPage })),
+);
 const MapPage = lazy(() => import("../pages/MapPage").then((m) => ({ default: m.MapPage })));
 const ToolsPage = lazy(() =>
   import("../pages/ToolsPage").then((m) => ({ default: m.ToolsPage })),
@@ -135,6 +138,7 @@ export function AppRouter() {
           <Route path="connections" element={withSuspense(<ClientConnectionsPage />)} />
           <Route path="alerts" element={withSuspense(<AlertsPage />)} />
           <Route path="events" element={withSuspense(<NetworkEventsPage />)} />
+          <Route path="registros" element={withSuspense(<RecordsPage />)} />
           <Route path="map" element={withSuspense(<MapPage />)} />
           <Route path="tools" element={withSuspense(<ToolsPage />)} />
           <Route path="settings" element={withSuspense(<SettingsPage />)} />

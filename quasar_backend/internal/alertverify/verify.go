@@ -32,13 +32,13 @@ type VerifyResult struct {
 }
 
 type alertRow struct {
-	ID         uuid.UUID
-	DeviceID   uuid.UUID
-	AlertType  string
-	Message    string
-	Severity   string
-	IP         string
-	DeviceName string
+	ID          uuid.UUID
+	DeviceID    uuid.UUID
+	AlertType   string
+	Message     string
+	Severity    string
+	IP          string
+	DeviceName  string
 	Meta        map[string]any
 	MetaKey     string
 	ActiveSince time.Time
@@ -543,22 +543,10 @@ func ponHintsFromMeta(meta map[string]any) []string {
 	return out
 }
 
-// ponLooksUpOnOltPage replica o critério da ficha da OLT: ON se ≥1 ONU online
-// (overlay) ou status operacional UP.
+// ponLooksUpOnOltPage replica o critério da ficha da OLT: ON se ≥1 ONU online.
 func ponLooksUpOnOltPage(p map[string]any) bool {
-	if n, ok := oltifderive.OnuOnlineFromRow(p); ok && n >= 1 {
-		return true
-	}
-	if up, ok := oltifderive.PonOperIsUp(p); ok && up {
-		return true
-	}
-	for _, key := range []string{"status", "pon_oper_status", "if_oper_status"} {
-		raw := strings.TrimSpace(strings.ToLower(fmt.Sprint(p[key])))
-		if raw == "up" || raw == "pon_up" || raw == "1" || raw == "online" || raw == "on" {
-			return true
-		}
-	}
-	return false
+	up, ok := oltifderive.PonLooksUpOnOltPage(p)
+	return ok && up
 }
 
 func toFloat64Default(v any, fallback float64) float64 {

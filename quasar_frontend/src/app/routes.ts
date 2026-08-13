@@ -24,6 +24,7 @@ export const APP_ROUTES = {
   settings: "/settings",
   about: "/about",
   events: "/events",
+  registros: "/registros",
   fleetDashboard: "/fleet/dashboard",
   fleetVehicles: "/fleet/vehicles",
   fleetDrivers: "/fleet/drivers",

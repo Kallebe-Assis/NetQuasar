@@ -166,6 +166,42 @@ func TestTelegramMonitoringBlocksBngPppoeDrop(t *testing.T) {
 	}
 }
 
+func TestTelegramMonitoringBlocksTemperatureShowsCelsius(t *testing.T) {
+	text := telegramMonitoringBlocksWithContext(
+		"WARNING",
+		"Temperatura da CPU MikroTik",
+		"RB-Core (10.0.0.8): Temperatura da CPU está em 72.50 — estado Atenção segundo os seus limiares de alerta.",
+		"RB-Core",
+		"10.0.0.8",
+		"mikrotik_cpu_temp",
+		map[string]any{
+			"metric_id":     "mikrotik_cpu_temp_c",
+			"value":         72.5,
+			"value_text":    "72.5 °C",
+			"temperature_c": 72.5,
+		},
+	)
+	for _, want := range []string{
+		"🟡 ALERTA TEMPERATURA",
+		"RB-Core",
+		"10.0.0.8",
+		"72.5 °C",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
+func TestShortEquipmentAndIncidentTempWithoutUnit(t *testing.T) {
+	_, _, _, val := shortEquipmentAndIncident(
+		"OLT-Central (10.0.0.1): Temperatura está em 68.50 — estado Atenção segundo os seus limiares de alerta.",
+	)
+	if !strings.Contains(val, "68.50") || !strings.Contains(val, "°C") {
+		t.Fatalf("want 68.50 °C, got %q", val)
+	}
+}
+
 func TestTelegramMonitoringBlocksTelemetryUptime(t *testing.T) {
 	text := telegramMonitoringBlocksWithContext(
 		"WARNING",

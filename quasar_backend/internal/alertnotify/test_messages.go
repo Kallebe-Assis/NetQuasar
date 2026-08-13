@@ -38,7 +38,7 @@ func MonitoringTestMessage(template string) string {
 			fmt.Sprintf("%s (%s): interface ether1 mudou de UP para DOWN.", equip, ip))
 	case "telemetry", "telemetry_threshold":
 		return formatMonitoringTelegram("WARNING", "Telemetria — limiar global",
-			fmt.Sprintf("%s (%s): Temperatura está em 68.50 — estado Atenção segundo os seus limiares de alerta.", equip, ip))
+			fmt.Sprintf("%s (%s): Temperatura está em 68.5 °C — estado Atenção segundo os seus limiares de alerta.", equip, ip))
 	case "snmp_failure":
 		return formatMonitoringTelegram("WARNING", "Falha SNMP",
 			fmt.Sprintf("%s (%s): telemetria SNMP sem resposta útil na última coleta.", equip, ip))

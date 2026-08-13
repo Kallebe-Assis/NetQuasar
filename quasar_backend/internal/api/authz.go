@@ -130,6 +130,21 @@ func (s *Server) requireAdminMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) requireAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ac := s.requestAuthContext(r)
+		if !ac.OK {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "inicie sessão", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) isAdminAuth(ac authContext) bool {
+	return ac.OK && (ac.Role == "admin" || permissionGranted(ac.Permissions, "*"))
+}
+
 func (s *Server) requestHasAnyPermission(r *http.Request, keys ...string) bool {
 	ac := s.requestAuthContext(r)
 	if !ac.OK {

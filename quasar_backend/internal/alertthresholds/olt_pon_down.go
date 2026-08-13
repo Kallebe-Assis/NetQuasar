@@ -16,11 +16,8 @@ import (
 
 const alertTypePonDown = "pon_down"
 
-// EvaluatePonDownAlerts abre/fecha alerta pon_down quando o status operacional da PON
-// muda de UP → DOWN (e resolve no regresso a UP).
-//
-// Usa link_oper_status (SNMP / ifOperStatus preservado) quando existir; caso contrário
-// o status efectivo (incl. derivado de onu_online após ApplyPonOperStatusAll).
+// EvaluatePonDownAlerts abre/fecha alerta pon_down quando a PON passa de ON → OFF
+// no mesmo critério da ficha da OLT (≥1 ONU online = UP) e resolve no regresso.
 func EvaluatePonDownAlerts(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -49,7 +46,7 @@ func EvaluatePonDownAlerts(
 		if k == "" {
 			continue
 		}
-		up, ok := oltifderive.PonOperIsUp(p)
+		up, ok := oltifderive.PonLooksUpOnOltPage(p)
 		if !ok {
 			continue
 		}
@@ -62,7 +59,7 @@ func EvaluatePonDownAlerts(
 		if k == "" {
 			continue
 		}
-		curUp, curOK := oltifderive.PonOperIsUp(p)
+		curUp, curOK := oltifderive.PonLooksUpOnOltPage(p)
 		if !curOK {
 			continue
 		}
@@ -78,9 +75,9 @@ func EvaluatePonDownAlerts(
 		if wasUp && !curUp {
 			msg := fmt.Sprintf("PON %s — status DOWN (inactiva) — OLT %s (%s).", k, oltLabel, host)
 			meta := alertnotify.WithStatusTransition(map[string]any{
-				"source":   src,
-				"pon":      k,
-				"key":      metaKey,
+				"source":    src,
+				"pon":       k,
+				"key":       metaKey,
 				"metric_id": "pon_oper_status",
 			}, "pon_up", "pon_down", nil)
 			if name := strings.TrimSpace(fmt.Sprint(p["name"])); name != "" && name != k {

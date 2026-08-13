@@ -137,3 +137,30 @@ func PonOperIsUp(row map[string]any) (up bool, ok bool) {
 	}
 	return false, false
 }
+
+// PonLooksUpOnOltPage replica o critério da ficha da OLT: ON se ≥1 ONU online.
+// Sem contagem de ONUs, usa o status overlay (não deixa link_oper_status DOWN
+// anular ONUs online — isso é PonOperIsUp, usado noutros contextos SNMP).
+func PonLooksUpOnOltPage(row map[string]any) (up bool, ok bool) {
+	if row == nil {
+		return false, false
+	}
+	if n, parsed := OnuOnlineFromRow(row); parsed {
+		return n >= 1, true
+	}
+	for _, key := range []string{"status", "pon_oper_status", "if_oper_status", "oper_status"} {
+		raw := strings.TrimSpace(strings.ToLower(anyToTrimmedString(row[key])))
+		if raw == "" {
+			continue
+		}
+		if u, parsed := parsePonOperToken(raw); parsed {
+			return u, true
+		}
+	}
+	if link := strings.TrimSpace(strings.ToLower(anyToTrimmedString(row["link_oper_status"]))); link != "" {
+		if u, parsed := parsePonOperToken(link); parsed {
+			return u, true
+		}
+	}
+	return false, false
+}

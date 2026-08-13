@@ -69,6 +69,8 @@ export const queryKeys = {
   networkEventsLookups: ["network-events-lookups"] as const,
   networkEventsSummary: ["network-events-summary"] as const,
   networkVlans: (deviceId: string) => ["network-vlans", deviceId] as const,
+  credentialRecords: (filters: string) => ["credential-records", filters] as const,
+  credentialLookups: ["credential-records-lookups"] as const,
 } as const;
 
 export function invalidateFleetOperationalQueries(qc: QueryClient): Promise<void> {

@@ -295,6 +295,11 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     cat: "funcoes",
   },
   {
+    q: "O que é a tela Registros?",
+    a: "Cofre de senhas de equipamentos, servidores (IP/host) e sites (domínio), com utilizador+senha ou só senha. Cada utilizador vê só os seus registos; o administrador vê todos e pode filtrar por pessoa. Não está na tela de Utilizadores. As senhas ficam cifradas e só se revelam ao pedir «Ver senha».",
+    cat: "funcoes",
+  },
+  {
     q: "Quem pode aceder a Configurações?",
     a: "Administradores ou utilizadores com permissões específicas de configurações.",
     cat: "configurar",

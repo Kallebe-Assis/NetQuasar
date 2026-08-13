@@ -19,19 +19,19 @@ import (
 
 // Server agrupa dependências HTTP.
 type Server struct {
-	Log               zerolog.Logger
-	Cfg               *config.Config
-	DBHolder          *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
-	WorkerCtx         context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
-	rt                *realtimeBroker
-	ensureMonitorOnce      sync.Once
+	Log                   zerolog.Logger
+	Cfg                   *config.Config
+	DBHolder              *atomic.Pointer[pgxpool.Pool] // pool atual; trocável em runtime (PATCH /settings/database)
+	WorkerCtx             context.Context               // cancelado no shutdown; nil desativa o worker de monitorização
+	rt                    *realtimeBroker
+	ensureMonitorOnce     sync.Once
 	automationONUOnce     sync.Once
 	automationReportsOnce sync.Once
 	// sysCfgImportMu protege o mapa de jobs de importação de configuração (aba Base de dados).
-	sysCfgImportMu   sync.Mutex
-	sysCfgImportJobs map[string]*sysConfigImportJob
-	dbRestoreMu      sync.Mutex
-	dbRestoreJobs    map[string]*dbRestoreJob
+	sysCfgImportMu     sync.Mutex
+	sysCfgImportJobs   map[string]*sysConfigImportJob
+	dbRestoreMu        sync.Mutex
+	dbRestoreJobs      map[string]*dbRestoreJob
 	bngCollectProgress *bngCollectProgressStore
 }
 
@@ -513,6 +513,16 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/realtime/ws", s.realtimeWS)
 		r.Get("/events", s.listEvents)
 		r.Get("/metrics", s.metricsSeries)
+
+		r.Route("/credential-records", func(r chi.Router) {
+			r.Use(s.requireAuthMiddleware)
+			r.Get("/", s.listCredentialRecords)
+			r.Get("/lookups", s.credentialRecordsLookups)
+			r.Post("/", s.createCredentialRecord)
+			r.Patch("/{id}", s.patchCredentialRecord)
+			r.Delete("/{id}", s.deleteCredentialRecord)
+			r.Post("/{id}/reveal", s.revealCredentialRecord)
+		})
 
 		r.Route("/network-events", func(r chi.Router) {
 			r.Get("/", s.listNetworkEvents)

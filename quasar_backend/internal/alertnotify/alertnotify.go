@@ -60,8 +60,22 @@ func shortEquipmentAndIncident(message string) (equip string, ip string, inciden
 		ip = "-"
 	}
 	num := strings.ReplaceAll(incident, ",", ".")
-	if m := regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s*(dBm|ms|°C|%|ONUs?|min(?:utos)?)`).FindStringSubmatch(num); len(m) >= 2 {
-		value = strings.TrimSpace(m[1] + " " + m[2])
+	if m := regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s*(dBm|ms|°C|ºC|%|ONUs?|min(?:utos)?)`).FindStringSubmatch(num); len(m) >= 2 {
+		unit := m[2]
+		if unit == "ºC" {
+			unit = "°C"
+		}
+		value = strings.TrimSpace(m[1] + " " + unit)
+	} else if m := regexp.MustCompile(`(?i)está em\s+(-?\d+(?:\.\d+)?)`).FindStringSubmatch(num); len(m) >= 2 {
+		n := m[1]
+		low := strings.ToLower(incident)
+		if strings.Contains(low, "temp") {
+			value = n + " °C"
+		} else if strings.Contains(low, "cpu") || strings.Contains(low, "memór") || strings.Contains(low, "memor") {
+			value = n + " %"
+		} else {
+			value = n
+		}
 	} else {
 		value = "-"
 	}
@@ -709,6 +723,23 @@ func metaNumber(meta map[string]any, key string) (float64, bool) {
 	}
 }
 
+func telegramDisplayedValue(parsed string, title, incident, alertType string, meta map[string]any) string {
+	if vt := metaString(meta, "value_text"); vt != "" {
+		return vt
+	}
+	if parsed != "" && parsed != "-" {
+		return parsed
+	}
+	if f := metaFloat(meta, "temperature_c", "value"); f != 0 {
+		hay := strings.ToLower(strings.TrimSpace(alertType + " " + title + " " + incident + " " + metaString(meta, "metric_id")))
+		if strings.Contains(hay, "temp") {
+			return fmt.Sprintf("%.1f °C", f)
+		}
+		return fmt.Sprintf("%.2f", f)
+	}
+	return "-"
+}
+
 func telegramMonitoringBlocks(level, title, message string, equipFallback string, ipFallback string) string {
 	return telegramMonitoringBlocksWithContext(level, title, message, equipFallback, ipFallback, "", nil)
 }
@@ -745,10 +776,8 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 			if cause != "" {
 				parts = append(parts, "• "+cause)
 			}
-			if val != "-" && !strings.Contains(strings.ToLower(header), "offline") {
-				parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
-			} else if vt := metaString(meta, "value_text"); vt != "" {
-				parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), vt))
+			if shown := telegramDisplayedValue(val, title, inc, alertType, meta); shown != "-" && !strings.Contains(strings.ToLower(header), "offline") {
+				parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), shown))
 			}
 		}
 	case "olt_onu_drop", "olt_onu_rise":
@@ -778,12 +807,16 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 				parts = append(parts, "• Temperatura = "+vt)
 			}
 		}
+	case "temperature_high", "temperature_low", "mikrotik_cpu_temp", "olt_pon_temp":
+		if shown := telegramDisplayedValue(val, title, inc, alertType, meta); shown != "-" {
+			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), shown))
+		}
 	default:
 		if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
 			parts = append(parts, "• "+tgt)
 		}
-		if val != "-" && !strings.Contains(strings.ToLower(header), "offline") {
-			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), val))
+		if shown := telegramDisplayedValue(val, title, inc, alertType, meta); shown != "-" && !strings.Contains(strings.ToLower(header), "offline") {
+			parts = append(parts, fmt.Sprintf("• %s = %s", metricLabel(title, inc), shown))
 		}
 	}
 

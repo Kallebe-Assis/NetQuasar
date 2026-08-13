@@ -17,6 +17,7 @@ import {
   Component,
   Cpu,
   BanknoteArrowDown,
+  KeySquare,
   Layers,
   MapPin,
   MonitorSmartphone,
@@ -86,6 +87,7 @@ const nav: NavEntry[] = [
   },
   { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
   { kind: "link", to: APP_ROUTES.events, label: "Eventos", icons: [CalendarClock] },
+  { kind: "link", to: APP_ROUTES.registros, label: "Registros", icons: [KeySquare] },
   { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
   {
     kind: "group",

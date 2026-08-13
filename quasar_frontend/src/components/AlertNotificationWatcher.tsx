@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { displayAlertType, displaySeverity } from "../lib/alertLabels";
@@ -23,8 +23,17 @@ function isAlertsOrMonitoringPath(pathname: string): boolean {
   return pathname === "/alerts" || pathname.startsWith("/alerts/") || pathname === "/monitoring" || pathname.startsWith("/monitoring/");
 }
 
-function fingerprint(a: WatchAlert): string {
-  return `${a.severity}|${a.type}|${a.message}|${a.closed_at ?? ""}`;
+function severityRank(sev: string): number {
+  switch (sev.toLowerCase()) {
+    case "critical":
+      return 3;
+    case "warning":
+      return 2;
+    case "info":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 function toastTone(sev: string): "err" | "info" {
@@ -35,6 +44,7 @@ function toastTone(sev: string): "err" | "info" {
 
 export function AlertNotificationWatcher() {
   const location = useLocation();
+  const qc = useQueryClient();
   const { push } = useAppToast();
   const seenRef = useRef<Map<string, string> | null>(null);
   const pathRef = useRef(location.pathname);
@@ -59,13 +69,20 @@ export function AlertNotificationWatcher() {
     staleTime: 1000,
   });
 
+  const changeAt = monState.data?.last_alerts_change_at ?? "";
   const alertsQ = useQuery({
-    queryKey: ["alerts-active-notify", monState.data?.last_alerts_change_at ?? ""],
+    queryKey: ["alerts-active-notify"],
     queryFn: () => apiFetch<{ alerts: WatchAlert[] }>("/api/v1/alerts/active?limit=250"),
     enabled: !!getAuthToken(),
     refetchInterval: 12_000,
     staleTime: 2000,
+    placeholderData: keepPreviousData,
   });
+
+  useEffect(() => {
+    if (!changeAt) return;
+    void qc.invalidateQueries({ queryKey: ["alerts-active-notify"] });
+  }, [changeAt, qc]);
 
   const prefs = prefsQ.data;
   const toastEverywhere = prefs?.alert_toast_everywhere !== false;
@@ -78,7 +95,7 @@ export function AlertNotificationWatcher() {
 
     if (seenRef.current == null) {
       const seed = new Map<string, string>();
-      for (const a of list) seed.set(a.id, fingerprint(a));
+      for (const a of list) seed.set(a.id, a.severity);
       seenRef.current = seed;
       return;
     }
@@ -87,10 +104,11 @@ export function AlertNotificationWatcher() {
     const next = new Map<string, string>();
     const events: WatchAlert[] = [];
     for (const a of list) {
-      const fp = fingerprint(a);
-      next.set(a.id, fp);
-      const old = prev.get(a.id);
-      if (old == null || old !== fp) events.push(a);
+      next.set(a.id, a.severity);
+      const oldSev = prev.get(a.id);
+      if (oldSev == null || severityRank(a.severity) > severityRank(oldSev)) {
+        events.push(a);
+      }
     }
     seenRef.current = next;
     if (events.length === 0) return;

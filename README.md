@@ -301,6 +301,14 @@ O endpoint legado `GET /api/v1/events` continua a ser a linha do tempo de sistem
 
 ---
 
+### Registros (`/registros`)
+
+**Função:** cofre de senhas de acesso (equipamento, servidor ou site). Todos os utilizadores autenticados vêem o menu; cada um só acede aos **seus** registos. Administradores vêem **todos** e filtram por pessoa. Não está na tela de Utilizadores.
+
+**Como funciona:** cada registo pertence a um utilizador. Pode guardar utilizador+senha ou só a senha. Equipamento escolhe-se da lista; servidor pede IP/host; site pede domínio. Senhas cifradas em AES-GCM (`credential_records.password_blob`); revelação pontual em `POST /api/v1/credential-records/{id}/reveal` (com auditoria). API: `/api/v1/credential-records`.
+
+---
+
 ### Relatórios (`/reports`)
 
 **Função:** relatórios do sistema (exceto frota), resumidos ou detalhados, com CSV / PDF / Telegram.
@@ -497,6 +505,7 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `/mikrotik` | MikroTik |
 | `/bng` | BNG / sessões PPPoE / VLANs |
 | `/events` | Eventos da Rede (manutenções e incidentes) |
+| `/registros` | Cofre de senhas (próprios; admin vê todos) |
 | `/reports` | Relatórios do sistema |
 | `/fleet/dashboard` | Frota |
 | `/about` | Sobre / FAQ |
@@ -509,7 +518,7 @@ Redireccionamentos legados: definidos em `LEGACY_ROUTE_REDIRECTS` (`routes.ts`) 
 ## Segurança
 
 - Não commitar `.env`, certificados (`*.crt`) nem credenciais.
-- Palavras-passe fortes em Postgres e `NETQUASAR_SESSION_SECRET`.
+- Palavras-passe fortes em Postgres e `NETQUASAR_SESSION_SECRET` (também deriva a chave do cofre de Registros).
 - Em produção: firewall + reverse proxy com TLS.
 - Codificar caracteres especiais no DSN (`%2C`, `%24`, …).
 

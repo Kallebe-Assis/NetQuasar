@@ -8073,4 +8073,76 @@ details.collapsible-section .collapsible-section__body {
   vertical-align: middle;
 }
 
+.vault-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vault-kind {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+}
+.vault-kind--equipment {
+  color: #2563eb;
+}
+.vault-kind--server {
+  color: #059669;
+}
+.vault-kind--site {
+  color: #7c3aed;
+}
+.vault-target {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.vault-kinds {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 14px;
+}
+.vault-kind-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.vault-kind-btn.is-on {
+  border-color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+  font-weight: 600;
+}
+.vault-form .vault-span {
+  grid-column: 1 / -1;
+}
+.vault-secret-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.vault-secret-row .input {
+  flex: 1;
+}
+.vault-reveal h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vault-reveal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
 

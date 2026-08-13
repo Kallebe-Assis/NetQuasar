@@ -35,3 +35,18 @@ func TestApplyPonOperStatusFromOnuCounts(t *testing.T) {
 		t.Fatal("expected false without onu_online")
 	}
 }
+
+func TestPonLooksUpOnOltPageIgnoresLinkDownWhenOnusOnline(t *testing.T) {
+	ghost := map[string]any{"onu_online": 5, "status": "pon_down"}
+	ApplyPonOperStatusFromOnuCounts(ghost)
+	up, ok := PonLooksUpOnOltPage(ghost)
+	if !ok || !up {
+		t.Fatalf("OLT page should treat ONU>=1 as UP, got up=%v ok=%v", up, ok)
+	}
+	off := map[string]any{"onu_online": 0, "status": "up"}
+	ApplyPonOperStatusFromOnuCounts(off)
+	up, ok = PonLooksUpOnOltPage(off)
+	if !ok || up {
+		t.Fatalf("OLT page should treat 0 ONUs as DOWN, got up=%v ok=%v", up, ok)
+	}
+}
