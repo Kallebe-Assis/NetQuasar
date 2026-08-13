@@ -58,6 +58,21 @@ func TestParseTempCFromTelemetry_PrefersBoardTemperature(t *testing.T) {
 	}
 }
 
+func TestParseMikrotikCPUTempC(t *testing.T) {
+	metrics := map[string]any{
+		"mikrotik_collection": mikrotikcollect.CollectOutput{
+			Fields: map[string]mikrotikcollect.FieldResult{
+				"board_temperature": {OK: true, Value: 65.0},
+				"cpu_temperature":   {OK: true, Value: 82.0},
+			},
+		},
+	}
+	got := parseMikrotikCPUTempC(metrics)
+	if got == nil || *got != 82.0 {
+		t.Fatalf("want cpu 82, got %v", got)
+	}
+}
+
 func TestParseCPUFromTelemetry_CollectOutput(t *testing.T) {
 	metrics := map[string]any{
 		"mikrotik_collection": mikrotikcollect.CollectOutput{

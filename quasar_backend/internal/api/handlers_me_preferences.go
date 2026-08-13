@@ -112,11 +112,14 @@ func validAlertSoundID(id string, custom []userAlertSound) bool {
 
 func (s *Server) requireSessionUser(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	ac := s.requestAuthContext(r)
-	if !ac.OK || ac.UserID == uuid.Nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "inicie sessão para gerir as suas preferências", nil)
-		return uuid.Nil, false
+	if ac.UserID != uuid.Nil {
+		return ac.UserID, true
 	}
-	return ac.UserID, true
+	if uid := s.userIDFromRequest(r); uid != nil && *uid != uuid.Nil {
+		return *uid, true
+	}
+	writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "inicie sessão para gerir as suas preferências", nil)
+	return uuid.Nil, false
 }
 
 func (s *Server) loadUserPreferences(r *http.Request, userID uuid.UUID) (userPreferences, error) {

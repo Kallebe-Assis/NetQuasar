@@ -11,6 +11,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/rs/zerolog"
 )
 
@@ -101,13 +102,7 @@ func updateOnuOpticalStreak(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 
 func EvaluateOltOnuOpticalFromPons(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, desc, ip string, pons []map[string]any) {
 	for _, p := range pons {
-		key := strings.TrimSpace(fmt.Sprint(p["pon_compact"]))
-		if key == "" {
-			key = strings.TrimSpace(fmt.Sprint(p["id"]))
-		}
-		if key == "" {
-			key = strings.TrimSpace(fmt.Sprint(p["name"]))
-		}
+		key := oltifderive.StablePonRowKey(p)
 		if key == "" {
 			continue
 		}

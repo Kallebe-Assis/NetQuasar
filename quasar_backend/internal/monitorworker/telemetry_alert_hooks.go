@@ -115,8 +115,8 @@ func collectionScalarFromMetrics(metrics map[string]any, fieldKeys ...string) *f
 
 // parseTempCFromTelemetry obtém temperatura em °C a partir da coleta MikroTik/Switch ou OID de perfil.
 func parseTempCFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *float64 {
-	// Preferência: temperature → board_temperature → cpu_temperature → telnet_sys_temperature.
-	if f := collectionScalarFromMetrics(metrics, "temperature", "board_temperature", "cpu_temperature", "telnet_sys_temperature"); f != nil {
+	// Placa / sensor principal — a temp. do CPU MikroTik é avaliada à parte (mikrotik_cpu_temp).
+	if f := collectionScalarFromMetrics(metrics, "temperature", "board_temperature", "telnet_sys_temperature"); f != nil {
 		v := snmpmetrics.NormalizeAmbientTempCelsius(*f)
 		if v > -273 && v < 500 {
 			return &v
@@ -149,6 +149,21 @@ func parseTempCFromTelemetry(metrics map[string]any, vars []probing.SNMPVar) *fl
 				return &f
 			}
 			return nil
+		}
+	}
+	return nil
+}
+
+func parseMikrotikCPUTempC(metrics map[string]any) *float64 {
+	return ParseMikrotikCPUTempC(metrics)
+}
+
+// ParseMikrotikCPUTempC lê cpu_temperature da coleta MikroTik (SNMP/Telnet).
+func ParseMikrotikCPUTempC(metrics map[string]any) *float64 {
+	if f := collectionScalarFromMetrics(metrics, "cpu_temperature"); f != nil {
+		v := snmpmetrics.NormalizeAmbientTempCelsius(*f)
+		if v > -273 && v < 500 {
+			return &v
 		}
 	}
 	return nil
@@ -320,6 +335,9 @@ func RunPostTelemetryAlertEval(ctx context.Context, pool *pgxpool.Pool, log *zer
 	}
 	if t := parseTempCFromTelemetry(col.Metrics, col.SNMP.Vars); t != nil {
 		alertthresholds.EvaluateGlobalGteMetric(ctx, pool, log, deviceID, deviceDesc, host, "temperature_c", *t)
+	}
+	if t := parseMikrotikCPUTempC(col.Metrics); t != nil {
+		alertthresholds.EvaluateMikrotikCPUTemp(ctx, pool, log, deviceID, deviceDesc, host, *t)
 	}
 	uptimeMin := parseUptimeMinutesFromTelemetry(col.Metrics, col.SNMP.Vars)
 	if uptimeMin == nil {

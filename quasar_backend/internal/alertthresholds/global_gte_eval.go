@@ -174,16 +174,51 @@ func EvalMetricSeverity(v float64, t GteMetricThreshold) string {
 	return severityGteMetric(v, t)
 }
 
-const alertTypeTelemetryThreshold = "telemetry_threshold"
+const (
+	alertTypeTelemetryThreshold = "telemetry_threshold"
+	alertTypeMikrotikCPUTemp    = "mikrotik_cpu_temp"
+)
 
 // EvaluateGlobalGteMetric abre/atualiza ou fecha alerta conforme limiar global (ex.: temperature_c).
 func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceDesc, deviceIP, metricID string, value float64) {
+	EvaluateNamedGteMetric(ctx, pool, log, deviceID, deviceDesc, deviceIP, metricID, value, alertTypeTelemetryThreshold, "telemetry:"+metricID, "Telemetria — limiar global")
+}
+
+// EvaluateMikrotikCPUTemp avalia a temperatura do CPU MikroTik (mtxrHlProcessorTemperature / cpu_temperature).
+func EvaluateMikrotikCPUTemp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceDesc, deviceIP string, value float64) {
+	var devCat string
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)), '') FROM devices WHERE id=$1`, deviceID).Scan(&devCat)
+	if devCat != "" && devCat != "mikrotik" {
+		return
+	}
+	th, label, ok := LoadGlobalGteMetricForDevice(ctx, pool, "mikrotik_cpu_temp_c", "mikrotik")
+	if !ok {
+		th, label, ok = LoadGlobalGteMetricForDevice(ctx, pool, "temperature_c", "mikrotik")
+		if label == "" {
+			label = "Temperatura da CPU"
+		}
+	}
+	if !ok {
+		return
+	}
+	EvaluateNamedGteMetricWithThreshold(ctx, pool, log, deviceID, deviceDesc, deviceIP, "mikrotik_cpu_temp_c", label, value, th, alertTypeMikrotikCPUTemp, "mikrotik_cpu_temp", "Temperatura da CPU MikroTik")
+}
+
+func EvaluateNamedGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, deviceDesc, deviceIP, metricID string, value float64, alertType, metaKey, headline string) {
 	var devCat string
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)), '') FROM devices WHERE id=$1`, deviceID).Scan(&devCat)
 	th, metricLabel, ok := LoadGlobalGteMetricForDevice(ctx, pool, metricID, devCat)
 	if !ok {
 		return
 	}
+	EvaluateNamedGteMetricWithThreshold(ctx, pool, log, deviceID, deviceDesc, deviceIP, metricID, metricLabel, value, th, alertType, metaKey, headline)
+}
+
+func EvaluateNamedGteMetricWithThreshold(
+	ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
+	deviceID uuid.UUID, deviceDesc, deviceIP, metricID, metricLabel string, value float64,
+	th GteMetricThreshold, alertType, metaKey, headline string,
+) {
 	sev := severityGteMetric(value, th)
 	sevPt := strings.ToUpper(sev)
 	if sev == "critical" {
@@ -193,13 +228,15 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 	}
 	desc := strings.TrimSpace(deviceDesc)
 	ip := strings.TrimSpace(deviceIP)
-	key := "telemetry:" + metricID
-
+	key := strings.TrimSpace(metaKey)
+	if key == "" {
+		key = "telemetry:" + metricID
+	}
 	if sev == "ok" {
-		closeTelemetryThresholdAlert(ctx, pool, log, deviceID, key)
+		closeNamedGteAlert(ctx, pool, deviceID, alertType, key)
 		return
 	}
-	if alertignore.IsMuted(ctx, pool, deviceID, alertTypeTelemetryThreshold, key) {
+	if alertignore.IsMuted(ctx, pool, deviceID, alertType, key) {
 		return
 	}
 	msg := fmt.Sprintf("%s (%s): %s está em %.2f — estado %s segundo os seus limiares de alerta.", descOrEmpty(desc, "?"), addrOrEmpty(ip, "?"), metricLabel, value, sevPt)
@@ -215,15 +252,15 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 	}
 	meta := alertnotify.WithStatusTransition(base, "metric_normal", "threshold_"+sev, nil)
 	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
-		DeviceID: deviceID, Severity: sev, AlertType: alertTypeTelemetryThreshold,
+		DeviceID: deviceID, Severity: sev, AlertType: alertType,
 		Message: msg, IP: ip, DeviceName: desc, Meta: meta,
 		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
 	}, &alertstore.NotifyCreate{
-		Log: log, Level: strings.ToUpper(sev), Headline: "Telemetria — limiar global",
+		Log: log, Level: strings.ToUpper(sev), Headline: headline,
 	})
 	if err != nil {
 		if log != nil {
-			log.Error().Err(err).Str("device", deviceID.String()).Msg("alertstore telemetry_threshold")
+			log.Error().Err(err).Str("device", deviceID.String()).Str("alert_type", alertType).Msg("alertstore gte_metric")
 		}
 		return
 	}
@@ -233,8 +270,13 @@ func EvaluateGlobalGteMetric(ctx context.Context, pool *pgxpool.Pool, log *zerol
 }
 
 func closeTelemetryThresholdAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, key string) {
-	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
-		DeviceID: deviceID, AlertType: alertTypeTelemetryThreshold,
+	_ = log
+	closeNamedGteAlert(ctx, pool, deviceID, alertTypeTelemetryThreshold, key)
+}
+
+func closeNamedGteAlert(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, alertType, key string) {
+	_, _, _ = alertstore.Close(ctx, pool, (*zerolog.Logger)(nil), alertstore.CloseSpec{
+		DeviceID: deviceID, AlertType: alertType,
 		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
 		Resolved: map[string]any{
 			"resolved": "metric_within_limits", "source": "monitoring_telemetry", "key": key,
@@ -262,7 +304,7 @@ func formatTelemetryValueText(metricID string, value float64) string {
 		return fmt.Sprintf("%.0f min", value)
 	case "cpu_usage_pct", "memory_usage_pct":
 		return fmt.Sprintf("%.1f%%", value)
-	case "temperature_c":
+	case "temperature_c", "mikrotik_cpu_temp_c":
 		return fmt.Sprintf("%.1f °C", value)
 	case "latency_ms":
 		return fmt.Sprintf("%.0f ms", value)

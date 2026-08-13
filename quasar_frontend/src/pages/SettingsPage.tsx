@@ -682,6 +682,7 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "mikrotik_sfp_tx_dbm", label: "SFP — potência TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
     { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "", apply_categories: ["mikrotik"] },
     { id: "mikrotik_sfp_temp_c", label: "Temperatura do módulo SFP", unit: "°C", scope: "mikrotik_sfp", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["mikrotik"] },
+    { id: "mikrotik_cpu_temp_c", label: "Temperatura da CPU MikroTik", unit: "°C", scope: "mikrotik", enabled: true, operator: "gte", green_min: "55", warning_min: "70", critical_min: "85", apply_categories: ["mikrotik"] },
   ];
 }
 
@@ -706,6 +707,7 @@ function AlertThresholdsPanel() {
     { value: "bng", label: "BNG (logins)" },
     { value: "mikrotik_pppoe", label: "PPPoE MikroTik" },
     { value: "mikrotik_sfp", label: "SFP da MikroTik" },
+    { value: "mikrotik", label: "MikroTik (CPU / saúde)" },
     { value: "interface", label: "Interface de rede" },
     { value: "onu", label: "ONU" },
     { value: "custom", label: "Outro" },

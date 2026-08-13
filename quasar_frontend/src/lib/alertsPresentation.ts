@@ -18,6 +18,7 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   mikrotik_sfp_tx: "optical",
   mikrotik_sfp_rx: "optical",
   mikrotik_sfp_temp: "optical",
+  mikrotik_cpu_temp: "performance",
   olt_onu_drop: "olt",
   olt_onu_rise: "olt",
   olt_onu_rx: "olt",
@@ -70,6 +71,14 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "Potência RX - SFP";
     case "mikrotik_sfp_temp":
       return "Temperatura SFP";
+    case "mikrotik_cpu_temp":
+      return "Temperatura CPU MikroTik";
+    case "temperature_high":
+      return "Temperatura alta";
+    case "cpu_high":
+      return "CPU elevada";
+    case "memory_high":
+      return "Memória elevada";
     case "telemetry_threshold":
       return "Limiar de métrica";
     case "olt_onu_drop":
@@ -197,6 +206,10 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "mikrotik_sfp_tx", label: "SFP — TX" },
   { value: "mikrotik_sfp_rx", label: "SFP — RX" },
   { value: "mikrotik_sfp_temp", label: "SFP — temperatura" },
+  { value: "mikrotik_cpu_temp", label: "MikroTik — temperatura da CPU" },
+  { value: "cpu_high", label: "CPU elevada" },
+  { value: "memory_high", label: "Memória elevada" },
+  { value: "temperature_high", label: "Temperatura do equipamento" },
   { value: "olt_onu_drop", label: "OLT — queda de ONUs" },
   { value: "olt_onu_rise", label: "OLT — subida de ONUs" },
   { value: "olt_onu_rx", label: "OLT — ONU RX" },
@@ -284,7 +297,7 @@ export function alertValueText(type: string | null | undefined, message: string 
   }
 
   const metricId = String(m?.metric_id ?? "").toLowerCase();
-  const isSfpTemp = t === "mikrotik_sfp_temp" || t === "olt_pon_temp";
+  const isSfpTemp = t === "mikrotik_sfp_temp" || t === "olt_pon_temp" || t === "mikrotik_cpu_temp";
   const isTempAlert =
     isSfpTemp || t.includes("temperature") || t.includes("temp") || metricId.includes("temp");
   const tempN = coerceFiniteNumber(m?.temperature_c);

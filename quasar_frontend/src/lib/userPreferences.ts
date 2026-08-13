@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import { getAuthToken } from "./auth";
+import { apiUrl, getAuthToken, getStoredApiKey } from "./auth";
 import type { UiTheme } from "./theme";
 
 export type UserPreferences = {
@@ -58,10 +58,18 @@ export function customSoundFileId(id: string): string {
   return id.startsWith("custom:") ? id.slice("custom:".length) : id;
 }
 
-export async function fetchCustomAlertSoundUrl(id: string): Promise<string> {
+function sessionHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
   const token = getAuthToken();
-  const res = await fetch(`/api/v1/me/alert-sounds/${encodeURIComponent(customSoundFileId(id))}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const key = getStoredApiKey();
+  if (key) headers["X-API-Key"] = key;
+  return headers;
+}
+
+export async function fetchCustomAlertSoundUrl(id: string): Promise<string> {
+  const res = await fetch(apiUrl(`/api/v1/me/alert-sounds/${encodeURIComponent(customSoundFileId(id))}`), {
+    headers: sessionHeaders(),
   });
   if (!res.ok) throw new Error("Falha ao carregar o som");
   const blob = await res.blob();
@@ -69,13 +77,12 @@ export async function fetchCustomAlertSoundUrl(id: string): Promise<string> {
 }
 
 export async function uploadAlertSound(file: File, name?: string) {
-  const token = getAuthToken();
   const fd = new FormData();
   fd.append("file", file);
   if (name?.trim()) fd.append("name", name.trim());
-  const res = await fetch("/api/v1/me/alert-sounds", {
+  const res = await fetch(apiUrl("/api/v1/me/alert-sounds"), {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: sessionHeaders(),
     body: fd,
   });
   const data = (await res.json().catch(() => ({}))) as { error?: string; id?: string; name?: string };

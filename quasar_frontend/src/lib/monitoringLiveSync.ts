@@ -39,12 +39,9 @@ export function applyMonitoringLiveSync(
   qc: QueryClient,
   opts: MonitoringLiveSyncOptions = {},
 ): void {
-  const { monitoring = true, alerts = true, olt = false, map = false } = opts;
+  const { monitoring = true, alerts = true, olt = false } = opts;
   if (monitoring) {
     void qc.invalidateQueries({ queryKey: queryKeys.monitoringActiveEquipment });
-  }
-  if (map) {
-    void qc.invalidateQueries({ queryKey: ["map-points"] });
   }
   if (alerts) {
     void invalidateAlertListQueries(qc);

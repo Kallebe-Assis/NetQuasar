@@ -10,6 +10,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/rs/zerolog"
 )
 
@@ -28,13 +29,7 @@ func EvaluateOltPonOpticalFromPons(ctx context.Context, pool *pgxpool.Pool, log 
 		return
 	}
 	for _, p := range pons {
-		key := strings.TrimSpace(fmt.Sprint(p["pon_compact"]))
-		if key == "" {
-			key = strings.TrimSpace(fmt.Sprint(p["id"]))
-		}
-		if key == "" {
-			key = strings.TrimSpace(fmt.Sprint(p["name"]))
-		}
+		key := oltifderive.StablePonRowKey(p)
 		if key == "" {
 			continue
 		}

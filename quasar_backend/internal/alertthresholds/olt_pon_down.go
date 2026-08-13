@@ -3,6 +3,7 @@ package alertthresholds
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -69,7 +70,7 @@ func EvaluatePonDownAlerts(
 		if !prevKnown[k] {
 			// Sem histórico: não abrir no 1.º snapshot; fechar se já estiver UP.
 			if curUp {
-				closePonDownAlert(ctx, pool, log, deviceID, metaKey)
+				closePonDownAlertAliases(ctx, pool, log, deviceID, k)
 			}
 			continue
 		}
@@ -100,8 +101,30 @@ func EvaluatePonDownAlerts(
 			continue
 		}
 		if curUp {
-			closePonDownAlert(ctx, pool, log, deviceID, metaKey)
+			closePonDownAlertAliases(ctx, pool, log, deviceID, k)
 		}
+	}
+}
+
+func closePonDownAlertAliases(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, ponKey string) {
+	seen := map[string]struct{}{}
+	add := func(k string) {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			return
+		}
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		closePonDownAlert(ctx, pool, log, deviceID, "pon_down:"+k)
+	}
+	add(ponKey)
+	norm := oltifderive.PonIdentityNorm(ponKey)
+	add(norm)
+	if n, err := strconv.Atoi(norm); err == nil && n > 0 {
+		add(oltifderive.VsolMibPonCompactID(n))
+		add(strconv.Itoa(n))
 	}
 }
 

@@ -16,6 +16,21 @@ func TestCanonicalPonRowKey_vsol_matches_if_mib(t *testing.T) {
 	}
 }
 
+func TestCanonicalPonRowKey_numericIdWithoutVsolStatus(t *testing.T) {
+	plain := map[string]any{"id": "4", "name": "", "status": "pon_up"}
+	if got := CanonicalPonRowKey(plain); got != "04" {
+		t.Fatalf("id 4 → %q want 04", got)
+	}
+	padded := map[string]any{"id": "04", "status": "pon_down"}
+	if got := CanonicalPonRowKey(padded); got != "04" {
+		t.Fatalf("id 04 → %q want 04", got)
+	}
+	jsonNum := map[string]any{"id": 4.0, "name": "PON 4"}
+	if got := CanonicalPonRowKey(jsonNum); got != "04" {
+		t.Fatalf("json 4 / PON 4 → %q want 04", got)
+	}
+}
+
 func TestVsolMibPonCompactID(t *testing.T) {
 	if VsolMibPonCompactID(1) != "01" {
 		t.Fatalf("1 -> %q", VsolMibPonCompactID(1))

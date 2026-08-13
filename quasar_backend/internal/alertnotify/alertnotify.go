@@ -173,7 +173,7 @@ func monitoringHeader(level, title, message, alertType string, meta map[string]a
 		return "🟡 ALERTA CPU"
 	case "memory_high":
 		return "🟡 ALERTA MEMÓRIA"
-	case "temperature_high", "temperature_low":
+	case "temperature_high", "temperature_low", "mikrotik_cpu_temp":
 		return "🟡 ALERTA TEMPERATURA"
 	}
 
@@ -1067,6 +1067,8 @@ func ResolutionHeadlineForAlertType(alertType string) string {
 		return "Potência óptica SFP dentro do limiar"
 	case "telemetry_threshold":
 		return "Métrica de telemetria voltou ao intervalo normal"
+	case "mikrotik_cpu_temp", "mikrotik_sfp_temp", "olt_pon_temp", "temperature_high":
+		return "Temperatura voltou ao intervalo normal"
 	default:
 		return "Alarme resolvido"
 	}

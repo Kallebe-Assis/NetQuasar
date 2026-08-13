@@ -88,25 +88,40 @@ func ClassifyKind(displayName, descr string) Kind {
 	return KindOther
 }
 
-// CanonicalPonRowKey alinha linhas VSOL (ex.: name "PON 1", id "1") com IF-MIB ("GPON0/1", id "01").
+func trimPonField(v any) string {
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return ""
+	}
+	return s
+}
+
+// CanonicalPonRowKey alinha linhas VSOL (ex.: name "PON 1", id "1" ou 4) com IF-MIB ("GPON0/1", id "01"/"04").
 func CanonicalPonRowKey(m map[string]any) string {
-	name := strings.TrimSpace(fmt.Sprint(m["name"]))
-	idStr := strings.TrimSpace(fmt.Sprint(m["id"]))
+	name := trimPonField(m["name"])
+	idStr := trimPonField(m["id"])
 	if c := PonCompactFromPhy(name, name); c != "" {
 		return c
 	}
 	if c := PonCompactFromPhy(idStr, idStr); c != "" {
 		return c
 	}
-	if sm := reVsolPonName.FindStringSubmatch(name); len(sm) == 2 {
-		if n, err := strconv.Atoi(sm[1]); err == nil && n > 0 {
-			return "0" + strconv.Itoa(n)
+	if compact := trimPonField(m["pon_compact"]); compact != "" {
+		if c := PonCompactFromPhy(compact, compact); c != "" {
+			return c
+		}
+		if n, err := strconv.Atoi(compact); err == nil && n > 0 {
+			return VsolMibPonCompactID(n)
 		}
 	}
-	if strings.TrimSpace(fmt.Sprint(m["status"])) == "vsol_snmp" {
-		if n, err := strconv.Atoi(idStr); err == nil && n > 0 {
-			return "0" + strconv.Itoa(n)
+	if sm := reVsolPonName.FindStringSubmatch(name); len(sm) == 2 {
+		if n, err := strconv.Atoi(sm[1]); err == nil && n > 0 {
+			return VsolMibPonCompactID(n)
 		}
+	}
+	// id numérico (4, "04", JSON float) — sempre compacto VSOL, não só com status vsol_snmp.
+	if n, err := strconv.Atoi(idStr); err == nil && n > 0 {
+		return VsolMibPonCompactID(n)
 	}
 	return idStr
 }

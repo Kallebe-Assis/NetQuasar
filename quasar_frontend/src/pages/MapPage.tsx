@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileUp, LocateFixed, Pencil, Search } from "lucide-react";
-import { EquipmentMap, DEFAULT_MAP_COLORS, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
+import { EquipmentMap, DEFAULT_MAP_COLORS, expandMapBounds, quantizeMapBounds, sameMapBounds, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
 import { MapInfraSidePanel, parseInfraMapId } from "../components/MapInfraSidePanel";
@@ -15,7 +15,6 @@ import { fiberSpecByName } from "../lib/fiberSplitter";
 import { formatDistanceMeters } from "../lib/nearestCtoMatch";
 import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
-import { type MonitoringStateSync, monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { queryKeys } from "../lib/queryKeys";
 import { fetchUiAppearance, mapColorsFromAppearance, mapIconsFromAppearance, type MapAppearanceColors } from "../lib/uiAppearance";
 import { looksLikeHTTPURL, parseLatLngPair, shouldLocateQuery, type MapLocateHit } from "../lib/mapLocationQuery";
@@ -257,7 +256,10 @@ export function MapPage() {
   const geoWatchRef = useRef<number | null>(null);
   const geoFirstFixRef = useRef(false);
   const nearestQueryRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
-  const onMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
+  const onMapBoundsChange = useCallback((b: MapBounds) => {
+    const next = quantizeMapBounds(b);
+    setMapBounds((prev) => (prev && sameMapBounds(prev, next) ? prev : next));
+  }, []);
   const qc = useQueryClient();
 
   const placeMode: MapPlaceMode = editingCable
@@ -377,38 +379,35 @@ export function MapPage() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [searchOpen]);
 
-  const monState = useQuery({
-    queryKey: queryKeys.monState,
-    queryFn: () => apiFetch<MonitoringStateSync>("/api/v1/monitoring/state"),
-    refetchInterval: (q) => monitoringPollMs(5000, q.state.data?.is_running),
-  });
-  useMonitoringLiveSync(monState.data, { map: true });
+  const queryBounds = useMemo(() => (mapBounds ? expandMapBounds(mapBounds, 0.28) : null), [mapBounds]);
 
   const connPts = useQuery({
     queryKey: [
       "map-connection-points",
-      mapBounds?.minLat,
-      mapBounds?.maxLat,
-      mapBounds?.minLng,
-      mapBounds?.maxLng,
-      mapBounds?.zoom,
+      queryBounds?.minLat,
+      queryBounds?.maxLat,
+      queryBounds?.minLng,
+      queryBounds?.maxLng,
+      queryBounds?.zoom,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (mapBounds) {
-        params.set("min_lat", String(mapBounds.minLat));
-        params.set("max_lat", String(mapBounds.maxLat));
-        params.set("min_lng", String(mapBounds.minLng));
-        params.set("max_lng", String(mapBounds.maxLng));
-        if (mapBounds.zoom != null) params.set("zoom", String(mapBounds.zoom));
+      if (queryBounds) {
+        params.set("min_lat", String(queryBounds.minLat));
+        params.set("max_lat", String(queryBounds.maxLat));
+        params.set("min_lng", String(queryBounds.minLng));
+        params.set("max_lng", String(queryBounds.maxLng));
+        if (queryBounds.zoom != null) params.set("zoom", String(queryBounds.zoom));
       }
       const qs = params.toString();
       return apiFetch<{ points: ConnectionPoint[]; total?: number; truncated?: boolean; limit?: number }>(
         `/api/v1/map/connection-points${qs ? `?${qs}` : ""}`,
       );
     },
-    enabled: showConnections && mapBounds != null,
+    enabled: showConnections && queryBounds != null,
     placeholderData: keepPreviousData,
+    staleTime: 20_000,
+    refetchOnWindowFocus: false,
   });
 
   const infraKinds = useMemo(() => {
@@ -441,31 +440,32 @@ export function MapPage() {
       "map-infrastructure-points",
       infraKinds.join(","),
       projectFilterId,
-      mapBounds?.minLat,
-      mapBounds?.maxLat,
-      mapBounds?.minLng,
-      mapBounds?.maxLng,
-      mapBounds?.zoom,
+      queryBounds?.minLat,
+      queryBounds?.maxLat,
+      queryBounds?.minLng,
+      queryBounds?.maxLng,
+      queryBounds?.zoom,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("kinds", infraKinds.join(","));
       if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
-      // Sempre limitar ao viewport — evita carregar milhares de CTOs de uma vez.
-      if (mapBounds) {
-        params.set("min_lat", String(mapBounds.minLat));
-        params.set("max_lat", String(mapBounds.maxLat));
-        params.set("min_lng", String(mapBounds.minLng));
-        params.set("max_lng", String(mapBounds.maxLng));
-        if (mapBounds.zoom != null) params.set("zoom", String(mapBounds.zoom));
+      if (queryBounds) {
+        params.set("min_lat", String(queryBounds.minLat));
+        params.set("max_lat", String(queryBounds.maxLat));
+        params.set("min_lng", String(queryBounds.minLng));
+        params.set("max_lng", String(queryBounds.maxLng));
+        if (queryBounds.zoom != null) params.set("zoom", String(queryBounds.zoom));
       }
       const qs = params.toString();
       return apiFetch<{ points: InfrastructurePoint[]; total?: number; truncated?: boolean; limit?: number }>(
         `/api/v1/map/infrastructure-points${qs ? `?${qs}` : ""}`,
       );
     },
-    enabled: showInfrastructure && mapBounds != null,
+    enabled: showInfrastructure && queryBounds != null,
     placeholderData: keepPreviousData,
+    staleTime: 20_000,
+    refetchOnWindowFocus: false,
   });
 
   const pts = useQuery({
@@ -480,9 +480,48 @@ export function MapPage() {
       return apiFetch<{ points: Point[] }>(`/api/v1/map/equipment-points${qs ? `?${qs}` : ""}`);
     },
     placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const equipPoints = useMemo(() => (Array.isArray(pts.data?.points) ? pts.data.points : []), [pts.data?.points]);
+
+  const infraCacheRef = useRef<Map<string, InfrastructurePoint>>(new Map());
+  const infraCacheScopeRef = useRef("");
+  const [infraStablePoints, setInfraStablePoints] = useState<InfrastructurePoint[]>([]);
+
+  useEffect(() => {
+    const scope = `${infraKinds.join(",")}|${projectFilterId}`;
+    if (infraCacheScopeRef.current !== scope) {
+      infraCacheRef.current.clear();
+      infraCacheScopeRef.current = scope;
+    }
+    const incoming = infraPts.data?.points;
+    if (!Array.isArray(incoming) || !queryBounds) return;
+    const cache = infraCacheRef.current;
+    for (const p of incoming) {
+      cache.set(`${p.point_type}:${p.id}`, p);
+    }
+    const keep = expandMapBounds(queryBounds, 0.6);
+    const next: InfrastructurePoint[] = [];
+    for (const [k, p] of cache) {
+      const lat = Number(p.lat);
+      const lng = Number(p.lng);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < keep.minLat ||
+        lat > keep.maxLat ||
+        lng < keep.minLng ||
+        lng > keep.maxLng
+      ) {
+        cache.delete(k);
+        continue;
+      }
+      next.push(p);
+    }
+    setInfraStablePoints(next);
+  }, [infraPts.data?.points, queryBounds, infraKinds, projectFilterId]);
 
   const displayedPoints = useMemo(() => {
     const projectScoped = projectFilterId.trim() !== "";
@@ -500,7 +539,7 @@ export function MapPage() {
       mapKind: "connection" as const,
       login: c.login,
     }));
-    const infraRaw = showInfrastructure && Array.isArray(infraPts.data?.points) ? infraPts.data.points : [];
+    const infraRaw = showInfrastructure ? infraStablePoints : [];
     const infraIds = new Set<string>();
     const infra: Point[] = infraRaw
       .filter((p) => isInfraMapKind(p.point_type))
@@ -561,7 +600,7 @@ export function MapPage() {
   }, [
     equipPoints,
     connPts.data?.points,
-    infraPts.data?.points,
+    infraStablePoints,
     showConnections,
     showEquipment,
     showInfrastructure,
@@ -1190,10 +1229,11 @@ export function MapPage() {
   /** Só o total da API — não usar `filteredPoints`: filtro POP/categoria vazio não deve trocar para «Lista» e esconder o mapa. */
   useEffect(() => {
     if (userPickedTab.current || (pts.isPending && !pts.data)) return;
-    const ptsArr = pts.data?.points;
-    const total = Array.isArray(ptsArr) ? ptsArr.length : 0;
-    if (total > 0) setView("mapa");
-    else setView("lista");
+    const total = Array.isArray(pts.data?.points) ? pts.data.points.length : 0;
+    setView((cur) => {
+      const next = total > 0 ? "mapa" : "lista";
+      return cur === next ? cur : next;
+    });
   }, [pts.isPending, pts.data, pts.data?.points?.length]);
 
   if (pts.isPending && !pts.data) {

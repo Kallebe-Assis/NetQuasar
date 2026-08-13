@@ -404,15 +404,15 @@ func mapInfrastructureLimit(zoom float64, hasBBox bool) int {
 	}
 	switch {
 	case zoom < 10:
-		return 60
-	case zoom < 12:
 		return 120
-	case zoom < 14:
+	case zoom < 12:
 		return 220
+	case zoom < 14:
+		return 400
 	case zoom < 16:
-		return 350
+		return 700
 	default:
-		return 500
+		return 1000
 	}
 }
 
@@ -426,20 +426,20 @@ func mapInfraKindCap(kind string, zoom float64, remaining int) int {
 	case "cto":
 		switch {
 		case zoom < 11:
-			if capN > 50 {
-				capN = 50
+			if capN > 90 {
+				capN = 90
 			}
 		case zoom < 13:
-			if capN > 100 {
-				capN = 100
+			if capN > 180 {
+				capN = 180
 			}
 		case zoom < 15:
-			if capN > 200 {
-				capN = 200
-			}
-		default:
 			if capN > 350 {
 				capN = 350
+			}
+		default:
+			if capN > 700 {
+				capN = 700
 			}
 		}
 	case "cable":

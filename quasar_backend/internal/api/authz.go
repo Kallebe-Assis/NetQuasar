@@ -91,13 +91,10 @@ func (s *Server) requestAuthRole(r *http.Request) (role string, ok bool) {
 }
 
 func (s *Server) requestAuthContext(r *http.Request) authContext {
-	if !s.Cfg.RequireAuth() {
-		return authContext{Role: "admin", ProfileSlug: "admin", Permissions: []string{"*"}, OK: true}
-	}
 	bearer := bearerFromRequest(r)
 	if bearer != "" {
 		uid, email, role, err := parseUserJWT(s.Cfg, bearer)
-		if err == nil {
+		if err == nil && uid != uuid.Nil {
 			pid, slug, perms := s.resolveUserPermissions(r.Context(), uid, role)
 			effectiveRole := role
 			if permissionGranted(perms, "*") {
@@ -112,6 +109,9 @@ func (s *Server) requestAuthContext(r *http.Request) authContext {
 				ProfileID: pid, ProfileSlug: slug, Permissions: perms, OK: true,
 			}
 		}
+	}
+	if !s.Cfg.RequireAuth() {
+		return authContext{Role: "admin", ProfileSlug: "admin", Permissions: []string{"*"}, OK: true}
 	}
 	if APIKeyMatches(s.Cfg, r) {
 		return authContext{Role: "admin", ProfileSlug: "admin", Permissions: []string{"*"}, OK: true}

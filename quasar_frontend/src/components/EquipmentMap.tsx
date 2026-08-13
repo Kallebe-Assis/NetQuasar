@@ -126,8 +126,13 @@ function gridDecimalsForZoom(z: number): number {
 function pointsFingerprint(points: MapPoint[]): string {
   let h = points.length;
   for (let i = 0; i < points.length; i++) {
-    const id = points[i].id;
+    const p = points[i];
+    const id = p.id;
     for (let j = 0; j < id.length; j++) h = (h * 33 + id.charCodeAt(j)) | 0;
+    h = (h * 33 + ((p.lat * 1e5) | 0)) | 0;
+    h = (h * 33 + ((p.lng * 1e5) | 0)) | 0;
+    const label = p.mapLabel ?? "";
+    for (let j = 0; j < label.length; j++) h = (h * 33 + label.charCodeAt(j)) | 0;
   }
   return `${points.length}:${h}`;
 }
@@ -180,15 +185,26 @@ function centroid(pts: MapPoint[]): [number, number] {
 function MapInvalidateSize() {
   const map = useMap();
   useEffect(() => {
+    let timer: number | null = null;
+    let lastW = 0;
+    let lastH = 0;
     const run = () => {
-      map.invalidateSize();
+      const size = map.getSize();
+      if (size.x === lastW && size.y === lastH && lastW > 0) return;
+      lastW = size.x;
+      lastH = size.y;
+      map.invalidateSize({ animate: false, pan: false });
     };
     run();
-    const t = window.setTimeout(run, 120);
-    const onResize = () => run();
+    const t = window.setTimeout(run, 160);
+    const onResize = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(run, 200);
+    };
     window.addEventListener("resize", onResize);
     return () => {
       window.clearTimeout(t);
+      if (timer != null) window.clearTimeout(timer);
       window.removeEventListener("resize", onResize);
     };
   }, [map]);
@@ -216,24 +232,68 @@ function FitBounds({ pointsRef, version }: { pointsRef: MutableRefObject<{ lat: 
 
 export type MapBounds = { minLat: number; maxLat: number; minLng: number; maxLng: number; zoom?: number };
 
+function quantizeCoord(n: number, decimals = 4): number {
+  const f = 10 ** decimals;
+  return Math.round(n * f) / f;
+}
+
+/** Arredonda o viewport para evitar refetch por ruído de float (invalidateSize / moveend). */
+export function quantizeMapBounds(b: MapBounds): MapBounds {
+  return {
+    minLat: quantizeCoord(b.minLat),
+    maxLat: quantizeCoord(b.maxLat),
+    minLng: quantizeCoord(b.minLng),
+    maxLng: quantizeCoord(b.maxLng),
+    zoom: Math.round(b.zoom ?? 0),
+  };
+}
+
+export function expandMapBounds(b: MapBounds, factor: number): MapBounds {
+  const latSpan = Math.max(b.maxLat - b.minLat, 0.002);
+  const lngSpan = Math.max(b.maxLng - b.minLng, 0.002);
+  const latPad = latSpan * factor;
+  const lngPad = lngSpan * factor;
+  return {
+    minLat: b.minLat - latPad,
+    maxLat: b.maxLat + latPad,
+    minLng: b.minLng - lngPad,
+    maxLng: b.maxLng + lngPad,
+    zoom: b.zoom,
+  };
+}
+
+export function sameMapBounds(a: MapBounds, b: MapBounds): boolean {
+  return (
+    a.minLat === b.minLat &&
+    a.maxLat === b.maxLat &&
+    a.minLng === b.minLng &&
+    a.maxLng === b.maxLng &&
+    a.zoom === b.zoom
+  );
+}
+
 function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds) => void }) {
   const map = useMap();
   useEffect(() => {
     if (!onBoundsChange) return;
     let timer: number | null = null;
+    let last: MapBounds | null = null;
     const emit = () => {
       const b = map.getBounds();
-      onBoundsChange({
+      const next = quantizeMapBounds({
         minLat: b.getSouth(),
         maxLat: b.getNorth(),
         minLng: b.getWest(),
         maxLng: b.getEast(),
         zoom: map.getZoom(),
       });
+      if (last && sameMapBounds(last, next)) return;
+      last = next;
+      onBoundsChange(next);
     };
     const schedule = () => {
       if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(emit, 450);
+      timer = window.setTimeout(emit, 550);
     };
     map.whenReady(emit);
     map.on("moveend", schedule);
@@ -956,12 +1016,17 @@ function ClusterMarkersByView({
   highlightedId?: string | string[] | null;
 }) {
   const map = useMap();
-  const [zoom, setZoom] = useState(() => map.getZoom());
+  const [zoom, setZoom] = useState(() => Math.round(map.getZoom()));
   const decimals = gridDecimalsForZoom(zoom);
   const pointsFp = useMemo(() => pointsFingerprint(points), [points]);
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
 
   useEffect(() => {
-    const bump = () => setZoom(map.getZoom());
+    const bump = () => {
+      const z = Math.round(map.getZoom());
+      setZoom((prev) => (prev === z ? prev : z));
+    };
     bump();
     map.whenReady(bump);
     map.on("zoomend", bump);
@@ -978,7 +1043,7 @@ function ClusterMarkersByView({
     stopSpiderAnim();
   }, [pointsFp, decimals, stopSpiderAnim, setSpider]);
 
-  const clustersGrid = useMemo(() => gridClusters(points, decimals), [points, decimals]);
+  const clustersGrid = useMemo(() => gridClusters(pointsRef.current, decimals), [pointsFp, decimals]);
 
   const expandCluster = useCallback((key: string) => {
     setExpandedClusterKeys((prev) => new Set(prev).add(key));
@@ -1570,6 +1635,8 @@ export function EquipmentMap({
         zoom={valid.length ? 6 : 5}
         style={{ height: mapHeight, width: "100%", minHeight: 420, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}
         scrollWheelZoom
+        markerZoomAnimation={false}
+        fadeAnimation={false}
       >
         <MapInvalidateSize />
         {valid.length > 0 ? <FitBounds pointsRef={fitPointsRef} version={fitBoundsVersion} /> : null}

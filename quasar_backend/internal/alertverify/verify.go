@@ -239,10 +239,22 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		return verifySfp(ctx, pool, log, row)
 	case "mikrotik_sfp_temp":
 		return verifySfpTemp(ctx, pool, log, row)
-	case "olt_pon_temp":
+	case "olt_pon_tx", "olt_pon_rx", "olt_pon_temp":
 		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
-		resolved, summary, collected, patch = verifyOltPonTemp(ctx, pool, row)
+		resolved, summary, collected, patch = verifyOltPonMetric(ctx, pool, row)
 		collected["refreshed"] = true
+		return resolved, summary, collected, patch
+	case "mikrotik_cpu_temp":
+		extra := map[string]any{}
+		if err := refreshTelemetryForDevice(ctx, pool, row.DeviceID); err != nil {
+			extra["refresh_error"] = err.Error()
+		} else {
+			extra["refreshed"] = true
+		}
+		resolved, summary, collected, patch = verifyMikrotikCPUTemp(ctx, pool, row)
+		for k, v := range extra {
+			collected[k] = v
+		}
 		return resolved, summary, collected, patch
 	case "interface_down_transition", "interface_down":
 		return verifyInterfaceDown(ctx, pool, log, row)
@@ -470,7 +482,11 @@ func verifyPonDown(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool
 	oltifderive.ApplyPonOperStatusAll(arr)
 	p, found := findPonRow(arr, row.Meta)
 	if !found {
-		return false, fmt.Sprintf("PON %s não encontrada no snapshot actual da OLT.", pon), collected, nil
+		if len(arr) == 0 {
+			return false, fmt.Sprintf("PON %s — snapshot da OLT sem PONs; não foi possível confirmar.", pon), collected, nil
+		}
+		// Snapshot válido mas a chave antiga (ex.: 04 vs 4 / GPON0/4) já não existe — alerta fantasma.
+		return true, fmt.Sprintf("PON %s já não consta no snapshot actual da OLT — alerta encerrado.", pon), collected, map[string]any{"resolved": "pon_missing_from_snapshot"}
 	}
 	collected["status"] = p["status"]
 	collected["pon_oper_status"] = p["pon_oper_status"]
@@ -486,41 +502,7 @@ func verifyPonDown(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool
 }
 
 func findPonRow(arr []map[string]any, meta map[string]any) (map[string]any, bool) {
-	wants := ponHintsFromMeta(meta)
-	if len(wants) == 0 {
-		return nil, false
-	}
-	for _, p := range arr {
-		for _, k := range ponIdentityKeys(p) {
-			for _, w := range wants {
-				if k == w {
-					return p, true
-				}
-			}
-		}
-	}
-	return nil, false
-}
-
-func ponIdentityKeys(p map[string]any) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(s string) {
-		s = strings.ToLower(strings.TrimSpace(s))
-		if s == "" || s == "<nil>" {
-			return
-		}
-		if _, ok := seen[s]; ok {
-			return
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	add(oltifderive.StablePonRowKey(p))
-	add(fmt.Sprint(p["id"]))
-	add(fmt.Sprint(p["pon_compact"]))
-	add(fmt.Sprint(p["name"]))
-	return out
+	return oltifderive.FindPonRowByHints(arr, ponHintsFromMeta(meta))
 }
 
 func ponHintsFromMeta(meta map[string]any) []string {
@@ -528,14 +510,18 @@ func ponHintsFromMeta(meta map[string]any) []string {
 		return nil
 	}
 	var raw []string
-	for _, key := range []string{"pon", "key", "pon_name"} {
+	for _, key := range []string{"pon", "key", "pon_name", "pon_compact"} {
 		v := strings.TrimSpace(fmt.Sprint(meta[key]))
 		if v == "" || v == "<nil>" {
 			continue
 		}
 		raw = append(raw, v)
 		lower := strings.ToLower(v)
-		for _, prefix := range []string{"pon_down:", "onu_rise_count:", "onu_rise_pct:", "onu_drop_count:", "onu_drop_pct:"} {
+		for _, prefix := range []string{
+			"pon_down:", "onu_rise_count:", "onu_rise_pct:", "onu_drop_count:", "onu_drop_pct:",
+			"olt_pon_tx_dbm:", "olt_pon_rx_dbm:", "olt_pon_temp_c:",
+			"olt_onu_rx_dbm:", "olt_onu_tx_dbm:",
+		} {
 			if strings.HasPrefix(lower, prefix) {
 				raw = append(raw, strings.TrimSpace(v[len(prefix):]))
 			}
@@ -544,7 +530,7 @@ func ponHintsFromMeta(meta map[string]any) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	for _, s := range raw {
-		k := strings.ToLower(strings.TrimSpace(s))
+		k := strings.TrimSpace(s)
 		if k == "" {
 			continue
 		}
@@ -671,23 +657,14 @@ func verifyOltOnuOptical(ctx context.Context, pool *pgxpool.Pool, row *alertRow)
 	pon := strings.TrimSpace(fmt.Sprint(row.Meta["pon"]))
 	var ponsRaw []byte
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, row.DeviceID).Scan(&ponsRaw)
-	var arr []any
+	var arr []map[string]any
 	_ = json.Unmarshal(ponsRaw, &arr)
-	for _, x := range arr {
-		p, ok := x.(map[string]any)
-		if !ok {
-			continue
-		}
-		k := strings.TrimSpace(fmt.Sprint(p["id"]))
-		if pon != "" && k != pon {
-			continue
-		}
+	if p, found := findPonRow(arr, row.Meta); found {
 		if row.AlertType == "olt_onu_rx" {
 			collected["dbm"] = p["rx_dbm"]
 		} else {
 			collected["dbm"] = p["tx_dbm"]
 		}
-		break
 	}
 	metricID := "olt_onu_rx_dbm"
 	if row.AlertType == "olt_onu_tx" {
@@ -792,49 +769,67 @@ func verifySfpTemp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	return false, fmt.Sprintf("%s: %.1f °C — ainda fora do limiar.", label, *temp), collected, patch
 }
 
-func verifyOltPonTemp(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+func verifyOltPonMetric(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
 	collected := map[string]any{}
 	pon := strings.TrimSpace(fmt.Sprint(row.Meta["pon"]))
+	collected["pon"] = pon
 	var ponsRaw []byte
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]') FROM olt_snapshots WHERE device_id=$1`, row.DeviceID).Scan(&ponsRaw)
-	collected["pon"] = pon
 	var arr []map[string]any
 	_ = json.Unmarshal(ponsRaw, &arr)
-	var temp *float64
-	for _, p := range arr {
-		k := strings.TrimSpace(fmt.Sprint(p["pon_compact"]))
-		if k == "" {
-			k = strings.TrimSpace(fmt.Sprint(p["id"]))
-		}
-		if k != pon && pon != "" {
-			continue
-		}
-		if f := toFloat(p["temperature"]); f != nil {
-			temp = f
-			break
-		}
+	p, found := findPonRow(arr, row.Meta)
+	if !found && len(arr) > 0 {
+		return true, fmt.Sprintf("PON %s já não consta no snapshot actual da OLT — alerta encerrado.", pon), collected, map[string]any{"resolved": "pon_missing_from_snapshot"}
 	}
-	if temp == nil {
-		temp = toFloat(row.Meta["temperature_c"])
-		if temp == nil {
-			temp = toFloat(row.Meta["value"])
+
+	metricID := "olt_pon_temp_c"
+	unit := "°C"
+	field := "temperature"
+	switch row.AlertType {
+	case "olt_pon_tx":
+		metricID, unit, field = "olt_pon_tx_dbm", "dBm", "tx_dbm"
+	case "olt_pon_rx":
+		metricID, unit, field = "olt_pon_rx_dbm", "dBm", "rx_dbm"
+	}
+
+	var val *float64
+	if found {
+		val = toFloat(p[field])
+	}
+	if val == nil && unit == "°C" {
+		val = toFloat(row.Meta["temperature_c"])
+	}
+	if val == nil {
+		val = toFloat(row.Meta["value"])
+	}
+	if val == nil {
+		if unit == "°C" {
+			return false, "Sem leitura de temperatura da PON.", collected, nil
 		}
+		return false, "Sem leitura óptica da PON no snapshot actual.", collected, nil
 	}
-	if temp == nil {
-		return false, "Sem leitura de temperatura da PON.", collected, nil
+	if unit == "°C" {
+		collected["temperature_c"] = *val
+	} else {
+		collected["dbm"] = *val
 	}
-	collected["temperature_c"] = *temp
-	collected["value"] = *temp
-	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "olt_pon_temp_c", "olt")
-	patch := map[string]any{"temperature_c": *temp, "value": *temp, "value_text": fmt.Sprintf("%.1f °C", *temp)}
+	collected["value"] = *val
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, metricID, "olt")
+	patch := map[string]any{"value": *val, "value_text": fmt.Sprintf("%.2f %s", *val, unit)}
+	if unit == "°C" {
+		patch["temperature_c"] = *val
+		patch["value_text"] = fmt.Sprintf("%.1f °C", *val)
+	} else {
+		patch["dbm"] = *val
+	}
 	if !ok {
-		return false, fmt.Sprintf("Temperatura PON %.1f °C (sem limiar global).", *temp), collected, patch
+		return false, fmt.Sprintf("%s PON %s: %.2f %s (sem limiar global).", metricID, pon, *val, unit), collected, patch
 	}
-	sev := severityGte(*temp, th)
+	sev := severityGte(*val, th)
 	if sev == "ok" {
-		return true, fmt.Sprintf("%s: %.1f °C — dentro do limiar.", label, *temp), collected, patch
+		return true, fmt.Sprintf("%s PON %s: %.2f %s — dentro do limiar.", label, pon, *val, unit), collected, patch
 	}
-	return false, fmt.Sprintf("%s: %.1f °C — ainda fora do limiar.", label, *temp), collected, patch
+	return false, fmt.Sprintf("%s PON %s: %.2f %s — ainda fora do limiar.", label, pon, *val, unit), collected, patch
 }
 
 func metaIfIndex(meta map[string]any) int {
@@ -985,9 +980,48 @@ func toFloat(v any) *float64 {
 	return nil
 }
 
+func verifyMikrotikCPUTemp(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+	collected := map[string]any{}
+	var metricsRaw []byte
+	_ = pool.QueryRow(ctx, `
+		SELECT COALESCE(metrics::text, '{}') FROM telemetry_samples
+		WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
+	`, row.DeviceID).Scan(&metricsRaw)
+	var bag map[string]any
+	_ = json.Unmarshal(metricsRaw, &bag)
+	temp := monitorworker.ParseMikrotikCPUTempC(bag)
+	if temp == nil {
+		temp = toFloat(row.Meta["temperature_c"])
+		if temp == nil {
+			temp = toFloat(row.Meta["value"])
+		}
+	}
+	if temp == nil {
+		return false, "Sem leitura de temperatura da CPU MikroTik.", collected, nil
+	}
+	collected["temperature_c"] = *temp
+	collected["value"] = *temp
+	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "mikrotik_cpu_temp_c", "mikrotik")
+	if !ok {
+		th, label, ok = alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "temperature_c", "mikrotik")
+	}
+	if label == "" {
+		label = "Temperatura da CPU"
+	}
+	patch := map[string]any{"temperature_c": *temp, "value": *temp, "value_text": fmt.Sprintf("%.1f °C", *temp)}
+	if !ok {
+		return false, fmt.Sprintf("Temperatura da CPU %.1f °C (sem limiar global).", *temp), collected, patch
+	}
+	sev := severityGte(*temp, th)
+	if sev == "ok" {
+		return true, fmt.Sprintf("%s: %.1f °C — dentro do limiar.", label, *temp), collected, patch
+	}
+	return false, fmt.Sprintf("%s: %.1f °C — ainda fora do limiar.", label, *temp), collected, patch
+}
+
 func isTemperatureAlert(alertType string, meta map[string]any) bool {
 	t := strings.ToLower(strings.TrimSpace(alertType))
-	if t == "mikrotik_sfp_temp" || t == "olt_pon_temp" || t == "temperature_high" || t == "temperature_low" {
+	if t == "mikrotik_sfp_temp" || t == "olt_pon_temp" || t == "mikrotik_cpu_temp" || t == "temperature_high" || t == "temperature_low" {
 		return true
 	}
 	if strings.Contains(t, "temp") {
