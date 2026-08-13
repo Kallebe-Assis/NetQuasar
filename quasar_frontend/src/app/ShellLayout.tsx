@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Menu,
   Plug,
+  CalendarClock,
   ChartPie,
   ClockCheck,
   Component,
@@ -33,6 +34,7 @@ import {
 import { clearSession, getAuthToken, getStoredUserDisplayLabel, getStoredUserPermissionsKey, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
+import { AlertNotificationWatcher } from "../components/AlertNotificationWatcher";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { AppToastProvider } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -83,6 +85,7 @@ const nav: NavEntry[] = [
     ],
   },
   { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
+  { kind: "link", to: APP_ROUTES.events, label: "Eventos", icons: [CalendarClock] },
   { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
   {
     kind: "group",
@@ -126,7 +129,7 @@ function canViewRoute(to: string): boolean {
   const perm = ROUTE_VIEW_PERMISSION[to];
   if (!perm) return true;
   if (to === APP_ROUTES.settings) {
-    return can("settings.view") || can("settings.users") || can("settings.permissions") || isAdminUser();
+    return true;
   }
   return can(perm) || isAdminUser();
 }
@@ -298,6 +301,7 @@ export function ShellLayout() {
         ) : null}
 
         <OnuReportGlobalToast />
+        <AlertNotificationWatcher />
         {showIndicator ? (
           <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
             <span className="runtime-indicator__dot" />

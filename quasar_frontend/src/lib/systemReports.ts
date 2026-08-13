@@ -12,12 +12,19 @@ export type SystemReportId =
   | "attention-devices"
   | "alerts-by-category"
   | "onu-per-pon"
-  | "bng-subscribers";
+  | "bng-subscribers"
+  | "network-events"
+  | "ftth-infra"
+  | "pon-down"
+  | "automations"
+  | "monitoring-health"
+  | "commercial-base";
 
 export type SystemReportCatalogItem = {
   id: SystemReportId;
   title: string;
   description: string;
+  group?: string;
 };
 
 export type EquipmentByPopReportOptions = {
@@ -35,10 +42,30 @@ export type OltOverviewReportOptions = {
   period?: "today" | "3d" | "7d" | "30d";
 };
 
+export type PeriodModeReportOptions = {
+  mode?: "summary" | "detailed";
+  from?: string;
+  to?: string;
+};
+
 export type SystemReportOptions =
   | EquipmentByPopReportOptions
   | ConnectionsReportOptions
-  | OltOverviewReportOptions;
+  | OltOverviewReportOptions
+  | PeriodModeReportOptions;
+
+export const PERIOD_MODE_REPORT_IDS: SystemReportId[] = [
+  "network-events",
+  "ftth-infra",
+  "pon-down",
+  "automations",
+  "monitoring-health",
+  "commercial-base",
+];
+
+export function isPeriodModeReport(id: string): id is SystemReportId {
+  return (PERIOD_MODE_REPORT_IDS as string[]).includes(id);
+}
 
 export type SystemReportPayload = {
   report_id: SystemReportId;
@@ -101,6 +128,12 @@ export const SYSTEM_REPORT_IDS: SystemReportId[] = [
   "alerts-by-category",
   "onu-per-pon",
   "bng-subscribers",
+  "network-events",
+  "ftth-infra",
+  "pon-down",
+  "automations",
+  "monitoring-health",
+  "commercial-base",
 ];
 
 export function fetchSystemReportCatalog() {
@@ -131,27 +164,34 @@ function oltOverviewQuery(opts?: OltOverviewReportOptions): string {
   return qs ? `?${qs}` : "";
 }
 
-function reportQuery(
-  id: SystemReportId,
-  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
-): string {
+function periodModeQuery(opts?: PeriodModeReportOptions): string {
+  const p = new URLSearchParams();
+  if (opts?.mode) p.set("mode", opts.mode);
+  if (opts?.from) p.set("from", opts.from);
+  if (opts?.to) p.set("to", opts.to);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export type AnySystemReportOptions =
+  | EquipmentByPopReportOptions
+  | ConnectionsReportOptions
+  | OltOverviewReportOptions
+  | PeriodModeReportOptions;
+
+function reportQuery(id: SystemReportId, opts?: AnySystemReportOptions): string {
   if (id === "equipment-by-pop") return equipmentByPopQuery(opts as EquipmentByPopReportOptions);
   if (id === "connections") return connectionsQuery(opts as ConnectionsReportOptions);
   if (id === "olt-overview") return oltOverviewQuery(opts as OltOverviewReportOptions);
+  if (isPeriodModeReport(id)) return periodModeQuery(opts as PeriodModeReportOptions);
   return "";
 }
 
-export function fetchSystemReport(
-  id: SystemReportId,
-  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
-) {
+export function fetchSystemReport(id: SystemReportId, opts?: AnySystemReportOptions) {
   return apiFetch<SystemReportPayload>(`/api/v1/reports/system/${id}${reportQuery(id, opts)}`);
 }
 
-export function downloadSystemReportCsv(
-  id: SystemReportId,
-  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
-) {
+export function downloadSystemReportCsv(id: SystemReportId, opts?: AnySystemReportOptions) {
   const token = getAuthToken();
   const url = `/api/v1/reports/system/${id}/csv${reportQuery(id, opts)}`;
   return fetch(url, {
@@ -181,12 +221,11 @@ export function downloadSystemReportCsvClient(payload: SystemReportPayload) {
   URL.revokeObjectURL(a.href);
 }
 
-export function sendSystemReportTelegram(
-  id: SystemReportId,
-  opts?: EquipmentByPopReportOptions | ConnectionsReportOptions | OltOverviewReportOptions,
-) {
+export function sendSystemReportTelegram(id: SystemReportId, opts?: AnySystemReportOptions) {
   const body =
-    id === "equipment-by-pop" || id === "connections" || id === "olt-overview" ? opts ?? {} : undefined;
+    id === "equipment-by-pop" || id === "connections" || id === "olt-overview" || isPeriodModeReport(id)
+      ? opts ?? {}
+      : undefined;
   return apiFetch<{ ok: boolean }>(`/api/v1/reports/system/${id}/telegram`, {
     method: "POST",
     json: body,

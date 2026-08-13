@@ -41,7 +41,7 @@ func defaultViewerPermissions() []string {
 		"dashboard.view", "monitoring.view", "realtime.view", "integrations.view",
 		"pops.view", "devices.view", "commercial.view", "connections.view",
 		"alerts.view", "map.view", "tools.view", "olt.view", "mikrotik.view",
-		"switch.view", "bng.view", "reports.view", "fleet.view",
+		"switch.view", "bng.view", "reports.view", "fleet.view", "network_events.view",
 	}
 }
 

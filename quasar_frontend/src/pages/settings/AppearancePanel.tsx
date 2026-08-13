@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { useUiTheme } from "../../app/ThemeProvider";
 import { InfoHint } from "../../components/InfoHint";
 import { useThemePreview } from "../../hooks/useThemePreview";
-import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { applyUiTheme, uiThemeLabel, type UiTheme } from "../../lib/theme";
-import { fetchUiAppearance, normalizeUiAppearanceCacheValue, themeFromAppearancePayload } from "../../lib/uiAppearance";
+import { fetchMyPreferences, patchMyPreferences } from "../../lib/userPreferences";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 
@@ -15,31 +14,24 @@ export function AppearancePanel() {
   const qc = useQueryClient();
   const { theme: activeTheme } = useUiTheme();
   const q = useQuery({
-    queryKey: queryKeys.uiAppearance,
-    queryFn: fetchUiAppearance,
+    queryKey: queryKeys.mePreferences,
+    queryFn: fetchMyPreferences,
   });
   const [draft, setDraft] = useState<UiTheme>(activeTheme);
   const { push: pushToast } = useAppToast();
 
   useThemePreview(draft, activeTheme);
 
-  const appearance = normalizeUiAppearanceCacheValue(q.data);
-
   useEffect(() => {
-    setDraft(themeFromAppearancePayload(appearance?.theme, activeTheme));
-  }, [appearance?.theme, activeTheme]);
+    if (q.data?.theme) setDraft(q.data.theme);
+  }, [q.data?.theme]);
 
   const save = useMutation({
-    mutationFn: (theme: UiTheme) =>
-      apiFetch<{ ok?: boolean; theme?: string }>("/api/v1/settings/ui-appearance", {
-        method: "PATCH",
-        json: { theme },
-      }),
-    onSuccess: (_data, theme) => {
-      applyUiTheme(theme);
-      qc.setQueryData(queryKeys.uiAppearance, { theme, updated_at: new Date().toISOString() });
-      void qc.invalidateQueries({ queryKey: queryKeys.uiAppearance });
-      toastOk(pushToast, `Tema «${uiThemeLabel(theme)}» salvo para todos os usuários.`);
+    mutationFn: (theme: UiTheme) => patchMyPreferences({ theme }),
+    onSuccess: (next) => {
+      applyUiTheme(next.theme);
+      qc.setQueryData(queryKeys.mePreferences, next);
+      toastOk(pushToast, `Tema «${uiThemeLabel(next.theme)}» guardado só para a sua conta.`);
     },
     onError: (e) => toastErr(pushToast, e, "Falha ao salvar tema."),
   });
@@ -55,8 +47,8 @@ export function AppearancePanel() {
         Tema da interface
         <InfoHint label="Tema claro e escuro">
           <p>
-            Define o aspecto visual de todo o NetQuasar (menu, tabelas, alertas, login). A preferência fica salva na base de dados e aplica-se a todos os
-            usuários.
+            Define o aspecto visual do NetQuasar neste utilizador (menu, tabelas, alertas). Cada conta guarda o seu
+            próprio tema — não altera o dos colegas.
           </p>
         </InfoHint>
       </h2>

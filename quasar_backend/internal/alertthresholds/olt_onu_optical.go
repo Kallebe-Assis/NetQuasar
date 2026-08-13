@@ -33,6 +33,9 @@ func EvaluateOltOnuOpticalThreshold(
 		return
 	}
 	sev := severityGteMetric(value, th)
+	if metricID == "olt_onu_rx_dbm" {
+		sev = capRxToWarning(sev)
+	}
 	streak := updateOnuOpticalStreak(ctx, pool, deviceID, ponKey, metricID, sev != "ok", value)
 	alertType := alertTypeOltOnuRx
 	title := "ONU RX abaixo do limiar"

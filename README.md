@@ -203,11 +203,11 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ---
 
-### Conexões (`/connections`)
+### Conexões / Elementos (`/connections`)
 
-**Função:** cadastro de assinantes PPPoE/DHCP com localização.
+**Função:** cadastro de assinantes e infraestrutura FTTH.
 
-**Como funciona:** tabela `client_connections` (login, cliente, plano, coordenadas, CTO/porta, médio fibra/rádio/UTP). Importação CSV em lote; pesquisa com debounce; integração com ERP (`integration-lookup` por login). Pontos aparecem no **Mapa** (switch «Logins no mapa», carga por bounding box para performance).
+**Como funciona:** `client_connections` (login, cliente, plano, coordenadas, CTO/porta). Aba de infraestrutura: projetos, CTOs, cabos, postes, caixas de emenda e **POPs**. Importação CSV; pesquisa; integração ERP. Pontos no **Mapa**.
 
 ---
 
@@ -219,19 +219,15 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ---
 
-### Mapa (`/mapa` → `/map`)
+### Mapa (`/map`)
 
-**Função:** visualização geográfica full-width (~72vh).
+**Função:** visualização geográfica da rede e da infra FTTH.
 
 **Como funciona:**
-- `GET /map/equipment-points` — equipamentos com lat/lng; pins coloridos online/offline.
-- `GET /map/connection-points` — logins PPPoE/DHCP (carga por bounding box).
-- `GET /map/search` — pesquisa unificada (equipamento, login, POP, CTO).
-- `GET /map/locality-center` — centrar mapa numa localidade comercial.
-- **Filtros** em modal (equipamentos ON por defeito; logins/infra OFF).
-- **Detalhe** em modal lateral (sem painel fixo).
-- CTOs no mapa: etiqueta só com **descrição** (sem ID).
-- Marcadores: equipamentos com pin Leaflet; logins com círculo azul.
+- Equipamentos, logins, **POPs**, CTOs, cabos, postes e caixas de emenda.
+- `GET /map/equipment-points`, `/map/connection-points`, `/map/search`.
+- Filtros em modal; detalhe em painel lateral.
+- Cores/ícones de mapa em `settings_ui` (globais).
 
 ---
 
@@ -270,65 +266,102 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 ---
 
+### Switch (`/switch`)
+
+**Função:** telemetria e interfaces de switches (IF-MIB, VLAN por porta quando o perfil inclui).
+
+**Como funciona:** mesma casca de monitorização que MikroTik/BNG; coleta configurável em **Configurações → Switch**.
+
+---
+
 ### BNG / PPPoE (`/bng`)
 
-**Função:** visão consolidada de sessões PPPoE activas nos concentradores.
+**Função:** operação do concentrador: sessões PPPoE, autenticações, interfaces, relatório e catálogo de VLANs.
 
-**Como funciona:** agrega sessões a partir de `telemetry_samples` (campo `pppoe_active_sessions`) e `interface_snapshots` (interfaces IF-MIB com «pppoe») em equipamentos BNG/concentrador/MikroTik. Endpoints: `GET /bng/sessions`, `/bng/sessions/search?q=`, `/bng/stats/summary`. Actualização automática na UI (~30 s). Logs RADIUS externos não estão integrados — use **Conexões** + auditoria em `/bng/auth/logs`.
+**Como funciona:** equipamentos com categoria BNG; coleta SNMP de sessões (`bng_session_snapshots`, `bng_known_logins`). Abas:
 
----
-
-### Eventos (`/events`)
-
-**Função:** linha do tempo operacional (alertas abertos/resolvidos e checks de equipamento).
-
-**Como funciona:** `GET /api/v1/events?limit=` (1–200; filtro opcional `device_id=`). Writers automáticos no backend:
-
-- `alert.opened` / `alert.closed` — ao criar ou fechar alertas via `alertstore`
-- `device.checks` — ao executar `POST /api/v1/devices/{id}/checks`
+| Aba | Conteúdo |
+|-----|----------|
+| **Visão geral** | Totais PPPoE/IPv4/IPv6, gráfico histórico, pools e RADIUS |
+| **Relatório** | Tempo online, tráfego agregado, infra e CGNAT (sem a lista de VLANs) |
+| **VLANs** | Catálogo da rede (`network_vlans`): tipo **PPPoE / Gerência / Transporte**, status, capacidade, conexões online, equipamentos e utilização. VLANs vistas nas sessões aparecem automaticamente até serem guardadas. `GET/POST /api/v1/network-vlans` |
+| **Interfaces** | Snapshot IF-MIB do BNG |
+| **Autenticações** | Tentativas recentes |
+| **Sessões PPPoE** | Lista pesquisável, filtros avançados, detalhe e coleta SNMP |
 
 ---
 
-### Configurações (`/settings`) — admin
+### Eventos da Rede (`/events`)
+
+**Função:** histórico estruturado de manutenções e incidentes (não é texto livre).
+
+**Como funciona:** catálogo com ~12 categorias e tipos estáveis (`networkevents`) gravados em `network_events`. Campos contextuais (POP, equipamento, interface, projeto FTTH, CTO, cabo, poste, VLAN, técnico). A interface do equipamento pode ser escolhida da lista SNMP ou em texto livre («Outros»). Permissões: `network_events.view` / `network_events.manage`. API: `/api/v1/network-events`.
+
+O endpoint legado `GET /api/v1/events` continua a ser a linha do tempo de sistema (`alert.opened` / `alert.closed` / `device.checks`).
+
+---
+
+### Relatórios (`/reports`)
+
+**Função:** relatórios do sistema (exceto frota), resumidos ou detalhados, com CSV / PDF / Telegram.
+
+Inclui: alertas activos, alertas por categoria, equipamentos em atenção, PONs DOWN, saúde do monitoramento, conexões, OLT, ONUs por PON, BNG, **eventos de rede**, infraestrutura FTTH (POPs, projetos, CTOs, cabos, postes, emendas), equipamentos por POP, visão geral, integrações, automações e base comercial.
+
+---
+
+### Frota (`/fleet/…`)
+
+**Função:** veículos, motoristas, despesas, alertas e relatórios da frota operacional. Independente dos relatórios de rede.
+
+---
+
+### Configurações (`/settings`)
+
+Qualquer utilizador autenticado acede às preferências pessoais. As restantes abas exigem `settings.*` ou admin.
 
 | Secção | Função |
 |--------|--------|
-| **Base de dados** | DSN, teste de ligação, logs |
-| **Utilizadores** | CRUD, perfil admin/operador |
+| **Alertas** | **Pessoal:** toast em qualquer ecrã, som de alerta (4 sons padrão + MP3). **Global** (se tiver permissão): limiares CPU/temp/SFP/OLT/BNG |
+| **Aparência** | Tema claro/escuro **por utilizador** (`users.preferences`) |
+| **Base de dados** | DSN, teste, limpeza, backup B2 |
+| **Utilizadores** | CRUD e perfis de permissão |
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
-| **Alertas** | Limiares globais (CPU, temp, SFP, OLT, BNG…): operador ≥/≤, faixas Normal/Atenção/Crítico; avaliados no worker e no refresh |
-| **OLT vendors** | Perfis SNMP/telnet por marca/modelo |
-| **MikroTik collection** | OIDs e passos de coleta |
-| **Telegram** | Bot token, chat monitoring e relatórios, teste de envio |
-| **SMTP** | Servidor para relatórios por e-mail |
-| **Automações** | Relatório ONU mensal, digest de alertas, relatório comercial |
-| **Aparência** | Tema/cores da UI |
-| **Auditoria** | `ops_audit_log` — quem alterou o quê |
+| **OLT / MikroTik / Switch / BNG** | Perfis e coleta |
+| **Telegram** | Bot monitoring e relatórios |
+| **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial |
+| **Auditoria** | `ops_audit_log` |
+
+Preferências por conta (novos utilizadores: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
 
 ---
 
 ## Notificações e automações
 
+### Toast e som no browser
+
+Cada utilizador liga/desliga em **Configurações → Alertas**:
+- **Toast em qualquer ecrã** — se desligado, o aviso só aparece em Monitoramento e Alertas.
+- **Som de alerta** — sons padrão ou MP3 próprio (`/api/v1/me/alert-sounds`).
+
+O watcher global reage a `monitoring_runtime.last_alerts_change_at` (offline, PON, SFP, temperatura, latência, etc.).
+
 ### Telegram
 
 - **Monitoring** — cada alerta novo e resolução (quando configurado).
-- **Relatórios** — ONU mensal, resumo de alertas (diário/semanal), totais comerciais.
+- **Relatórios** — ONU mensal, resumo de alertas, totais BNG, base comercial.
 
-### Relatório ONU mensal
+### Automações agendadas
 
-Scheduler verifica `automation_onu_monthly_report`; percorre OLTs, colecta, gera resumo e envia Telegram (e regista execução em `automation_runs`).
-
-### Digest de alertas
-
-Contagens por tipo/severidade e incidentes abertos; envio agendado por Telegram e/ou SMTP.
+Em **Configurações → Automações**: backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial. Recorrência diária/semanal/mensal/personalizada. Histórico em `automation_execution_log`.
 
 ---
 
 ## Autenticação e API
 
-- **Login UI** — `POST /auth/login` → JWT em sessão (`NETQUASAR_SESSION_SECRET`).
+- **Login UI** — `POST /auth/login` → JWT (`NETQUASAR_SESSION_SECRET`).
 - **API keys** — cabeçalho `X-API-Key` (`NETQUASAR_API_KEYS`).
-- Rotas administrativas (configurações, mutações, coletas manuais) exigem perfil **admin**.
+- Permissões por perfil (`permission_profiles`); mutações e coletas exigem a chave correspondente ou admin.
+- Preferências do utilizador autenticado: `/api/v1/me/preferences`.
 
 Health: `GET /health` · Métricas Prometheus: `GET /metrics`
 
@@ -351,6 +384,7 @@ NetQuasar/
 │   │   ├── alertcorrelation/# Incidentes
 │   │   ├── oltcollect/      # Perfis e coleta OLT
 │   │   ├── oltifderive/     # Derivação PON/ONU via IF-MIB
+│   │   ├── networkevents/   # Catálogo de eventos de rede
 │   │   └── db/migrations/   # Esquema PostgreSQL
 │   └── data/mibs/           # MIBs SNMP de referência
 ├── quasar_frontend/         # SPA React
@@ -461,11 +495,12 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `/tools` | Ferramentas |
 | `/olt` | OLT |
 | `/mikrotik` | MikroTik |
-| `/bng` | BNG / sessões PPPoE |
-| `/events` | Eventos (linha do tempo operacional) |
-| `/about` | Sobre / documentação do software |
-| `/reports` | Relatórios analíticos |
-| `/settings` | Configurações |
+| `/bng` | BNG / sessões PPPoE / VLANs |
+| `/events` | Eventos da Rede (manutenções e incidentes) |
+| `/reports` | Relatórios do sistema |
+| `/fleet/dashboard` | Frota |
+| `/about` | Sobre / FAQ |
+| `/settings` | Configurações e preferências pessoais |
 
 Redireccionamentos legados: definidos em `LEGACY_ROUTE_REDIRECTS` (`routes.ts`) e aplicados automaticamente no `AppRouter` (ex.: `/alertas` → `/alerts`, `/comercial` → `/commercial`).
 

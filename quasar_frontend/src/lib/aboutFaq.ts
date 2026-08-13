@@ -161,7 +161,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Onde configuro limiares de alerta?",
-    a: "Configurações → Alertas (limiar global), com operadores ≥/≤ e faixas Normal / Atenção / Crítico.",
+    a: "Configurações → Alertas (limiar global), com operadores ≥/≤ e faixas Normal / Atenção / Crítico. No topo da mesma aba cada utilizador liga ou desliga o toast em qualquer ecrã, o som de alerta e escolhe/envia um MP3.",
+    cat: "configurar",
+  },
+  {
+    q: "Como activo o som e o toast de alerta em qualquer ecrã?",
+    a: "Configurações → Alertas → Notificações neste dispositivo. São preferências da sua conta. Com o toast ligado, o aviso aparece em qualquer ecrã; desligado, só em Monitoramento e Alertas. O som é um interruptor à parte e pode usar um dos sons padrão ou um MP3 seu.",
     cat: "configurar",
   },
   {
@@ -251,8 +256,13 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que a tela BNG mostra no NetQuasar?",
-    a: "Monitorização de sessões/assinantes e alertas quando a contagem cai de forma anormal entre coletas.",
+    a: "Visão geral do concentrador, relatório de sessões, aba VLANs (catálogo PPPoE/gerência/transporte com totais e utilização), interfaces, autenticações e sessões PPPoE ao vivo.",
     cat: "funcoes",
+  },
+  {
+    q: "Como categorizo VLANs no BNG?",
+    a: "BNG → aba VLANs. Crie ou edite cada VLAN e escolha o tipo: PPPoE, Gerência ou Transporte. As VLANs vistas nas sessões aparecem sozinhas até as guardar no catálogo.",
+    cat: "configurar",
   },
   {
     q: "Para que servem as Ferramentas?",
@@ -276,7 +286,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Onde vejo o histórico operacional?",
-    a: "Na tela Alertas (histórico) e no histórico do equipamento. A linha do tempo global de eventos deixou de ser um menu separado.",
+    a: "Alertas (histórico) para falhas de monitoramento; Eventos da Rede no menu lateral para alterações, manutenções e rompimentos registados pela equipa.",
+    cat: "funcoes",
+  },
+  {
+    q: "O que é a tela Eventos?",
+    a: "É o histórico/auditoria da rede: categorias e tipos estruturados (POP, FTTH, GBIC, rompimentos, configurações, etc.), com POP, equipamento, técnico, data e impacto. Serve para relatórios do tipo «quantas trocas de GBIC» ou «quem alterou a VLAN».",
     cat: "funcoes",
   },
   {
@@ -531,12 +546,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como configuro aparência?",
-    a: "Configurações → Aparência: tema e cores/ícones do mapa.",
+    a: "Configurações → Aparência: cada utilizador escolhe o tema claro ou escuro da sua conta.",
     cat: "configurar",
   },
   {
     q: "Tema claro/escuro existe?",
-    a: "Sim, conforme a preferência de aparência guardada.",
+    a: "Sim — é uma preferência individual em Configurações → Aparência. Utilizadores novos começam no tema escuro.",
     cat: "configurar",
   },
   {

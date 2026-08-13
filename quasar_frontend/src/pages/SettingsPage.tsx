@@ -8,7 +8,9 @@ import { InfoHint } from "../components/InfoHint";
 import { ActionMenu } from "../components/ActionMenu";
 import { apiFetch, ApiError } from "../lib/api";
 import { invalidateAlertListQueries, queryKeys } from "../lib/queryKeys";
+import { can, isAdminUser } from "../lib/auth";
 import { AppearancePanel } from "./settings/AppearancePanel";
+import { AlertNotificationPrefsPanel } from "./settings/AlertNotificationPrefsPanel";
 import { MonitoringSettingsPanel } from "./settings/MonitoringPipelinePanel";
 import { AuditingPanel } from "./settings/AuditingPanel";
 import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
@@ -43,11 +45,49 @@ const SETTINGS_TABS: SettingsTab[] = [
   "telegram", "olt", "mikrotik", "switch", "bng", "fleet", "automation",
 ];
 
+const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
+  database: "Base de dados",
+  logs: "Auditoria",
+  users: "Usuários",
+  alerts: "Alertas",
+  monitoring: "Monitoramento",
+  appearance: "Aparência",
+  connection: "Rede e SNMP",
+  telegram: "Telegram",
+  olt: "Perfis OLT",
+  mikrotik: "MikroTik",
+  switch: "Switch",
+  bng: "BNG",
+  fleet: "Frota",
+  automation: "Automações",
+};
+
+function canSeeSettingsTab(tab: SettingsTab): boolean {
+  if (isAdminUser()) return true;
+  if (tab === "appearance" || tab === "alerts") return true;
+  if (tab === "users" || tab === "logs") return can("settings.users") || can("settings.permissions");
+  if (tab === "database" || tab === "connection") return can("settings.system");
+  if (tab === "monitoring" || tab === "olt" || tab === "mikrotik" || tab === "switch" || tab === "bng") {
+    return can("settings.monitoring");
+  }
+  if (tab === "telegram" || tab === "automation") return can("settings.notifications");
+  if (tab === "fleet") return can("fleet.manage") || can("settings.system");
+  return can("settings.view");
+}
+
+function canEditAlertThresholds(): boolean {
+  return isAdminUser() || can("alerts.manage") || can("settings.monitoring");
+}
+
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const visibleTabs = useMemo(() => SETTINGS_TABS.filter(canSeeSettingsTab), []);
   const [tab, setTab] = useState<SettingsTab>(() => {
     const raw = searchParams.get("tab");
-    return SETTINGS_TABS.includes(raw as SettingsTab) ? (raw as SettingsTab) : "database";
+    if (SETTINGS_TABS.includes(raw as SettingsTab) && canSeeSettingsTab(raw as SettingsTab)) {
+      return raw as SettingsTab;
+    }
+    return visibleTabs[0] ?? "appearance";
   });
 
   function selectTab(next: SettingsTab) {
@@ -63,33 +103,21 @@ export function SettingsPage() {
         Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/Switch/BNG e relatórios automáticos.
       </p>
       <div className="tabs" style={{ flexWrap: "wrap" }}>
-        {(
-          [
-            ["database", "Base de dados"],
-            ["logs", "Auditoria"],
-            ["users", "Usuários"],
-            ["alerts", "Alertas"],
-            ["monitoring", "Monitoramento"],
-            ["appearance", "Aparência"],
-            ["connection", "Rede e SNMP"],
-            ["telegram", "Telegram"],
-            ["olt", "Perfis OLT"],
-            ["mikrotik", "MikroTik"],
-            ["switch", "Switch"],
-            ["bng", "BNG"],
-            ["fleet", "Frota"],
-            ["automation", "Automações"],
-          ] as const
-        ).map(([k, lab]) => (
+        {visibleTabs.map((k) => (
           <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => selectTab(k)}>
-            {lab}
+            {SETTINGS_TAB_LABELS[k]}
           </button>
         ))}
       </div>
       {tab === "database" && <DatabasePanel />}
       {tab === "logs" && <AuditingPanel />}
       {tab === "users" && <UsersPanel />}
-      {tab === "alerts" && <AlertThresholdsPanel />}
+      {tab === "alerts" && (
+        <>
+          <AlertNotificationPrefsPanel />
+          {canEditAlertThresholds() ? <AlertThresholdsPanel /> : null}
+        </>
+      )}
       {tab === "monitoring" && <MonitoringSettingsPanel />}
       {tab === "appearance" && <AppearancePanel />}
       {tab === "connection" && <ConnectionPanel />}
@@ -638,9 +666,9 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "temperature_c", label: "Temperatura do equipamento", unit: "°C", scope: "equipamento", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: [] },
     { id: "uptime_minutes", label: "Uptime (minutos)", unit: "min", scope: "equipamento", enabled: true, operator: "lte", green_min: "120", warning_min: "60", critical_min: "15", apply_categories: [] },
     { id: "olt_pon_tx_dbm", label: "PON TX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-14", critical_min: "-20", apply_categories: ["olt"] },
-    { id: "olt_pon_rx_dbm", label: "PON RX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-10", warning_min: "-16", critical_min: "-22", apply_categories: ["olt"] },
+    { id: "olt_pon_rx_dbm", label: "PON RX da OLT", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-10", warning_min: "-16", critical_min: "", apply_categories: ["olt"] },
     { id: "olt_onu_tx_dbm", label: "ONU TX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-8", warning_min: "-15", critical_min: "-20", apply_categories: ["olt"] },
-    { id: "olt_onu_rx_dbm", label: "ONU RX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-12", warning_min: "-20", critical_min: "-28", apply_categories: ["olt"] },
+    { id: "olt_onu_rx_dbm", label: "ONU RX por PON", unit: "dBm", scope: "olt_pon", enabled: true, operator: "lte", green_min: "-12", warning_min: "-20", critical_min: "", apply_categories: ["olt"] },
     { id: "olt_pon_temp_c", label: "Temperatura da PON", unit: "°C", scope: "olt_pon", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["olt"] },
     { id: "olt_onu_drop_count", label: "Variação de ONUs online (por PON)", unit: "ONUs", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "2", critical_min: "5", apply_categories: ["olt"] },
     { id: "olt_onu_drop_percent", label: "Variação de ONUs online (%)", unit: "%", scope: "olt_pon", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "25", apply_categories: ["olt"] },
@@ -652,7 +680,7 @@ function defaultAlertMetrics(): AlertThresholdMetric[] {
     { id: "mikrotik_pppoe_drop_count", label: "Queda de sessões PPPoE MikroTik (entre coletas)", unit: "sessões", scope: "mikrotik_pppoe", enabled: true, operator: "gte", green_min: "0", warning_min: "10", critical_min: "30", apply_categories: ["mikrotik"] },
     { id: "iface_down_count", label: "Mudança de interface UP→DOWN", unit: "evento", scope: "interface", enabled: true, operator: "gte", green_min: "0", warning_min: "1", critical_min: "1", apply_categories: [] },
     { id: "mikrotik_sfp_tx_dbm", label: "SFP — potência TX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-8", warning_min: "-13", critical_min: "-18", apply_categories: ["mikrotik"] },
-    { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "-20", apply_categories: ["mikrotik"] },
+    { id: "mikrotik_sfp_rx_dbm", label: "SFP — potência RX", unit: "dBm", scope: "mikrotik_sfp", enabled: true, operator: "lte", green_min: "-10", warning_min: "-15", critical_min: "", apply_categories: ["mikrotik"] },
     { id: "mikrotik_sfp_temp_c", label: "Temperatura do módulo SFP", unit: "°C", scope: "mikrotik_sfp", enabled: true, operator: "gte", green_min: "45", warning_min: "60", critical_min: "75", apply_categories: ["mikrotik"] },
   ];
 }

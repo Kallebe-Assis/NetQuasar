@@ -153,6 +153,25 @@ func PatchOpenMeta(ctx context.Context, pool *pgxpool.Pool, spec OpenSpec) error
 	return err
 }
 
+// CloseExpired fecha alertas abertos do tipo dado com mais de maxAge (sem Telegram de resolução).
+func CloseExpired(ctx context.Context, pool *pgxpool.Pool, alertType string, maxAge time.Duration) int {
+	if pool == nil || strings.TrimSpace(alertType) == "" || maxAge <= 0 {
+		return 0
+	}
+	tag, err := pool.Exec(ctx, `
+		UPDATE alert_instances
+		SET closed_at = now(),
+			meta = COALESCE(meta, '{}'::jsonb) || '{"resolved":"ttl"}'::jsonb
+		WHERE alert_type = $1
+		  AND closed_at IS NULL
+		  AND active_since < now() - ($2::bigint * interval '1 millisecond')
+	`, alertType, maxAge.Milliseconds())
+	if err != nil {
+		return 0
+	}
+	return int(tag.RowsAffected())
+}
+
 // CloseSpec fecha alertas abertos que correspondem ao Match.
 type CloseSpec struct {
 	DeviceID   uuid.UUID

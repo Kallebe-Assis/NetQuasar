@@ -7,6 +7,7 @@ docker-compose.override.yml
 
 # Credenciais persistidas pelo servidor
 **/database-credentials.json
+**/user-alert-sounds/
 
 # Migração pontual Supabase (secrets + dumps)
 scripts/one-shot-supabase-migration/.env

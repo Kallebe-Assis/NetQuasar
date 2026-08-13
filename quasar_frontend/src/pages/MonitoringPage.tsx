@@ -32,16 +32,6 @@ type ActiveEquipRow = {
   metrics_note?: string;
 };
 
-type OfflineAlertRow = {
-  id: string;
-  severity: string;
-  type: string;
-  message: string;
-  ip: string;
-  device_name: string;
-  active_since: string;
-};
-
 type NetCheck = {
   ok: boolean;
   checked_at: string;
@@ -308,7 +298,6 @@ export function MonitoringPage() {
   const qc = useQueryClient();
   const { push: pushToast, dismiss: dismissToast } = useAppToast();
   const showPageToastRef = useRef<(ok: boolean, text: string) => void>(() => {});
-  const offlineToastIdsRef = useRef(new Map<string, string>());
 
   const showPageToast = useCallback(
     (ok: boolean, text: string) => {
@@ -322,7 +311,6 @@ export function MonitoringPage() {
   useEffect(() => {
     if (!canMutate && (tab === "settings" || tab === "ops")) setTab("overview");
   }, [canMutate, tab]);
-  const handledOfflineAlertsRef = useRef(new Set<string>());
   const [snmpModalDeviceId, setSnmpModalDeviceId] = useState<string | null>(null);
   const [actionMenuRow, setActionMenuRow] = useState<ActiveEquipRow | null>(null);
   const [reportModalDevice, setReportModalDevice] = useState<DeviceReportTarget | null>(null);
@@ -472,52 +460,10 @@ export function MonitoringPage() {
     queryFn: () => apiFetch<Record<string, unknown>>(`/api/v1/devices/${snmpModalDeviceId}/snmp-inventory`),
     enabled: !!snmpModalDeviceId,
   });
-  const offlineAlerts = useQuery({
-    queryKey: queryKeys.alertsPingUnreachable,
-    queryFn: () => apiFetch<{ alerts: OfflineAlertRow[] }>("/api/v1/alerts/active?type=ping_unreachable&limit=50"),
-    enabled: tab === "overview",
-    refetchInterval: tab === "overview" ? 3000 : false,
-  });
-
   const invalidateActiveList = () => {
     qc.invalidateQueries({ queryKey: queryKeys.monitoringActiveEquipment });
     qc.invalidateQueries({ queryKey: queryKeys.alertsPingUnreachable });
   };
-
-  useEffect(() => {
-    if (tab !== "overview") {
-      for (const tid of offlineToastIdsRef.current.values()) dismissToast(tid);
-      offlineToastIdsRef.current.clear();
-      return;
-    }
-    const list = (offlineAlerts.data?.alerts as OfflineAlertRow[] | undefined) ?? [];
-    const active = new Set<string>();
-    for (const a of list) {
-      if (handledOfflineAlertsRef.current.has(a.id)) continue;
-      active.add(a.id);
-      if (!offlineToastIdsRef.current.has(a.id)) {
-        const alertId = a.id;
-        const tid = pushToast({
-          tone: "err",
-          text: "",
-          kind: "offline",
-          offlineTitle: a.device_name || "Equipamento offline",
-          offlineIp: a.ip || "—",
-          onDismiss: () => {
-            handledOfflineAlertsRef.current.add(alertId);
-            offlineToastIdsRef.current.delete(alertId);
-          },
-        });
-        offlineToastIdsRef.current.set(a.id, tid);
-      }
-    }
-    for (const [alertId, tid] of [...offlineToastIdsRef.current.entries()]) {
-      if (!active.has(alertId)) {
-        dismissToast(tid);
-        offlineToastIdsRef.current.delete(alertId);
-      }
-    }
-  }, [tab, offlineAlerts.data, pushToast, dismissToast]);
 
   useEffect(() => {
     if (tab !== "overview") return;

@@ -49,6 +49,8 @@ var permissionCatalog = []permissionDefinition{
 	{Key: "reports.manage", Module: "reports", ModuleLabel: "Relatórios", Label: "Gerir agendamentos"},
 	{Key: "fleet.view", Module: "fleet", ModuleLabel: "Frota", Label: "Visualizar"},
 	{Key: "fleet.manage", Module: "fleet", ModuleLabel: "Frota", Label: "Criar, editar e lançar despesas"},
+	{Key: "network_events.view", Module: "network_events", ModuleLabel: "Eventos", Label: "Visualizar"},
+	{Key: "network_events.manage", Module: "network_events", ModuleLabel: "Eventos", Label: "Registar, editar e excluir"},
 	{Key: "settings.view", Module: "settings", ModuleLabel: "Configurações", Label: "Visualizar"},
 	{Key: "settings.system", Module: "settings", ModuleLabel: "Configurações", Label: "Base de dados, rede e aparência"},
 	{Key: "settings.monitoring", Module: "settings", ModuleLabel: "Configurações", Label: "Monitoramento, alertas e coletas"},

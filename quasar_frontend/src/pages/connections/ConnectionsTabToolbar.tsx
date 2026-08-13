@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { RefreshCw } from "lucide-react";
+import { Bolt, Funnel, RefreshCw } from "lucide-react";
 
 type Props = {
   children: ReactNode;
@@ -12,6 +12,9 @@ type Props = {
   onReload?: () => void;
   reloading?: boolean;
   reloadTitle?: string;
+  /** CTO: pesquisa → filtro → config → actualizar → extra */
+  layout?: "actions-first" | "search-first";
+  extraActions?: ReactNode;
 };
 
 export function ConnectionsTabToolbar({
@@ -25,40 +28,85 @@ export function ConnectionsTabToolbar({
   onReload,
   reloading = false,
   reloadTitle = "Recarregar da base de dados",
+  layout = "actions-first",
+  extraActions,
 }: Props) {
+  const searchFirst = layout === "search-first";
+
+  const searchBox = (
+    <label className="conn-toolbar__search">
+      <input
+        className="input"
+        type="search"
+        aria-label="Pesquisa"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={searchPlaceholder}
+        autoComplete="off"
+      />
+    </label>
+  );
+
+  const filterBtn = (
+    <button
+      type="button"
+      className={`btn btn--icon conn-toolbar__icon-btn${activeFilterCount > 0 ? " is-active" : ""}`}
+      onClick={onOpenFilters}
+      title={activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
+      aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
+    >
+      <Funnel size={16} />
+      {activeFilterCount > 0 ? <span className="conn-toolbar__badge">{activeFilterCount}</span> : null}
+    </button>
+  );
+
+  const settingsBtn = (
+    <button
+      type="button"
+      className="btn btn--icon conn-toolbar__icon-btn"
+      onClick={onOpenSettings}
+      title="Configurações"
+      aria-label="Configurações"
+    >
+      <Bolt size={16} />
+    </button>
+  );
+
+  const reloadBtn = onReload ? (
+    <button
+      type="button"
+      className="btn btn--icon conn-toolbar__icon-btn"
+      title={reloadTitle}
+      aria-label={reloadTitle}
+      disabled={reloading}
+      onClick={onReload}
+    >
+      <RefreshCw size={16} className={reloading ? "map-refresh-spin" : undefined} />
+    </button>
+  ) : null;
+
+  if (searchFirst) {
+    return (
+      <div className="conn-toolbar conn-toolbar--search-first">
+        {searchBox}
+        {filterBtn}
+        {settingsBtn}
+        {reloadBtn}
+        {extraActions}
+        <div className="conn-toolbar__spacer" aria-hidden />
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="conn-toolbar">
       {children}
       <div className="conn-toolbar__spacer" aria-hidden />
-      {onReload ? (
-        <button
-          type="button"
-          className="btn btn--icon"
-          title={reloadTitle}
-          aria-label={reloadTitle}
-          disabled={reloading}
-          onClick={onReload}
-        >
-          <RefreshCw size={16} className={reloading ? "map-refresh-spin" : undefined} />
-        </button>
-      ) : null}
-      <label className="conn-toolbar__search">
-        <input
-          className="input"
-          type="search"
-          aria-label="Pesquisa"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={searchPlaceholder}
-          autoComplete="off"
-        />
-      </label>
-      <button type="button" className="btn" onClick={onOpenFilters}>
-        Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-      </button>
-      <button type="button" className="btn" onClick={onOpenSettings}>
-        Configurações
-      </button>
+      {reloadBtn}
+      {searchBox}
+      {filterBtn}
+      {settingsBtn}
     </div>
   );
 }

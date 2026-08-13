@@ -192,6 +192,9 @@ func EvaluateMikrotikSFPAfterSnapshot(ctx context.Context, pool *pgxpool.Pool, l
 
 func syncSfpAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, desc, ip, alertType string, row SfpInterfaceRow, label string, v float64, unit string, rule thresholdMetric) {
 	sev := evalOne(v, rule)
+	if alertType == alertTypeSfpRx {
+		sev = capRxToWarning(sev)
+	}
 	ifLabel := strings.TrimSpace(row.DisplayName)
 	if ifLabel == "" {
 		ifLabel = fmt.Sprintf("if%d", row.IfIndex)

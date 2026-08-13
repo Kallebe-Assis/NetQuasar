@@ -20,16 +20,22 @@ import (
 )
 
 var systemReportCatalog = []map[string]string{
-	{"id": "active-alerts", "title": "Alertas ativos", "description": "Lista detalhada de todos os alertas em aberto."},
-	{"id": "connections", "title": "Conexões de clientes", "description": "Quantidade e detalhes das conexões cadastradas."},
-	{"id": "equipment-by-pop", "title": "Equipamentos por POP", "description": "Lista de equipamentos agrupados por ponto de presença."},
-	{"id": "olt-overview", "title": "OLTs — informações e gráfico", "description": "Frota OLT, ONUs e evolução recente (últimos 7 dias)."},
-	{"id": "system-general", "title": "Visão geral do sistema", "description": "Métricas consolidadas de equipamentos, localidades, clientes, PONs, Mikrotik e mais."},
-	{"id": "integrations", "title": "Integrações", "description": "Integrações configuradas e estado de cada uma."},
-	{"id": "attention-devices", "title": "Equipamentos precisando de atenção", "description": "Lacunas de cadastro e equipamentos com alertas abertos."},
-	{"id": "alerts-by-category", "title": "Alertas por categoria", "description": "Alertas ativos agrupados por categoria operacional."},
-	{"id": "onu-per-pon", "title": "ONUs por PON", "description": "Última coleta por porta PON (sem nova coleta SNMP)."},
-	{"id": "bng-subscribers", "title": "BNG — totais de logins", "description": "Totais PPPoE, IPv4, IPv6 e dual-stack por BNG e evolução recente (7 dias)."},
+	{"id": "active-alerts", "title": "Alertas ativos", "description": "Lista detalhada de todos os alertas em aberto.", "group": "Alertas e monitoramento"},
+	{"id": "alerts-by-category", "title": "Alertas por categoria", "description": "Alertas ativos agrupados por categoria operacional.", "group": "Alertas e monitoramento"},
+	{"id": "attention-devices", "title": "Equipamentos precisando de atenção", "description": "Lacunas de cadastro e equipamentos com alertas abertos.", "group": "Alertas e monitoramento"},
+	{"id": "pon-down", "title": "PONs inactivas", "description": "Resumo e detalhe de alertas PON DOWN.", "group": "Alertas e monitoramento"},
+	{"id": "monitoring-health", "title": "Saúde do monitoramento", "description": "Resumo e equipamentos offline / SNMP falho.", "group": "Alertas e monitoramento"},
+	{"id": "connections", "title": "Conexões de clientes", "description": "Quantidade e detalhes das conexões cadastradas.", "group": "Acesso e OLT"},
+	{"id": "olt-overview", "title": "OLTs — informações e gráfico", "description": "Frota OLT, ONUs e evolução recente (últimos 7 dias).", "group": "Acesso e OLT"},
+	{"id": "onu-per-pon", "title": "ONUs por PON", "description": "Última coleta por porta PON (sem nova coleta SNMP).", "group": "Acesso e OLT"},
+	{"id": "bng-subscribers", "title": "BNG — totais de logins", "description": "Totais PPPoE, IPv4, IPv6 e dual-stack por BNG e evolução recente (7 dias).", "group": "Acesso e OLT"},
+	{"id": "network-events", "title": "Eventos de rede", "description": "Manutenções, alterações e rompimentos — resumido ou detalhado.", "group": "Rede e manutenção"},
+	{"id": "ftth-infra", "title": "Infraestrutura FTTH", "description": "POPs, projetos, CTOs, cabos, postes e emendas — resumido ou detalhado.", "group": "Rede e manutenção"},
+	{"id": "equipment-by-pop", "title": "Equipamentos por POP", "description": "Lista de equipamentos agrupados por ponto de presença.", "group": "Rede e manutenção"},
+	{"id": "system-general", "title": "Visão geral do sistema", "description": "Métricas consolidadas de equipamentos, localidades, clientes, PONs, eventos e mais.", "group": "Sistema e cadastros"},
+	{"id": "integrations", "title": "Integrações", "description": "Integrações configuradas e estado de cada uma.", "group": "Sistema e cadastros"},
+	{"id": "automations", "title": "Automações", "description": "Execuções de automações e relatórios agendados.", "group": "Sistema e cadastros"},
+	{"id": "commercial-base", "title": "Base comercial", "description": "Clientes por localidade — totais mensais ou detalhe.", "group": "Sistema e cadastros"},
 }
 
 func systemReportIDValid(id string) bool {
@@ -153,6 +159,18 @@ func (s *Server) buildSystemReport(ctx context.Context, id string, opts systemRe
 		return s.reportOnuPerPon(ctx, pool, base)
 	case "bng-subscribers":
 		return s.reportBngSubscribers(ctx, pool, base)
+	case "network-events":
+		return s.reportNetworkEvents(ctx, pool, base, opts.PeriodMode)
+	case "ftth-infra":
+		return s.reportFtthInfra(ctx, pool, base, opts.PeriodMode)
+	case "pon-down":
+		return s.reportPonDown(ctx, pool, base, opts.PeriodMode)
+	case "automations":
+		return s.reportAutomations(ctx, pool, base, opts.PeriodMode)
+	case "monitoring-health":
+		return s.reportMonitoringHealth(ctx, pool, base, opts.PeriodMode)
+	case "commercial-base":
+		return s.reportCommercialBase(ctx, pool, base, opts.PeriodMode)
 	default:
 		return nil, fmt.Errorf("relatório desconhecido")
 	}
@@ -594,16 +612,32 @@ type oltOverviewReportOptions struct {
 	Period string `json:"period"` // today | 3d | 7d | 30d
 }
 
+type periodModeReportOptions struct {
+	Mode string `json:"mode"` // summary | detailed
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type systemReportOptions struct {
 	EquipmentByPop equipmentByPopReportOptions
 	Connections    connectionsReportOptions
 	OltOverview    oltOverviewReportOptions
+	PeriodMode     periodModeReportOptions
+}
+
+func reportUsesPeriodMode(id string) bool {
+	switch id {
+	case "network-events", "ftth-infra", "pon-down", "automations", "monitoring-health", "commercial-base":
+		return true
+	}
+	return false
 }
 
 func parseSystemReportOptions(r *http.Request, reportID string) systemReportOptions {
 	opts := systemReportOptions{
 		Connections: connectionsReportOptions{Mode: "detailed", Source: "connections"},
 		OltOverview: oltOverviewReportOptions{Period: "7d"},
+		PeriodMode:  periodModeReportOptions{Mode: "summary"},
 	}
 	q := r.URL.Query()
 	switch reportID {
@@ -625,6 +659,13 @@ func parseSystemReportOptions(r *http.Request, reportID string) systemReportOpti
 			opts.OltOverview.Period = v
 		}
 	}
+	if reportUsesPeriodMode(reportID) {
+		if v := strings.TrimSpace(q.Get("mode")); v != "" {
+			opts.PeriodMode.Mode = v
+		}
+		opts.PeriodMode.From = strings.TrimSpace(q.Get("from"))
+		opts.PeriodMode.To = strings.TrimSpace(q.Get("to"))
+	}
 	if r.Method == http.MethodPost && r.Body != nil {
 		switch reportID {
 		case "equipment-by-pop":
@@ -641,6 +682,15 @@ func parseSystemReportOptions(r *http.Request, reportID string) systemReportOpti
 			var body oltOverviewReportOptions
 			if json.NewDecoder(r.Body).Decode(&body) == nil {
 				opts.OltOverview = normalizeOltOverviewReportOptions(body)
+			}
+		default:
+			if reportUsesPeriodMode(reportID) {
+				var body periodModeReportOptions
+				if json.NewDecoder(r.Body).Decode(&body) == nil {
+					opts.PeriodMode.Mode = normalizePeriodMode(body.Mode)
+					opts.PeriodMode.From = strings.TrimSpace(body.From)
+					opts.PeriodMode.To = strings.TrimSpace(body.To)
+				}
 			}
 		}
 	}
@@ -999,6 +1049,15 @@ func (s *Server) reportSystemGeneral(ctx context.Context, pool *pgxpool.Pool, ba
 		{"Snapshots OLT", `SELECT COUNT(*) FROM olt_snapshots`},
 		{"Amostras telemetria (30d)", `SELECT COUNT(*) FROM telemetry_samples WHERE collected_at >= now() - interval '30 days'`},
 		{"Amostras ping (30d)", `SELECT COUNT(*) FROM ping_history WHERE checked_at >= now() - interval '30 days'`},
+		{"Eventos de rede", `SELECT COUNT(*) FROM network_events`},
+		{"Eventos de rede (mês)", `SELECT COUNT(*) FROM network_events WHERE occurred_at >= date_trunc('month', now())`},
+		{"Rompimentos registados", `SELECT COUNT(*) FROM network_events WHERE category_code = 'incident'`},
+		{"Projetos FTTH", `SELECT COUNT(*) FROM network_projects WHERE COALESCE(status,'') <> 'inativo'`},
+		{"CTOs", `SELECT COUNT(*) FROM network_ctos`},
+		{"Cabos ópticos", `SELECT COUNT(*) FROM network_cables`},
+		{"Postes", `SELECT COUNT(*) FROM network_poles`},
+		{"Caixas de emenda", `SELECT COUNT(*) FROM network_splice_boxes`},
+		{"Automações (30d)", `SELECT COUNT(*) FROM automation_execution_log WHERE started_at >= now() - interval '30 days'`},
 	}
 	for _, m := range metrics {
 		var n int64

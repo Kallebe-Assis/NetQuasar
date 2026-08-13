@@ -6,6 +6,7 @@ import type { QueryClient } from "@tanstack/react-query";
  */
 export const queryKeys = {
   uiAppearance: ["ui-appearance"] as const,
+  mePreferences: ["me-preferences"] as const,
   monState: ["mon-state"] as const,
   monStateGlobal: ["mon-state-global-indicator"] as const,
   monIntervals: ["mon-intervals"] as const,
@@ -63,6 +64,11 @@ export const queryKeys = {
   fleetUsers: ["fleet-users"] as const,
   fleetSettings: ["fleet-settings"] as const,
   fleetMeDriver: ["fleet-me-driver"] as const,
+  networkEvents: (filters: string) => ["network-events", filters] as const,
+  networkEventsCatalog: ["network-events-catalog"] as const,
+  networkEventsLookups: ["network-events-lookups"] as const,
+  networkEventsSummary: ["network-events-summary"] as const,
+  networkVlans: (deviceId: string) => ["network-vlans", deviceId] as const,
 } as const;
 
 export function invalidateFleetOperationalQueries(qc: QueryClient): Promise<void> {

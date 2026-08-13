@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
@@ -37,8 +39,9 @@ type alertRow struct {
 	Severity   string
 	IP         string
 	DeviceName string
-	Meta       map[string]any
-	MetaKey    string
+	Meta        map[string]any
+	MetaKey     string
+	ActiveSince time.Time
 }
 
 func loadOpenAlert(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (*alertRow, error) {
@@ -46,9 +49,9 @@ func loadOpenAlert(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (
 	var ip, dname *string
 	var metaRaw []byte
 	err := pool.QueryRow(ctx, `
-		SELECT id, device_id, alert_type, message, severity, ip, device_name, COALESCE(meta::text,'{}')
+		SELECT id, device_id, alert_type, message, severity, ip, device_name, COALESCE(meta::text,'{}'), active_since
 		FROM alert_instances WHERE id = $1 AND closed_at IS NULL
-	`, alertID).Scan(&r.ID, &r.DeviceID, &r.AlertType, &r.Message, &r.Severity, &ip, &dname, &metaRaw)
+	`, alertID).Scan(&r.ID, &r.DeviceID, &r.AlertType, &r.Message, &r.Severity, &ip, &dname, &metaRaw, &r.ActiveSince)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +204,18 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		return resolved, summary, collected, patch
 	case "olt_onu_drop", "olt_onu_rise":
 		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
+		if !alertStillOpen(ctx, pool, row.ID) {
+			return true, "Variação de ONUs normalizada na recoleta.", map[string]any{"refreshed": true}, nil
+		}
 		resolved, summary, collected, patch = verifyOltOnuDelta(ctx, pool, row)
+		collected["refreshed"] = true
+		return resolved, summary, collected, patch
+	case "pon_down":
+		refreshOltCollect(ctx, pool, log, row.DeviceID, "baseline")
+		if !alertStillOpen(ctx, pool, row.ID) {
+			return true, "PON voltou a operação UP na recoleta.", map[string]any{"refreshed": true}, nil
+		}
+		resolved, summary, collected, patch = verifyPonDown(ctx, pool, row)
 		collected["refreshed"] = true
 		return resolved, summary, collected, patch
 	case "bng_subscriber_drop":
@@ -381,6 +395,8 @@ func loadLatestUptimeMinutes(ctx context.Context, pool *pgxpool.Pool, row *alert
 	return nil
 }
 
+const onuRiseVerifyTTL = time.Minute
+
 func verifyOltOnuDelta(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
 	collected := map[string]any{}
 	pon := strings.TrimSpace(fmt.Sprint(row.Meta["pon"]))
@@ -390,33 +406,180 @@ func verifyOltOnuDelta(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (
 	collected["snapshot_at"] = time.Now().UTC().Format(time.RFC3339)
 	var arr []map[string]any
 	_ = json.Unmarshal(ponsRaw, &arr)
-	for _, p := range arr {
-		k := strings.TrimSpace(fmt.Sprint(p["id"]))
-		if k == "" {
-			k = strings.TrimSpace(fmt.Sprint(p["pon_compact"]))
+	p, found := findPonRow(arr, row.Meta)
+	if found {
+		if n, ok := oltifderive.OnuOnlineFromRow(p); ok {
+			collected["onu_online"] = n
 		}
-		if k != pon && pon != "" {
-			continue
-		}
-		collected["onu_online"] = p["onu_online"]
 		collected["onu_offline"] = p["onu_offline"]
-		break
 	}
-	prev, _ := row.Meta["prev_online"].(float64)
-	cur, _ := row.Meta["curr_online"].(float64)
-	if v, ok := collected["onu_online"].(float64); ok {
-		cur = v
-	} else if v, ok := collected["onu_online"].(json.Number); ok {
-		f, _ := v.Float64()
-		cur = f
+	prev := toFloat64Default(row.Meta["prev_online"], 0)
+	cur := toFloat64Default(row.Meta["curr_online"], 0)
+	if n, ok := collected["onu_online"].(float64); ok {
+		cur = n
 	}
 	if row.AlertType == "olt_onu_drop" && cur >= prev {
 		return true, fmt.Sprintf("PON %s: %.0f ONUs online (normalizado vs %.0f).", pon, cur, prev), collected, map[string]any{"curr_online": cur, "prev_online": prev}
 	}
-	if row.AlertType == "olt_onu_rise" && cur <= prev {
-		return true, fmt.Sprintf("PON %s: variação estabilizada (%.0f online).", pon, cur), collected, map[string]any{"curr_online": cur}
+	if row.AlertType == "olt_onu_rise" {
+		age := time.Since(row.ActiveSince)
+		if !row.ActiveSince.IsZero() && age >= onuRiseVerifyTTL {
+			closeOpenRiseByMetaKey(ctx, pool, row)
+			return true, fmt.Sprintf("PON %s: subida de ONUs (INFO) encerrada após 1 minuto.", pon), collected, map[string]any{"curr_online": cur, "ttl": "1m"}
+		}
+		if cur <= prev {
+			return true, fmt.Sprintf("PON %s: variação estabilizada (%.0f online).", pon, cur), collected, map[string]any{"curr_online": cur}
+		}
+		remain := onuRiseVerifyTTL - age
+		if remain < 0 {
+			remain = 0
+		}
+		return false, fmt.Sprintf("PON %s: %.0f ONUs online (INFO). Encerra automaticamente em ~%s.", pon, cur, remain.Truncate(time.Second)), collected, map[string]any{"curr_online": cur, "onu_online": collected["onu_online"]}
 	}
 	return false, fmt.Sprintf("PON %s: %.0f ONUs online na última coleta OLT.", pon, cur), collected, map[string]any{"curr_online": cur, "onu_online": collected["onu_online"]}
+}
+
+func closeOpenRiseByMetaKey(ctx context.Context, pool *pgxpool.Pool, row *alertRow) {
+	key := strings.TrimSpace(fmt.Sprint(row.Meta["key"]))
+	if key == "" || key == "<nil>" {
+		return
+	}
+	_, _, _ = alertstore.Close(ctx, pool, nil, alertstore.CloseSpec{
+		DeviceID:  row.DeviceID,
+		AlertType: "olt_onu_rise",
+		Match:     alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved:  map[string]any{"resolved": "ttl", "source": "alert_verify"},
+	})
+}
+
+func verifyPonDown(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
+	collected := map[string]any{}
+	pon := strings.TrimSpace(fmt.Sprint(row.Meta["pon"]))
+	if pon == "" || pon == "<nil>" {
+		pon = strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(row.Meta["key"])), "pon_down:")
+	}
+	collected["pon"] = pon
+	var ponsRaw []byte
+	var snapAt time.Time
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(pons::text,'[]'), collected_at FROM olt_snapshots WHERE device_id=$1`, row.DeviceID).Scan(&ponsRaw, &snapAt)
+	if !snapAt.IsZero() {
+		collected["snapshot_at"] = snapAt.UTC().Format(time.RFC3339)
+	}
+	var arr []map[string]any
+	_ = json.Unmarshal(ponsRaw, &arr)
+	oltifderive.ApplyPonOperStatusAll(arr)
+	p, found := findPonRow(arr, row.Meta)
+	if !found {
+		return false, fmt.Sprintf("PON %s não encontrada no snapshot actual da OLT.", pon), collected, nil
+	}
+	collected["status"] = p["status"]
+	collected["pon_oper_status"] = p["pon_oper_status"]
+	collected["if_oper_status"] = p["if_oper_status"]
+	collected["link_oper_status"] = p["link_oper_status"]
+	if n, ok := oltifderive.OnuOnlineFromRow(p); ok {
+		collected["onu_online"] = n
+	}
+	if ponLooksUpOnOltPage(p) {
+		return true, fmt.Sprintf("PON %s está UP na OLT — alerta encerrado.", pon), collected, map[string]any{"status": "up"}
+	}
+	return false, fmt.Sprintf("PON %s continua DOWN no snapshot da OLT.", pon), collected, map[string]any{"status": "down"}
+}
+
+func findPonRow(arr []map[string]any, meta map[string]any) (map[string]any, bool) {
+	wants := ponHintsFromMeta(meta)
+	if len(wants) == 0 {
+		return nil, false
+	}
+	for _, p := range arr {
+		for _, k := range ponIdentityKeys(p) {
+			for _, w := range wants {
+				if k == w {
+					return p, true
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+func ponIdentityKeys(p map[string]any) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(s string) {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" || s == "<nil>" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	add(oltifderive.StablePonRowKey(p))
+	add(fmt.Sprint(p["id"]))
+	add(fmt.Sprint(p["pon_compact"]))
+	add(fmt.Sprint(p["name"]))
+	return out
+}
+
+func ponHintsFromMeta(meta map[string]any) []string {
+	if meta == nil {
+		return nil
+	}
+	var raw []string
+	for _, key := range []string{"pon", "key", "pon_name"} {
+		v := strings.TrimSpace(fmt.Sprint(meta[key]))
+		if v == "" || v == "<nil>" {
+			continue
+		}
+		raw = append(raw, v)
+		lower := strings.ToLower(v)
+		for _, prefix := range []string{"pon_down:", "onu_rise_count:", "onu_rise_pct:", "onu_drop_count:", "onu_drop_pct:"} {
+			if strings.HasPrefix(lower, prefix) {
+				raw = append(raw, strings.TrimSpace(v[len(prefix):]))
+			}
+		}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, s := range raw {
+		k := strings.ToLower(strings.TrimSpace(s))
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	return out
+}
+
+// ponLooksUpOnOltPage replica o critério da ficha da OLT: ON se ≥1 ONU online
+// (overlay) ou status operacional UP.
+func ponLooksUpOnOltPage(p map[string]any) bool {
+	if n, ok := oltifderive.OnuOnlineFromRow(p); ok && n >= 1 {
+		return true
+	}
+	if up, ok := oltifderive.PonOperIsUp(p); ok && up {
+		return true
+	}
+	for _, key := range []string{"status", "pon_oper_status", "if_oper_status"} {
+		raw := strings.TrimSpace(strings.ToLower(fmt.Sprint(p[key])))
+		if raw == "up" || raw == "pon_up" || raw == "1" || raw == "online" || raw == "on" {
+			return true
+		}
+	}
+	return false
+}
+
+func toFloat64Default(v any, fallback float64) float64 {
+	if f := toFloat(v); f != nil {
+		return *f
+	}
+	return fallback
 }
 
 func verifyBngSubscriberDrop(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
@@ -882,6 +1045,8 @@ func VerifyAllOpen(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	started := time.Now().UTC()
+	expired := alertstore.CloseExpired(ctx, pool, "olt_onu_rise", onuRiseVerifyTTL)
 	_, _ = pool.Exec(ctx, `
 		UPDATE alert_instances
 		SET severity = 'info'
@@ -912,6 +1077,30 @@ func VerifyAllOpen(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 			resolved++
 		}
 	}
+	expired += alertstore.CloseExpired(ctx, pool, "olt_onu_rise", onuRiseVerifyTTL)
+	reopened, reopenErr := pool.Exec(ctx, `
+		UPDATE alert_instances a
+		SET closed_at = now(),
+			meta = COALESCE(a.meta, '{}'::jsonb) || '{"resolved":"ttl","source":"alert_verify"}'::jsonb
+		WHERE a.alert_type = 'olt_onu_rise'
+		  AND a.closed_at IS NULL
+		  AND a.active_since >= $1
+		  AND EXISTS (
+			SELECT 1 FROM alert_instances old
+			WHERE old.device_id = a.device_id
+			  AND old.alert_type = 'olt_onu_rise'
+			  AND old.closed_at IS NOT NULL
+			  AND old.closed_at >= $1
+			  AND COALESCE(old.meta->>'key','') = COALESCE(a.meta->>'key','')
+			  AND COALESCE(old.meta->>'key','') <> ''
+			  AND COALESCE(old.meta->>'resolved','') = 'ttl'
+		  )
+	`, started)
+	if reopenErr == nil {
+		expired += int(reopened.RowsAffected())
+	}
+	verified += expired
+	resolved += expired
 	return verified, resolved, nil
 }
 
@@ -991,6 +1180,14 @@ func formatResolvedValueText(alertType string, collected map[string]any) string 
 			suffix = " °C"
 		}
 		return fmt.Sprintf("%v%s", v, suffix)
+	}
+	if alertType == "pon_down" {
+		if st, _ := collected["status"].(string); strings.TrimSpace(st) != "" {
+			return strings.ToUpper(st)
+		}
+		if n, ok := collected["onu_online"].(float64); ok && n >= 1 {
+			return "UP"
+		}
 	}
 	if probe, ok := collected["probe"].(map[string]any); ok {
 		if okVal, _ := probe["ok"].(bool); okVal {

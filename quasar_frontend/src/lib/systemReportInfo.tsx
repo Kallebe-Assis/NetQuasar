@@ -33,7 +33,7 @@ export const SYSTEM_REPORT_INFO: Record<SystemReportId, SystemReportInfo> = {
     notes: "Período configurável: hoje (por hora), 3, 7 ou 30 dias.",
   },
   "system-general": {
-    delivers: "Painel consolidado: equipamentos, POPs, clientes, PONs, Mikrotik, alertas e integrações.",
+    delivers: "Painel consolidado: equipamentos, POPs, clientes, PONs, eventos de rede, FTTH, automações e alertas.",
     formats: "Tabela resumo (métrica/valor); CSV e Telegram com os mesmos totais.",
     columns: "Métrica, Valor",
   },
@@ -61,6 +61,37 @@ export const SYSTEM_REPORT_INFO: Record<SystemReportId, SystemReportInfo> = {
     delivers: "Totais de logins PPPoE, IPv4, IPv6 e dual-stack por BNG, com gráfico de 7 dias e médias.",
     formats: "Tabela + gráfico na aplicação/PDF; CSV detalhado; Telegram com totais e médias.",
     columns: "BNG, IP, Última coleta, Total online, PPPoE, IPv4, IPv6, Dual-stack",
+  },
+  "network-events": {
+    delivers: "Eventos de manutenção da rede: categorias, tipos, impacto, POP, equipamento e técnico.",
+    formats: "Resumido (totais por categoria/tipo) ou detalhado (cada evento). CSV, PDF e Telegram.",
+    columns: "Resumo: dimensão/código/qtd. Detalhe: data, tipo, POP, equipamento, interface, técnico, notas.",
+    notes: "Escolha resumido ou detalhado e, se quiser, um intervalo de datas.",
+  },
+  "ftth-infra": {
+    delivers: "Inventário FTTH: POPs, projetos, CTOs, cabos, postes e caixas de emenda.",
+    formats: "Resumido (contagens) ou detalhado (cada elemento). CSV/PDF/Telegram.",
+    columns: "Detalhe: Tipo, Nº, Descrição, Projeto, Extra",
+  },
+  "pon-down": {
+    delivers: "Alertas de PON inactiva (DOWN), por OLT.",
+    formats: "Resumido (contagem por OLT) ou detalhado (cada alerta). CSV/PDF/Telegram.",
+    columns: "OLT, IP, PON, Severidade, Estado, Desde, Mensagem",
+  },
+  automations: {
+    delivers: "Histórico de automações e relatórios agendados (alertas, comercial, ONU, BNG, backup).",
+    formats: "Resumido por tipo de job ou detalhado por execução. CSV/PDF/Telegram.",
+    columns: "Início, Automação, Actor, Gatilho, OK, Mensagem",
+  },
+  "monitoring-health": {
+    delivers: "Estado do monitoramento: ping, telemetria, equipamentos offline e SNMP falho.",
+    formats: "Resumido (métricas) ou detalhado (lista de equipamentos com problema).",
+    columns: "Equipamento, IP, Categoria, POP, Alcance, SNMP, Detalhe",
+  },
+  "commercial-base": {
+    delivers: "Base comercial mensal de clientes por localidade.",
+    formats: "Resumido (totais por mês) ou detalhado (localidade/mês). CSV/PDF/Telegram.",
+    columns: "Mês, Localidade, UF, Clientes",
   },
 };
 

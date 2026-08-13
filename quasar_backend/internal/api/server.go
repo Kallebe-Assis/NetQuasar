@@ -101,6 +101,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Post("/setup/database/apply", s.setupDatabaseApply)
 		r.Post("/auth/login", s.authLogin)
 
+		r.Route("/me", func(r chi.Router) {
+			r.Get("/preferences", s.getMyPreferences)
+			r.Patch("/preferences", s.patchMyPreferences)
+			r.Get("/alert-sounds", s.listMyAlertSounds)
+			r.Post("/alert-sounds", s.uploadMyAlertSound)
+			r.Get("/alert-sounds/{id}", s.getMyAlertSoundFile)
+			r.Delete("/alert-sounds/{id}", s.deleteMyAlertSound)
+		})
+
 		r.Route("/monitoring", func(r chi.Router) {
 			r.Get("/internet-check", s.internetCheck)
 			r.Get("/state", s.monitoringState)
@@ -463,6 +472,17 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			})
 		})
 
+		r.Route("/network-vlans", func(r chi.Router) {
+			r.Get("/", s.listNetworkVLANs)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("bng.collect", "devices.manage", "*"))
+				r.Post("/", s.createNetworkVLAN)
+				r.Post("/upsert", s.upsertNetworkVLAN)
+				r.Patch("/{id}", s.patchNetworkVLAN)
+				r.Delete("/{id}", s.deleteNetworkVLAN)
+			})
+		})
+
 		r.Route("/bng", func(r chi.Router) {
 			r.Get("/devices", s.bngListDevices)
 			r.Get("/devices/{id}/overview", s.bngDeviceOverview)
@@ -493,6 +513,20 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/realtime/ws", s.realtimeWS)
 		r.Get("/events", s.listEvents)
 		r.Get("/metrics", s.metricsSeries)
+
+		r.Route("/network-events", func(r chi.Router) {
+			r.Get("/", s.listNetworkEvents)
+			r.Get("/catalog", s.networkEventsCatalog)
+			r.Get("/lookups", s.networkEventsLookups)
+			r.Get("/summary", s.networkEventsSummary)
+			r.Get("/export.csv", s.exportNetworkEventsCSV)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("network_events.manage", "*"))
+				r.Post("/", s.createNetworkEvent)
+				r.Patch("/{id}", s.patchNetworkEvent)
+				r.Delete("/{id}", s.deleteNetworkEvent)
+			})
+		})
 
 		r.Route("/reports", func(r chi.Router) {
 			r.Get("/system", s.systemReportsCatalog)

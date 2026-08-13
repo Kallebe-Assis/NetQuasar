@@ -39,6 +39,8 @@ export type PermissionKey =
   | "reports.manage"
   | "fleet.view"
   | "fleet.manage"
+  | "network_events.view"
+  | "network_events.manage"
   | "settings.view"
   | "settings.system"
   | "settings.monitoring"
@@ -104,6 +106,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "reports.manage", module: "reports", module_label: "Relatórios", label: "Gerir agendamentos" },
   { key: "fleet.view", module: "fleet", module_label: "Frota", label: "Visualizar" },
   { key: "fleet.manage", module: "fleet", module_label: "Frota", label: "Criar, editar e lançar despesas" },
+  { key: "network_events.view", module: "network_events", module_label: "Eventos", label: "Visualizar" },
+  { key: "network_events.manage", module: "network_events", module_label: "Eventos", label: "Registar, editar e excluir" },
   { key: "settings.view", module: "settings", module_label: "Configurações", label: "Visualizar" },
   { key: "settings.system", module: "settings", module_label: "Configurações", label: "Base de dados, rede e aparência" },
   { key: "settings.monitoring", module: "settings", module_label: "Configurações", label: "Monitoramento, alertas e coletas" },
@@ -131,6 +135,7 @@ export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = [
   "bng.view",
   "reports.view",
   "fleet.view",
+  "network_events.view",
 ];
 
 export function groupPermissionsByModule(catalog: PermissionDefinition[] = PERMISSION_CATALOG) {
@@ -186,5 +191,6 @@ export const ROUTE_VIEW_PERMISSION: Record<string, PermissionKey> = {
   "/fleet/cost-centers": "fleet.view",
   "/fleet/alerts": "fleet.view",
   "/fleet/reports": "fleet.view",
+  "/events": "network_events.view",
   "/settings": "settings.view",
 };

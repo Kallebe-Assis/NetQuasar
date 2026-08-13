@@ -13,6 +13,7 @@ type InfraRow = {
   needs_maintenance?: boolean;
   splitter?: string | null;
   transmitter?: string | null;
+  olt_device_id?: string | null;
   pon?: number | null;
   pon_description?: string | null;
   vlan?: number | string | null;
@@ -69,6 +70,20 @@ export function filterInfrastructureRows<T extends InfraRow>(
     const sp = filters.ctos.splitter.trim().toLowerCase();
     if (sp) {
       out = out.filter((r) => (r.splitter ?? "").toLowerCase().includes(sp));
+    }
+    const tx = filters.ctos.transmitter.trim().toLowerCase();
+    if (tx) {
+      out = out.filter((r) => (r.transmitter ?? "").toLowerCase() === tx);
+    }
+    const vlan = filters.ctos.vlan.trim();
+    if (vlan) {
+      out = out.filter((r) => String(r.vlan ?? "") === vlan);
+    }
+    if (filters.ctos.olt_link === "linked") {
+      out = out.filter((r) => Boolean(r.olt_device_id) || (r.pon != null && Number(r.pon) > 0));
+    }
+    if (filters.ctos.olt_link === "unlinked") {
+      out = out.filter((r) => !r.olt_device_id && !(r.pon != null && Number(r.pon) > 0));
     }
   }
   if (variant === "cable") {

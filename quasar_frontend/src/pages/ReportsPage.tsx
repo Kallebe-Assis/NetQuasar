@@ -22,11 +22,13 @@ import {
   downloadSystemReportCsv,
   fetchSystemReport,
   fetchSystemReportCatalog,
+  isPeriodModeReport,
   sendSystemReportTelegram,
   summaryEntries,
   type ConnectionsReportOptions,
   type EquipmentByPopReportOptions,
   type OltOverviewReportOptions,
+  type PeriodModeReportOptions,
   type SystemReportId,
   type SystemReportPayload,
 } from "../lib/systemReports";
@@ -46,6 +48,14 @@ const DEFAULT_CONNECTIONS_OPTS: ConnectionsReportOptions = {
 const DEFAULT_OLT_OPTS: OltOverviewReportOptions = {
   period: "7d",
 };
+
+const DEFAULT_PERIOD_MODE_OPTS: PeriodModeReportOptions = {
+  mode: "summary",
+  from: "",
+  to: "",
+};
+
+const PERIOD_MODE_NEEDS_DATES = new Set<SystemReportId>(["network-events", "pon-down", "automations"]);
 
 type ReportVariant = "screen" | "print";
 
@@ -195,6 +205,45 @@ function OltPeriodPanel({
           {opt.label}
         </label>
       ))}
+    </div>
+  );
+}
+
+function PeriodModeOptionsPanel({
+  value,
+  onChange,
+  showDates,
+}: {
+  value: PeriodModeReportOptions;
+  onChange: (next: PeriodModeReportOptions) => void;
+  showDates: boolean;
+}) {
+  const mode = value.mode ?? "summary";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13 }}>
+      <fieldset style={{ border: "none", margin: 0, padding: 0 }}>
+        <legend style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Formato</legend>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 6 }}>
+          <input type="radio" name="pm-mode" checked={mode === "summary"} onChange={() => onChange({ ...value, mode: "summary" })} />
+          Resumido (totais e agrupamentos)
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <input type="radio" name="pm-mode" checked={mode === "detailed"} onChange={() => onChange({ ...value, mode: "detailed" })} />
+          Detalhado (cada registo)
+        </label>
+      </fieldset>
+      {showDates ? (
+        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--muted)" }}>
+            De
+            <input className="input" type="date" value={value.from ?? ""} onChange={(e) => onChange({ ...value, from: e.target.value })} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--muted)" }}>
+            Até
+            <input className="input" type="date" value={value.to ?? ""} onChange={(e) => onChange({ ...value, to: e.target.value })} />
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -495,6 +544,9 @@ function ReportPreviewBody({ payload, variant = "screen" }: { payload: SystemRep
         )}
         <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
           Gerado: {new Date(payload.generated_at).toLocaleString("pt-PT")}
+          {payload.options && "mode" in payload.options && payload.options.mode
+            ? ` · ${payload.options.mode === "detailed" ? "Detalhado" : "Resumido"}`
+            : ""}
         </p>
       </header>
 
@@ -610,6 +662,7 @@ function ReportCard({
   onEquipPopRequest,
   onConnectionsRequest,
   onOltRequest,
+  onPeriodModeRequest,
 }: {
   id: SystemReportId;
   title: string;
@@ -624,6 +677,7 @@ function ReportCard({
   onEquipPopRequest: (action: EquipPopAction) => void;
   onConnectionsRequest: (action: EquipPopAction) => void;
   onOltRequest: (action: EquipPopAction) => void;
+  onPeriodModeRequest: (action: EquipPopAction) => void;
 }) {
   const admin = isAdminUser();
 
@@ -638,6 +692,10 @@ function ReportCard({
     }
     if (id === "olt-overview") {
       onOltRequest(action);
+      return;
+    }
+    if (isPeriodModeReport(id)) {
+      onPeriodModeRequest(action);
       return;
     }
     fn();
@@ -729,6 +787,14 @@ export function ReportsPage() {
     draft: OltOverviewReportOptions;
     action: EquipPopAction;
   } | null>(null);
+  const [periodModeOpts, setPeriodModeOpts] = useState<PeriodModeReportOptions>(DEFAULT_PERIOD_MODE_OPTS);
+  const [previewPeriodModeOpts, setPreviewPeriodModeOpts] = useState<PeriodModeReportOptions | null>(null);
+  const [periodModeModal, setPeriodModeModal] = useState<{
+    id: SystemReportId;
+    title: string;
+    draft: PeriodModeReportOptions;
+    action: EquipPopAction;
+  } | null>(null);
   const admin = isAdminUser();
   const { push: pushToast } = useAppToast();
 
@@ -778,8 +844,9 @@ export function ReportsPage() {
     if (previewId === "equipment-by-pop") return previewEquipPopOpts ?? equipPopOpts;
     if (previewId === "connections") return previewConnectionsOpts ?? connectionsOpts;
     if (previewId === "olt-overview") return previewOltOpts ?? oltOpts;
+    if (previewId && isPeriodModeReport(previewId)) return previewPeriodModeOpts ?? periodModeOpts;
     return undefined;
-  }, [previewId, previewEquipPopOpts, equipPopOpts, previewConnectionsOpts, connectionsOpts, previewOltOpts, oltOpts]);
+  }, [previewId, previewEquipPopOpts, equipPopOpts, previewConnectionsOpts, connectionsOpts, previewOltOpts, oltOpts, previewPeriodModeOpts, periodModeOpts]);
 
   const preview = useQuery({
     queryKey: ["system-report", previewId, previewReportOpts],
@@ -791,6 +858,7 @@ export function ReportsPage() {
     setPreviewEquipPopOpts(null);
     setPreviewConnectionsOpts(null);
     setPreviewOltOpts(null);
+    setPreviewPeriodModeOpts(null);
     setPreviewId(id);
   }, []);
 
@@ -885,6 +953,35 @@ export function ReportsPage() {
     [pushToast, triggerPrint],
   );
 
+  const runPeriodModeAction = useCallback(
+    (id: SystemReportId, opts: PeriodModeReportOptions, action: EquipPopAction) => {
+      setPeriodModeOpts(opts);
+      setPreviewPeriodModeOpts(opts);
+      if (action === "preview") {
+        setPreviewId(id);
+        return;
+      }
+      if (action === "csv") {
+        void downloadSystemReportCsv(id, opts)
+          .then(() => pushToast({ tone: "ok", text: "CSV descarregado." }))
+          .catch((e) => toastErr(pushToast, e, "Falha ao exportar CSV"));
+        return;
+      }
+      if (action === "pdf") {
+        void fetchSystemReport(id, opts)
+          .then((data) => triggerPrint(data))
+          .catch((e) => toastErr(pushToast, e, "Falha ao preparar PDF"));
+        return;
+      }
+      if (action === "telegram") {
+        void sendSystemReportTelegram(id, opts)
+          .then(() => toastOk(pushToast, "Relatório enviado ao Telegram."))
+          .catch((e) => toastErr(pushToast, e, "Falha ao enviar Telegram"));
+      }
+    },
+    [pushToast, triggerPrint],
+  );
+
   const printMut = useMutation({
     mutationFn: (id: SystemReportId) => fetchSystemReport(id),
     onSuccess: (data) => triggerPrint(data),
@@ -912,6 +1009,22 @@ export function ReportsPage() {
     );
   }, [catalog.data?.reports, search]);
 
+  const grouped = useMemo(() => {
+    const map = new Map<string, typeof items>();
+    for (const r of items) {
+      const g = r.group?.trim() || "Outros";
+      const cur = map.get(g) ?? [];
+      cur.push(r);
+      map.set(g, cur);
+    }
+    const order = ["Alertas e monitoramento", "Acesso e OLT", "Rede e manutenção", "Sistema e cadastros"];
+    return [...map.entries()].sort((a, b) => {
+      const ia = order.indexOf(a[0]);
+      const ib = order.indexOf(b[0]);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+  }, [items]);
+
   if (catalog.isLoading) return <p>Carregando relatórios…</p>;
   if (catalog.isError) return <div className="msg msg--err">{(catalog.error as Error).message}</div>;
 
@@ -936,28 +1049,45 @@ export function ReportsPage() {
       {items.length === 0 ? (
         <p style={{ color: "var(--muted)" }}>Nenhum relatório corresponde à pesquisa.</p>
       ) : (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items.map((r) => (
-          <ReportCard
-            key={r.id}
-            id={r.id as SystemReportId}
-            title={r.title}
-            description={r.description}
-            onOpen={openReport}
-            onPrint={(id) => printMut.mutate(id)}
-            onCsv={(id) => csvMut.mutate(id)}
-            onTelegram={(id) => tgMut.mutate(id)}
-            printPending={printMut.isPending}
-            csvPending={csvMut.isPending}
-            tgPending={tgMut.isPending}
-            onEquipPopRequest={(action) =>
-              setEquipPopModal({ draft: { ...equipPopOpts }, action })
-            }
-            onConnectionsRequest={(action) =>
-              setConnectionsModal({ draft: { ...connectionsOpts }, action })
-            }
-            onOltRequest={(action) => setOltModal({ draft: { ...oltOpts }, action })}
-          />
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {grouped.map(([group, list]) => (
+          <section key={group}>
+            <h2 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--muted)", letterSpacing: 0.3 }}>
+              {group}
+            </h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {list.map((r) => (
+                <ReportCard
+                  key={r.id}
+                  id={r.id as SystemReportId}
+                  title={r.title}
+                  description={r.description}
+                  onOpen={openReport}
+                  onPrint={(id) => printMut.mutate(id)}
+                  onCsv={(id) => csvMut.mutate(id)}
+                  onTelegram={(id) => tgMut.mutate(id)}
+                  printPending={printMut.isPending}
+                  csvPending={csvMut.isPending}
+                  tgPending={tgMut.isPending}
+                  onEquipPopRequest={(action) =>
+                    setEquipPopModal({ draft: { ...equipPopOpts }, action })
+                  }
+                  onConnectionsRequest={(action) =>
+                    setConnectionsModal({ draft: { ...connectionsOpts }, action })
+                  }
+                  onOltRequest={(action) => setOltModal({ draft: { ...oltOpts }, action })}
+                  onPeriodModeRequest={(action) =>
+                    setPeriodModeModal({
+                      id: r.id as SystemReportId,
+                      title: r.title,
+                      draft: { ...periodModeOpts },
+                      action,
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
       )}
@@ -1087,6 +1217,45 @@ export function ReportsPage() {
           document.body,
         )}
 
+      {periodModeModal &&
+        createPortal(
+          <div className="modal-backdrop" role="presentation" onClick={() => setPeriodModeModal(null)}>
+            <div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              style={{ width: "min(440px, 94vw)", padding: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <h2 style={{ margin: 0, fontSize: 17 }}>{periodModeModal.title}</h2>
+                <button type="button" className="btn btn--icon-menu" aria-label="Fechar" onClick={() => setPeriodModeModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <PeriodModeOptionsPanel
+                value={periodModeModal.draft}
+                onChange={(next) => setPeriodModeModal((m) => (m ? { ...m, draft: next } : m))}
+                showDates={PERIOD_MODE_NEEDS_DATES.has(periodModeModal.id)}
+              />
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    const { id, draft, action } = periodModeModal;
+                    setPeriodModeModal(null);
+                    runPeriodModeAction(id, draft, action);
+                  }}
+                >
+                  Gerar relatório
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       {previewId != null &&
         createPortal(
           <div className="modal-backdrop" role="presentation" onClick={() => setPreviewId(null)}>
@@ -1129,6 +1298,8 @@ export function ReportsPage() {
                           runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "csv");
                         } else if (previewId === "olt-overview") {
                           runOltAction(previewOltOpts ?? oltOpts, "csv");
+                        } else if (isPeriodModeReport(previewId)) {
+                          runPeriodModeAction(previewId, previewPeriodModeOpts ?? periodModeOpts, "csv");
                         } else {
                           csvMut.mutate(previewId);
                         }
@@ -1149,6 +1320,8 @@ export function ReportsPage() {
                             runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "telegram");
                           } else if (previewId === "olt-overview") {
                             runOltAction(previewOltOpts ?? oltOpts, "telegram");
+                          } else if (isPeriodModeReport(previewId)) {
+                            runPeriodModeAction(previewId, previewPeriodModeOpts ?? periodModeOpts, "telegram");
                           } else {
                             tgMut.mutate(previewId);
                           }

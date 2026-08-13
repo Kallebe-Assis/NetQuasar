@@ -25,6 +25,13 @@ export function getStoredApiKey(): string {
   return localStorage.getItem(K_KEY) ?? "";
 }
 
+export const AUTH_CHANGED_EVENT = "netquasar-auth-changed";
+
+function emitAuthChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 export function getAuthToken(): string {
   return localStorage.getItem(K_AUTH) ?? "";
 }
@@ -33,6 +40,7 @@ export function saveAuthToken(token: string) {
   const t = token.trim();
   if (t) localStorage.setItem(K_AUTH, t);
   else localStorage.removeItem(K_AUTH);
+  emitAuthChanged();
 }
 
 export function saveSession(apiBase: string, apiKey: string) {
@@ -84,6 +92,7 @@ export function clearSession() {
   localStorage.removeItem(K_USER_LABEL);
   localStorage.removeItem(K_PERMS);
   localStorage.removeItem(K_PROFILE);
+  emitAuthChanged();
 }
 
 /** Nome ou e-mail mostrado na shell (gravado no login). */

@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Loader2,
   RefreshCw,
+  Tags,
   Users,
 } from "lucide-react";
 import {
@@ -51,7 +52,6 @@ import {
   type StatsSeriesKey,
 } from "../lib/bngDisplay";
 import { useAppToast } from "../lib/appToast";
-import { queryKeys } from "../lib/queryKeys";
 import {
   BNG_SESSION_SEARCH_FIELDS,
   countActiveBngSessionFilters,
@@ -62,6 +62,7 @@ import {
 } from "../lib/bngSessionFilters";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { APP_ROUTES } from "../app/routes";
+import { BngVlansTab } from "./bng/BngVlansTab";
 
 type BngDevice = {
   id: string;
@@ -336,11 +337,12 @@ type TrafficRateSnapshot = {
   sampled_at?: string;
 };
 
-type BngTab = "overview" | "relatorio" | "interfaces" | "auth" | "sessions";
+type BngTab = "overview" | "relatorio" | "vlans" | "interfaces" | "auth" | "sessions";
 
 const BNG_TABS: Array<{ id: BngTab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "relatorio", label: "Relatório", icon: BarChart3 },
+  { id: "vlans", label: "VLANs", icon: Tags },
   { id: "interfaces", label: "Interfaces", icon: Cable },
   { id: "auth", label: "Autenticações", icon: KeyRound },
   { id: "sessions", label: "Sessões PPPoE", icon: Users },
@@ -920,57 +922,12 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
 }
 
 function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse; loading: boolean }) {
-  const [vlanSelected, setVlanSelected] = useState<string[]>([]);
-  const [localityId, setLocalityId] = useState("");
-  const [sortBy, setSortBy] = useState<"count_desc" | "count_asc" | "label_asc" | "label_desc">("count_desc");
-
-  const localities = useQuery({
-    queryKey: queryKeys.commercialLocalities,
-    queryFn: () =>
-      apiFetch<{ localities: { id: string; name: string; vlans?: string[] }[] }>("/api/v1/commercial/localities"),
-    staleTime: 60_000,
-  });
-
-  const vlanRows = useMemo(() => {
-    const raw = data?.report?.by_vlan ?? [];
-    let rows = [...raw];
-    if (localityId) {
-      const loc = (localities.data?.localities ?? []).find((l) => l.id === localityId);
-      const allowed = new Set((loc?.vlans ?? []).map(String));
-      if (allowed.size > 0) {
-        rows = rows.filter((r) => allowed.has(String(r.key)) || allowed.has(String(r.label)));
-      } else {
-        rows = [];
-      }
-    }
-    if (vlanSelected.length > 0) {
-      const sel = new Set(vlanSelected);
-      rows = rows.filter((r) => sel.has(String(r.key)) || sel.has(String(r.label)));
-    }
-    rows.sort((a, b) => {
-      switch (sortBy) {
-        case "count_asc":
-          return a.count - b.count || a.label.localeCompare(b.label, "pt");
-        case "label_asc":
-          return a.label.localeCompare(b.label, "pt");
-        case "label_desc":
-          return b.label.localeCompare(a.label, "pt");
-        case "count_desc":
-        default:
-          return b.count - a.count || a.label.localeCompare(b.label, "pt");
-      }
-    });
-    return rows;
-  }, [data?.report?.by_vlan, localityId, localities.data, vlanSelected, sortBy]);
-
-  const allVlanOptions = data?.report?.by_vlan ?? [];
-
   if (loading) return <p style={{ fontSize: 13, color: "var(--muted)" }}>A carregar relatório de sessões…</p>;
   const rep = data?.report;
   if (!rep || rep.session_count === 0) {
     return (
       <div className="msg msg--warn" style={{ marginBottom: 16 }}>
-        {data?.note || "Execute a consulta completa SNMP na aba Sessões PPPoE para gerar o relatório por VLAN, limites e tempo online."}
+        {data?.note || "Execute a consulta completa SNMP na aba Sessões PPPoE para gerar o relatório de limites e tempo online. As VLANs estão na aba VLANs."}
       </div>
     );
   }
@@ -993,105 +950,6 @@ function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse
           {rep.session_count.toLocaleString("pt-PT")} logins
           {data?.captured_at ? ` · ${formatBngDateTime(data.captured_at)}` : ""}
         </span>
-      </div>
-
-      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-        <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Logins por VLAN</h3>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 12,
-            alignItems: "flex-end",
-          }}
-        >
-          <div className="field" style={{ margin: 0, minWidth: 180 }}>
-            <label style={{ fontSize: 11 }}>Localidade</label>
-            <select className="input" value={localityId} onChange={(e) => setLocalityId(e.target.value)}>
-              <option value="">Todas</option>
-              {(localities.data?.localities ?? []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                  {(l.vlans?.length ?? 0) > 0 ? ` (${l.vlans!.length} VLAN)` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field" style={{ margin: 0, minWidth: 160 }}>
-            <label style={{ fontSize: 11 }}>Ordenar</label>
-            <select
-              className="input"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            >
-              <option value="count_desc">Quantidade ↓</option>
-              <option value="count_asc">Quantidade ↑</option>
-              <option value="label_asc">VLAN A–Z</option>
-              <option value="label_desc">VLAN Z–A</option>
-            </select>
-          </div>
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={() => {
-              setVlanSelected([]);
-              setLocalityId("");
-              setSortBy("count_desc");
-            }}
-          >
-            Limpar filtros
-          </button>
-        </div>
-        {allVlanOptions.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, maxHeight: 96, overflow: "auto" }}>
-            {allVlanOptions.map((v) => {
-              const on = vlanSelected.length === 0 || vlanSelected.includes(v.key);
-              const active = vlanSelected.includes(v.key);
-              return (
-                <button
-                  key={v.key}
-                  type="button"
-                  className={active ? "btn btn--primary btn--sm" : "btn btn--sm"}
-                  style={{ opacity: on || vlanSelected.length === 0 ? 1 : 0.45 }}
-                  onClick={() =>
-                    setVlanSelected((prev) =>
-                      prev.includes(v.key) ? prev.filter((x) => x !== v.key) : [...prev, v.key],
-                    )
-                  }
-                  title={`${v.count} logins`}
-                >
-                  {v.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {vlanRows.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0 }}>
-            Nenhuma VLAN para os filtros seleccionados.
-            {localityId ? " Associe VLANs à localidade no menu Localidades." : ""}
-          </p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>VLAN</th>
-                  <th style={{ width: 120, textAlign: "right" }}>Quantidade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vlanRows.map((b) => (
-                  <tr key={b.key}>
-                    <td className="mono">VLAN {b.label}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>{b.count.toLocaleString("pt-PT")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
@@ -2071,6 +1929,12 @@ export function BngPage() {
               refreshingPppoeOnline={refreshPppoeOnline.isPending}
             />
             )
+          )}
+
+          {tab === "vlans" && (
+            <div className="mk-noc-panel" style={{ padding: 14 }}>
+              <BngVlansTab deviceId={selectedId} />
+            </div>
           )}
 
           {tab === "relatorio" && (

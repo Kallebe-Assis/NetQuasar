@@ -27,6 +27,8 @@ export type SplitterPort = {
   destination: string;
 };
 
+export const SPLITTER_RATIOS = ["1x2", "1x4", "1x8", "1x16", "1x32", "1x64"] as const;
+
 export const SPLITTER_PORT_STATUSES: Array<{ value: SplitterPortStatus; label: string }> = [
   { value: "livre", label: "Livre" },
   { value: "ocupada", label: "Ocupada" },

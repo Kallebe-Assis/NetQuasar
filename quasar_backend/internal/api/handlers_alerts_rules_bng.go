@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertignore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 )
@@ -28,7 +29,9 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"alerts": []any{}})
 		return
 	}
+	alertstore.CloseExpired(r.Context(), s.DB(), "olt_onu_rise", time.Minute)
 	// Abertos + instâncias fechadas há pouco (grace de 1 min na UI antes de sumirem desta lista).
+	// Subida de ONUs (info) some ao fechar — não fica no grace de resolvidos.
 	q := `
 		SELECT u.id, u.device_id, u.severity, u.alert_type, u.message, u.ip, u.device_name,
 			u.active_since, u.closed_at, u.meta::text, u.incident_id,
@@ -66,6 +69,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 			SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip, a.device_name, a.active_since, a.closed_at, a.meta, a.incident_id
 			FROM alert_instances a
 			WHERE a.closed_at IS NOT NULL AND a.closed_at >= now() - interval '1 minute'
+			  AND a.alert_type <> 'olt_onu_rise'
 		) u
 		LEFT JOIN devices d ON d.id = u.device_id
 		LEFT JOIN pops p ON p.id = d.pop_id

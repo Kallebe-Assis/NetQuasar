@@ -23,6 +23,7 @@ export const APP_ROUTES = {
   reports: "/reports",
   settings: "/settings",
   about: "/about",
+  events: "/events",
   fleetDashboard: "/fleet/dashboard",
   fleetVehicles: "/fleet/vehicles",
   fleetDrivers: "/fleet/drivers",
@@ -50,8 +51,7 @@ export const LEGACY_ROUTE_REDIRECTS: Record<string, string> = {
   "/conexoes": APP_ROUTES.connections,
   "/integracoes": APP_ROUTES.integrations,
   "/tempo-real": APP_ROUTES.realtime,
-  "/eventos": APP_ROUTES.alerts,
-  "/events": APP_ROUTES.alerts,
+  "/eventos": APP_ROUTES.events,
   "/overview": APP_ROUTES.dashboard,
   "/sobre": APP_ROUTES.about,
 };

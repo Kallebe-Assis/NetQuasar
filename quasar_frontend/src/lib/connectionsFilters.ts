@@ -17,6 +17,9 @@ export type ConnectionsFilterState = {
   ctos: {
     fiber_color: string;
     splitter: string;
+    transmitter: string;
+    vlan: string;
+    olt_link: "" | "linked" | "unlinked";
   };
   splice_boxes: {
     fiber_count_min: string;
@@ -40,7 +43,7 @@ export const DEFAULT_CONNECTIONS_FILTERS: ConnectionsFilterState = {
   needs_maintenance: false,
   visibleKinds: ["logins", "ctos", "splice_boxes", "cables", "poles", "projects"],
   logins: { connection_kind: "", medium_type: "", cto: "" },
-  ctos: { fiber_color: "", splitter: "" },
+  ctos: { fiber_color: "", splitter: "", transmitter: "", vlan: "", olt_link: "" },
   splice_boxes: { fiber_count_min: "" },
   cables: { cable_type: "", status: "" },
   poles: { pole_type: "" },
@@ -58,7 +61,6 @@ export const ELEMENT_KIND_LABELS: Record<InfrastructureElementKind, string> = {
 
 export function countActiveFilters(f: ConnectionsFilterState, tab: ConnectionsTabId): number {
   let n = 0;
-  if (f.q.trim()) n++;
   if (f.project_id) n++;
   if (f.locality_id) n++;
   if (f.needs_maintenance) n++;
@@ -70,6 +72,9 @@ export function countActiveFilters(f: ConnectionsFilterState, tab: ConnectionsTa
   if (tab === "cto") {
     if (f.ctos.fiber_color) n++;
     if (f.ctos.splitter.trim()) n++;
+    if (f.ctos.transmitter.trim()) n++;
+    if (f.ctos.vlan.trim()) n++;
+    if (f.ctos.olt_link) n++;
   }
   if (tab === "splice" && f.splice_boxes.fiber_count_min.trim()) n++;
   if (tab === "cables") {
@@ -90,6 +95,9 @@ export function filtersToQueryParams(f: ConnectionsFilterState, tab: Connections
   if (tab === "cto") {
     if (f.ctos.fiber_color) p.set("fiber_color", f.ctos.fiber_color);
     if (f.ctos.splitter.trim()) p.set("splitter", f.ctos.splitter.trim());
+    if (f.ctos.transmitter.trim()) p.set("transmitter", f.ctos.transmitter.trim());
+    if (f.ctos.vlan.trim()) p.set("vlan", f.ctos.vlan.trim());
+    if (f.ctos.olt_link) p.set("olt_link", f.ctos.olt_link);
   }
   if (tab === "cables") {
     if (f.cables.cable_type.trim()) p.set("cable_type", f.cables.cable_type.trim());

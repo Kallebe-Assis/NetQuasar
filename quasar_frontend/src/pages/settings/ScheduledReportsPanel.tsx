@@ -1,11 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { History, Mail, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { InfoHint } from "../../components/InfoHint";
 import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
+import {
+  automationJobDef,
+  draftFromJob,
+  formatRecurrence,
+} from "../../lib/automationJobs";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { AddAutomationModal } from "./AddAutomationModal";
 import { AutomationHistoryModal } from "./AutomationHistoryModal";
 import { AutomationsHistoryTable, AutomationsLogDetail, type AutomationHistoryRow } from "./AutomationsHistoryTable";
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
@@ -542,6 +549,12 @@ type AutomationJobOverview = {
   last_run_at?: string | null;
   runs_24h?: number;
   fail_24h?: number;
+  frequency?: string | null;
+  day_of_week?: number | null;
+  day_of_month?: number | null;
+  time_hhmm?: string | null;
+  timezone?: string | null;
+  days_of_week?: number[] | null;
 };
 
 type AutomationKpis = {
@@ -558,21 +571,29 @@ type AutomationKpis = {
 
 type DetailTab = "geral" | "historico" | "logs";
 
-const JOB_ICONS: Record<string, string> = {
-  database_backup: "DB",
-  onu_monthly_report: "ONU",
-  bng_stats_report: "BNG",
-  alerts_digest: "ALR",
-  commercial_report: "COM",
-};
+function formatWhen(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
+}
+
+function jobScheduleText(j: AutomationJobOverview): string {
+  const def = automationJobDef(j.job_type);
+  if (def?.recurrences.length === 1 && def.recurrences[0] === "monthly") {
+    return formatRecurrence(draftFromJob({ ...j, frequency: "monthly", day_of_month: j.day_of_month ?? 1 }));
+  }
+  return formatRecurrence(draftFromJob(j));
+}
 
 export function ScheduledReportsPanel() {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [selected, setSelected] = useState("database_backup");
+  const [addOpen, setAddOpen] = useState(false);
+  const [smtpOpen, setSmtpOpen] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("geral");
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [logRow, setLogRow] = useState<AutomationHistoryRow | null>(null);
 
   const overview = useQuery({
@@ -584,41 +605,19 @@ export function ScheduledReportsPanel() {
 
   const jobs = overview.data?.jobs ?? [];
   const kpis = overview.data?.kpis;
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return jobs.filter((j) => {
-      if (category && j.category !== category) return false;
-      if (statusFilter === "active" && !j.enabled) return false;
-      if (statusFilter === "inactive" && j.enabled) return false;
-      if (q && !`${j.label} ${j.description} ${j.category}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [jobs, search, category, statusFilter]);
-
-  const selectedJob = jobs.find((j) => j.job_type === selected) ?? null;
+  const registered = useMemo(() => jobs.filter((j) => j.enabled), [jobs]);
+  const selectedJob = registered.find((j) => j.job_type === selected) ?? null;
 
   useEffect(() => {
-    if (selected === "smtp") return;
-    if (!jobs.length) return;
-    if (!jobs.some((j) => j.job_type === selected)) {
-      setSelected(jobs[0].job_type);
+    if (selected && !registered.some((j) => j.job_type === selected)) {
+      setSelected(registered[0]?.job_type ?? null);
     }
-  }, [jobs, selected]);
+  }, [registered, selected]);
 
   useEffect(() => {
     setLogRow(null);
     setDetailTab("geral");
   }, [selected]);
-
-  const formatWhen = (iso?: string | null) => {
-    if (!iso) return "—";
-    try {
-      return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-    } catch {
-      return iso;
-    }
-  };
 
   return (
     <div className="automations-workspace">
@@ -626,21 +625,58 @@ export function ScheduledReportsPanel() {
         <div>
           <h2 style={{ margin: 0 }}>Automações</h2>
           <p style={{ color: "var(--muted)", fontSize: 13, margin: "6px 0 0" }}>
-            Agendamentos, execuções manuais e auditoria. Verificação de horários a cada 30 segundos.
+            Cadastre o que deve correr sozinho: tipo, dias e hora. O resto (canais, teste, histórico) fica em cada cartão.
           </p>
         </div>
-        <button type="button" className="btn" onClick={() => setHistoryOpen(true)}>
-          Histórico global
-        </button>
+        <div className="automations-workspace__actions">
+          <button
+            type="button"
+            className="btn btn--icon btn--icon-menu"
+            title="Actualizar"
+            aria-label="Actualizar"
+            disabled={overview.isFetching}
+            onClick={() => void overview.refetch()}
+          >
+            <RefreshCw size={18} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="btn btn--icon btn--icon-menu"
+            title="Histórico global"
+            aria-label="Histórico global"
+            onClick={() => setHistoryOpen(true)}
+          >
+            <History size={18} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={`btn btn--icon btn--icon-menu${smtpOpen ? " btn--primary" : ""}`}
+            title="E-mail (SMTP)"
+            aria-label="E-mail SMTP"
+            onClick={() => {
+              setSmtpOpen((v) => !v);
+              setSelected(null);
+            }}
+          >
+            <Mail size={18} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="btn btn--icon btn--icon-menu btn--primary"
+            title="Adicionar nova automação"
+            aria-label="Adicionar nova automação"
+            onClick={() => setAddOpen(true)}
+          >
+            <Plus size={18} aria-hidden />
+          </button>
+        </div>
       </div>
 
       <div className="automations-kpis">
         <div className="automations-kpi card">
-          <div className="automations-kpi__label">Total</div>
-          <div className="automations-kpi__value">{kpis?.total ?? "—"}</div>
-          <div className="automations-kpi__meta">
-            {kpis ? `${kpis.enabled} activas · ${kpis.disabled} inactivas` : "…"}
-          </div>
+          <div className="automations-kpi__label">Cadastradas</div>
+          <div className="automations-kpi__value">{registered.length}</div>
+          <div className="automations-kpi__meta">{kpis ? `${kpis.enabled} activas` : "…"}</div>
         </div>
         <div className="automations-kpi card">
           <div className="automations-kpi__label">Executadas hoje</div>
@@ -648,7 +684,7 @@ export function ScheduledReportsPanel() {
           <div className="automations-kpi__meta">{kpis?.running ? `${kpis.running} em curso` : "Nenhuma em curso"}</div>
         </div>
         <div className="automations-kpi card">
-          <div className="automations-kpi__label">Taxa de sucesso (30d)</div>
+          <div className="automations-kpi__label">Sucesso (30d)</div>
           <div className="automations-kpi__value">
             {kpis?.success_rate_30d != null ? `${kpis.success_rate_30d.toFixed(1)}%` : "—"}
           </div>
@@ -661,168 +697,133 @@ export function ScheduledReportsPanel() {
         </div>
       </div>
 
-      <div className="automations-toolbar card">
-        <input
-          className="input"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar automação…"
-          style={{ flex: "1 1 200px", minWidth: 160 }}
-        />
-        <select className="input" value={category} onChange={(e) => setCategory(e.target.value)} style={{ maxWidth: 160 }}>
-          <option value="">Todas categorias</option>
-          <option value="Sistema">Sistema</option>
-          <option value="Relatórios">Relatórios</option>
-        </select>
-        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ maxWidth: 140 }}>
-          <option value="">Todos estados</option>
-          <option value="active">Activas</option>
-          <option value="inactive">Inactivas</option>
-        </select>
-        <button type="button" className="btn" onClick={() => void overview.refetch()} disabled={overview.isFetching}>
-          Actualizar
-        </button>
-      </div>
+      {smtpOpen ? (
+        <div className="card automations-smtp-card">
+          <SmtpPanel />
+        </div>
+      ) : null}
 
-      <div className="automations-layout">
-        <div className="automations-list card">
-          <div className="automations-list__title">Lista de automações</div>
-          {overview.isLoading ? (
-            <p style={{ fontSize: 13, color: "var(--muted)" }}>A carregar…</p>
-          ) : filtered.length === 0 ? (
-            <p style={{ fontSize: 13, color: "var(--muted)" }}>Nenhuma automação encontrada.</p>
-          ) : (
-            <ul className="automations-list__ul">
-              {filtered.map((j) => (
-                <li key={j.job_type}>
-                  <button
-                    type="button"
-                    className={`automations-list__item${selected === j.job_type ? " is-active" : ""}`}
-                    onClick={() => setSelected(j.job_type)}
-                  >
-                    <span className="automations-list__icon" aria-hidden>
-                      {JOB_ICONS[j.job_type] ?? "AUTO"}
-                    </span>
-                    <span className="automations-list__body">
-                      <span className="automations-list__name">{j.label}</span>
-                      <span className="automations-list__desc">{j.description}</span>
-                      <span className="automations-list__meta">
-                        <span className={`automations-pill automations-pill--cat`}>{j.category}</span>
-                        {j.running ? <span className="automations-pill automations-pill--run">A correr</span> : null}
-                        <span className={`automations-pill ${j.enabled ? "automations-pill--on" : "automations-pill--off"}`}>
-                          {j.enabled ? "Activa" : "Inactiva"}
-                        </span>
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-              <li>
+      <div className="automations-register card">
+        <div className="automations-register__title">Cadastros</div>
+        {overview.isLoading ? (
+          <p style={{ fontSize: 13, color: "var(--muted)" }}>A carregar…</p>
+        ) : registered.length === 0 ? (
+          <div className="automations-empty">
+            <p>Nenhuma automação cadastrada.</p>
+            <button type="button" className="btn btn--primary" onClick={() => setAddOpen(true)}>
+              Adicionar a primeira
+            </button>
+          </div>
+        ) : (
+          <ul className="automations-cards">
+            {registered.map((j) => (
+              <li key={j.job_type}>
                 <button
                   type="button"
-                  className={`automations-list__item${selected === "smtp" ? " is-active" : ""}`}
-                  onClick={() => setSelected("smtp")}
+                  className={`automations-card${selected === j.job_type ? " is-active" : ""}`}
+                  onClick={() => {
+                    setSmtpOpen(false);
+                    setSelected(j.job_type);
+                  }}
                 >
-                  <span className="automations-list__icon" aria-hidden>
-                    SMTP
-                  </span>
-                  <span className="automations-list__body">
-                    <span className="automations-list__name">E-mail (SMTP)</span>
-                    <span className="automations-list__desc">Canal partilhado para envio de relatórios por e-mail.</span>
-                    <span className="automations-list__meta">
-                      <span className="automations-pill automations-pill--cat">Sistema</span>
+                  <span className="automations-card__top">
+                    <span className="automations-card__name">{j.label}</span>
+                    <span className={`automations-pill ${j.running ? "automations-pill--run" : "automations-pill--on"}`}>
+                      {j.running ? "A correr" : "Activa"}
                     </span>
+                  </span>
+                  <span className="automations-card__when">{jobScheduleText(j)}</span>
+                  <span className="automations-card__meta">
+                    {j.category} · última: {formatWhen(j.last_run_at)}
+                    {j.last_status ? ` · ${j.last_status}` : ""}
                   </span>
                 </button>
               </li>
-            </ul>
-          )}
-        </div>
-
-        <div className="automations-detail card">
-          {selected === "smtp" ? (
-            <>
-              <div className="automations-detail__head">
-                <h3 style={{ margin: 0 }}>E-mail (SMTP)</h3>
-              </div>
-              <SmtpPanel />
-            </>
-          ) : selectedJob ? (
-            <>
-              <div className="automations-detail__head">
-                <div>
-                  <h3 style={{ margin: 0 }}>{selectedJob.label}</h3>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>{selectedJob.description}</p>
-                </div>
-                <span className={`automations-pill ${selectedJob.enabled ? "automations-pill--on" : "automations-pill--off"}`}>
-                  {selectedJob.enabled ? "Activa" : "Inactiva"}
-                </span>
-              </div>
-              <div className="automations-detail__tabs" role="tablist">
-                {(
-                  [
-                    ["geral", "Geral"],
-                    ["historico", "Histórico"],
-                    ["logs", "Logs"],
-                  ] as const
-                ).map(([id, lab]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    aria-selected={detailTab === id}
-                    className={detailTab === id ? "is-active" : ""}
-                    onClick={() => setDetailTab(id)}
-                  >
-                    {lab}
-                  </button>
-                ))}
-              </div>
-              <div className="automations-detail__body">
-                {detailTab === "geral" ? (
-                  <div className="automations-detail__form">
-                    {selected === "database_backup" && <DatabaseBackupAutomationCard />}
-                    {selected === "onu_monthly_report" && <OnuMonthlyReportPanel />}
-                    {selected === "bng_stats_report" && <BngStatsScheduleCard />}
-                    {selected === "alerts_digest" && <DigestScheduleCard />}
-                    {selected === "commercial_report" && <CommercialScheduleCard />}
-                  </div>
-                ) : null}
-                {detailTab === "historico" ? (
-                  <AutomationsHistoryTable
-                    jobType={selected}
-                    showJobColumn={false}
-                    selectedId={logRow?.id}
-                    onSelect={(row) => {
-                      setLogRow(row);
-                      setDetailTab("logs");
-                    }}
-                  />
-                ) : null}
-                {detailTab === "logs" ? (
-                  <div>
-                    <AutomationsHistoryTable
-                      jobType={selected}
-                      showJobColumn={false}
-                      compact
-                      limit={50}
-                      selectedId={logRow?.id}
-                      onSelect={setLogRow}
-                    />
-                    <div style={{ marginTop: 12 }}>
-                      <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Detalhe da execução</h4>
-                      <AutomationsLogDetail row={logRow} />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </>
-          ) : (
-            <p style={{ color: "var(--muted)" }}>Seleccione uma automação na lista.</p>
-          )}
-        </div>
+            ))}
+          </ul>
+        )}
       </div>
 
+      {selectedJob ? (
+        <div className="automations-detail card">
+          <div className="automations-detail__head">
+            <div>
+              <h3 style={{ margin: 0 }}>{selectedJob.label}</h3>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>{selectedJob.description}</p>
+            </div>
+            <span className="automations-pill automations-pill--on">Activa</span>
+          </div>
+          <div className="automations-detail__tabs" role="tablist">
+            {(
+              [
+                ["geral", "Geral"],
+                ["historico", "Histórico"],
+                ["logs", "Logs"],
+              ] as const
+            ).map(([id, lab]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={detailTab === id}
+                className={detailTab === id ? "is-active" : ""}
+                onClick={() => setDetailTab(id)}
+              >
+                {lab}
+              </button>
+            ))}
+          </div>
+          <div className="automations-detail__body">
+            {detailTab === "geral" ? (
+              <div className="automations-detail__form">
+                {selected === "database_backup" && <DatabaseBackupAutomationCard />}
+                {selected === "onu_monthly_report" && <OnuMonthlyReportPanel />}
+                {selected === "bng_stats_report" && <BngStatsScheduleCard />}
+                {selected === "alerts_digest" && <DigestScheduleCard />}
+                {selected === "commercial_report" && <CommercialScheduleCard />}
+              </div>
+            ) : null}
+            {detailTab === "historico" ? (
+              <AutomationsHistoryTable
+                jobType={selected ?? ""}
+                showJobColumn={false}
+                selectedId={logRow?.id}
+                onSelect={(row) => {
+                  setLogRow(row);
+                  setDetailTab("logs");
+                }}
+              />
+            ) : null}
+            {detailTab === "logs" ? (
+              <div>
+                <AutomationsHistoryTable
+                  jobType={selected ?? ""}
+                  showJobColumn={false}
+                  compact
+                  limit={50}
+                  selectedId={logRow?.id}
+                  onSelect={setLogRow}
+                />
+                <div style={{ marginTop: 12 }}>
+                  <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Detalhe da execução</h4>
+                  <AutomationsLogDetail row={logRow} />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <AddAutomationModal
+        open={addOpen}
+        takenIds={registered.map((j) => j.job_type)}
+        onClose={() => setAddOpen(false)}
+        onCreated={(id) => {
+          setAddOpen(false);
+          setSmtpOpen(false);
+          setSelected(id);
+        }}
+      />
       <AutomationHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   );

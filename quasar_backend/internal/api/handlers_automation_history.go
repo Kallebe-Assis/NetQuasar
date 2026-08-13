@@ -66,9 +66,26 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	readSimple := func(table string) jobRow {
 		var jr jobRow
+		jr.extra = map[string]any{}
+		var freq, th, tz *string
+		var dow *int
+		var lastAt *time.Time
 		_ = pool.QueryRow(ctx, `
-			SELECT enabled, running, last_status, last_error
-			FROM `+table+` WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError)
+			SELECT enabled, running, last_status, last_error, last_run_at, frequency, day_of_week, time_hhmm, timezone
+			FROM `+table+` WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &lastAt, &freq, &dow, &th, &tz)
+		jr.lastAt = lastAt
+		if freq != nil {
+			jr.extra["frequency"] = *freq
+		}
+		if dow != nil {
+			jr.extra["day_of_week"] = *dow
+		}
+		if th != nil {
+			jr.extra["time_hhmm"] = *th
+		}
+		if tz != nil {
+			jr.extra["timezone"] = *tz
+		}
 		return jr
 	}
 
@@ -114,14 +131,41 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		add(jobAlertsDigest, jr)
 	}
 	{
-		jr := readSimple("automation_commercial_report")
+		var jr jobRow
+		jr.extra = map[string]any{"frequency": "monthly"}
+		var th, tz *string
+		var dom *int
+		_ = pool.QueryRow(ctx, `
+			SELECT enabled, running, last_status, last_error, last_run_at, day_of_month, time_hhmm, timezone
+			FROM automation_commercial_report WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &jr.lastAt, &dom, &th, &tz)
+		if dom != nil {
+			jr.extra["day_of_month"] = *dom
+		}
+		if th != nil {
+			jr.extra["time_hhmm"] = *th
+		}
+		if tz != nil {
+			jr.extra["timezone"] = *tz
+		}
 		add(jobCommercialReport, jr)
 	}
 	{
 		var jr jobRow
+		jr.extra = map[string]any{"frequency": "monthly"}
+		var th, tz *string
+		var dom *int
 		_ = pool.QueryRow(ctx, `
-			SELECT enabled, running, last_status, last_error, last_run_at
-			FROM automation_onu_report WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &jr.lastAt)
+			SELECT enabled, running, last_status, last_error, last_run_at, day_of_month, time_hhmm, timezone
+			FROM automation_onu_report WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &jr.lastAt, &dom, &th, &tz)
+		if dom != nil {
+			jr.extra["day_of_month"] = *dom
+		}
+		if th != nil {
+			jr.extra["time_hhmm"] = *th
+		}
+		if tz != nil {
+			jr.extra["timezone"] = *tz
+		}
 		add(jobOnuMonthlyReport, jr)
 	}
 	{
@@ -129,10 +173,7 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		add(jobBngStatsReport, jr)
 	}
 	{
-		var jr jobRow
-		_ = pool.QueryRow(ctx, `
-			SELECT enabled, running, last_status, last_error, last_run_at
-			FROM automation_database_backup WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &jr.lastAt)
+		jr := readSimple("automation_database_backup")
 		add(jobDatabaseBackup, jr)
 	}
 

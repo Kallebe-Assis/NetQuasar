@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Pencil, Trash2 } from "lucide-react";
+import { EthernetPort, MapPin, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
@@ -570,6 +570,29 @@ export function InfrastructureTab({
         onReload={() => void reloadFromDb()}
         reloading={listQ.isFetching}
         reloadTitle={`Recarregar ${meta.label.toLowerCase()} da base de dados`}
+        layout={variant === "cto" ? "search-first" : "actions-first"}
+        extraActions={
+          variant === "cto" && canMutate ? (
+            <button
+              type="button"
+              className={`btn btn--icon conn-toolbar__icon-btn${selectedCtoIds.length > 0 ? " is-active" : ""}`}
+              disabled={selectedCtoIds.length === 0}
+              title={
+                selectedCtoIds.length === 0
+                  ? "Seleccione uma ou mais CTOs na tabela"
+                  : `Vincular interface (${selectedCtoIds.length})`
+              }
+              aria-label="Vincular interface"
+              onClick={() => {
+                setLinkForm({ olt_device_id: "", transmitter: "", pon: "" });
+                setLinkOpen(true);
+              }}
+            >
+              <EthernetPort size={16} />
+              {selectedCtoIds.length > 0 ? <span className="conn-toolbar__badge">{selectedCtoIds.length}</span> : null}
+            </button>
+          ) : null
+        }
       >
         <PageCountPill label={meta.label} count={filteredRows.length} />
         {canMutate ? (
@@ -585,20 +608,6 @@ export function InfrastructureTab({
             >
               Nova {meta.singular.toLowerCase()}
             </button>
-            {variant === "cto" ? (
-              <button
-                type="button"
-                className="btn"
-                disabled={selectedCtoIds.length === 0}
-                title={selectedCtoIds.length === 0 ? "Seleccione uma ou mais CTOs na tabela" : "Vincular as CTOs seleccionadas a uma interface da OLT"}
-                onClick={() => {
-                  setLinkForm({ olt_device_id: "", transmitter: "", pon: "" });
-                  setLinkOpen(true);
-                }}
-              >
-                Vincular interface{selectedCtoIds.length ? ` (${selectedCtoIds.length})` : ""}
-              </button>
-            ) : null}
             <ActionMenu
               align="start"
               title="CSV — importar, modelo e exportar"
