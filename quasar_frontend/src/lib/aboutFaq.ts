@@ -136,7 +136,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como ligo ou desligo o monitoramento?",
-    a: "Na tela Monitoramento (início/parada). Utilizadores com permissão de administração controlam o runtime.",
+    a: "Na tela Monitoramento (início/parada). Usuários com permissão de administração controlam o runtime.",
     cat: "configurar",
   },
   {
@@ -161,7 +161,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Onde configuro limiares de alerta?",
-    a: "Configurações → Alertas (limiar global), com operadores ≥/≤ e faixas Normal / Atenção / Crítico. No topo da mesma aba cada utilizador liga ou desliga o toast em qualquer ecrã, o som de alerta e escolhe/envia um MP3.",
+    a: "Configurações → Alertas (limiar global), com operadores ≥/≤ e faixas Normal / Atenção / Crítico. No topo da mesma aba cada usuário liga ou desliga o toast em qualquer ecrã, o som de alerta e escolhe/envia um MP3.",
     cat: "configurar",
   },
   {
@@ -206,7 +206,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que é a tela de Tempo real?",
-    a: "Actualizações ao vivo do painel quando a infra de tempo real (normalmente com Redis) está disponível.",
+    a: "Atualizações ao vivo do painel quando a infra de tempo real (normalmente com Redis) está disponível.",
     cat: "funcoes",
   },
   {
@@ -296,12 +296,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que é a tela Registros?",
-    a: "Cofre de senhas de equipamentos, servidores (IP/host) e sites (domínio), com utilizador+senha ou só senha. Cada utilizador vê só os seus registos; o administrador vê todos e pode filtrar por pessoa. Não está na tela de Utilizadores. As senhas ficam cifradas e só se revelam ao pedir «Ver senha».",
+    a: "Cofre de senhas de equipamentos, servidores (IP/host) e sites (domínio), com usuário+senha ou só senha. Cada usuário vê só os seus registos; o administrador vê todos e pode filtrar por pessoa. Não está na tela de Usuários. As senhas ficam cifradas e só se revelam ao pedir «Ver senha».",
     cat: "funcoes",
   },
   {
     q: "Quem pode aceder a Configurações?",
-    a: "Administradores ou utilizadores com permissões específicas de configurações.",
+    a: "Administradores ou usuários com permissões específicas de configurações.",
     cat: "configurar",
   },
   {
@@ -331,7 +331,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como restauro um dump SQL?",
-    a: "Com a ferramenta do Postgres (psql ou equivalente no Docker), apontando para o utilizador/base correctos. Idealmente com a API parada.",
+    a: "Com a ferramenta do Postgres (psql ou equivalente no Docker), apontando para o usuário/base correctos. Idealmente com a API parada.",
     cat: "configurar",
   },
   {
@@ -361,7 +361,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Preciso de internet no servidor NOC?",
-    a: "Para Telegram, geolocalização de endereços, actualizações e algumas integrações, sim. O monitoramento local na LAN funciona sem Internet.",
+    a: "Para Telegram, geolocalização de endereços, atualizações e algumas integrações, sim. O monitoramento local na LAN funciona sem Internet.",
     cat: "como_funciona",
   },
   {
@@ -445,8 +445,8 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     cat: "tecnico",
   },
   {
-    q: "Como actualizo o NetQuasar?",
-    a: "Actualize a imagem/binário, aplique migrações (automáticas na arranque quando configurado) e reinicie. Faça backup antes.",
+    q: "Como atualizo o NetQuasar?",
+    a: "Atualize a imagem/binário, aplique migrações (automáticas na arranque quando configurado) e reinicie. Faça backup antes.",
     cat: "configurar",
   },
   {
@@ -461,7 +461,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como protejo o acesso?",
-    a: "Utilizadores com palavra-passe, sessão, permissões por módulo e restrição à rede de gestão/VPN.",
+    a: "Usuários com palavra-passe, sessão, permissões por módulo e restrição à rede de gestão/VPN.",
     cat: "configurar",
   },
   {
@@ -501,7 +501,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O indicador de actividade no topo — o que é?",
-    a: "Mostra actividade recente do monitoramento/sistema para a interface actualizar dados.",
+    a: "Mostra actividade recente do monitoramento/sistema para a interface atualizar dados.",
     cat: "funcoes",
   },
   {
@@ -551,12 +551,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como configuro aparência?",
-    a: "Configurações → Aparência: cada utilizador escolhe o tema claro ou escuro da sua conta.",
+    a: "Configurações → Aparência: cada usuário escolhe o tema claro ou escuro da sua conta.",
     cat: "configurar",
   },
   {
     q: "Tema claro/escuro existe?",
-    a: "Sim — é uma preferência individual em Configurações → Aparência. Utilizadores novos começam no tema escuro.",
+    a: "Sim — é uma preferência individual em Configurações → Aparência. Usuários novos começam no tema escuro.",
     cat: "configurar",
   },
   {

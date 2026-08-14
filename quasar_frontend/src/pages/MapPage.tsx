@@ -489,11 +489,13 @@ export function MapPage() {
   const infraCacheRef = useRef<Map<string, InfrastructurePoint>>(new Map());
   const infraCacheScopeRef = useRef("");
   const [infraStablePoints, setInfraStablePoints] = useState<InfrastructurePoint[]>([]);
+  const connCacheRef = useRef<Map<string, ConnectionPoint>>(new Map());
 
   useEffect(() => {
     const scope = `${infraKinds.join(",")}|${projectFilterId}`;
     if (infraCacheScopeRef.current !== scope) {
       infraCacheRef.current.clear();
+      connCacheRef.current.clear();
       infraCacheScopeRef.current = scope;
     }
     const incoming = infraPts.data?.points;
@@ -502,7 +504,11 @@ export function MapPage() {
     for (const p of incoming) {
       cache.set(`${p.point_type}:${p.id}`, p);
     }
-    const keep = expandMapBounds(queryBounds, 0.6);
+    if (infraPts.isFetching) {
+      setInfraStablePoints(Array.from(cache.values()));
+      return;
+    }
+    const keep = expandMapBounds(queryBounds, 1.25);
     const next: InfrastructurePoint[] = [];
     for (const [k, p] of cache) {
       const lat = Number(p.lat);
@@ -521,13 +527,45 @@ export function MapPage() {
       next.push(p);
     }
     setInfraStablePoints(next);
-  }, [infraPts.data?.points, queryBounds, infraKinds, projectFilterId]);
+  }, [infraPts.data?.points, infraPts.isFetching, queryBounds, infraKinds, projectFilterId]);
+
+  useEffect(() => {
+    const incoming = connPts.data?.points;
+    if (!Array.isArray(incoming)) return;
+    const cache = connCacheRef.current;
+    for (const p of incoming) {
+      cache.set(p.id, p);
+    }
+    if (connPts.isFetching || !queryBounds) return;
+    const keep = expandMapBounds(queryBounds, 1.25);
+    for (const [k, p] of cache) {
+      const lat = Number(p.lat);
+      const lng = Number(p.lng);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < keep.minLat ||
+        lat > keep.maxLat ||
+        lng < keep.minLng ||
+        lng > keep.maxLng
+      ) {
+        cache.delete(k);
+      }
+    }
+  }, [connPts.data?.points, connPts.isFetching, queryBounds]);
 
   const displayedPoints = useMemo(() => {
     const projectScoped = projectFilterId.trim() !== "";
     // Com projeto seleccionado: só infraestrutura desse projeto (sem equipamentos/logins).
     const equip = showEquipment && !projectScoped ? equipPoints : [];
-    const connRaw = showConnections && !projectScoped && Array.isArray(connPts.data?.points) ? connPts.data.points : [];
+    const connRaw =
+      showConnections && !projectScoped
+        ? connPts.isFetching && connCacheRef.current.size > 0
+          ? Array.from(connCacheRef.current.values())
+          : Array.isArray(connPts.data?.points)
+            ? connPts.data.points
+            : []
+        : [];
     const conn: Point[] = connRaw.map((c) => ({
       id: `conn-${c.id}`,
       description: `${c.client_name} (${c.login})`,
@@ -880,7 +918,7 @@ export function MapPage() {
         setRepositionPreview({ lat, lng });
         setRepositionTarget(null);
         setRepositionPreview(null);
-        setMapToast({ ok: true, text: "Posição actualizada." });
+        setMapToast({ ok: true, text: "Posição atualizada." });
         setFlyTo({ lat, lng, zoom: 17 });
         setFlyKey((k) => k + 1);
         if (selId === repositionTarget.mapId) {
@@ -911,7 +949,7 @@ export function MapPage() {
       await patchInfraPosition("cable", editingCable.entityId, draftPath[0].lat, draftPath[0].lng, draftPath);
       setEditingCable(null);
       setDraftPath([]);
-      setMapToast({ ok: true, text: "Trajeto do cabo actualizado." });
+      setMapToast({ ok: true, text: "Trajeto do cabo atualizado." });
     } catch (e) {
       setMapToast({ ok: false, text: e instanceof Error ? e.message : "Falha ao guardar o cabo." });
     }
@@ -1466,12 +1504,12 @@ export function MapPage() {
               try {
                 const r = await pts.refetch();
                 if (r.error) {
-                  setMapToast({ ok: false, text: (r.error as Error).message || "Erro ao actualizar o mapa." });
+                  setMapToast({ ok: false, text: (r.error as Error).message || "Erro ao atualizar o mapa." });
                 } else {
-                  setMapToast({ ok: true, text: "Mapa actualizado com os filtros actuais." });
+                  setMapToast({ ok: true, text: "Mapa atualizado com os filtros actuais." });
                 }
               } catch (e) {
-                setMapToast({ ok: false, text: e instanceof Error ? e.message : "Erro ao actualizar o mapa." });
+                setMapToast({ ok: false, text: e instanceof Error ? e.message : "Erro ao atualizar o mapa." });
               } finally {
                 setFitBoundsVersion((v) => v + 1);
               }
@@ -1960,7 +1998,7 @@ export function MapPage() {
                       setInfraPanelOpen(false);
                     }}
                     onSaved={(next) => {
-                      setMapToast({ ok: true, text: "Elemento actualizado." });
+                      setMapToast({ ok: true, text: "Elemento atualizado." });
                       setFlyTo({ lat: next.lat, lng: next.lng, zoom: 17 });
                       setFlyKey((k) => k + 1);
                       if (selId) {

@@ -5865,6 +5865,9 @@ h3 .info-hint {
   margin-top: 12px;
 }
 .automation-weekdays__day {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 42px;
   font: inherit;
   font-size: 12px;
@@ -5874,12 +5877,20 @@ h3 .info-hint {
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
+  user-select: none;
+}
+.automation-weekdays__day input {
+  margin: 0;
 }
 .automation-weekdays__day.is-on {
   color: var(--text);
   border-color: var(--accent, #3b82f6);
   background: var(--accent-dim, color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent));
   font-weight: 600;
+}
+.automation-weekdays__day:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 .automations-layout {
   display: grid;
@@ -8094,6 +8105,28 @@ details.collapsible-section .collapsible-section__body {
 }
 .vault-kind--site {
   color: #7c3aed;
+}
+.vault-kind--orcamento {
+  color: #d97706;
+}
+.vault-kind--informacao {
+  color: #0891b2;
+}
+.vault-kind--texto {
+  color: #64748b;
+}
+.vault-kind--outros {
+  color: #94a3b8;
+}
+.vault-kinds__label {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.vault-kinds__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .vault-target {
   display: flex;

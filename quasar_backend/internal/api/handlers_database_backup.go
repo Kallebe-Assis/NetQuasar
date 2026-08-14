@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"context"
@@ -67,8 +67,9 @@ func (s *Server) ensureAutomationDatabaseBackupSchema(ctx context.Context) error
 		CREATE TABLE IF NOT EXISTS automation_database_backup (
 			id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
 			enabled BOOLEAN NOT NULL DEFAULT false,
-			frequency TEXT NOT NULL DEFAULT 'daily' CHECK (frequency IN ('daily', 'weekly')),
+			frequency TEXT NOT NULL DEFAULT 'daily' CHECK (frequency IN ('daily', 'weekly', 'custom')),
 			day_of_week INT CHECK (day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)),
+			days_of_week INT[] NOT NULL DEFAULT '{}',
 			time_hhmm TEXT NOT NULL DEFAULT '03:00' CHECK (time_hhmm ~ '^\d{2}:\d{2}$'),
 			timezone TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
 			keep_last INT NOT NULL DEFAULT 14 CHECK (keep_last >= 1 AND keep_last <= 365),
@@ -81,6 +82,19 @@ func (s *Server) ensureAutomationDatabaseBackupSchema(ctx context.Context) error
 			running BOOLEAN NOT NULL DEFAULT false,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE automation_database_backup ADD COLUMN IF NOT EXISTS days_of_week INT[] NOT NULL DEFAULT '{}'`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE automation_database_backup DROP CONSTRAINT IF EXISTS automation_database_backup_frequency_check`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE automation_database_backup
+		ADD CONSTRAINT automation_database_backup_frequency_check
+		CHECK (frequency IN ('daily', 'weekly', 'custom'))
+	`); err != nil {
 		return err
 	}
 	_, err := pool.Exec(ctx, `INSERT INTO automation_database_backup (id) VALUES (1) ON CONFLICT (id) DO NOTHING`)
@@ -272,13 +286,14 @@ func (s *Server) getAutomationDatabaseBackup(w http.ResponseWriter, r *http.Requ
 	var en, running bool
 	var freq, th, tz, lastKey, lastStatus, lastErr, lastObj *string
 	var dow, keep *int
+	var days []int32
 	var lr *time.Time
 	var lastSize *int64
 	err := pool.QueryRow(r.Context(), `
 		SELECT enabled, frequency, day_of_week, time_hhmm, timezone, keep_last,
-			last_run_key, last_run_at, last_status, last_error, last_object_key, last_size_bytes, running
+			last_run_key, last_run_at, last_status, last_error, last_object_key, last_size_bytes, running, days_of_week
 		FROM automation_database_backup WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &keep, &lastKey, &lr, &lastStatus, &lastErr, &lastObj, &lastSize, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &keep, &lastKey, &lr, &lastStatus, &lastErr, &lastObj, &lastSize, &running, &days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -287,6 +302,7 @@ func (s *Server) getAutomationDatabaseBackup(w http.ResponseWriter, r *http.Requ
 		"enabled":         en,
 		"frequency":       freq,
 		"day_of_week":     dow,
+		"days_of_week":    intSliceFromInt32(days),
 		"time_hhmm":       th,
 		"timezone":        tz,
 		"keep_last":       keep,
@@ -323,6 +339,7 @@ func (s *Server) patchAutomationDatabaseBackup(w http.ResponseWriter, r *http.Re
 		d := int(v)
 		dow = &d
 	}
+	days := parseDaysOfWeekBody(body)
 	var keep *int
 	if v, ok := body["keep_last"].(float64); ok {
 		k := int(v)
@@ -340,9 +357,10 @@ func (s *Server) patchAutomationDatabaseBackup(w http.ResponseWriter, r *http.Re
 			last_run_key = CASE WHEN $7 THEN NULL ELSE last_run_key END,
 			last_run_at = CASE WHEN $7 THEN NULL ELSE last_run_at END,
 			running = CASE WHEN $7 THEN false ELSE running END,
+			days_of_week = COALESCE($8, days_of_week),
 			updated_at = now()
 		WHERE id = 1
-	`, boolPtr(body, "enabled"), freq, dow, th, tz, keep, resetLast)
+	`, boolPtr(body, "enabled"), freq, dow, th, tz, keep, resetLast, days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -375,11 +393,12 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	var en, running bool
 	var freq, th, tz, lastKey *string
 	var dow *int
+	var days []int32
 	var lr *time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT enabled, frequency, day_of_week, time_hhmm, timezone, last_run_key, last_run_at, running
+		SELECT enabled, frequency, day_of_week, time_hhmm, timezone, last_run_key, last_run_at, running, days_of_week
 		FROM automation_database_backup WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &lastKey, &lr, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &lastKey, &lr, &running, &days)
 	if err != nil || !en {
 		return
 	}
@@ -395,7 +414,7 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	if th != nil {
 		thStr = *th
 	}
-	runKey, due := scheduleutil.DailyWeeklyDue(en, frequency, tzStr, thStr, dow, lastKey, lr, running, time.Now())
+	runKey, due := scheduleutil.DailyWeeklyDueOnDays(en, frequency, tzStr, thStr, dow, intSliceFromInt32(days), lastKey, lr, running, time.Now())
 	if !due {
 		return
 	}

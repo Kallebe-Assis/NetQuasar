@@ -259,7 +259,7 @@ export function DeviceEditMonitoramentoTab({
               <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Credenciais Telnet (equipamento)</h4>
             </div>
             <div className="field">
-              <label>Utilizador Telnet</label>
+              <label>Usuário Telnet</label>
               <input
                 className="input mono"
                 style={{ width: "100%" }}
@@ -297,7 +297,7 @@ export function DeviceEditMonitoramentoTab({
               <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Credenciais SSH (equipamento)</h4>
             </div>
             <div className="field">
-              <label>Utilizador SSH</label>
+              <label>Usuário SSH</label>
               <input
                 className="input mono"
                 style={{ width: "100%" }}

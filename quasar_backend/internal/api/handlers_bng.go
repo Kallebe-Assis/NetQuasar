@@ -1006,15 +1006,15 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"found": false, "source": "snmp_live", "query": q,
 			"session": sessionRowToJSON(row),
-			"note":    "Utilizador não encontrado online no BNG.",
+			"note":    "Usuário não encontrado online no BNG.",
 		})
 		return
 	}
 	if err := bngcollect.UpsertSessionInLatestSnapshot(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
-		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao actualizar snapshot")
+		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao atualizar snapshot")
 	}
 	if err := bngcollect.TouchKnownLoginOnline(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
-		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao actualizar known login")
+		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao atualizar known login")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true, "source": "snmp_live", "query": q,

@@ -71,15 +71,17 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 		return
 	}
 	s.clearStaleAutomationRunning(ctx, "automation_alerts_digest")
+	ensureAutomationDaysOfWeek(ctx, pool, "automation_alerts_digest")
 	var en, running, tg, em bool
 	var freq, th, tz, lastKey, emailTo *string
 	var dow *int
+	var days []int32
 	var lr *time.Time
 	err := pool.QueryRow(ctx, `
 		SELECT enabled, frequency, day_of_week, time_hhmm, timezone,
-			channel_telegram, channel_email, email_to, last_run_key, last_run_at, running
+			channel_telegram, channel_email, email_to, last_run_key, last_run_at, running, days_of_week
 		FROM automation_alerts_digest WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lastKey, &lr, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lastKey, &lr, &running, &days)
 	if err != nil || !en {
 		return
 	}
@@ -95,7 +97,7 @@ func (s *Server) tryScheduledAlertsDigest(ctx context.Context, log *zerolog.Logg
 	if th != nil {
 		thStr = *th
 	}
-	runKey, due := scheduleutil.DailyWeeklyDue(en, frequency, tzStr, thStr, dow, lastKey, lr, running, time.Now())
+	runKey, due := scheduleutil.DailyWeeklyDueOnDays(en, frequency, tzStr, thStr, dow, intSliceFromInt32(days), lastKey, lr, running, time.Now())
 	if !due {
 		return
 	}
@@ -393,15 +395,17 @@ func ptrStr(p *string) string {
 }
 
 func (s *Server) getAutomationAlertsDigest(w http.ResponseWriter, r *http.Request) {
+	ensureAutomationDaysOfWeek(r.Context(), s.DB(), "automation_alerts_digest")
 	var en, running, tg, em bool
 	var freq, th, tz, emailTo, lastKey, ls, le *string
 	var dow *int
+	var days []int32
 	var lr *time.Time
 	err := s.DB().QueryRow(r.Context(), `
 		SELECT enabled, frequency, day_of_week, time_hhmm, timezone,
-			channel_telegram, channel_email, email_to, last_run_at, last_run_key, last_status, last_error, running
+			channel_telegram, channel_email, email_to, last_run_at, last_run_key, last_status, last_error, running, days_of_week
 		FROM automation_alerts_digest WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lr, &lastKey, &ls, &le, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lr, &lastKey, &ls, &le, &running, &days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -410,6 +414,7 @@ func (s *Server) getAutomationAlertsDigest(w http.ResponseWriter, r *http.Reques
 		"enabled": en, "frequency": freq, "day_of_week": dow, "time_hhmm": th, "timezone": tz,
 		"channel_telegram": tg, "channel_email": em, "email_to": emailTo,
 		"last_run_at": lr, "last_run_key": lastKey, "last_status": ls, "last_error": le, "running": running,
+		"days_of_week": intSliceFromInt32(days),
 	})
 }
 
@@ -558,7 +563,7 @@ func (s *Server) testSMTPSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func schedulePatchResetsLastRun(body map[string]any) bool {
-	for _, k := range []string{"time_hhmm", "timezone", "frequency", "day_of_week", "day_of_month"} {
+	for _, k := range []string{"time_hhmm", "timezone", "frequency", "day_of_week", "day_of_month", "days_of_week"} {
 		if _, ok := body[k]; ok {
 			return true
 		}
@@ -566,10 +571,61 @@ func schedulePatchResetsLastRun(body map[string]any) bool {
 	return false
 }
 
+func ensureAutomationDaysOfWeek(ctx context.Context, pool *pgxpool.Pool, table string) {
+	if pool == nil {
+		return
+	}
+	switch table {
+	case "automation_alerts_digest", "automation_bng_stats_report", "automation_database_backup":
+	default:
+		return
+	}
+	_, _ = pool.Exec(ctx, `ALTER TABLE `+table+` ADD COLUMN IF NOT EXISTS days_of_week INT[] NOT NULL DEFAULT '{}'`)
+	_, _ = pool.Exec(ctx, `ALTER TABLE `+table+` DROP CONSTRAINT IF EXISTS `+table+`_frequency_check`)
+	_, _ = pool.Exec(ctx, `ALTER TABLE `+table+` ADD CONSTRAINT `+table+`_frequency_check CHECK (frequency IN ('daily', 'weekly', 'custom'))`)
+}
+
+func parseDaysOfWeekBody(body map[string]any) *[]int32 {
+	raw, ok := body["days_of_week"]
+	if !ok || raw == nil {
+		return nil
+	}
+	var out []int32
+	switch v := raw.(type) {
+	case []any:
+		for _, x := range v {
+			switch n := x.(type) {
+			case float64:
+				d := int32(n)
+				if d >= 0 && d <= 6 {
+					out = append(out, d)
+				}
+			case int:
+				if n >= 0 && n <= 6 {
+					out = append(out, int32(n))
+				}
+			}
+		}
+	}
+	return &out
+}
+
+func intSliceFromInt32(in []int32) []int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]int, len(in))
+	for i, d := range in {
+		out[i] = int(d)
+	}
+	return out
+}
+
 func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table string, body map[string]any) error {
 	if pool == nil {
 		return fmt.Errorf("pool nil")
 	}
+	ensureAutomationDaysOfWeek(ctx, pool, table)
 	th, _ := body["time_hhmm"].(string)
 	tz, _ := body["timezone"].(string)
 	emailTo, _ := body["email_to"].(string)
@@ -582,6 +638,7 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 			d := int(v)
 			dow = &d
 		}
+		days := parseDaysOfWeekBody(body)
 		_, err := pool.Exec(ctx, `
 			UPDATE automation_bng_stats_report SET
 				enabled = COALESCE($1, enabled),
@@ -592,12 +649,13 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 				channel_telegram = COALESCE($6, channel_telegram),
 				channel_email = COALESCE($7, channel_email),
 				email_to = COALESCE($8, email_to),
+				days_of_week = COALESCE($10, days_of_week),
 				last_run_key = CASE WHEN $9 THEN NULL ELSE last_run_key END,
 				last_run_at = CASE WHEN $9 THEN NULL ELSE last_run_at END,
 				running = CASE WHEN $9 THEN false ELSE running END,
 				updated_at = now()
 			WHERE id = 1
-		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast)
+		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast, days)
 		return err
 	case "automation_alerts_digest":
 		freq, _ := body["frequency"].(string)
@@ -606,6 +664,7 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 			d := int(v)
 			dow = &d
 		}
+		days := parseDaysOfWeekBody(body)
 		_, err := pool.Exec(ctx, `
 			UPDATE automation_alerts_digest SET
 				enabled = COALESCE($1, enabled),
@@ -616,12 +675,13 @@ func patchAutomationSchedule(ctx context.Context, pool *pgxpool.Pool, table stri
 				channel_telegram = COALESCE($6, channel_telegram),
 				channel_email = COALESCE($7, channel_email),
 				email_to = COALESCE($8, email_to),
+				days_of_week = COALESCE($10, days_of_week),
 				last_run_key = CASE WHEN $9 THEN NULL ELSE last_run_key END,
 				last_run_at = CASE WHEN $9 THEN NULL ELSE last_run_at END,
 				running = CASE WHEN $9 THEN false ELSE running END,
 				updated_at = now()
 			WHERE id = 1
-		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast)
+		`, boolPtr(body, "enabled"), freq, dow, th, tz, boolPtr(body, "channel_telegram"), boolPtr(body, "channel_email"), nullStr(emailTo), resetLast, days)
 		return err
 	default:
 		var dom *int

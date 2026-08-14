@@ -5,7 +5,9 @@ import { SettingsField } from "../../components/SettingsField";
 import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
+import { daysFromSchedule, scheduleFromDays } from "../../lib/automationJobs";
 import { queryKeys } from "../../lib/queryKeys";
+import { AutomationWeekdayChecks } from "./AutomationRecurrenceFields";
 
 const TZ_DEFAULT = "America/Sao_Paulo";
 
@@ -13,6 +15,7 @@ type BackupSchedule = {
   enabled: boolean;
   frequency?: string;
   day_of_week?: number | null;
+  days_of_week?: number[] | null;
   time_hhmm: string;
   timezone: string;
   keep_last?: number;
@@ -48,7 +51,7 @@ export function DatabaseBackupAutomationCard() {
 
   const [enabled, setEnabled] = useState(false);
   const [freq, setFreq] = useState("daily");
-  const [dow, setDow] = useState("1");
+  const [days, setDays] = useState<number[]>([1]);
   const [timeVal, setTimeVal] = useState("03:00");
   const [tz, setTz] = useState(TZ_DEFAULT);
   const [keep, setKeep] = useState("14");
@@ -65,7 +68,7 @@ export function DatabaseBackupAutomationCard() {
     if (!cfg.data) return;
     setEnabled(cfg.data.enabled);
     setFreq(cfg.data.frequency ?? "daily");
-    setDow(cfg.data.day_of_week != null ? String(cfg.data.day_of_week) : "1");
+    setDays(daysFromSchedule(cfg.data));
     setTimeVal((cfg.data.time_hhmm ?? "03:00").slice(0, 5));
     setTz(cfg.data.timezone?.trim() || TZ_DEFAULT);
     setKeep(String(cfg.data.keep_last ?? 14));
@@ -87,8 +90,7 @@ export function DatabaseBackupAutomationCard() {
         method: "PATCH",
         json: {
           enabled,
-          frequency: freq,
-          day_of_week: Number(dow),
+          ...scheduleFromDays(freq, days),
           time_hhmm: timeVal,
           timezone: tz,
           keep_last: Number(keep) || 14,
@@ -265,16 +267,11 @@ export function DatabaseBackupAutomationCard() {
       </label>
       <div className="settings-fields-grid" style={{ marginTop: 10 }}>
         <SettingsField label="Frequência">
-          <select className="input" value={freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
+          <select className="input" value={freq === "custom" ? "weekly" : freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
             <option value="daily">Diário</option>
-            <option value="weekly">Semanal</option>
+            <option value="weekly">Dias da semana</option>
           </select>
         </SettingsField>
-        {freq === "weekly" && (
-          <SettingsField label="Dia da semana (0=Dom)">
-            <input className="input" value={dow} onChange={(e) => setDow(e.target.value)} disabled={busy || !enabled} />
-          </SettingsField>
-        )}
         <SettingsField label="Hora (HH:MM)">
           <input className="input" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
@@ -285,6 +282,12 @@ export function DatabaseBackupAutomationCard() {
           <input className="input" value={keep} onChange={(e) => setKeep(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
       </div>
+      {freq !== "daily" ? (
+        <>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0" }}>Dias da semana</p>
+          <AutomationWeekdayChecks days={days} disabled={busy || !enabled} onChange={setDays} />
+        </>
+      ) : null}
       <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
         <button type="button" className="btn btn--primary" disabled={patchSched.isPending || busy} onClick={() => patchSched.mutate()}>
           Salvar agendamento

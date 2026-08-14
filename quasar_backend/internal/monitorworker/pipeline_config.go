@@ -388,7 +388,7 @@ func loadDevicesForPipelineStep(ctx context.Context, pool *pgxpool.Pool, step Pi
 	if only != nil {
 		return base, nil
 	}
-	// Coleta ONU: por defeito TODAS as OLTs; filtro só se utilizador escolheu equipamentos específicos.
+	// Coleta ONU: por defeito TODAS as OLTs; filtro só se usuário escolheu equipamentos específicos.
 	if step.Kind == StepKindOltOnu && !strings.EqualFold(strings.TrimSpace(step.Scope.Target), "devices") {
 		return base, nil
 	}

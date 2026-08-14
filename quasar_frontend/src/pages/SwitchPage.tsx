@@ -180,7 +180,7 @@ export function SwitchPage() {
       apiFetch(`/api/v1/devices/${deviceId}`, { method: "PATCH", json: { switch_telnet_profile_id: profileId } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["devices-switch-list"] });
-      toastOk(pushToast, "Perfil telnet actualizado.");
+      toastOk(pushToast, "Perfil telnet atualizado.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao atribuir perfil."),
   });
@@ -199,9 +199,9 @@ export function SwitchPage() {
       if (data?.device_id) qc.setQueryData(["switch-if", id], data);
       qc.invalidateQueries({ queryKey: ["switch-if", id] });
       const n = data.interface_count ?? data.interface_table?.length;
-      toastOk(pushToast, typeof n === "number" ? `Interfaces actualizadas (${n}).` : "Interfaces actualizadas.");
+      toastOk(pushToast, typeof n === "number" ? `Interfaces atualizadas (${n}).` : "Interfaces atualizadas.");
     },
-    onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
+    onError: (e) => toastErr(pushToast, e, "Falha ao atualizar interfaces."),
   });
 
   const realtimeTick = useMutation({
@@ -237,7 +237,7 @@ export function SwitchPage() {
         }),
       );
     },
-    onError: (e) => toastErr(pushToast, e, "Falha na actualização em tempo real."),
+    onError: (e) => toastErr(pushToast, e, "Falha na atualização em tempo real."),
   });
 
   const runTelCollect = async () => {
@@ -404,7 +404,7 @@ export function SwitchPage() {
         {canMutate ? (
           <>
             <button type="button" className="mk-noc-btn" disabled={refreshIf.isPending || !selectedId} onClick={() => selectedId && refreshIf.mutate(selectedId)}>
-              {refreshIf.isPending ? "A actualizar…" : "Actualizar interfaces"}
+              {refreshIf.isPending ? "A atualizar…" : "Atualizar interfaces"}
             </button>
             <button
               type="button"

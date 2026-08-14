@@ -61,7 +61,7 @@ func RunUnauthorizedOnuQueryMulti(
 
 	ponsToQuery := resolvePonsForSerialSearch(0, ponIndexes)
 	if len(ponsToQuery) == 0 {
-		return OnuTelnetActionResult{Error: "informe portas PON ou actualize o snapshot da OLT para listar portas"}
+		return OnuTelnetActionResult{Error: "informe portas PON ou atualize o snapshot da OLT para listar portas"}
 	}
 
 	globalPre, perPonPre := splitUnauthorizedPreCommands(cfg.UnauthorizedOnuPreCommands)

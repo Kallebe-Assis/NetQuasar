@@ -389,7 +389,7 @@ export function AlertsPage() {
           Alertas
           <InfoHint label="Sobre a lista de alertas">
             <p>
-              Valores (latência, dBm, etc.) actualizam quando o worker grava na BD; renovação automática a cada ~
+              Valores (latência, dBm, etc.) atualizam quando o worker grava na BD; renovação automática a cada ~
               {Math.round(ALERTS_ACTIVE_REFRESH_MS / 1000)} s com esta página aberta.
             </p>
           </InfoHint>
@@ -732,7 +732,7 @@ export function AlertsPage() {
               Limpar datas
             </button>
             <button type="button" className="btn" onClick={() => void hist.refetch()}>
-              Actualizar
+              Atualizar
             </button>
           </div>
           <p style={{ color: "var(--muted)", fontSize: 12, marginTop: -4 }}>

@@ -342,7 +342,7 @@ func fleetLookupUserID(ctx context.Context, db *pgxpool.Pool, raw string) (*uuid
 	var id uuid.UUID
 	err := db.QueryRow(ctx, `SELECT id FROM users WHERE lower(login) = lower(trim($1)) LIMIT 1`, raw).Scan(&id)
 	if err == pgx.ErrNoRows {
-		return nil, errValidation("utilizador não encontrado: " + raw)
+		return nil, errValidation("usuário não encontrado: " + raw)
 	}
 	if err != nil {
 		return nil, err
@@ -452,7 +452,7 @@ func (s *Server) importFleetDriverRow(ctx context.Context, rec []string, colMap 
 			return errValidation("CPF já cadastrado")
 		}
 		if strings.Contains(low, "fleet_drivers_user_id") || strings.Contains(low, "user_id") {
-			return errValidation("utilizador já vinculado a outro motorista")
+			return errValidation("usuário já vinculado a outro motorista")
 		}
 		return err
 	}

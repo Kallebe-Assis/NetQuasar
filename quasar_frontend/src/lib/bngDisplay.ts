@@ -75,23 +75,41 @@ export function formatBngPercent(raw: unknown): string {
 export function formatBngUptime(raw: unknown): string {
   if (raw == null || raw === "") return "—";
   const s = String(raw).trim();
-  let sec = Number(s);
-  if (!Number.isFinite(sec) || sec < 0) {
-    const m = s.match(/(\d+)/);
-    if (!m) return s;
-    sec = Number(m[1]);
+  if (!s) return "—";
+
+  const timeticksParen = s.match(/\((\d+)\)/);
+  if (timeticksParen) {
+    return formatUptimeTicks(Number(timeticksParen[1]));
   }
-  // sysUpTime em centésimos de segundo (SNMP)
-  if (sec > 86400 * 365 * 50) {
-    sec = Math.floor(sec / 100);
+
+  const daysTime = s.match(/(\d+)\s*days?,?\s*(\d+):(\d+):(\d+)/i);
+  if (daysTime) {
+    const d = Number(daysTime[1]);
+    const h = Number(daysTime[2]);
+    const m = Number(daysTime[3]);
+    const sec = Number(daysTime[4]);
+    if ([d, h, m, sec].every(Number.isFinite)) {
+      const totalSec = d * 86400 + h * 3600 + m * 60 + sec;
+      return formatUptimeTicks(totalSec * 100);
+    }
   }
-  const days = Math.floor(sec / 86400);
-  const hours = Math.floor((sec % 86400) / 3600);
-  const mins = Math.floor((sec % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${mins}min`;
-  if (mins > 0) return `${mins} min`;
-  return `${sec}s`;
+
+  const dayParts = s.match(/(\d+)\s*(?:days?|dias?)/i);
+  if (dayParts && !/^\d+$/.test(s)) {
+    let totalSec = Number(dayParts[1]) * 86400;
+    const hms = s.match(/(\d+):(\d+):(\d+)/);
+    if (hms) {
+      totalSec += Number(hms[1]) * 3600 + Number(hms[2]) * 60 + Number(hms[3]);
+    }
+    if (totalSec > 0) return formatUptimeTicks(totalSec * 100);
+  }
+
+  const n = Number(s.replace(/[^\d.]/g, ""));
+  if (Number.isFinite(n) && n >= 0) {
+    return formatUptimeTicks(n);
+  }
+
+  return s;
 }
 
 export function formatBngTemperature(raw: unknown): string {

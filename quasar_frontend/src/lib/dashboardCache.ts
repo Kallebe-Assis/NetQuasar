@@ -80,7 +80,7 @@ export async function refreshDashboard(qc: QueryClient, days = DASHBOARD_DEFAULT
   ]);
 }
 
-/** Após coleta OLT/MikroTik — actualiza gráficos do dashboard se estiverem abertos. */
+/** Após coleta OLT/MikroTik — atualiza gráficos do dashboard se estiverem abertos. */
 export function invalidateDashboardAfterCollect(qc: QueryClient): void {
   void qc.invalidateQueries({ queryKey: ["dashboard-analytics"], refetchType: "active" });
   void qc.invalidateQueries({ queryKey: dashboardTopLatencyKey, refetchType: "active" });

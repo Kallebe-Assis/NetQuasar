@@ -63,7 +63,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isActive {
 		s.appendAuditLog(r.Context(), "auth", id.String(), "login_failed", email, nil, map[string]any{"reason": "inactive"})
-		writeErr(w, http.StatusUnauthorized, "AUTH_FAILED", "utilizador inactivo", nil)
+		writeErr(w, http.StatusUnauthorized, "AUTH_FAILED", "usuário inactivo", nil)
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword(hash, []byte(pw)); err != nil {

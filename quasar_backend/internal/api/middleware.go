@@ -47,7 +47,7 @@ func isAPIPublicPath(p string) bool {
 	return false
 }
 
-// apiCombinedAuth exige X-API-Key válida ou JWT de utilizador quando cfg.RequireAuth().
+// apiCombinedAuth exige X-API-Key válida ou JWT de usuário quando cfg.RequireAuth().
 // Sem RequireAuth (dev típico), /api fica aberto como antes.
 func apiCombinedAuth(cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

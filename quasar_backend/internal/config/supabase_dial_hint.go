@@ -74,7 +74,7 @@ func SupabaseDirectDBDockerHint(ctx context.Context, dsn string, connectErr stri
 	if hasV4 || !hasV6 {
 		return ""
 	}
-	return `O hostname db.….supabase.co (portas 5432 ou 6543) resolve em geral só para IPv6. Use o Session pooler do painel (Connect → Session): host aws-0- ou aws-1-REGIÃO.pooler.supabase.com (a numeração varia por projeto), porta 5432, utilizador postgres.PROJECTREF. Ver: https://supabase.com/docs/guides/database/connecting-to-postgres`
+	return `O hostname db.….supabase.co (portas 5432 ou 6543) resolve em geral só para IPv6. Use o Session pooler do painel (Connect → Session): host aws-0- ou aws-1-REGIÃO.pooler.supabase.com (a numeração varia por projeto), porta 5432, usuário postgres.PROJECTREF. Ver: https://supabase.com/docs/guides/database/connecting-to-postgres`
 }
 
 // ErrDetailsWithSupabaseHint devolve um mapa com campo hint quando aplicável (para JSON em writeErr).

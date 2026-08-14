@@ -35,7 +35,7 @@ Documentação complementar: [Backend](quasar_backend/README-BACKEND.md) · [Fro
          PostgreSQL                      Redis (tempo real)
 ```
 
-O **worker de monitoramento** (`monitorworker.Run`) corre em goroutine dedicada, lê o estado em `monitoring_runtime` (ligado/desligado, modo) e dispara ciclos conforme `monitoring_intervals` e a ordem de passos em **Configurações → Monitoramento → Pipeline**. Cada alteração relevante actualiza timestamps em `monitoring_runtime` para o frontend invalidar caches (polling + `useMonitoringLiveSync`).
+O **worker de monitoramento** (`monitorworker.Run`) corre em goroutine dedicada, lê o estado em `monitoring_runtime` (ligado/desligado, modo) e dispara ciclos conforme `monitoring_intervals` e a ordem de passos em **Configurações → Monitoramento → Pipeline**. Cada alteração relevante atualiza timestamps em `monitoring_runtime` para o frontend invalidar caches (polling + `useMonitoringLiveSync`).
 
 **Modo `full`:** o ping pode correr **em paralelo** (`ping_parallel=true`, intervalo `ping_seconds`) enquanto telemetria, interfaces e OLT correm **em sequência** num pipeline único (intervalo `pipeline_cycle_seconds`). Com `ping_parallel=false`, o ping entra no pipeline em vez de correr à parte. **Modo `simple_ping`:** apenas latência/ICMP-TCP, sempre activo independentemente de `ping_parallel`.
 
@@ -60,8 +60,8 @@ Ligação/desligação: **Monitoramento** na UI ou `POST /api/v1/monitoring/star
 | **Latência / ping** | `ping_seconds` (paralelo) ou dentro do pipeline | Para cada equipamento monitorizado: ICMP e fallback TCP; grava `device_probe_cache` (`reach_ok`, `latency_ms`); abre/fecha alerta `ping_unreachable`; histórico em `ping_history`. Requer **3 leituras consecutivas** antes de abrir alerta de latência alta ou offline. |
 | **Telemetria SNMP** | Passo no pipeline (`pipeline_cycle_seconds`) | Walk/get conforme perfil do equipamento; amostras em `telemetry_samples` (CPU, memória, temperatura, uptime); **no fim de cada ciclo OK** chama `RunPostTelemetryAlertEval` → alertas `telemetry_threshold` e `uptime_restart_low` (também no refresh manual) |
 | **Interfaces (IF-MIB)** | Passo no pipeline | Walk IF-MIB (+ IF-MIB-X); grava `interface_snapshots`; MikroTik: potências SFP **e temperatura do módulo**; alertas `mikrotik_sfp_tx` / `mikrotik_sfp_rx` / `mikrotik_sfp_temp`; detecta transição UP→DOWN → `interface_down_transition` |
-| **OLT PON / ONUs** | Passo no pipeline | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, actualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs, potência óptica ONU/PON e temperatura da PON |
-| **Pipeline completo** | `pipeline_cycle_seconds` | Executa os passos activos em sequência (ping incluído se `ping_parallel=false`); actualiza `last_pipeline_cycle_at` |
+| **OLT PON / ONUs** | Passo no pipeline | Por OLT online com telemetria activa: colecta contagem de ONUs por PON, atualiza `olt_snapshots`, deriva status PON (ON se ≥1 ONU online), avalia alertas de queda/subida de ONUs, potência óptica ONU/PON e temperatura da PON |
+| **Pipeline completo** | `pipeline_cycle_seconds` | Executa os passos activos em sequência (ping incluído se `ping_parallel=false`); atualiza `last_pipeline_cycle_at` |
 
 Os campos `telemetry_seconds`, `interface_snapshot_seconds` e `olt_if_derived_pon_seconds` continuam disponíveis para ciclos **manuais** (`POST /monitoring/cycles/...`) e referência na UI; no worker automático em modo full, o gatilho principal é `pipeline_cycle_seconds`.
 
@@ -75,7 +75,7 @@ Execução manual de um ciclo: `POST /api/v1/monitoring/cycles/{latency|telemetr
 2. **OLT por perfil de fabricante** (VSOL, ZTE, etc.): lê `olt_vendor_models` (passos SNMP/telnet); executa `onu_metrics_collect` ou `onu_snmp_walk`; grava o mesmo `olt_snapshots`.
 3. **Refresh manual** na tela OLT: `POST /olt/devices/{id}/refresh` executa o perfil completo do modelo (scope `full` ou `onu`).
 
-A UI OLT e o Dashboard leem `olt_snapshots` e actualizam-se via polling + sinalização de `monitoring_runtime.activity_updated_at`.
+A UI OLT e o Dashboard leem `olt_snapshots` e atualizam-se via polling + sinalização de `monitoring_runtime.activity_updated_at`.
 
 ### Coleta nocturna
 
@@ -109,7 +109,7 @@ Cada métrica na UI só gera alerta se estiver **habilitada**, o perfil global e
 
 1. **Detecção** — worker ou refresh manual compara métrica com limiar.
 2. **Criação** — `INSERT` em `alert_instances` se não existir alerta aberto do mesmo padrão (`device_id` + `alert_type` + `meta.key`).
-3. **Actualização** — mesma condição mantém o alerta aberto e actualiza `message` / `meta` (ex.: latência 243→210 ms).
+3. **Atualização** — mesma condição mantém o alerta aberto e atualiza `message` / `meta` (ex.: latência 243→210 ms).
 4. **Notificação** — `alertnotify.SendMonitoringTelegramAndPatchMeta` envia Telegram (config «monitoring») e regista resultado em `meta.telegram`.
 5. **Resolução** — quando a condição normaliza, `closed_at` é preenchido e Telegram de resolução é enviado.
 
@@ -127,7 +127,7 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 | Acção | Função |
 |-------|--------|
 | **Ignorar alerta** | Persiste em `alert_ignores` (equipamento + tipo + chave PON/interface/métrica); fecha alertas abertos do padrão; bloqueia novos alertas na UI **e** no Telegram |
-| **Verificar** | Reavalia a condição (ping, latência, snapshot SFP, OLT, etc.) e actualiza valor na lista ou fecha se normalizado |
+| **Verificar** | Reavalia a condição (ping, latência, snapshot SFP, OLT, etc.) e atualiza valor na lista ou fecha se normalizado |
 | **Verificar alertas** (global) | Recalcula pings + reverifica até 250 alertas abertos |
 | **Alertas ignorados** | Modal com lista completa; opção **Reactivar** remove o silêncio |
 | **Supressões** (`alert_suppressions`) | Filtro por scope POP/global na listagem (legado; ignorar por equipamento é o modelo preferido) |
@@ -160,7 +160,7 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 
 **Função:** latência e estado de reachability em fluxo contínuo.
 
-**Como funciona:** WebSocket `GET /realtime/ws` (broker Redis quando configurado) ou polling `GET /realtime/ping`. Actualiza lista de equipamentos sem esperar o intervalo completo do worker.
+**Como funciona:** WebSocket `GET /realtime/ws` (broker Redis quando configurado) ou polling `GET /realtime/ping`. Atualiza lista de equipamentos sem esperar o intervalo completo do worker.
 
 ---
 
@@ -191,7 +191,7 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 - **SNMP walk** — descoberta de OIDs / inventário.
 - **Backup de config** — texto guardado em `device_config_backups`.
 
-Estado operacional vem de `device_probe_cache` actualizado pelo worker.
+Estado operacional vem de `device_probe_cache` atualizado pelo worker.
 
 ---
 
@@ -254,7 +254,7 @@ Estado operacional vem de `device_probe_cache` actualizado pelo worker.
 
 **Função:** monitorização de PONs e ONUs.
 
-**Como funciona:** lista OLTs com snapshot (`olt_snapshots`: `pons`, `summary`, totais computados). Detalhe por OLT: tabela PON (status ON/OFF derivado de ONUs online), ONUs VSOL/ZTE, interfaces, log de coleta SNMP. **Actualizar** dispara refresh pelo perfil do fabricante. Relatórios mensais de ONU (histórico e export). Totais globais de ONUs online/offline no dashboard e nesta tela. Coleta periódica via worker (intervalo em configurações).
+**Como funciona:** lista OLTs com snapshot (`olt_snapshots`: `pons`, `summary`, totais computados). Detalhe por OLT: tabela PON (status ON/OFF derivado de ONUs online), ONUs VSOL/ZTE, interfaces, log de coleta SNMP. **Atualizar** dispara refresh pelo perfil do fabricante. Relatórios mensais de ONU (histórico e export). Totais globais de ONUs online/offline no dashboard e nesta tela. Coleta periódica via worker (intervalo em configurações).
 
 ---
 
@@ -303,9 +303,9 @@ O endpoint legado `GET /api/v1/events` continua a ser a linha do tempo de sistem
 
 ### Registros (`/registros`)
 
-**Função:** cofre de senhas de acesso (equipamento, servidor ou site). Todos os utilizadores autenticados vêem o menu; cada um só acede aos **seus** registos. Administradores vêem **todos** e filtram por pessoa. Não está na tela de Utilizadores.
+**Função:** cofre de senhas de acesso (equipamento, servidor ou site). Todos os usuários autenticados vêem o menu; cada um só acede aos **seus** registos. Administradores vêem **todos** e filtram por pessoa. Não está na tela de Usuários.
 
-**Como funciona:** cada registo pertence a um utilizador. Pode guardar utilizador+senha ou só a senha. Equipamento escolhe-se da lista; servidor pede IP/host; site pede domínio. Senhas cifradas em AES-GCM (`credential_records.password_blob`); revelação pontual em `POST /api/v1/credential-records/{id}/reveal` (com auditoria). API: `/api/v1/credential-records`.
+**Como funciona:** cada registo pertence a um usuário. Pode guardar usuário+senha ou só a senha. Equipamento escolhe-se da lista; servidor pede IP/host; site pede domínio. Senhas cifradas em AES-GCM (`credential_records.password_blob`); revelação pontual em `POST /api/v1/credential-records/{id}/reveal` (com auditoria). API: `/api/v1/credential-records`.
 
 ---
 
@@ -325,21 +325,21 @@ Inclui: alertas activos, alertas por categoria, equipamentos em atenção, PONs 
 
 ### Configurações (`/settings`)
 
-Qualquer utilizador autenticado acede às preferências pessoais. As restantes abas exigem `settings.*` ou admin.
+Qualquer usuário autenticado acede às preferências pessoais. As restantes abas exigem `settings.*` ou admin.
 
 | Secção | Função |
 |--------|--------|
 | **Alertas** | **Pessoal:** toast em qualquer ecrã, som de alerta (4 sons padrão + MP3). **Global** (se tiver permissão): limiares CPU/temp/SFP/OLT/BNG |
-| **Aparência** | Tema claro/escuro **por utilizador** (`users.preferences`) |
+| **Aparência** | Tema claro/escuro **por usuário** (`users.preferences`) |
 | **Base de dados** | DSN, teste, limpeza, backup B2 |
-| **Utilizadores** | CRUD e perfis de permissão |
+| **Usuários** | CRUD e perfis de permissão |
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
 | **OLT / MikroTik / Switch / BNG** | Perfis e coleta |
 | **Telegram** | Bot monitoring e relatórios |
 | **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial |
 | **Auditoria** | `ops_audit_log` |
 
-Preferências por conta (novos utilizadores: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
+Preferências por conta (novos usuários: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
 
 ---
 
@@ -347,7 +347,7 @@ Preferências por conta (novos utilizadores: toast e som ligados): tema, `alert_
 
 ### Toast e som no browser
 
-Cada utilizador liga/desliga em **Configurações → Alertas**:
+Cada usuário liga/desliga em **Configurações → Alertas**:
 - **Toast em qualquer ecrã** — se desligado, o aviso só aparece em Monitoramento e Alertas.
 - **Som de alerta** — sons padrão ou MP3 próprio (`/api/v1/me/alert-sounds`).
 
@@ -369,7 +369,7 @@ Em **Configurações → Automações**: backup PostgreSQL (B2), digest de alert
 - **Login UI** — `POST /auth/login` → JWT (`NETQUASAR_SESSION_SECRET`).
 - **API keys** — cabeçalho `X-API-Key` (`NETQUASAR_API_KEYS`).
 - Permissões por perfil (`permission_profiles`); mutações e coletas exigem a chave correspondente ou admin.
-- Preferências do utilizador autenticado: `/api/v1/me/preferences`.
+- Preferências do usuário autenticado: `/api/v1/me/preferences`.
 
 Health: `GET /health` · Métricas Prometheus: `GET /metrics`
 
@@ -467,7 +467,7 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 ## Configuração inicial
 
 1. Aceder à UI → login ou `/config-setup` se a base estiver vazia.
-2. **Configurações** (admin) — intervalos, Telegram, perfis OLT, utilizadores.
+2. **Configurações** (admin) — intervalos, Telegram, perfis OLT, usuários.
 3. Cadastrar **POPs** e **Equipamentos** (com IP e SNMP).
 4. **Monitoramento** → iniciar modo **Full**.
 5. Ajustar **limiares de alerta** em Configurações.
@@ -532,7 +532,7 @@ Redireccionamentos legados: definidos em `LEGACY_ROUTE_REDIRECTS` (`routes.ts`) 
 | Autenticação Postgres falha | DSN, password URL-encoded, credenciais Supabase |
 | Docker + Supabase | Usar **Session pooler** (IPv4) — ver README-BACKEND |
 | Interfaces MikroTik incompletas | Aumentar `interface_snapshot_timeout_ms` |
-| OLT sem actualizar PONs | Monitoramento **Full** ligado; intervalo `olt_if_derived_pon_seconds`; equipamento online |
+| OLT sem atualizar PONs | Monitoramento **Full** ligado; intervalo `olt_if_derived_pon_seconds`; equipamento online |
 | Alertas não no Telegram | Configurações → Telegram monitoring; bot/chat correctos |
 | Migrações em falta | `go run ./cmd/migrate/` |
 

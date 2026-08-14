@@ -7,9 +7,12 @@ import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import {
   automationJobDef,
+  daysFromSchedule,
   draftFromJob,
   formatRecurrence,
+  scheduleFromDays,
 } from "../../lib/automationJobs";
+import { AutomationWeekdayChecks } from "./AutomationRecurrenceFields";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
 import { AddAutomationModal } from "./AddAutomationModal";
@@ -25,6 +28,7 @@ type ScheduleCfg = {
   frequency?: string;
   day_of_week?: number | null;
   day_of_month?: number | null;
+  days_of_week?: number[] | null;
   time_hhmm: string;
   timezone: string;
   channel_telegram: boolean;
@@ -55,7 +59,7 @@ function DigestScheduleCard() {
   });
   const [enabled, setEnabled] = useState(false);
   const [freq, setFreq] = useState("daily");
-  const [dow, setDow] = useState("1");
+  const [days, setDays] = useState<number[]>([1]);
   const [timeVal, setTimeVal] = useState("07:30");
   const [tz, setTz] = useState(TZ_DEFAULT);
   const [tg, setTg] = useState(true);
@@ -66,7 +70,7 @@ function DigestScheduleCard() {
     if (!cfg.data) return;
     setEnabled(cfg.data.enabled);
     setFreq(cfg.data.frequency ?? "daily");
-    setDow(cfg.data.day_of_week != null ? String(cfg.data.day_of_week) : "1");
+    setDays(daysFromSchedule(cfg.data));
     setTimeVal((cfg.data.time_hhmm ?? "07:30").slice(0, 5));
     setTz(cfg.data.timezone?.trim() || TZ_DEFAULT);
     setTg(cfg.data.channel_telegram);
@@ -80,8 +84,7 @@ function DigestScheduleCard() {
         method: "PATCH",
         json: {
           enabled,
-          frequency: freq,
-          day_of_week: Number(dow),
+          ...scheduleFromDays(freq, days),
           time_hhmm: timeVal,
           timezone: tz,
           channel_telegram: tg,
@@ -123,22 +126,11 @@ function DigestScheduleCard() {
       </label>
       <div className="settings-fields-grid" style={{ marginTop: 10 }}>
         <SettingsField label="Frequência">
-          <select className="input" value={freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
+          <select className="input" value={freq === "custom" ? "weekly" : freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
             <option value="daily">Diário</option>
-            <option value="weekly">Semanal</option>
+            <option value="weekly">Dias da semana</option>
           </select>
         </SettingsField>
-        {freq === "weekly" && (
-          <SettingsField label="Dia da semana">
-            <select className="input" value={dow} onChange={(e) => setDow(e.target.value)} disabled={busy || !enabled}>
-              {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((l, i) => (
-                <option key={l} value={String(i)}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </SettingsField>
-        )}
         <SettingsField label="Hora">
           <input className="input" type="time" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
@@ -146,6 +138,12 @@ function DigestScheduleCard() {
           <input className="input mono" value={tz} onChange={(e) => setTz(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
       </div>
+      {freq !== "daily" ? (
+        <>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0" }}>Dias da semana</p>
+          <AutomationWeekdayChecks days={days} disabled={busy || !enabled} onChange={setDays} />
+        </>
+      ) : null}
       <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
         <label className="row" style={{ gap: 6 }}>
           <input type="checkbox" checked={tg} onChange={(e) => setTg(e.target.checked)} disabled={busy} />
@@ -191,7 +189,7 @@ function BngStatsScheduleCard() {
   });
   const [enabled, setEnabled] = useState(false);
   const [freq, setFreq] = useState("daily");
-  const [dow, setDow] = useState("1");
+  const [days, setDays] = useState<number[]>([1]);
   const [timeVal, setTimeVal] = useState("08:00");
   const [tz, setTz] = useState(TZ_DEFAULT);
   const [tg, setTg] = useState(true);
@@ -202,7 +200,7 @@ function BngStatsScheduleCard() {
     if (!cfg.data) return;
     setEnabled(cfg.data.enabled);
     setFreq(cfg.data.frequency ?? "daily");
-    setDow(cfg.data.day_of_week != null ? String(cfg.data.day_of_week) : "1");
+    setDays(daysFromSchedule(cfg.data));
     setTimeVal((cfg.data.time_hhmm ?? "08:00").slice(0, 5));
     setTz(cfg.data.timezone?.trim() || TZ_DEFAULT);
     setTg(cfg.data.channel_telegram);
@@ -216,8 +214,7 @@ function BngStatsScheduleCard() {
         method: "PATCH",
         json: {
           enabled,
-          frequency: freq,
-          day_of_week: Number(dow),
+          ...scheduleFromDays(freq, days),
           time_hhmm: timeVal,
           timezone: tz,
           channel_telegram: tg,
@@ -262,22 +259,11 @@ function BngStatsScheduleCard() {
       </label>
       <div className="settings-fields-grid" style={{ marginTop: 10 }}>
         <SettingsField label="Frequência">
-          <select className="input" value={freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
+          <select className="input" value={freq === "custom" ? "weekly" : freq} onChange={(e) => setFreq(e.target.value)} disabled={busy || !enabled}>
             <option value="daily">Diário</option>
-            <option value="weekly">Semanal</option>
+            <option value="weekly">Dias da semana</option>
           </select>
         </SettingsField>
-        {freq === "weekly" && (
-          <SettingsField label="Dia da semana">
-            <select className="input" value={dow} onChange={(e) => setDow(e.target.value)} disabled={busy || !enabled}>
-              {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((l, i) => (
-                <option key={l} value={String(i)}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </SettingsField>
-        )}
         <SettingsField label="Hora">
           <input className="input" type="time" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
@@ -285,6 +271,12 @@ function BngStatsScheduleCard() {
           <input className="input mono" value={tz} onChange={(e) => setTz(e.target.value)} disabled={busy || !enabled} />
         </SettingsField>
       </div>
+      {freq !== "daily" ? (
+        <>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0" }}>Dias da semana</p>
+          <AutomationWeekdayChecks days={days} disabled={busy || !enabled} onChange={setDays} />
+        </>
+      ) : null}
       <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
         <label className="row" style={{ gap: 6 }}>
           <input type="checkbox" checked={tg} onChange={(e) => setTg(e.target.checked)} disabled={busy} />
@@ -632,8 +624,8 @@ export function ScheduledReportsPanel() {
           <button
             type="button"
             className="btn btn--icon btn--icon-menu"
-            title="Actualizar"
-            aria-label="Actualizar"
+            title="Atualizar"
+            aria-label="Atualizar"
             disabled={overview.isFetching}
             onClick={() => void overview.refetch()}
           >

@@ -291,10 +291,10 @@ export function PopsPage() {
       invalidate();
       setEditLoc(null);
       setSharedWarn(null);
-      toastOk(pushToast, "Localidade actualizada.");
+      toastOk(pushToast, "Localidade atualizada.");
     },
     onError: (err) => {
-      if (!handleSharedConflict(err, "edit")) toastErr(pushToast, err, "Falha ao actualizar localidade.");
+      if (!handleSharedConflict(err, "edit")) toastErr(pushToast, err, "Falha ao atualizar localidade.");
     },
   });
 
@@ -325,9 +325,9 @@ export function PopsPage() {
     onSuccess: () => {
       invalidate();
       setEditPop(null);
-      toastOk(pushToast, "POP actualizado.");
+      toastOk(pushToast, "POP atualizado.");
     },
-    onError: (err) => toastErr(pushToast, err, "Falha ao actualizar POP."),
+    onError: (err) => toastErr(pushToast, err, "Falha ao atualizar POP."),
   });
 
   const unlinkPop = useMutation({

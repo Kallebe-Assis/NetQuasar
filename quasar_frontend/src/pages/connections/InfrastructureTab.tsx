@@ -408,7 +408,7 @@ export function InfrastructureTab({
       setFormOpen(false);
       setEditId(null);
       setForm(emptyForm());
-      toastOk(pushToast, editId ? `${meta.singular} actualizada.` : `${meta.singular} criada.`);
+      toastOk(pushToast, editId ? `${meta.singular} atualizada.` : `${meta.singular} criada.`);
     },
     onError: (e) => toastErr(pushToast, e, "Falha ao guardar."),
   });

@@ -307,9 +307,9 @@ export function DashboardPage() {
     <div className={`dashboard-page${pageIn ? " dashboard-page--in" : ""}`}>
       <ConfirmModal
         open={refreshConfirmOpen}
-        title="Actualizar dashboard"
+        title="Atualizar dashboard"
         message="Vai recarregar todos os gráficos e indicadores do dashboard. Esta operação pode demorar alguns segundos, conforme o volume de dados no servidor."
-        confirmLabel="Actualizar agora"
+        confirmLabel="Atualizar agora"
         cancelLabel="Cancelar"
         busy={refreshing}
         onCancel={() => !refreshing && setRefreshConfirmOpen(false)}
@@ -333,7 +333,7 @@ export function DashboardPage() {
           title="Recarregar todos os dados do dashboard"
         >
           <RefreshCw size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-          {refreshing ? "A actualizar…" : "Actualizar dados"}
+          {refreshing ? "A atualizar…" : "Atualizar dados"}
         </button>
       </div>
 
@@ -350,7 +350,7 @@ export function DashboardPage() {
         </label>
         <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
           Gerado: {dash.data?.generated_at ? new Date(dash.data.generated_at).toLocaleString("pt-PT") : "—"}
-          {isFetching ? " · a actualizar…" : " · em cache"}
+          {isFetching ? " · a atualizar…" : " · em cache"}
         </span>
       </div>
 

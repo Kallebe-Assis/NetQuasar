@@ -30,6 +30,7 @@ type credentialRecordRow struct {
 	Username      *string    `json:"username,omitempty"`
 	HasUsername   bool       `json:"has_username"`
 	HasPassword   bool       `json:"has_password"`
+	Content       *string    `json:"content,omitempty"`
 	Notes         *string    `json:"notes,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -44,8 +45,18 @@ type credentialRecordBody struct {
 	Domain      *string `json:"domain"`
 	Username    *string `json:"username"`
 	Password    *string `json:"password"`
+	Content     *string `json:"content"`
 	Notes       *string `json:"notes"`
 	Mode        string  `json:"mode"` // password | user_password
+}
+
+func isTextCredentialKind(kind string) bool {
+	switch kind {
+	case "orcamento", "informacao", "texto", "outros":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeCredentialKind(s string) string {
@@ -56,6 +67,14 @@ func normalizeCredentialKind(s string) string {
 		return "server"
 	case "site", "website", "web":
 		return "site"
+	case "orcamento", "orçamento", "budget":
+		return "orcamento"
+	case "informacao", "informação", "info":
+		return "informacao"
+	case "texto", "text":
+		return "texto"
+	case "outros", "other", "others":
+		return "outros"
 	default:
 		return ""
 	}
@@ -223,7 +242,7 @@ func (s *Server) listCredentialRecords(w http.ResponseWriter, r *http.Request) {
 		n := strconv.Itoa(len(args))
 		where = append(where, `(
 			c.title ILIKE $`+n+` OR COALESCE(c.host,'') ILIKE $`+n+` OR COALESCE(c.domain,'') ILIKE $`+n+` OR
-			COALESCE(c.username,'') ILIKE $`+n+` OR COALESCE(c.notes,'') ILIKE $`+n+` OR
+			COALESCE(c.username,'') ILIKE $`+n+` OR COALESCE(c.notes,'') ILIKE $`+n+` OR COALESCE(c.content,'') ILIKE $`+n+` OR
 			COALESCE(d.description,'') ILIKE $`+n+` OR COALESCE(u.display_name,'') ILIKE $`+n+`
 		)`)
 	}
@@ -232,7 +251,7 @@ func (s *Server) listCredentialRecords(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.owner_user_id, COALESCE(NULLIF(trim(u.display_name), ''), u.email),
 			c.created_by, NULLIF(trim(cb.display_name), ''),
 			c.kind, c.title, c.device_id, d.description, host(d.ip)::text,
-			c.host, c.domain, c.username, c.notes, c.created_at, c.updated_at
+			c.host, c.domain, c.username, c.content, c.notes, c.password_blob IS NOT NULL, c.created_at, c.updated_at
 		FROM credential_records c
 		JOIN users u ON u.id = c.owner_user_id
 		LEFT JOIN users cb ON cb.id = c.created_by
@@ -253,14 +272,13 @@ func (s *Server) listCredentialRecords(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&it.ID, &it.OwnerUserID, &it.OwnerName, &it.CreatedBy, &createdName,
 			&it.Kind, &it.Title, &it.DeviceID, &it.DeviceName, &it.DeviceIP,
-			&it.Host, &it.Domain, &it.Username, &it.Notes, &it.CreatedAt, &it.UpdatedAt,
+			&it.Host, &it.Domain, &it.Username, &it.Content, &it.Notes, &it.HasPassword, &it.CreatedAt, &it.UpdatedAt,
 		); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
 		it.CreatedByName = createdName
 		it.HasUsername = it.Username != nil && strings.TrimSpace(*it.Username) != ""
-		it.HasPassword = true
 		items = append(items, it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
@@ -291,10 +309,10 @@ func (s *Server) createCredentialRecord(w http.ResponseWriter, r *http.Request) 
 	var id uuid.UUID
 	err := s.DB().QueryRow(r.Context(), `
 		INSERT INTO credential_records (
-			owner_user_id, created_by, kind, title, device_id, host, domain, username, password_blob, notes
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			owner_user_id, created_by, kind, title, device_id, host, domain, username, password_blob, content, notes
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id
-	`, row.OwnerUserID, createdBy, row.Kind, row.Title, row.DeviceID, row.Host, row.Domain, row.Username, blob, row.Notes).Scan(&id)
+	`, row.OwnerUserID, createdBy, row.Kind, row.Title, row.DeviceID, row.Host, row.Domain, row.Username, blob, row.Content, row.Notes).Scan(&id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -344,9 +362,9 @@ func (s *Server) patchCredentialRecord(w http.ResponseWriter, r *http.Request) {
 	tag, err := s.DB().Exec(r.Context(), `
 		UPDATE credential_records SET
 			owner_user_id=$2, kind=$3, title=$4, device_id=$5, host=$6, domain=$7,
-			username=$8, password_blob=$9, notes=$10, updated_at=now()
+			username=$8, password_blob=$9, content=$10, notes=$11, updated_at=now()
 		WHERE id=$1
-	`, id, row.OwnerUserID, row.Kind, row.Title, row.DeviceID, row.Host, row.Domain, row.Username, blob, row.Notes)
+	`, id, row.OwnerUserID, row.Kind, row.Title, row.DeviceID, row.Host, row.Domain, row.Username, blob, row.Content, row.Notes)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -404,16 +422,28 @@ func (s *Server) revealCredentialRecord(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "sem acesso a este registo", nil)
 		return
 	}
+	var kind string
 	var blob []byte
-	var username *string
+	var username, content *string
 	if err := s.DB().QueryRow(r.Context(), `
-		SELECT password_blob, username FROM credential_records WHERE id=$1
-	`, id).Scan(&blob, &username); err != nil {
+		SELECT kind, password_blob, username, content FROM credential_records WHERE id=$1
+	`, id).Scan(&kind, &blob, &username, &content); err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "registo não encontrado", nil)
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if isTextCredentialKind(kind) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"kind":    kind,
+			"content": content,
+		})
+		return
+	}
+	if len(blob) == 0 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "registo sem senha", nil)
 		return
 	}
 	key, err := s.vaultKey()
@@ -443,26 +473,49 @@ func (s *Server) prepareCredentialRecord(r *http.Request, body credentialRecordB
 	var out credentialRecordRow
 	kind := normalizeCredentialKind(body.Kind)
 	if kind == "" {
-		return out, nil, "tipo inválido (equipment, server ou site)"
+		return out, nil, "tipo inválido"
 	}
 	ownerID, err := uuid.Parse(strings.TrimSpace(body.OwnerUserID))
 	if err != nil {
 		if actor := s.requestAuthContext(r).UserID; actor != uuid.Nil {
 			ownerID = actor
 		} else {
-			return out, nil, "seleccione o utilizador dono do registo"
+			return out, nil, "seleccione o usuário dono do registo"
 		}
 	}
+	title := strings.TrimSpace(body.Title)
+	notes := optionalTrimmed(body.Notes)
+	content := optionalTrimmed(body.Content)
+
+	if isTextCredentialKind(kind) {
+		if title == "" {
+			return out, nil, "informe o título"
+		}
+		if content == nil {
+			return out, nil, "informe o texto do registo"
+		}
+		if len(*content) > 20000 {
+			return out, nil, "texto demasiado longo (máx. 20000 caracteres)"
+		}
+		if len(title) > 200 {
+			title = title[:200]
+		}
+		out.OwnerUserID = ownerID
+		out.Kind = kind
+		out.Title = title
+		out.Content = content
+		out.Notes = notes
+		return out, nil, ""
+	}
+
 	mode := normalizeCredentialMode(body.Mode)
 	user := optionalTrimmed(body.Username)
 	if mode == "user_password" && user == nil {
-		return out, nil, "informe o utilizador ou escolha «somente senha»"
+		return out, nil, "informe o usuário ou escolha «somente senha»"
 	}
 	if mode == "password" {
 		user = nil
 	}
-	title := strings.TrimSpace(body.Title)
-	notes := optionalTrimmed(body.Notes)
 	var deviceID *uuid.UUID
 	var host, domain *string
 	switch kind {

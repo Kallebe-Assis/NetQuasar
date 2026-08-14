@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// LoadCustomDescriptionsByIndex devolve description do utilizador indexada por if_index.
+// LoadCustomDescriptionsByIndex devolve description do usuário indexada por if_index.
 func LoadCustomDescriptionsByIndex(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) map[int]string {
 	out := map[int]string{}
 	if pool == nil || deviceID == uuid.Nil {

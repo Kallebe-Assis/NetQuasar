@@ -58,7 +58,7 @@ Backend principal do NetQuasar, responsável por:
 
 O hostname **direto** `db.<ref>.supabase.co` muitas vezes **só tem registo DNS AAAA (IPv6)**. No Windows o IPv6 costuma funcionar; no **Docker** (p.ex. Docker Desktop) a VM Linux por vezes **não tem rota IPv6** até à Internet, o que produz erros como `dial tcp [2600:…]:5432: connect: network is unreachable`. Isto **não** é falha de SSL nem de palavra-passe.
 
-- **Recomendado em contentores:** usar a cadeia **Session pooler** do painel (Connect → Session): host `aws-0-<região>.pooler.supabase.com` ou `aws-1-<região>.pooler.supabase.com` (a Supabase indica qual no teu projeto), porta **5432**, utilizador `postgres.<project_ref>`, base `postgres`. Modo transação no host `db.*` usa porta **6543** (só IPv6 no DNS do host direto).
+- **Recomendado em contentores:** usar a cadeia **Session pooler** do painel (Connect → Session): host `aws-0-<região>.pooler.supabase.com` ou `aws-1-<região>.pooler.supabase.com` (a Supabase indica qual no teu projeto), porta **5432**, usuário `postgres.<project_ref>`, base `postgres`. Modo transação no host `db.*` usa porta **6543** (só IPv6 no DNS do host direto).
 - **Alternativa:** ativar IPv6 no Docker / rede do servidor, ou a opção **IPv4** para Postgres na Supabase quando existir no plano.
 - O utilitário `go run ./cmd/dbping` na pasta `quasar_backend` replica a mesma DSN; em falha, pode imprimir uma linha extra com esta explicação.
 

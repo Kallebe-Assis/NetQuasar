@@ -755,19 +755,17 @@ export function FleetFuelingsPage() {
                       ))}
                     </select>
                   </label>
-                  {!quick ? (
-                    <label>
-                      Posto
-                      <select className="input" value={fuelForm.station_id} onChange={(e) => setFuelForm({ ...fuelForm, station_id: e.target.value })}>
-                        <option value="">—</option>
-                        {(stations.data?.items ?? []).map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.description}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
+                  <label>
+                    Posto
+                    <select className="input" value={fuelForm.station_id} onChange={(e) => setFuelForm({ ...fuelForm, station_id: e.target.value })}>
+                      <option value="">—</option>
+                      {(stations.data?.items ?? []).map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.description}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {!quick ? (
                     <label>
                       Centro de custo

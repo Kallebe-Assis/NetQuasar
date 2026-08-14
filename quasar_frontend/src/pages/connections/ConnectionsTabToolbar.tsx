@@ -12,7 +12,7 @@ type Props = {
   onReload?: () => void;
   reloading?: boolean;
   reloadTitle?: string;
-  /** CTO: pesquisa → filtro → config → actualizar → extra */
+  /** CTO: pesquisa → filtro → config → atualizar → extra */
   layout?: "actions-first" | "search-first";
   extraActions?: ReactNode;
 };

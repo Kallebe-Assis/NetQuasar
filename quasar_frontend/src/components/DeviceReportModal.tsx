@@ -514,7 +514,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
         </div>
         {fullReport.data && (
           <div className="msg msg--ok" style={{ marginBottom: 8 }}>
-            Relatório actualizado com sucesso para este equipamento.
+            Relatório atualizado com sucesso para este equipamento.
           </div>
         )}
         <div className="row no-print" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
@@ -595,7 +595,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
               </table>
             </div>
             {Array.isArray(reportOltDevice.data.pons_table) && (reportOltDevice.data.pons_table as unknown[]).length === 0 && (
-              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 0 }}>Sem dados de PON. Actualize o snapshot da OLT.</p>
+              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 0 }}>Sem dados de PON. Atualize o snapshot da OLT.</p>
             )}
           </div>
         )}
@@ -855,7 +855,7 @@ export function DeviceReportModal({ device, onClose }: Props) {
             ) : (
               !reportInterfacesLatest.isLoading && (
                 <p style={{ color: "var(--muted)", fontSize: 12 }}>
-                  Sem tabela de interfaces nem snapshots no período. Use «Actualizar interfaces» no equipamento ou «Atualizar relatório agora» para gerar dados.
+                  Sem tabela de interfaces nem snapshots no período. Use «Atualizar interfaces» no equipamento ou «Atualizar relatório agora» para gerar dados.
                 </p>
               )
             )}

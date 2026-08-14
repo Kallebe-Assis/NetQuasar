@@ -68,22 +68,56 @@ func MonthlyDue(enabled bool, tz, hhmm string, dom int, lastRunKey *string, last
 	return period, true
 }
 
-// DailyWeeklyDue runKey = YYYY-MM-DD. frequency: daily | weekly (dayOfWeek 0=Sunday).
+// NormalizeWeekdays devolve dias 0=Dom … 6=Sáb, sem duplicados.
+func NormalizeWeekdays(days []int, fallback *int) []int {
+	seen := map[int]bool{}
+	var out []int
+	for _, d := range days {
+		if d < 0 || d > 6 || seen[d] {
+			continue
+		}
+		seen[d] = true
+		out = append(out, d)
+	}
+	if len(out) == 0 && fallback != nil && *fallback >= 0 && *fallback <= 6 {
+		return []int{*fallback}
+	}
+	return out
+}
+
+func weekdayAllowed(frequency string, days []int, fallback *int, wd time.Weekday) bool {
+	freq := strings.ToLower(strings.TrimSpace(frequency))
+	if freq == "" || freq == "daily" {
+		return true
+	}
+	allowed := NormalizeWeekdays(days, fallback)
+	if len(allowed) == 0 {
+		return true
+	}
+	today := int(wd)
+	for _, d := range allowed {
+		if d == today {
+			return true
+		}
+	}
+	return false
+}
+
+// DailyWeeklyDue runKey = YYYY-MM-DD. frequency: daily | weekly | custom.
 func DailyWeeklyDue(enabled bool, frequency, tz, hhmm string, dayOfWeek *int, lastRunKey *string, lastRunAt *time.Time, running bool, now time.Time) (runKey string, due bool) {
+	return DailyWeeklyDueOnDays(enabled, frequency, tz, hhmm, dayOfWeek, nil, lastRunKey, lastRunAt, running, now)
+}
+
+// DailyWeeklyDueOnDays respeita vários dias da semana (days_of_week).
+func DailyWeeklyDueOnDays(enabled bool, frequency, tz, hhmm string, dayOfWeek *int, days []int, lastRunKey *string, lastRunAt *time.Time, running bool, now time.Time) (runKey string, due bool) {
 	if !enabled || running {
 		return "", false
 	}
 	loc := LoadTZ(tz)
 	now = now.In(loc)
 	runKey = now.Format("2006-01-02")
-	if strings.EqualFold(strings.TrimSpace(frequency), "weekly") {
-		dow := 1
-		if dayOfWeek != nil {
-			dow = *dayOfWeek
-		}
-		if int(now.Weekday()) != dow {
-			return runKey, false
-		}
+	if !weekdayAllowed(frequency, days, dayOfWeek, now.Weekday()) {
+		return runKey, false
 	}
 	hour, min := ParseHHMM(hhmm)
 	scheduled := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc)

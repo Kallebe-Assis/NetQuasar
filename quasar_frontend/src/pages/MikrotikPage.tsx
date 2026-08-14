@@ -179,7 +179,7 @@ export function MikrotikPage() {
       apiFetch(`/api/v1/devices/${deviceId}`, { method: "PATCH", json: { mikrotik_telnet_profile_id: profileId } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["devices-mikrotik-list"] });
-      toastOk(pushToast, "Perfil telnet actualizado.");
+      toastOk(pushToast, "Perfil telnet atualizado.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao atribuir perfil."),
   });
@@ -202,10 +202,10 @@ export function MikrotikPage() {
       qc.invalidateQueries({ queryKey: ["mikrotik-tel", id] });
       const n = data.interface_count ?? data.interface_table?.length;
       const ppp = data.pppoe_session_count;
-      const base = typeof n === "number" ? `Interfaces actualizadas (${n}).` : "Interfaces actualizadas.";
+      const base = typeof n === "number" ? `Interfaces atualizadas (${n}).` : "Interfaces atualizadas.";
       toastOk(pushToast, typeof ppp === "number" ? `${base} PPPoE: ${ppp} sessão(ões).` : base);
     },
-    onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
+    onError: (e) => toastErr(pushToast, e, "Falha ao atualizar interfaces."),
   });
 
   const realtimeTick = useMutation({
@@ -241,7 +241,7 @@ export function MikrotikPage() {
         }),
       );
     },
-    onError: (e) => toastErr(pushToast, e, "Falha na actualização em tempo real."),
+    onError: (e) => toastErr(pushToast, e, "Falha na atualização em tempo real."),
   });
 
   const runTelCollect = async () => {
@@ -400,7 +400,7 @@ export function MikrotikPage() {
         {canMutate ? (
           <>
             <button type="button" className="mk-noc-btn" disabled={refreshIf.isPending || !sel} onClick={() => sel && refreshIf.mutate(sel)}>
-              {refreshIf.isPending ? "A actualizar…" : "Actualizar interfaces"}
+              {refreshIf.isPending ? "A atualizar…" : "Atualizar interfaces"}
             </button>
             <button
               type="button"

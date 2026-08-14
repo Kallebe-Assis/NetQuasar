@@ -456,9 +456,9 @@ export function OltPage() {
       qc.invalidateQueries({ queryKey: ["olt-device", id] });
       void invalidateAlertListQueries(qc);
       invalidateDashboardAfterCollect(qc);
-      toastOk(pushToast, "Interfaces actualizadas com sucesso.");
+      toastOk(pushToast, "Interfaces atualizadas com sucesso.");
     },
-    onError: (e) => toastErr(pushToast, e, "Falha ao actualizar interfaces."),
+    onError: (e) => toastErr(pushToast, e, "Falha ao atualizar interfaces."),
   });
 
   async function runBulkSnapshotAndInterfaces() {
@@ -532,7 +532,7 @@ export function OltPage() {
       await qc.invalidateQueries({ queryKey: ["commercial-rec"] });
       await qc.invalidateQueries({ queryKey: ["commercial-agg"] });
       await qc.invalidateQueries({ queryKey: ["commercial-cmp"] });
-      setBulkLog((m) => [...m, `Base comercial actualizada para ${formatYearMonthPt(bulkMonth)}.`]);
+      setBulkLog((m) => [...m, `Base comercial atualizada para ${formatYearMonthPt(bulkMonth)}.`]);
       toastOk(pushToast, `Guardado com sucesso (Base comercial: ${formatYearMonthPt(bulkMonth)}).`);
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao salvar (Base comercial)."),
@@ -779,7 +779,7 @@ export function OltPage() {
               setBulkOpen(true);
             }}
           >
-            {bulkRunning ? "Actualização em massa…" : "Actualizar dados e interfaces (OLTs seleccionadas)"}
+            {bulkRunning ? "Atualização em massa…" : "Atualizar dados e interfaces (OLTs seleccionadas)"}
           </button>
         ) : null}
       </div>
@@ -810,7 +810,7 @@ export function OltPage() {
           >
             <div className="olt-bulk-modal__head">
               <h2 id="bulk-olt-title" style={{ marginTop: 0 }}>
-                Actualizar OLTs em massa
+                Atualizar OLTs em massa
               </h2>
               <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}>
                 {bulkPhase === "results"
@@ -830,7 +830,7 @@ export function OltPage() {
                 disabled={bulkRunning}
                 onChange={(e) => setBulkIncludeInterfaces(e.target.checked)}
               />
-              Incluir actualização de interfaces (IF-MIB / SNMP walk)
+              Incluir atualização de interfaces (IF-MIB / SNMP walk)
             </label>
             <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <input
@@ -1371,7 +1371,7 @@ export function OltPage() {
                 Em ZTE esses contadores podem ficar muito altos, pois são acumulados desde o uptime da porta (não é taxa instantânea).
               </p>
               {ifRows.length > 0 ? <OltIfaceSection rows={ifRows as IfRow[]} /> : null}
-              {ifRows.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Use «Actualizar interfaces» para colher IF-MIB desta OLT.</p>}
+              {ifRows.length === 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Use «Atualizar interfaces» para colher IF-MIB desta OLT.</p>}
 
               {sensors.length > 0 && (
                 <details className="collapsible-section" style={{ marginTop: 18 }}>

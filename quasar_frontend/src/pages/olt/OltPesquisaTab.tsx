@@ -534,7 +534,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                   ))}
                   {ponOptions.length === 0 ? (
                     <p style={{ padding: "8px 12px", margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                      Sem snapshot PON — informe o número ao lado ou actualize a OLT.
+                      Sem snapshot PON — informe o número ao lado ou atualize a OLT.
                     </p>
                   ) : null}
                 </div>
@@ -667,7 +667,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             Nenhuma ONU encontrada nos snapshots.
             {canMutate && debouncedQ.trim().length >= 2 && !selectedOltId
               ? " Seleccione uma OLT para pesquisar o serial via telnet (com PON opcional)."
-              : " Actualize as OLTs em Equipamentos ou ajuste os filtros."}
+              : " Atualize as OLTs em Equipamentos ou ajuste os filtros."}
           </p>
         ) : null}
       </div>

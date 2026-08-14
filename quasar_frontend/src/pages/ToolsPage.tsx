@@ -1087,7 +1087,7 @@ export function ToolsPage() {
               <input id="tools-tn-max" className="input mono" style={{ maxWidth: 120 }} value={tnMax} onChange={(e) => setTnMax(e.target.value)} />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="tools-tn-user">Utilizador (opcional, enviado em texto claro)</label>
+              <label htmlFor="tools-tn-user">Usuário (opcional, enviado em texto claro)</label>
               <input id="tools-tn-user" className="input" value={tnUser} onChange={(e) => setTnUser(e.target.value)} autoComplete="off" />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
@@ -1131,7 +1131,7 @@ export function ToolsPage() {
               <input id="tools-ssh-port" className="input mono" style={{ maxWidth: 120 }} value={sshPort} onChange={(e) => setSshPort(e.target.value)} />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="tools-ssh-user">Nome de utilizador SSH</label>
+              <label htmlFor="tools-ssh-user">Nome de usuário SSH</label>
               <input id="tools-ssh-user" className="input" value={sshUser} onChange={(e) => setSshUser(e.target.value)} autoComplete="off" />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>

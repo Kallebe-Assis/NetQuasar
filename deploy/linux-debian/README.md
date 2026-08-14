@@ -6,7 +6,7 @@ Este guia assume **Debian 11 ou 12** (ou derivado, ex. Ubuntu LTS) numa **VM ou 
 
 - CPU x86_64 (amd64), RAM recomendada **≥ 2 GiB** (4 GiB confortável para build e Postgres).
 - Disco: **≥ 15 GiB** livres para imagens Docker e volume do Postgres.
-- Utilizador com `sudo` ou root.
+- Usuário com `sudo` ou root.
 
 ## 1. Instalar Docker Engine e o plugin Compose
 
@@ -15,7 +15,7 @@ Siga a documentação oficial (evita pacotes Debian desatualizados):
 - **Debian:** [Install Docker Engine on Debian](https://docs.docker.com/engine/install/debian/)
 - Confirme: `docker version` e `docker compose version`
 
-Coloque o seu utilizador no grupo `docker` (opcional, evita `sudo` em cada comando):
+Coloque o seu usuário no grupo `docker` (opcional, evita `sudo` em cada comando):
 
 ```bash
 sudo usermod -aG docker "$USER"
@@ -147,7 +147,7 @@ A imagem `netquasar` inclui **traceroute** e **nmap** (Ferramentas → Tracert /
 ## 7. Backup
 
 - Listar volumes: `docker volume ls | grep netquasar`
-- Dump lógico (ajusta utilizador e base conforme o teu `.env`):
+- Dump lógico (ajusta usuário e base conforme o teu `.env`):
 
 ```bash
 docker compose exec -T postgres pg_dump -U quasar netquasar > backup-$(date +%F).sql

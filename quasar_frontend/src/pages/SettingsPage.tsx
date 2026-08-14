@@ -226,9 +226,9 @@ function UsersPanel() {
       setPassword("");
       setProfileId(defaultUserProfileId);
       setCreateOpen(false);
-      toastOk(pushToast, "Utilizador criado com sucesso.");
+      toastOk(pushToast, "Usuário criado com sucesso.");
     },
-    onError: (err) => toastErr(pushToast, err, "Falha ao criar utilizador."),
+    onError: (err) => toastErr(pushToast, err, "Falha ao criar usuário."),
   });
 
   const patch = useMutation({
@@ -265,9 +265,9 @@ function UsersPanel() {
       });
       void qc.invalidateQueries({ queryKey: ["settings-users"] });
       setConfirmAction(null);
-      toastOk(pushToast, vars.is_active ? "Utilizador activado." : "Utilizador inactivado.");
+      toastOk(pushToast, vars.is_active ? "Usuário activado." : "Usuário inactivado.");
     },
-    onError: (err) => toastErr(pushToast, err, "Falha ao alterar estado do utilizador."),
+    onError: (err) => toastErr(pushToast, err, "Falha ao alterar estado do usuário."),
   });
 
   const del = useMutation({
@@ -275,9 +275,9 @@ function UsersPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings-users"] });
       setConfirmAction(null);
-      toastOk(pushToast, "Utilizador removido.");
+      toastOk(pushToast, "Usuário removido.");
     },
-    onError: (err) => toastErr(pushToast, err, "Falha ao remover utilizador."),
+    onError: (err) => toastErr(pushToast, err, "Falha ao remover usuário."),
   });
 
   const profileLabel = (u: UserRow) =>
@@ -380,7 +380,7 @@ function UsersPanel() {
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ color: "var(--muted)" }}>
-                  Nenhum utilizador encontrado.
+                  Nenhum usuário encontrado.
                 </td>
               </tr>
             ) : (
@@ -568,17 +568,17 @@ function UsersPanel() {
           <div className="card" style={{ width: "min(420px, 92vw)", margin: "12vh auto" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
               {confirmAction.type === "delete"
-                ? "Apagar utilizador"
+                ? "Apagar usuário"
                 : confirmAction.type === "activate"
-                  ? "Activar utilizador"
-                  : "Inactivar utilizador"}
+                  ? "Activar usuário"
+                  : "Inactivar usuário"}
             </h3>
             <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>
               {confirmAction.type === "delete"
                 ? `Eliminar permanentemente ${confirmAction.user.email}?`
                 : confirmAction.type === "activate"
                   ? `Activar o acesso de ${confirmAction.user.email}?`
-                  : `Inactivar ${confirmAction.user.email}? O utilizador não poderá iniciar sessão.`}
+                  : `Inactivar ${confirmAction.user.email}? O usuário não poderá iniciar sessão.`}
             </p>
             <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
               <button
@@ -1675,12 +1675,12 @@ function ConnectionPanel() {
           <input className="input" value={snmp} onChange={(e) => setSnmp(e.target.value)} />
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <div className="field" style={{ minWidth: 220 }}><label>Utilizador Telnet</label><input className="input" value={tu} onChange={(e) => setTu(e.target.value)} /></div>
+          <div className="field" style={{ minWidth: 220 }}><label>Usuário Telnet</label><input className="input" value={tu} onChange={(e) => setTu(e.target.value)} /></div>
           <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe Telnet</label><input className="input" type="password" value={tp} onChange={(e) => setTp(e.target.value)} /></div>
           <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe enable (Telnet)</label><input className="input" type="password" value={te} onChange={(e) => setTe(e.target.value)} /></div>
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-          <div className="field" style={{ minWidth: 220 }}><label>Utilizador SSH</label><input className="input" value={su} onChange={(e) => setSu(e.target.value)} /></div>
+          <div className="field" style={{ minWidth: 220 }}><label>Usuário SSH</label><input className="input" value={su} onChange={(e) => setSu(e.target.value)} /></div>
           <div className="field" style={{ minWidth: 220 }}><label>Palavra-passe SSH</label><input className="input" type="password" value={sp} onChange={(e) => setSp(e.target.value)} /></div>
         </div>
       </div>

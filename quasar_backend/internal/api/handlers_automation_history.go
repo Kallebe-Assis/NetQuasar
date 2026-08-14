@@ -56,10 +56,13 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	ensureAutomationDaysOfWeek(ctx, pool, "automation_alerts_digest")
+	ensureAutomationDaysOfWeek(ctx, pool, "automation_bng_stats_report")
+	ensureAutomationDaysOfWeek(ctx, pool, "automation_database_backup")
 
 	type jobRow struct {
-		enabled bool
-		running bool
+		enabled               bool
+		running               bool
 		lastStatus, lastError *string
 		lastAt                *time.Time
 		extra                 map[string]any
@@ -69,10 +72,11 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		jr.extra = map[string]any{}
 		var freq, th, tz *string
 		var dow *int
+		var days []int32
 		var lastAt *time.Time
 		_ = pool.QueryRow(ctx, `
-			SELECT enabled, running, last_status, last_error, last_run_at, frequency, day_of_week, time_hhmm, timezone
-			FROM `+table+` WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &lastAt, &freq, &dow, &th, &tz)
+			SELECT enabled, running, last_status, last_error, last_run_at, frequency, day_of_week, time_hhmm, timezone, days_of_week
+			FROM `+table+` WHERE id = 1`).Scan(&jr.enabled, &jr.running, &jr.lastStatus, &jr.lastError, &lastAt, &freq, &dow, &th, &tz, &days)
 		jr.lastAt = lastAt
 		if freq != nil {
 			jr.extra["frequency"] = *freq
@@ -85,6 +89,9 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		if tz != nil {
 			jr.extra["timezone"] = *tz
+		}
+		if ds := intSliceFromInt32(days); len(ds) > 0 {
+			jr.extra["days_of_week"] = ds
 		}
 		return jr
 	}

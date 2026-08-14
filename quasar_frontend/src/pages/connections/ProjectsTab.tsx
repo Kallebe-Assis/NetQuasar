@@ -198,7 +198,7 @@ export function ProjectsTab({
           `${wasEdit ? "Projecto substituído" : "Projecto criado"} com ${imported.ctos ?? 0} CTO(s), ${imported.splice_boxes ?? 0} emenda(s), ${imported.poles ?? 0} poste(s), ${imported.cables ?? 0} cabo(s), ${imported.pops ?? 0} POP(s).`,
         );
       } else {
-        toastOk(pushToast, wasEdit ? "Projeto actualizado." : "Projeto criado.");
+        toastOk(pushToast, wasEdit ? "Projeto atualizado." : "Projeto criado.");
       }
     },
     onError: (e) => toastErr(pushToast, e),

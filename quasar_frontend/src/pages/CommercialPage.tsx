@@ -292,7 +292,7 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
       qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       setBulkModalOpen(false);
-      notify(`${data.upserted} localidade(s) actualizada(s) de uma vez (${formatYearMonthPt(ymShown)}).`);
+      notify(`${data.upserted} localidade(s) atualizada(s) de uma vez (${formatYearMonthPt(ymShown)}).`);
     },
     onError: (e) => toastErr(pushToast, e),
   });
@@ -306,7 +306,7 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
       setRecEditOpen(false);
       setEditRecRow(null);
-      notify("Registo actualizado.");
+      notify("Registo atualizado.");
     },
     onError: (e) => toastErr(pushToast, e),
   });
@@ -468,7 +468,7 @@ export function CommercialPage() {
       qc.invalidateQueries({ queryKey: queryKeys.commercialRecords });
       qc.invalidateQueries({ queryKey: queryKeys.commercialAgg(month) });
       qc.invalidateQueries({ queryKey: queryKeys.commercialCmp(month) });
-      notify(`Registos comerciais actualizados (${data.upserted} localidade(s)) para ${formatYearMonthPt(month)}.`);
+      notify(`Registos comerciais atualizados (${data.upserted} localidade(s)) para ${formatYearMonthPt(month)}.`);
       setOltCollectConfirmOpen(false);
       setOltCollectModalOpen(false);
     },
@@ -968,7 +968,7 @@ export function CommercialPage() {
             </select>
           </div>
           <button type="button" className="btn" disabled={agg.isFetching} onClick={() => setAggRefreshConfirmOpen(true)}>
-            {agg.isFetching ? "A actualizar…" : "Atualizar totais"}
+            {agg.isFetching ? "A atualizar…" : "Atualizar totais"}
           </button>
           <button type="button" className="btn" onClick={() => exportCsv().catch((e) => toastErr(pushToast, e))}>
             Export CSV
@@ -1408,7 +1408,7 @@ export function CommercialPage() {
           onClick={(e) => e.target === e.currentTarget && !agg.isFetching && setAggRefreshConfirmOpen(false)}
         >
           <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
-            <h3 id="agg-refresh-title">Actualizar totais agregados?</h3>
+            <h3 id="agg-refresh-title">Atualizar totais agregados?</h3>
             <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 0 }}>
               Serão recalculados os totais de clientes para <strong>{formatYearMonthPt(month)}</strong> a partir dos registos mensais já salvos na base
               comercial (não altera dados nas OLTs).
@@ -1424,12 +1424,12 @@ export function CommercialPage() {
                 onClick={() => {
                   void agg.refetch().then((r) => {
                     if (r.error) toastErr(pushToast, r.error);
-                    else notify(`Totais actualizados (${formatYearMonthPt(month)}).`);
+                    else notify(`Totais atualizados (${formatYearMonthPt(month)}).`);
                     setAggRefreshConfirmOpen(false);
                   });
                 }}
               >
-                {agg.isFetching ? "A actualizar…" : "Confirmar"}
+                {agg.isFetching ? "A atualizar…" : "Confirmar"}
               </button>
             </div>
           </div>

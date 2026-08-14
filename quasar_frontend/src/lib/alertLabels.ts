@@ -106,7 +106,7 @@ export function formatAlertDateTimePt(iso: string | null | undefined): string {
   }
 }
 
-/** Tempo decorrido desde `iso` (actualiza quando o chamador re-renderiza com relógio periódico). */
+/** Tempo decorrido desde `iso` (atualiza quando o chamador re-renderiza com relógio periódico). */
 export function formatRelativeTimeAgoPt(iso: string | null | undefined, _tick?: number): string {
   if (!iso) return "—";
   const t = new Date(iso).getTime();

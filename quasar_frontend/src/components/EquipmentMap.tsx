@@ -293,15 +293,20 @@ function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (b: MapBounds)
     };
     const schedule = () => {
       if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(emit, 550);
+      timer = window.setTimeout(emit, 350);
+    };
+    const onZoomEnd = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = null;
+      emit();
     };
     map.whenReady(emit);
     map.on("moveend", schedule);
-    map.on("zoomend", schedule);
+    map.on("zoomend", onZoomEnd);
     return () => {
       if (timer != null) window.clearTimeout(timer);
       map.off("moveend", schedule);
-      map.off("zoomend", schedule);
+      map.off("zoomend", onZoomEnd);
     };
   }, [map, onBoundsChange]);
   return null;
@@ -1644,7 +1649,12 @@ export function EquipmentMap({
         <MapFlyTo target={flyTo} flyKey={flyKey} />
         <CloseSpiderOnMapClick active={!placing && !!spider && spider.phase >= 0.995} onClose={() => setSpider(null)} />
         <MapPlaceClickLayer enabled={placing} onMapClick={onMapClick} />
-        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          keepBuffer={6}
+          updateWhenIdle
+        />
 
         <CablePathsLayer
           points={valid}

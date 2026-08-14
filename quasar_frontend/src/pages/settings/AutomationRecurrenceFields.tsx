@@ -13,6 +13,35 @@ type Props = {
   onChange: (next: RecurrenceDraft) => void;
 };
 
+export function AutomationWeekdayChecks({
+  days,
+  disabled,
+  onChange,
+}: {
+  days: number[];
+  disabled?: boolean;
+  onChange: (days: number[]) => void;
+}) {
+  function toggle(d: number) {
+    const has = days.includes(d);
+    const next = has ? days.filter((x) => x !== d) : [...days, d];
+    onChange((next.length ? next : [d]).sort((a, b) => a - b));
+  }
+  return (
+    <div className="automation-weekdays" role="group" aria-label="Dias da semana">
+      {WEEKDAY_LABELS.map((l, i) => {
+        const on = days.includes(i);
+        return (
+          <label key={l} className={`automation-weekdays__day${on ? " is-on" : ""}`}>
+            <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(i)} />
+            {l}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AutomationRecurrenceFields({ value, allowed, disabled, onChange }: Props) {
   const kinds = allowed.length ? allowed : (["daily"] as RecurrenceKind[]);
   const kind = kinds.includes(value.kind) ? value.kind : kinds[0];
@@ -22,14 +51,16 @@ export function AutomationRecurrenceFields({ value, allowed, disabled, onChange 
       ...value,
       kind: next,
       weekdays:
-        next === "weekly" ? (value.weekdays.length === 1 ? value.weekdays : [1]) : next === "custom" ? (value.weekdays.length ? value.weekdays : [1, 2, 3, 4, 5]) : [],
+        next === "weekly"
+          ? value.weekdays.length
+            ? value.weekdays
+            : [1]
+          : next === "custom"
+            ? value.weekdays.length
+              ? value.weekdays
+              : [1, 2, 3, 4, 5]
+            : [],
     });
-  }
-
-  function toggleDay(d: number) {
-    const has = value.weekdays.includes(d);
-    const weekdays = has ? value.weekdays.filter((x) => x !== d) : [...value.weekdays, d];
-    onChange({ ...value, weekdays: weekdays.length ? weekdays : [d] });
   }
 
   return (
@@ -66,23 +97,6 @@ export function AutomationRecurrenceFields({ value, allowed, disabled, onChange 
           </SettingsField>
         ) : null}
 
-        {kind === "weekly" ? (
-          <SettingsField label="Dia da semana">
-            <select
-              className="input"
-              value={String(value.weekdays[0] ?? 1)}
-              disabled={disabled}
-              onChange={(e) => onChange({ ...value, weekdays: [Number(e.target.value)] })}
-            >
-              {WEEKDAY_LABELS.map((l, i) => (
-                <option key={l} value={String(i)}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </SettingsField>
-        ) : null}
-
         <SettingsField label="Hora">
           <input
             className="input"
@@ -102,31 +116,14 @@ export function AutomationRecurrenceFields({ value, allowed, disabled, onChange 
         </SettingsField>
       </div>
 
-      {kind === "custom" ? (
+      {kind === "weekly" || kind === "custom" ? (
         <>
-          <div className="automation-weekdays" role="group" aria-label="Dias da semana">
-            {WEEKDAY_LABELS.map((l, i) => {
-              const on = value.weekdays.includes(i);
-              return (
-                <button
-                  key={l}
-                  type="button"
-                  className={`automation-weekdays__day${on ? " is-on" : ""}`}
-                  disabled={disabled}
-                  aria-pressed={on}
-                  onClick={() => toggleDay(i)}
-                >
-                  {l}
-                </button>
-              );
-            })}
-          </div>
-          {value.weekdays.length > 0 && value.weekdays.length < 7 ? (
-            <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
-              O agendamento corre à hora escolhida em cada dia marcado. Se o motor ainda só aceitar um dia, usa o primeiro
-              seleccionado.
-            </p>
-          ) : null}
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0" }}>Dias da semana</p>
+          <AutomationWeekdayChecks
+            days={value.weekdays.length ? value.weekdays : [1]}
+            disabled={disabled}
+            onChange={(weekdays) => onChange({ ...value, weekdays })}
+          />
         </>
       ) : null}
     </div>

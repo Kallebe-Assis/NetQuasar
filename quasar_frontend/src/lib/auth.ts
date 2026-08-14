@@ -84,7 +84,7 @@ export function isSessionReady(): boolean {
   return localStorage.getItem(K_READY) === "1";
 }
 
-/** Termina a sessão do utilizador (mantém URL/chave do servidor para voltar a entrar mais rápido). */
+/** Termina a sessão do usuário (mantém URL/chave do servidor para voltar a entrar mais rápido). */
 export function clearSession() {
   localStorage.removeItem(K_READY);
   localStorage.removeItem(K_AUTH);
@@ -181,7 +181,7 @@ export function isViewerUser(): boolean {
 }
 
 /**
- * Utilizador com permissões de administrador na UI.
+ * Usuário com permissões de administrador na UI.
  * Sessões antigas sem `K_ROLE` gravado tratam-se como admin (compatível com tokens já emitidos).
  */
 export function isAdminUser(): boolean {

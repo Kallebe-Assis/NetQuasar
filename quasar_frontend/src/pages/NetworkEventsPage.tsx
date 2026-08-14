@@ -267,7 +267,7 @@ export function NetworkEventsPage() {
       }
     },
     onSuccess: async () => {
-      toastOk(push, editing ? "Evento actualizado" : "Evento registado");
+      toastOk(push, editing ? "Evento atualizado" : "Evento registado");
       closeForm();
       await invalidateAll();
     },

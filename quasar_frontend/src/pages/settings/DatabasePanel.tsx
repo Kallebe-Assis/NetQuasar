@@ -65,11 +65,11 @@ function friendlyDbConnectionError(err: unknown): string {
   const raw = (err.message || "").toLowerCase();
   const code = (err.code || "").toUpperCase();
   if (code === "VALIDATION" || raw.includes("informe host") || raw.includes("db_password")) {
-    return "Falta informação para testar: servidor, porta, nome da base, utilizador e palavra-passe.";
+    return "Falta informação para testar: servidor, porta, nome da base, usuário e palavra-passe.";
   }
   if (code === "NO_DB") return "O serviço de base de dados não está disponível neste momento.";
   if (raw.includes("authentication failed") || raw.includes("password authentication")) {
-    return "O servidor recusou o utilizador ou a palavra-passe.";
+    return "O servidor recusou o usuário ou a palavra-passe.";
   }
   if (raw.includes("connection refused")) {
     return "Ligação recusada na porta indicada. Verifique se o PostgreSQL está a correr.";
@@ -121,7 +121,7 @@ function missingDbFieldsForTest(opts: {
   const p = opts.port.trim();
   if (!p || Number.isNaN(Number(p)) || Number(p) <= 0) missing.push("porta");
   if (!opts.dbName.trim()) missing.push("nome da base");
-  if (!opts.dbUser.trim() && !opts.userKnownInSettings) missing.push("utilizador");
+  if (!opts.dbUser.trim() && !opts.userKnownInSettings) missing.push("usuário");
   if (!opts.dbPass.trim() && !opts.passwordConfigured) missing.push("palavra-passe");
   return missing;
 }
@@ -511,7 +511,7 @@ export function DatabasePanel() {
           </div>
 
           <div className="field" style={{ margin: 0 }}>
-            <label htmlFor="db-user">Utilizador</label>
+            <label htmlFor="db-user">Usuário</label>
             <input
               id="db-user"
               className="input"

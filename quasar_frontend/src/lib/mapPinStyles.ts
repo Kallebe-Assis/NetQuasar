@@ -26,7 +26,7 @@ export const MAP_PIN_STYLE_OPTIONS: Record<MapPinRole, MapPinStyleOption[]> = {
     { id: "building", label: "Edifício" },
   ],
   connection: [
-    { id: "user", label: "Utilizador" },
+    { id: "user", label: "Usuário" },
     { id: "home", label: "Casa" },
     { id: "wifi", label: "Wi‑Fi" },
     { id: "key", label: "Chave" },

@@ -19,6 +19,22 @@ func TestDailyWeeklyDue_RescheduleLaterSameDay(t *testing.T) {
 	}
 }
 
+func TestDailyWeeklyDueOnDays_OnlySelectedWeekdays(t *testing.T) {
+	t.Parallel()
+	loc, _ := time.LoadLocation("UTC")
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, loc)
+	today := int(now.Weekday())
+	other := (today + 1) % 7
+	_, due := DailyWeeklyDueOnDays(true, "custom", "UTC", "10:00", nil, []int{other}, nil, nil, false, now)
+	if due {
+		t.Fatal("should not run on a day that is not selected")
+	}
+	_, due = DailyWeeklyDueOnDays(true, "custom", "UTC", "10:00", nil, []int{today}, nil, nil, false, now)
+	if !due {
+		t.Fatal("should run when today is selected")
+	}
+}
+
 func TestDailyWeeklyDue_AlreadyRanAfterScheduled(t *testing.T) {
 	t.Parallel()
 	loc, _ := time.LoadLocation("UTC")

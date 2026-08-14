@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { APP_ROUTES } from "../../app/routes";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { addDaysISO, fleetMoney, fleetNum, formatFleetPlate, monthEndISO, monthStartISO, todayISO } from "./fleetUtils";
+import { addDaysISO, fleetMoney, fleetNum, formatFleetPlate, isFleetVehicleInactive, monthEndISO, monthStartISO, todayISO } from "./fleetUtils";
 
 type Dash = {
   fleet: { vehicles_total: number; vehicles_active: number };
@@ -74,8 +74,17 @@ export function FleetDashboardPage() {
   }
   const vehicles = useQuery({
     queryKey: queryKeys.fleetVehicles,
-    queryFn: () => apiFetch<{ items: { id: string; plate: string; description: string }[] }>("/api/v1/fleet/vehicles"),
+    queryFn: () => apiFetch<{ items: { id: string; plate: string; description: string; status?: string }[] }>("/api/v1/fleet/vehicles"),
   });
+  const selectableVehicles = useMemo(
+    () => (vehicles.data?.items ?? []).filter((v) => !isFleetVehicleInactive(v.status)),
+    [vehicles.data],
+  );
+  useEffect(() => {
+    if (!vehicleId) return;
+    const selectedVeh = (vehicles.data?.items ?? []).find((v) => v.id === vehicleId);
+    if (selectedVeh && isFleetVehicleInactive(selectedVeh.status)) onVehicleChange("");
+  }, [vehicleId, vehicles.data]);
   const q = useQuery({
     queryKey: queryKeys.fleetDashboard(from, to, vehicleId),
     queryFn: () => {
@@ -108,7 +117,7 @@ export function FleetDashboardPage() {
             Veículo
           <select className="input" value={vehicleId} onChange={(e) => onVehicleChange(e.target.value)} style={{ minWidth: 220 }}>
             <option value="">Todos os Veículos</option>
-            {(vehicles.data?.items ?? []).map((v) => (
+            {selectableVehicles.map((v) => (
               <option key={v.id} value={v.id}>
                 {formatFleetPlate(v.plate)} — {v.description}
               </option>

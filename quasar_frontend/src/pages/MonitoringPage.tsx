@@ -613,7 +613,7 @@ export function MonitoringPage() {
     mutationFn: (body: Record<string, unknown>) => apiFetch("/api/v1/monitoring/nightly-collection", { method: "PATCH", json: body }),
     onSuccess: () => {
       void nightly.refetch();
-      showPageToastRef.current(true, "Agenda noturna actualizada.");
+      showPageToastRef.current(true, "Agenda noturna atualizada.");
     },
     onError: (e: Error) => showPageToastRef.current(false, e.message),
   });
@@ -1110,7 +1110,7 @@ export function MonitoringPage() {
             <h3 id="start-mon-title">Iniciar monitoramento</h3>
             <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 0 }}>
               Escolha o modo de execução do motor no servidor. No modo completo, o walk SNMP de inventário corre apenas para equipamentos sem inventário
-              gravado (com telemetria ativa e host acessível); para actualizar um equipamento já inventariado, use a página Equipamentos ou a acção de walk SNMP.
+              gravado (com telemetria ativa e host acessível); para atualizar um equipamento já inventariado, use a página Equipamentos ou a acção de walk SNMP.
             </p>
             <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8, marginTop: 12 }}>
               <button

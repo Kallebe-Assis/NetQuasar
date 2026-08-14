@@ -431,7 +431,7 @@ func (s *Server) patchNetworkProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sets) == 1 {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "nenhum campo para actualizar", nil)
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "nenhum campo para atualizar", nil)
 		return
 	}
 	tag, err := s.DB().Exec(ctx, `UPDATE network_projects SET `+strings.Join(sets, ", ")+` WHERE id=$1`, args...)
@@ -1072,7 +1072,7 @@ func (s *Server) patchNetworkRow(w http.ResponseWriter, r *http.Request, table, 
 		return
 	}
 	if len(sets) == 0 {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "nenhum campo para actualizar", nil)
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "nenhum campo para atualizar", nil)
 		return
 	}
 	sets = append(sets, "updated_at = now()")

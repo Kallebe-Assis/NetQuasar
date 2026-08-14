@@ -6,7 +6,7 @@ import (
 )
 
 // BearerAuthorizationValue monta o valor do header Authorization para auth_type=bearer.
-// encodeBase64 só aplica quando o utilizador activa token_encode_base64 na configuração.
+// encodeBase64 só aplica quando o usuário activa token_encode_base64 na configuração.
 func BearerAuthorizationValue(token, prefix string, encodeBase64 bool) string {
 	token = strings.TrimSpace(token)
 	if token == "" {

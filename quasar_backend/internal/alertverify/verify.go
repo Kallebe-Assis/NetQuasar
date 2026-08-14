@@ -270,7 +270,7 @@ func evaluateAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		if lat != nil {
 			collected["latency_ms"] = *lat
 		}
-		return false, "Dados actualizados do cache de monitorização.", collected, patch
+		return false, "Dados atualizados do cache de monitorização.", collected, patch
 	}
 }
 

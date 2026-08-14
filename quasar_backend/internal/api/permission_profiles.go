@@ -362,7 +362,7 @@ func (s *Server) deletePermissionProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if inUse > 0 {
-		writeErr(w, http.StatusConflict, "IN_USE", "perfil está atribuído a utilizadores; reatribua-os antes de apagar", map[string]any{"users": inUse})
+		writeErr(w, http.StatusConflict, "IN_USE", "perfil está atribuído a usuários; reatribua-os antes de apagar", map[string]any{"users": inUse})
 		return
 	}
 	ct, err := s.DB().Exec(r.Context(), `DELETE FROM permission_profiles WHERE id=$1 AND is_system=false`, id)

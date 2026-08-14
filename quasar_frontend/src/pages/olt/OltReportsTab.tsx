@@ -49,7 +49,7 @@ function OnuHistoryChart({ title, data, days, height = 220 }: { title: string; d
     return (
       <div className="card" style={{ padding: 12 }}>
         <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h3>
-        <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Sem amostras no período. Actualize snapshots das OLTs para gerar histórico.</p>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Sem amostras no período. Atualize snapshots das OLTs para gerar histórico.</p>
       </div>
     );
   }
@@ -96,7 +96,7 @@ export function OltReportsTab() {
           Relatórios ONU (histórico)
           <InfoHint label="Histórico de ONUs por OLT">
             <p>
-              Cada <strong>actualização de snapshot OLT</strong> ou relatório mensal automático regista uma amostra (total, online, offline). Use os
+              Cada <strong>atualização de snapshot OLT</strong> ou relatório mensal automático regista uma amostra (total, online, offline). Use os
               gráficos para acompanhar a evolução por equipamento e o total de todas as OLTs.
             </p>
           </InfoHint>
@@ -109,7 +109,7 @@ export function OltReportsTab() {
             </button>
           ))}
           <button type="button" className="btn" disabled={q.isFetching} onClick={() => q.refetch()} style={{ marginLeft: "auto" }}>
-            {q.isFetching ? "A actualizar…" : "Actualizar gráficos"}
+            {q.isFetching ? "A atualizar…" : "Atualizar gráficos"}
           </button>
         </div>
         {q.isError && <div className="msg msg--err" style={{ marginTop: 8 }}>{(q.error as Error).message}</div>}
@@ -131,7 +131,7 @@ export function OltReportsTab() {
         ) : null}
         {!q.isLoading && !hasAny && (
           <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 8, marginBottom: 0 }}>
-            Ainda não há histórico. Vá à lista de equipamentos e actualize snapshots, ou aguarde o relatório mensal automático.
+            Ainda não há histórico. Vá à lista de equipamentos e atualize snapshots, ou aguarde o relatório mensal automático.
           </p>
         )}
       </div>

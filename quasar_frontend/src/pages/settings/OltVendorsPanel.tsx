@@ -440,7 +440,7 @@ function filterOltModels<T extends { model: string }>(list: T[]): T[] {
 }
 
 const OLT_COLLECT_METHODS: { value: string; label: string }[] = [
-  { value: "if_mib_refresh", label: "SNMP — actualizar interfaces (walk completo)" },
+  { value: "if_mib_refresh", label: "SNMP — atualizar interfaces (walk completo)" },
   { value: "if_mib_snapshot", label: "SNMP — ler interfaces (rápido)" },
   { value: "onu_metrics_collect", label: "Coletar métricas SNMP das ONUs" },
   { value: "onu_snmp_walk", label: "Contagem simples via snmpwalk (legado)" },
@@ -2150,7 +2150,7 @@ function OltVendorsPanel() {
             <label className="row" style={{ gap: 8, alignItems: "flex-start", margin: "12px 0 8px", cursor: "pointer" }}>
               <input type="checkbox" checked={ponTelnetEnabled} onChange={(e) => setPonTelnetEnabled(e.target.checked)} style={{ marginTop: 3 }} />
               <span style={{ fontSize: 13 }}>
-                <strong>Coletar no monitoramento</strong> — actualiza a tabela de PONs após cada coleta.
+                <strong>Coletar no monitoramento</strong> — atualiza a tabela de PONs após cada coleta.
               </span>
             </label>
             {ponTelnetEnabled ? (

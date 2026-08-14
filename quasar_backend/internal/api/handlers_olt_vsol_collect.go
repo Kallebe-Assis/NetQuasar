@@ -58,7 +58,7 @@ func (s *Server) collectVsolOLTWithPreload(parentCtx context.Context, deviceID u
 	sum["vsol_onu_refs_count"] = len(onuRefs)
 	if len(onuRefs) == 0 {
 		if _, hasNote := sum["vsol_get_note"]; !hasNote {
-			sum["vsol_get_note"] = "sem ONUs no IF-MIB — actualize interfaces antes do snapshot"
+			sum["vsol_get_note"] = "sem ONUs no IF-MIB — atualize interfaces antes do snapshot"
 		}
 		return vPons, onuRefs, sum
 	}

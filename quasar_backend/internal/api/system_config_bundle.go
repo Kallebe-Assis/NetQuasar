@@ -156,7 +156,7 @@ func (s *Server) collectSystemConfigurationBundle(ctx context.Context) (map[stri
 			"olt_vendor_profiles":           sectionWrap("Marcas OLT.", oltProfiles, true),
 			"olt_vendor_models":             sectionWrap("Modelos OLT.", oltModels, true),
 			"integrations":                  sectionWrap("Integrações ERP/CRM.", integrations, true),
-			"users":                         sectionWrap("Utilizadores (sem password_hash).", users, true),
+			"users":                         sectionWrap("Usuários (sem password_hash).", users, true),
 			"automation_onu_monthly_report": sectionWrap("Agendamento ONU.", automationOnu, false),
 			"automation_alerts_digest":      sectionWrap("Agendamento resumo alertas.", automationDigest, false),
 			"automation_commercial_report":  sectionWrap("Agendamento comercial.", automationCommercial, false),
@@ -205,12 +205,12 @@ func importSteps() []systemConfigStep {
 		{"automation_onu_monthly_report", "Automação ONU", applyAutomationOnuImport},
 		{"automation_alerts_digest", "Automação resumo alertas", applyAutomationDigestImport},
 		{"automation_commercial_report", "Automação comercial", applyAutomationCommercialImport},
-		{"users", "Utilizadores", applyUsersImport},
+		{"users", "Usuários", applyUsersImport},
 		{"database_connection", "Ligação PostgreSQL", applyDatabaseMetaImport},
 	}
 }
 
-// updateSingletonFromJSON actualiza a linha id=1 de tabelas singleton via json_populate_record.
+// updateSingletonFromJSON atualiza a linha id=1 de tabelas singleton via json_populate_record.
 func updateSingletonFromJSON(ctx context.Context, pool *pgxpool.Pool, table string, data any, skipCols ...string) error {
 	skip := map[string]bool{"id": true}
 	for _, c := range skipCols {

@@ -770,9 +770,9 @@ export function DevicesPage() {
         return;
       }
       if (errors.length) {
-        toastErr(pushToast, new Error(`Actualizados ${ok}; ${errors.length} erro(s). ${errors.slice(0, 3).join(" · ")}`));
+        toastErr(pushToast, new Error(`Atualizados ${ok}; ${errors.length} erro(s). ${errors.slice(0, 3).join(" · ")}`));
       } else {
-        toastOk(pushToast, `Alteração em massa: ${ok} equipamento(s) actualizado(s).`);
+        toastOk(pushToast, `Alteração em massa: ${ok} equipamento(s) atualizado(s).`);
         setBulkModalOpen(false);
         setBulkForm(emptyBulkForm());
       }

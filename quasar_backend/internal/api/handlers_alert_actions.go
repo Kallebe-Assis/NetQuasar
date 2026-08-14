@@ -61,7 +61,7 @@ func (s *Server) alertsVerifyAll(w http.ResponseWriter, r *http.Request) {
 		"closed_ping_count": closedPing,
 		"verified_count":    verified,
 		"resolved_count":    resolved,
-		"note":              "Recalculou ping offline e reverificou alertas abertos com coleta actualizada.",
+		"note":              "Recalculou ping offline e reverificou alertas abertos com coleta atualizada.",
 	})
 }
 

@@ -92,7 +92,7 @@ func main() {
 		fmt.Printf("  %s %v total_if=%v\n", p["name"], p["id"], p["onu_total"])
 	}
 
-	// Enterprise 13464 (reportado pelo utilizador)
+	// Enterprise 13464 (reportado pelo usuário)
 	fmt.Println("\n--- Enterprise 1.3.6.1.4.1.13464.1.11.3.1 ---")
 	w13464, tr134, e134 := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
 		Host: *host, Community: *community, RootOID: "1.3.6.1.4.1.13464.1.11.3.1",

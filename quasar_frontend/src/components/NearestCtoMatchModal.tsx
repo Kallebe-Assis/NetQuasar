@@ -177,9 +177,9 @@ export function NearestCtoMatchModal({ open, onClose, canMutate }: Props) {
       }
       await invalidatePageCachedQuery(qc, queryKeys.clientConnectionsList);
       if (fail === 0) {
-        toastOk(pushToast, `${ok} login(s) actualizado(s) com a CTO sugerida.`);
+        toastOk(pushToast, `${ok} login(s) atualizado(s) com a CTO sugerida.`);
       } else {
-        pushToast({ text: `${ok} actualizado(s), ${fail} falha(s).`, tone: fail > ok ? "err" : "info" });
+        pushToast({ text: `${ok} atualizado(s), ${fail} falha(s).`, tone: fail > ok ? "err" : "info" });
       }
     } catch (e) {
       toastErr(pushToast, e);

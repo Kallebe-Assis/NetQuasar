@@ -149,8 +149,8 @@ export function BngOverviewPanel(props: Props) {
               <button
                 type="button"
                 className="mk-noc-kpi__refresh"
-                title="Actualizar só este total (SNMP)"
-                aria-label="Actualizar total de PPPoEs online"
+                title="Atualizar só este total (SNMP)"
+                aria-label="Atualizar total de PPPoEs online"
                 disabled={props.refreshingPppoeOnline}
                 onClick={(e) => {
                   e.stopPropagation();

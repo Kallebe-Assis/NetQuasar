@@ -142,12 +142,12 @@ export function MikrotikNocDashboard(props: Props) {
         <>
           <button type="button" className="mk-noc-btn mk-noc-btn--primary" disabled={props.collecting} onClick={props.onCollect}>
             <RefreshCw size={14} className={props.collecting ? "spin" : ""} />
-            {props.collecting ? "A coletar…" : "Actualizar telemetria"}
+            {props.collecting ? "A coletar…" : "Atualizar telemetria"}
           </button>
           {props.section === "interfaces" ? (
             <button type="button" className="mk-noc-btn" disabled={props.refreshingIf} onClick={props.onRefreshIf}>
               <Activity size={14} className={props.refreshingIf ? "spin" : ""} />
-              {props.refreshingIf ? "A actualizar…" : "Actualizar interfaces"}
+              {props.refreshingIf ? "A atualizar…" : "Atualizar interfaces"}
             </button>
           ) : (
             <button type="button" className="mk-noc-btn" disabled={props.refreshingIf} onClick={props.onRefreshIf}>
@@ -184,7 +184,7 @@ export function MikrotikNocDashboard(props: Props) {
             <strong>{softwareLabel}</strong> {sys.version}
           </span>
           <span>
-            <strong>Últ. actualização</strong> {props.formatCollectedAt(props.collectedAt)}
+            <strong>Últ. atualização</strong> {props.formatCollectedAt(props.collectedAt)}
           </span>
         </>
       }
@@ -263,7 +263,7 @@ export function MikrotikNocDashboard(props: Props) {
                       </ResponsiveContainer>
                     ) : (
                       <p className="mk-noc-muted">
-                        Active tempo real ou actualize interfaces para construir o gráfico de tráfego.
+                        Active tempo real ou atualize interfaces para construir o gráfico de tráfego.
                       </p>
                     )}
                   </div>

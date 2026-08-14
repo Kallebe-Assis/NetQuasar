@@ -130,7 +130,7 @@ export function AutomationsHistoryTable({
           className="input"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Pesquisar status, utilizador, erro…"
+          placeholder="Pesquisar status, usuário, erro…"
         />
       </div>
       {hist.isLoading ? (
@@ -149,7 +149,7 @@ export function AutomationsHistoryTable({
                 <th>Data / hora</th>
                 {showJobColumn ? <th>Automação</th> : null}
                 <th>Origem</th>
-                <th>Utilizador</th>
+                <th>Usuário</th>
                 <th>Status</th>
                 {!compact ? <th>Detalhe</th> : null}
               </tr>
@@ -196,7 +196,7 @@ export function AutomationsLogDetail({ row }: { row: AutomationHistoryRow | null
     `Início: ${formatAutomationWhen(row.started_at)}`,
     `Fim: ${formatAutomationWhen(row.finished_at)}`,
     `Origem: ${automationOriginLabel(row)}`,
-    `Utilizador: ${automationActorLabel(row)}`,
+    `Usuário: ${automationActorLabel(row)}`,
     `Estado: ${row.ok ? "Sucesso" : "Erro"}`,
     `Mensagem: ${row.status_message || "—"}`,
   ];

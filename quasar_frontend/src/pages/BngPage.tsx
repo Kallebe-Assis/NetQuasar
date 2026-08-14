@@ -491,7 +491,7 @@ function BngAuthRecordsPanel({
             Tentativas recentes de autenticação no BNG — falhas AAA + logins OK detectados em tempo real (atualização a cada 2 s).
             {refreshing && (
               <span style={{ marginLeft: 8 }}>
-                <Loader2 size={12} className="map-refresh-spin" aria-hidden /> A actualizar…
+                <Loader2 size={12} className="map-refresh-spin" aria-hidden /> A atualizar…
               </span>
             )}
           </p>
@@ -1320,7 +1320,7 @@ function SessionDetailModal({
 
           <SessionDetailSection title="Tráfego em tempo real">
             <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-              Upload/download instantâneos (amostra ~2s, actualiza a cada 5s)
+              Upload/download instantâneos (amostra ~2s, atualiza a cada 5s)
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div
@@ -1389,7 +1389,7 @@ function SessionDetailModal({
                 if (sessionIndex) traffic.refetch();
               }}
             >
-              {lookup.isFetching ? "A consultar…" : "Actualizar"}
+              {lookup.isFetching ? "A consultar…" : "Atualizar"}
             </button>
           )}
         </div>
@@ -1643,7 +1643,7 @@ export function BngPage() {
         setPppoeOnlineOverride(Number(data.pppoe_online));
       }
     },
-    onError: (err) => toastErr(pushToast, err, "Falha ao actualizar PPPoE online."),
+    onError: (err) => toastErr(pushToast, err, "Falha ao atualizar PPPoE online."),
   });
 
   const collectSessions = useMutation({
@@ -1863,7 +1863,7 @@ export function BngPage() {
           onClick={() => collectPeriodic.mutate()}
         >
           <RefreshCw size={14} className={collectPeriodic.isPending ? "spin" : ""} />
-          {collectPeriodic.isPending ? "A coletar…" : "Actualizar telemetria"}
+          {collectPeriodic.isPending ? "A coletar…" : "Atualizar telemetria"}
         </button>
       )}
     </>
@@ -2067,7 +2067,7 @@ export function BngPage() {
                   onClick={() => authRecords.refetch()}
                 >
                   <RefreshCw size={14} className={authRecords.isFetching ? "spin" : ""} />
-                  {authRecords.isFetching ? "A actualizar…" : "Actualizar log AAA"}
+                  {authRecords.isFetching ? "A atualizar…" : "Atualizar log AAA"}
                 </button>
               </div>
               <div className="mk-noc-panel" style={{ padding: 14 }}>
@@ -2197,8 +2197,8 @@ export function BngPage() {
                     type="button"
                     className="btn btn--icon-menu"
                     style={{ flexShrink: 0 }}
-                    title="Actualizar lista"
-                    aria-label="Actualizar lista"
+                    title="Atualizar lista"
+                    aria-label="Atualizar lista"
                     disabled={sessionTableLoading}
                     onClick={() => {
                       if (searchField === "login") {
@@ -2471,7 +2471,7 @@ export function BngPage() {
                   <div style={{ fontSize: 24, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                     {progressLoginLabel(collectProgress?.logins_loaded)} logins
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--muted)" }}>Walk de logins (GET-BULK) — actualiza de 50 em 50</div>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>Walk de logins (GET-BULK) — atualiza de 50 em 50</div>
                 </>
               )}
             </div>

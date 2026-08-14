@@ -1,4 +1,4 @@
-/** Apresentação dos alertas na UI — categorias, filtros, textos curtos (sem JSON/códigos ao utilizador). */
+/** Apresentação dos alertas na UI — categorias, filtros, textos curtos (sem JSON/códigos ao usuário). */
 
 export type AlertUiCategory = "equipment" | "interface" | "olt" | "optical" | "performance" | "system";
 

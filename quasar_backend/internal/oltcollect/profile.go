@@ -190,7 +190,7 @@ func EffectivePeriodicSteps(p Profile) []Step {
 
 // MethodLabels para UI.
 var MethodLabels = map[string]string{
-	MethodIfMibRefresh:     "SNMP — actualizar snapshot IF-MIB",
+	MethodIfMibRefresh:     "SNMP — atualizar snapshot IF-MIB",
 	MethodIfMibSnapshot:    "SNMP — ler IF-MIB (snapshot ou walk)",
 	MethodVsolOnuCollect:   "VSOL — tabela gOnuAuthList (snmpwalk)",
 	MethodOnuSNMPWalk:        "ONUs — snmpwalk no OID do perfil e contagem",

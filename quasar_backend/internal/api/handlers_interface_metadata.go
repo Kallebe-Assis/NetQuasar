@@ -24,7 +24,7 @@ type interfaceMetadataBody struct {
 	Interfaces []interfaceMetadataInput `json:"interfaces"`
 }
 
-// enrichInterfaceTableMetadata aplica descrição e tipo configurados pelo utilizador.
+// enrichInterfaceTableMetadata aplica descrição e tipo configurados pelo usuário.
 func enrichInterfaceTableMetadata(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, payload map[string]any) error {
 	if pool == nil || deviceID == uuid.Nil || payload == nil {
 		return nil

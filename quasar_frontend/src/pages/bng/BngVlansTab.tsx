@@ -161,7 +161,7 @@ export function BngVlansTab({ deviceId }: { deviceId: string | null }) {
       }
     },
     onSuccess: async () => {
-      toastOk(push, editing ? "VLAN actualizada" : "VLAN criada");
+      toastOk(push, editing ? "VLAN atualizada" : "VLAN criada");
       setFormOpen(false);
       setEditing(null);
       await invalidate();
@@ -270,7 +270,7 @@ export function BngVlansTab({ deviceId }: { deviceId: string | null }) {
           <option value="gerencia">Gerência</option>
           <option value="transporte">Transporte</option>
         </select>
-        <button type="button" className="btn btn--icon-menu" title="Actualizar" onClick={() => void listQ.refetch()}>
+        <button type="button" className="btn btn--icon-menu" title="Atualizar" onClick={() => void listQ.refetch()}>
           <RefreshCw size={16} className={listQ.isFetching ? "spin" : ""} />
         </button>
         <label className="bng-vlans__sort">

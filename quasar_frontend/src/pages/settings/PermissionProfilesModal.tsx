@@ -159,7 +159,7 @@ export function PermissionProfilesModal({ open, onClose }: Props) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["permission-profiles"] });
       void qc.invalidateQueries({ queryKey: ["settings-users"] });
-      toastOk(pushToast, creating ? "Perfil criado." : "Perfil actualizado.");
+      toastOk(pushToast, creating ? "Perfil criado." : "Perfil atualizado.");
       cancelEditor();
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao guardar perfil."),
@@ -372,7 +372,7 @@ export function PermissionProfilesModal({ open, onClose }: Props) {
             <div className="card" style={{ width: "min(420px, 92vw)", margin: "18vh auto" }} onClick={(e) => e.stopPropagation()}>
               <h3 style={{ marginTop: 0 }}>Apagar perfil</h3>
               <p style={{ fontSize: 13, color: "var(--muted)" }}>
-                Remover o perfil <strong>{confirmDelete.name}</strong>? Utilizadores atribuídos a ele precisam ser reatribuídos antes.
+                Remover o perfil <strong>{confirmDelete.name}</strong>? Usuários atribuídos a ele precisam ser reatribuídos antes.
               </p>
               <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
                 <button type="button" className="btn" disabled={del.isPending} onClick={() => setConfirmDelete(null)}>

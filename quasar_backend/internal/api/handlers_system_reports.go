@@ -1040,7 +1040,7 @@ func (s *Server) reportSystemGeneral(ctx context.Context, pool *pgxpool.Pool, ba
 		{"Alertas abertos", `SELECT COUNT(*) FROM alert_instances WHERE closed_at IS NULL`},
 		{"Incidentes abertos", `SELECT COUNT(*) FROM alert_incidents WHERE status = 'open'`},
 		{"Janelas de manutenção activas", `SELECT COUNT(*) FROM maintenance_windows WHERE now() BETWEEN starts_at AND ends_at AND status IN ('planned','running')`},
-		{"Utilizadores", `SELECT COUNT(*) FROM users`},
+		{"Usuários", `SELECT COUNT(*) FROM users`},
 		{"Regras de alerta", `SELECT COUNT(*) FROM alert_rules`},
 		{"Telemetria activa (equip.)", `SELECT COUNT(*) FROM devices WHERE telemetry_enabled = true`},
 		{"Ping activo (equip.)", `SELECT COUNT(*) FROM devices WHERE ping_enabled = true`},
@@ -1144,7 +1144,7 @@ func (s *Server) reportIntegrations(ctx context.Context, pool *pgxpool.Pool, bas
 		return nil, err
 	}
 	defer rows.Close()
-	cols := []string{"Nome", "Slug", "URL", "Auth", "Activa", "Último teste", "Resultado", "Mensagem", "Actualizado"}
+	cols := []string{"Nome", "Slug", "URL", "Auth", "Activa", "Último teste", "Resultado", "Mensagem", "Atualizado"}
 	var dataRows [][]string
 	var enabled, disabled int
 	for rows.Next() {

@@ -246,7 +246,7 @@ export function AboutPage() {
           <section className="card about-section about-section--wide">
             <h3>Segurança operacional</h3>
             <ul>
-              <li>Autenticação de utilizadores e sessão/token.</li>
+              <li>Autenticação de usuários e sessão/token.</li>
               <li>Permissões por módulo (admin vs operador).</li>
               <li>Restringir o painel à rede de gestão / VPN.</li>
               <li>HTTPS no reverse proxy.</li>

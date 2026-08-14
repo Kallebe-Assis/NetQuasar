@@ -52,6 +52,6 @@ export async function playAlertSound(soundId: string): Promise<void> {
   try {
     await audio.play();
   } catch {
-    /* autoplay bloqueado até gesto do utilizador */
+    /* autoplay bloqueado até gesto do usuário */
   }
 }

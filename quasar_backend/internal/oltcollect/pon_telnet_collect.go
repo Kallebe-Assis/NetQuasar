@@ -145,7 +145,7 @@ func EnrichPonRowsViaTelnet(
 	return res
 }
 
-// ApplyPonTelnetResultToSummary actualiza summary e devolve linhas PON enriquecidas.
+// ApplyPonTelnetResultToSummary atualiza summary e devolve linhas PON enriquecidas.
 func ApplyPonTelnetResultToSummary(summary map[string]any, result PonTelnetCollectResult) {
 	if summary == nil {
 		return

@@ -6,7 +6,7 @@ import (
 )
 
 // FormatAlertIfaceLabel monta o rótulo de interface para alertas/Telegram.
-// Prioridade da descrição: custom (utilizador) > ifAlias > vazio.
+// Prioridade da descrição: custom (usuário) > ifAlias > vazio.
 // Ex.: "ether1 (Uplink-POP1)" ou "sfp-sfpplus1".
 func FormatAlertIfaceLabel(ifName, ifAlias, customDescription string) string {
 	name := strings.TrimSpace(ifName)

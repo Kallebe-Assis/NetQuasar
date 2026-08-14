@@ -40,7 +40,7 @@ export const SYSTEM_REPORT_INFO: Record<SystemReportId, SystemReportInfo> = {
   integrations: {
     delivers: "Integrações configuradas, URL, autenticação e resultado do último teste.",
     formats: "Tabela detalhada; exportação CSV/PDF/Telegram.",
-    columns: "Nome, Slug, URL, Auth, Activa, Último teste, Resultado, Mensagem, Actualizado",
+    columns: "Nome, Slug, URL, Auth, Activa, Último teste, Resultado, Mensagem, Atualizado",
   },
   "attention-devices": {
     delivers: "Equipamentos com lacunas de cadastro ou alertas abertos que precisam de atenção.",

@@ -21,15 +21,17 @@ func (s *Server) tryScheduledBngStatsReport(ctx context.Context, log *zerolog.Lo
 		return
 	}
 	s.clearStaleAutomationRunning(ctx, "automation_bng_stats_report")
+	ensureAutomationDaysOfWeek(ctx, pool, "automation_bng_stats_report")
 	var en, running, tg, em bool
 	var freq, th, tz, lastKey, emailTo *string
 	var dow *int
+	var days []int32
 	var lr *time.Time
 	err := pool.QueryRow(ctx, `
 		SELECT enabled, frequency, day_of_week, time_hhmm, timezone,
-			channel_telegram, channel_email, email_to, last_run_key, last_run_at, running
+			channel_telegram, channel_email, email_to, last_run_key, last_run_at, running, days_of_week
 		FROM automation_bng_stats_report WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lastKey, &lr, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lastKey, &lr, &running, &days)
 	if err != nil || !en {
 		return
 	}
@@ -45,7 +47,7 @@ func (s *Server) tryScheduledBngStatsReport(ctx context.Context, log *zerolog.Lo
 	if th != nil {
 		thStr = *th
 	}
-	runKey, due := scheduleutil.DailyWeeklyDue(en, frequency, tzStr, thStr, dow, lastKey, lr, running, time.Now())
+	runKey, due := scheduleutil.DailyWeeklyDueOnDays(en, frequency, tzStr, thStr, dow, intSliceFromInt32(days), lastKey, lr, running, time.Now())
 	if !due {
 		return
 	}
@@ -173,15 +175,17 @@ func (s *Server) setBngStatsReportStatus(ctx context.Context, status string, err
 }
 
 func (s *Server) getAutomationBngStatsReport(w http.ResponseWriter, r *http.Request) {
+	ensureAutomationDaysOfWeek(r.Context(), s.DB(), "automation_bng_stats_report")
 	var en, running, tg, em bool
 	var freq, th, tz, emailTo, lastKey, ls, le *string
 	var dow *int
+	var days []int32
 	var lr *time.Time
 	err := s.DB().QueryRow(r.Context(), `
 		SELECT enabled, frequency, day_of_week, time_hhmm, timezone,
-			channel_telegram, channel_email, email_to, last_run_at, last_run_key, last_status, last_error, running
+			channel_telegram, channel_email, email_to, last_run_at, last_run_key, last_status, last_error, running, days_of_week
 		FROM automation_bng_stats_report WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lr, &lastKey, &ls, &le, &running)
+	`).Scan(&en, &freq, &dow, &th, &tz, &tg, &em, &emailTo, &lr, &lastKey, &ls, &le, &running, &days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -190,6 +194,7 @@ func (s *Server) getAutomationBngStatsReport(w http.ResponseWriter, r *http.Requ
 		"enabled": en, "frequency": freq, "day_of_week": dow, "time_hhmm": th, "timezone": tz,
 		"channel_telegram": tg, "channel_email": em, "email_to": emailTo,
 		"last_run_at": lr, "last_run_key": lastKey, "last_status": ls, "last_error": le, "running": running,
+		"days_of_week": intSliceFromInt32(days),
 	})
 }
 

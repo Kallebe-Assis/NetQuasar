@@ -419,7 +419,7 @@ export function FleetSettingsPanel() {
             <h3>Motoristas</h3>
             <p>
               Colunas: nome, CPF, RG, telefone, e-mail, CNH, categoria, validade (AAAA-MM-DD ou DD/MM/AAAA), cidade, UF,
-              utilizador (login do sistema, opcional), status e observação. Status: ativo, inativo, bloqueado.
+              usuário (login do sistema, opcional), status e observação. Status: ativo, inativo, bloqueado.
             </p>
             <div className="fleet-import-actions">
               <button

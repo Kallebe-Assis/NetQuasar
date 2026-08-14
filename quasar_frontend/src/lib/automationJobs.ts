@@ -112,7 +112,7 @@ export function formatRecurrence(draft: RecurrenceDraft): string {
     .slice()
     .sort((a, b) => a - b)
     .map((d) => WEEKDAY_LABELS[d] ?? d);
-  if (draft.kind === "weekly") return `Toda ${days[0] ?? "Seg"} às ${hhmm}`;
+  if (draft.kind === "weekly" && days.length <= 1) return `Toda ${days[0] ?? "Seg"} às ${hhmm}`;
   return `${days.join(", ")} às ${hhmm}`;
 }
 
@@ -128,13 +128,19 @@ export function draftFromJob(job: {
   const timezone = job.timezone?.trim() || TZ_DEFAULT;
   const customDays = (job.days_of_week ?? []).filter((d) => d >= 0 && d <= 6);
   if (customDays.length > 1 || job.frequency === "custom") {
-    return { kind: "custom", time, timezone, weekdays: customDays.length ? customDays : [1], dayOfMonth: 1 };
+    return { kind: "custom", time, timezone, weekdays: customDays.length ? customDays : [job.day_of_week ?? 1], dayOfMonth: 1 };
   }
   if (job.frequency === "monthly" || (job.day_of_month != null && job.frequency !== "daily" && job.frequency !== "weekly")) {
     return { kind: "monthly", time, timezone, weekdays: [], dayOfMonth: job.day_of_month || 1 };
   }
   if (job.frequency === "weekly") {
-    return { kind: "weekly", time, timezone, weekdays: [job.day_of_week ?? 1], dayOfMonth: 1 };
+    return {
+      kind: "weekly",
+      time,
+      timezone,
+      weekdays: customDays.length ? customDays : [job.day_of_week ?? 1],
+      dayOfMonth: 1,
+    };
   }
   return { kind: "daily", time, timezone, weekdays: [], dayOfMonth: 1 };
 }
@@ -155,14 +161,40 @@ export function recurrenceToPatch(jobId: AutomationJobType, draft: RecurrenceDra
   }
 
   if (draft.kind === "daily" || (draft.kind === "custom" && weekdays.length >= 7)) {
-    return { enabled, frequency: "daily", time_hhmm, timezone };
+    return { enabled, frequency: "daily", time_hhmm, timezone, days_of_week: [] };
   }
   const dow = weekdays[0] ?? 1;
   return {
     enabled,
-    frequency: "weekly",
+    frequency: weekdays.length > 1 ? "custom" : "weekly",
     day_of_week: dow,
+    days_of_week: weekdays.length ? weekdays : [dow],
     time_hhmm,
     timezone,
+  };
+}
+
+export function daysFromSchedule(cfg: {
+  frequency?: string | null;
+  day_of_week?: number | null;
+  days_of_week?: number[] | null;
+}): number[] {
+  const custom = (cfg.days_of_week ?? []).filter((d) => d >= 0 && d <= 6);
+  if (custom.length) return [...new Set(custom)].sort((a, b) => a - b);
+  if (cfg.frequency === "weekly" && cfg.day_of_week != null && cfg.day_of_week >= 0 && cfg.day_of_week <= 6) {
+    return [cfg.day_of_week];
+  }
+  return [1];
+}
+
+export function scheduleFromDays(freq: string, days: number[]) {
+  const weekdays = [...new Set(days.filter((d) => d >= 0 && d <= 6))].sort((a, b) => a - b);
+  if (freq === "daily" || weekdays.length >= 7) {
+    return { frequency: "daily", day_of_week: null as number | null, days_of_week: [] as number[] };
+  }
+  return {
+    frequency: weekdays.length === 1 ? "weekly" : "custom",
+    day_of_week: weekdays[0] ?? 1,
+    days_of_week: weekdays,
   };
 }

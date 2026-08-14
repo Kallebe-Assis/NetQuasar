@@ -104,7 +104,7 @@ export function DeviceEditHistoricoTab({ deviceId }: Props) {
       </p>
       <div className="row" style={{ gap: 8, marginBottom: 10 }}>
         <button type="button" className="btn" onClick={() => { void alertsHist.refetch(); void alertsActive.refetch(); void events.refetch(); }}>
-          Actualizar
+          Atualizar
         </button>
       </div>
       {rows.length === 0 ? (

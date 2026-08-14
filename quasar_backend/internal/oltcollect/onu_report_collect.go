@@ -304,7 +304,7 @@ func EnrichOnuRowsViaTelnet(
 	return res
 }
 
-// ApplyOnuTelnetResultToSummary actualiza vsol_onu_rows no summary.
+// ApplyOnuTelnetResultToSummary atualiza vsol_onu_rows no summary.
 func ApplyOnuTelnetResultToSummary(summary map[string]any, result OnuTelnetCollectResult) {
 	if summary == nil {
 		return

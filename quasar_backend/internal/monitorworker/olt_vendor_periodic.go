@@ -203,7 +203,7 @@ func CollectOltVendorPeriodic(
 			Str("host", host).
 			Int("pon_segments", len(pons)).
 			Float64("onu_online_sum", sumOnuOnlineInPonRows(pons)).
-			Msg("OLT periódica: snapshot actualizado (perfil fabricante)")
+			Msg("OLT periódica: snapshot atualizado (perfil fabricante)")
 	}
 	out.OK = true
 	out.PonCount = len(pons)

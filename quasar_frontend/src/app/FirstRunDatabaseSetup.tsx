@@ -137,7 +137,7 @@ export function FirstRunDatabaseSetup({ onConfigured }: Props) {
       const p = port.trim();
       if (!p || Number.isNaN(Number(p)) || Number(p) <= 0) missing.push("porta");
       if (!dbName.trim()) missing.push("nome da base");
-      if (!dbUser.trim()) missing.push("utilizador");
+      if (!dbUser.trim()) missing.push("usuário");
       if (!dbPass.trim()) missing.push("palavra-passe");
       if (missing.length) {
         setToast({ ok: false, text: `Preencha: ${missing.join(", ")} (ou use só a URL completa).` });
@@ -181,7 +181,7 @@ export function FirstRunDatabaseSetup({ onConfigured }: Props) {
             style={{ width: "100%", minHeight: 44, boxSizing: "border-box" }}
             value={dbUrl}
             onChange={(e) => setDbUrl(e.target.value)}
-            placeholder="postgresql://utilizador:senha@host:5432/nome_bd?sslmode=require"
+            placeholder="postgresql://usuário:senha@host:5432/nome_bd?sslmode=require"
             autoComplete="off"
             spellCheck={false}
           />
@@ -206,7 +206,7 @@ export function FirstRunDatabaseSetup({ onConfigured }: Props) {
           <input id="first-db-port" className="input" style={{ maxWidth: 120 }} value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
         </div>
         <div className="field" style={fieldStyle}>
-          <label htmlFor="first-db-user">Utilizador</label>
+          <label htmlFor="first-db-user">Usuário</label>
           <input id="first-db-user" className="input" value={dbUser} onChange={(e) => setDbUser(e.target.value)} autoComplete="off" />
         </div>
         <div className="field" style={fieldStyle}>

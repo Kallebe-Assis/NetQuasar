@@ -340,7 +340,7 @@ export function MonitoringSettingsPanel() {
 
   useEffect(() => {
     if (!stateQ.data) return;
-    // Não sobrescrever a escolha do utilizador a cada poll de 5s.
+    // Não sobrescrever a escolha do usuário a cada poll de 5s.
     if (modeTouched) return;
     setModeChoice(modeFromRuntime(stateQ.data.monitoring_mode, intervalsQ.data?.pipeline_steps));
   }, [stateQ.data, intervalsQ.data?.pipeline_steps, modeTouched]);

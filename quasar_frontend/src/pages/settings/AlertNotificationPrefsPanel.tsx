@@ -100,8 +100,8 @@ export function AlertNotificationPrefsPanel() {
         Notificações neste dispositivo
         <InfoHint label="Toasts e som de alerta">
           <p>
-            Estas opções são só suas — cada utilizador escolhe se quer toast em qualquer ecrã e se o som toca.
-            Utilizadores novos têm ambos ligados.
+            Estas opções são só suas — cada usuário escolhe se quer toast em qualquer ecrã e se o som toca.
+            Usuários novos têm ambos ligados.
           </p>
         </InfoHint>
       </h2>
@@ -139,7 +139,7 @@ export function AlertNotificationPrefsPanel() {
             )}
             Som de alerta
           </strong>
-          <span>Toca quando surge um alerta novo ou actualizado (offline, PON, SFP, temperatura, latência, etc.).</span>
+          <span>Toca quando surge um alerta novo ou atualizado (offline, PON, SFP, temperatura, latência, etc.).</span>
         </div>
         <PrefSwitch
           label="Som de alerta"

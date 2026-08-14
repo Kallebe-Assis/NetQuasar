@@ -12,8 +12,11 @@ import { isAdminUser } from "../lib/auth";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { queryKeys } from "../lib/queryKeys";
 
-type Kind = "equipment" | "server" | "site";
+type Kind = "equipment" | "server" | "site" | "orcamento" | "informacao" | "texto" | "outros";
 type Mode = "user_password" | "password";
+
+const CREDENTIAL_KINDS: Kind[] = ["equipment", "server", "site"];
+const TEXT_KINDS: Kind[] = ["orcamento", "informacao", "texto", "outros"];
 
 type RecordItem = {
   id: string;
@@ -28,6 +31,8 @@ type RecordItem = {
   domain?: string | null;
   username?: string | null;
   has_username: boolean;
+  has_password?: boolean;
+  content?: string | null;
   notes?: string | null;
   created_at: string;
   updated_at: string;
@@ -42,6 +47,7 @@ type Form = {
   owner_user_id: string;
   kind: Kind;
   title: string;
+  content: string;
   device_id: string;
   host: string;
   domain: string;
@@ -55,13 +61,28 @@ const KIND_LABEL: Record<Kind, string> = {
   equipment: "Equipamento",
   server: "Servidor",
   site: "Site",
+  orcamento: "Orçamento",
+  informacao: "Informação",
+  texto: "Texto",
+  outros: "Outros",
 };
+
+function isTextKind(kind: Kind) {
+  return TEXT_KINDS.includes(kind);
+}
+
+function contentPreview(text?: string | null, max = 80) {
+  const s = String(text ?? "").trim();
+  if (!s) return "—";
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
 
 function emptyForm(): Form {
   return {
     owner_user_id: "",
     kind: "equipment",
     title: "",
+    content: "",
     device_id: "",
     host: "",
     domain: "",
@@ -79,6 +100,7 @@ function formatWhen(iso: string) {
 }
 
 function targetOf(it: RecordItem): string {
+  if (isTextKind(it.kind)) return it.title || contentPreview(it.content, 48);
   if (it.kind === "equipment") {
     const ip = it.device_ip ? ` (${it.device_ip})` : "";
     return `${it.device_name || it.title || "Equipamento"}${ip}`;
@@ -109,7 +131,11 @@ export function RecordsPage() {
   const [form, setForm] = useState<Form>(emptyForm());
   const [deviceSearch, setDeviceSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<RecordItem | null>(null);
-  const [reveal, setReveal] = useState<{ id: string; username: string | null; password: string } | null>(null);
+  const [reveal, setReveal] = useState<
+    | { id: string; kind: Kind; username: string | null; password: string }
+    | { id: string; kind: Kind; content: string }
+    | null
+  >(null);
   const [showPass, setShowPass] = useState(false);
 
   const lookupsQ = useQuery({
@@ -168,6 +194,7 @@ export function RecordsPage() {
       owner_user_id: it.owner_user_id,
       kind: it.kind,
       title: it.title,
+      content: it.content ?? "",
       device_id: it.device_id ?? "",
       host: it.host ?? "",
       domain: it.domain ?? "",
@@ -182,25 +209,34 @@ export function RecordsPage() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload = {
-        owner_user_id: admin ? form.owner_user_id || undefined : undefined,
-        kind: form.kind,
-        title: form.title.trim() || undefined,
-        device_id: form.kind === "equipment" ? form.device_id || null : null,
-        host: form.kind === "server" ? form.host.trim() || null : null,
-        domain: form.kind === "site" ? form.domain.trim() || null : null,
-        mode: form.mode,
-        username: form.mode === "user_password" ? form.username.trim() || null : null,
-        password: form.password.trim() || undefined,
-        notes: form.notes.trim() || null,
-      };
+      const text = isTextKind(form.kind);
+      const payload = text
+        ? {
+            owner_user_id: admin ? form.owner_user_id || undefined : undefined,
+            kind: form.kind,
+            title: form.title.trim(),
+            content: form.content.trim(),
+            notes: form.notes.trim() || null,
+          }
+        : {
+            owner_user_id: admin ? form.owner_user_id || undefined : undefined,
+            kind: form.kind,
+            title: form.title.trim() || undefined,
+            device_id: form.kind === "equipment" ? form.device_id || null : null,
+            host: form.kind === "server" ? form.host.trim() || null : null,
+            domain: form.kind === "site" ? form.domain.trim() || null : null,
+            mode: form.mode,
+            username: form.mode === "user_password" ? form.username.trim() || null : null,
+            password: form.password.trim() || undefined,
+            notes: form.notes.trim() || null,
+          };
       if (editing) {
         return apiFetch(`/api/v1/credential-records/${editing}`, { method: "PATCH", json: payload });
       }
       return apiFetch("/api/v1/credential-records", { method: "POST", json: payload });
     },
     onSuccess: async () => {
-      toastOk(push, editing ? "Registo actualizado." : "Registo guardado.");
+      toastOk(push, editing ? "Registo atualizado." : "Registo guardado.");
       setFormOpen(false);
       setEditing(null);
       await invalidate();
@@ -220,12 +256,19 @@ export function RecordsPage() {
 
   const revealMut = useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ username?: string | null; password: string }>(`/api/v1/credential-records/${id}/reveal`, {
-        method: "POST",
-      }),
+      apiFetch<{ username?: string | null; password?: string; content?: string; kind?: string }>(
+        `/api/v1/credential-records/${id}/reveal`,
+        { method: "POST" },
+      ),
     onSuccess: (data, id) => {
+      const item = items.find((x) => x.id === id);
+      const kind = (item?.kind ?? data.kind ?? "equipment") as Kind;
+      if (isTextKind(kind) || data.content != null) {
+        setReveal({ id, kind, content: data.content ?? "" });
+        return;
+      }
       setShowPass(true);
-      setReveal({ id, username: data.username ?? null, password: data.password });
+      setReveal({ id, kind, username: data.username ?? null, password: data.password ?? "" });
     },
     onError: (e) => toastErr(push, e),
   });
@@ -239,8 +282,8 @@ export function RecordsPage() {
           Registros
           <InfoHint>
             {admin
-              ? "Cofre de senhas de equipamentos, servidores e sites. Como administrador vê todos os registos e pode filtrar por utilizador. As senhas ficam cifradas; use «Ver senha» para revelar."
-              : "O seu cofre de senhas de equipamentos, servidores e sites. Só você (e os administradores) vê estes registos. As senhas ficam cifradas; use «Ver senha» para revelar."}
+              ? "Cofre de senhas e registos de texto (orçamentos, informações, notas). Como administrador vê todos e pode filtrar por usuário."
+              : "O seu cofre de senhas e registos de texto. Só você (e os administradores) vê estes registos."}
           </InfoHint>
         </h1>
         <PageCountPill label="registos" count={listQ.data?.total ?? items.length} />
@@ -249,7 +292,7 @@ export function RecordsPage() {
       <div className="netev-toolbar">
         <input
           className="input"
-          placeholder="Pesquisar título, host, domínio…"
+          placeholder="Pesquisar título, host, domínio, texto…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -258,10 +301,14 @@ export function RecordsPage() {
           <option value="equipment">Equipamento</option>
           <option value="server">Servidor</option>
           <option value="site">Site</option>
+          <option value="orcamento">Orçamento</option>
+          <option value="informacao">Informação</option>
+          <option value="texto">Texto</option>
+          <option value="outros">Outros</option>
         </select>
         {admin ? (
-          <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} aria-label="Utilizador">
-            <option value="">Todos os utilizadores</option>
+          <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} aria-label="Usuário">
+            <option value="">Todos os usuários</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.label}
@@ -287,8 +334,8 @@ export function RecordsPage() {
               <th>Tipo</th>
               <th>Destino</th>
               <th>Acesso</th>
-              {admin ? <th>Utilizador</th> : null}
-              <th>Actualizado</th>
+              {admin ? <th>Usuário</th> : null}
+              <th>Atualizado</th>
               <th />
             </tr>
           </thead>
@@ -302,7 +349,7 @@ export function RecordsPage() {
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={colSpan} className="muted">
-                  Nenhum registo. Guarde senhas de equipamento, servidor ou site.
+                  Nenhum registo. Guarde senhas ou textos com título e tipo.
                 </td>
               </tr>
             ) : (
@@ -319,13 +366,23 @@ export function RecordsPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td>{it.has_username ? it.username : <span className="muted">somente senha</span>}</td>
+                  <td>
+                    {isTextKind(it.kind) ? (
+                      <span className="muted">{contentPreview(it.content)}</span>
+                    ) : it.has_username ? (
+                      it.username
+                    ) : (
+                      <span className="muted">somente senha</span>
+                    )}
+                  </td>
                   {admin ? <td>{it.owner_name}</td> : null}
                   <td className="netev-when">{formatWhen(it.updated_at)}</td>
                   <td>
                     <ActionMenu
                       items={[
-                        { id: "reveal", label: "Ver senha", onClick: () => revealMut.mutate(it.id) },
+                        isTextKind(it.kind)
+                          ? { id: "reveal", label: "Ver conteúdo", onClick: () => revealMut.mutate(it.id) }
+                          : { id: "reveal", label: "Ver senha", onClick: () => revealMut.mutate(it.id) },
                         { id: "edit", label: "Editar", onClick: () => openEdit(it) },
                         { id: "del", label: "Excluir", danger: true, onClick: () => setDeleteTarget(it) },
                       ]}
@@ -344,16 +401,34 @@ export function RecordsPage() {
               <div className="modal modal--wide vault-modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
                 <h3>{editing ? "Editar registo" : "Novo registo"}</h3>
                 <div className="vault-kinds">
-                  {(["equipment", "server", "site"] as Kind[]).map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      className={`vault-kind-btn${form.kind === k ? " is-on" : ""}`}
-                      onClick={() => setForm((f) => ({ ...f, kind: k }))}
-                    >
-                      {KIND_LABEL[k]}
-                    </button>
-                  ))}
+                  <p className="vault-kinds__label">Credenciais</p>
+                  <div className="vault-kinds__row">
+                    {CREDENTIAL_KINDS.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`vault-kind-btn${form.kind === k ? " is-on" : ""}`}
+                        onClick={() => setForm((f) => ({ ...f, kind: k }))}
+                      >
+                        {KIND_LABEL[k]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="vault-kinds__label" style={{ marginTop: 10 }}>
+                    Texto livre
+                  </p>
+                  <div className="vault-kinds__row">
+                    {TEXT_KINDS.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`vault-kind-btn${form.kind === k ? " is-on" : ""}`}
+                        onClick={() => setForm((f) => ({ ...f, kind: k }))}
+                      >
+                        {KIND_LABEL[k]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="fleet-form-grid vault-form">
                   {admin ? (
@@ -364,7 +439,7 @@ export function RecordsPage() {
                         value={form.owner_user_id}
                         onChange={(e) => setForm((f) => ({ ...f, owner_user_id: e.target.value }))}
                       >
-                        <option value="">Seleccione o utilizador</option>
+                        <option value="">Seleccione o usuário</option>
                         {users.map((u) => (
                           <option key={u.id} value={u.id}>
                             {u.label}
@@ -374,15 +449,27 @@ export function RecordsPage() {
                     </label>
                   ) : null}
                   <label>
-                    Título (opcional)
+                    Título{isTextKind(form.kind) ? "*" : " (opcional)"}
                     <input
                       className="input"
                       value={form.title}
                       onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                      placeholder="Ex.: SSH POP Centro"
+                      placeholder={isTextKind(form.kind) ? "Ex.: Orçamento POP Centro" : "Ex.: SSH POP Centro"}
                     />
                   </label>
-                  {form.kind === "equipment" ? (
+                  {isTextKind(form.kind) ? (
+                    <label className="vault-span">
+                      Texto*
+                      <textarea
+                        className="input"
+                        rows={8}
+                        value={form.content}
+                        onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
+                        placeholder="Conteúdo livre do registo…"
+                      />
+                    </label>
+                  ) : null}
+                  {!isTextKind(form.kind) && form.kind === "equipment" ? (
                     <label className="vault-span">
                       Equipamento
                       <input
@@ -407,7 +494,7 @@ export function RecordsPage() {
                       </select>
                     </label>
                   ) : null}
-                  {form.kind === "server" ? (
+                  {!isTextKind(form.kind) && form.kind === "server" ? (
                     <label className="vault-span">
                       IP ou host
                       <input
@@ -418,7 +505,7 @@ export function RecordsPage() {
                       />
                     </label>
                   ) : null}
-                  {form.kind === "site" ? (
+                  {!isTextKind(form.kind) && form.kind === "site" ? (
                     <label className="vault-span">
                       Domínio
                       <input
@@ -429,6 +516,8 @@ export function RecordsPage() {
                       />
                     </label>
                   ) : null}
+                  {!isTextKind(form.kind) ? (
+                    <>
                   <label className="vault-span">
                     O que guardar
                     <select
@@ -436,13 +525,13 @@ export function RecordsPage() {
                       value={form.mode}
                       onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value as Mode }))}
                     >
-                      <option value="user_password">Utilizador e senha</option>
+                      <option value="user_password">Usuário e senha</option>
                       <option value="password">Somente senha</option>
                     </select>
                   </label>
                   {form.mode === "user_password" ? (
                     <label>
-                      Utilizador
+                      Usuário
                       <input
                         className="input"
                         value={form.username}
@@ -461,6 +550,8 @@ export function RecordsPage() {
                       autoComplete="new-password"
                     />
                   </label>
+                    </>
+                  ) : null}
                   <label className="vault-span">
                     Notas
                     <textarea
@@ -489,19 +580,38 @@ export function RecordsPage() {
         ? createPortal(
             <div className="modal-backdrop" role="presentation" onMouseDown={() => setReveal(null)}>
               <div className="modal vault-reveal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+                {"content" in reveal ? (
+                  <>
+                    <h3>Conteúdo — {KIND_LABEL[reveal.kind]}</h3>
+                    <textarea className="input" readOnly rows={12} value={reveal.content} />
+                    <div className="row" style={{ justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => void copyText(reveal.content).then((ok) => ok && toastOk(push, "Texto copiado."))}
+                      >
+                        Copiar
+                      </button>
+                      <button type="button" className="btn" onClick={() => setReveal(null)}>
+                        Fechar
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
                 <h3>
                   <KeyRound size={18} aria-hidden /> Senha
                 </h3>
                 {reveal.username ? (
                   <label>
-                    Utilizador
+                    Usuário
                     <div className="vault-secret-row">
                       <input className="input" readOnly value={reveal.username} />
                       <button
                         type="button"
                         className="btn btn--icon"
-                        title="Copiar utilizador"
-                        onClick={() => void copyText(reveal.username ?? "").then((ok) => ok && toastOk(push, "Utilizador copiado."))}
+                        title="Copiar usuário"
+                        onClick={() => void copyText(reveal.username ?? "").then((ok) => ok && toastOk(push, "Usuário copiado."))}
                       >
                         <Copy size={16} />
                       </button>
@@ -532,6 +642,8 @@ export function RecordsPage() {
                     Fechar
                   </button>
                 </div>
+                  </>
+                )}
               </div>
             </div>,
             document.body,
@@ -541,7 +653,7 @@ export function RecordsPage() {
       <ConfirmModal
         open={!!deleteTarget}
         title="Excluir registo"
-        message={deleteTarget ? `Remover «${deleteTarget.title || targetOf(deleteTarget)}»? A senha deixa de estar disponível.` : ""}
+        message={deleteTarget ? `Remover «${deleteTarget.title || targetOf(deleteTarget)}»?` : ""}
         confirmLabel="Excluir"
         danger
         busy={remove.isPending}

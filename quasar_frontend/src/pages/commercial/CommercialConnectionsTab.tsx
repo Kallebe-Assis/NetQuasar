@@ -390,7 +390,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
       setDupModal(null);
       const skipped = data && typeof data === "object" && "skipped" in data && data.skipped;
       pushToast({
-        text: skipped ? "Conexão ignorada (duplicado)." : editId ? "Conexão actualizada." : "Conexão criada.",
+        text: skipped ? "Conexão ignorada (duplicado)." : editId ? "Conexão atualizada." : "Conexão criada.",
         tone: skipped ? "info" : "ok",
       });
     },
@@ -860,7 +860,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
               <h2 id="conn-form-title">{editId ? "Editar conexão" : "Nova conexão"}</h2>
               <p>
                 {editId
-                  ? "Actualize os dados do cliente. O login PPPoE/DHCP não pode ser alterado."
+                  ? "Atualize os dados do cliente. O login PPPoE/DHCP não pode ser alterado."
                   : "Cadastre um cliente com login, plano e coordenadas para aparecer no mapa de conexões."}
               </p>
             </div>

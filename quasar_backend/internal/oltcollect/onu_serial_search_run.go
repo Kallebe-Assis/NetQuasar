@@ -151,7 +151,7 @@ func runListSerialSearch(
 		ponsToQuery = resolvePonsForSerialSearch(target.Pon, ponIndexes)
 	}
 	if len(ponsToQuery) == 0 {
-		res.Error = "informe a porta PON ou actualize o snapshot da OLT para listar portas"
+		res.Error = "informe a porta PON ou atualize o snapshot da OLT para listar portas"
 		return res
 	}
 

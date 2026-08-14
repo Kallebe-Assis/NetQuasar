@@ -216,7 +216,7 @@ export function SystemConfigBackupPanel() {
             style={{ marginTop: 3 }}
           />
           <span style={{ fontSize: 13, lineHeight: 1.45 }}>
-            <strong>Importar utilizadores</strong> — cria/atualiza por e-mail (palavra-passe temporária; redefinir depois).
+            <strong>Importar usuários</strong> — cria/atualiza por e-mail (palavra-passe temporária; redefinir depois).
           </span>
         </label>
         <label className="row" style={{ gap: 8, alignItems: "flex-start", cursor: "pointer", maxWidth: 640 }}>

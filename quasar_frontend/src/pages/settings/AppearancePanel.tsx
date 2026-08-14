@@ -47,7 +47,7 @@ export function AppearancePanel() {
         Tema da interface
         <InfoHint label="Tema claro e escuro">
           <p>
-            Define o aspecto visual do NetQuasar neste utilizador (menu, tabelas, alertas). Cada conta guarda o seu
+            Define o aspecto visual do NetQuasar neste usuário (menu, tabelas, alertas). Cada conta guarda o seu
             próprio tema — não altera o dos colegas.
           </p>
         </InfoHint>

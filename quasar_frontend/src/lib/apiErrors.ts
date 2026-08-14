@@ -1,6 +1,6 @@
 import { ApiError } from "./api";
 
-/** Mensagens legíveis para o utilizador (evita texto técnico cru de rede/SNMP). */
+/** Mensagens legíveis para o usuário (evita texto técnico cru de rede/SNMP). */
 export function friendlyApiMessage(raw: unknown): string {
   const t = String(raw ?? "").trim();
   if (!t) return "Ocorreu um erro inesperado.";

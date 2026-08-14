@@ -77,7 +77,7 @@ export function AutomationHistoryModal({ open, onClose }: Props) {
           <div>
             <h2 style={{ margin: 0 }}>Histórico de execuções</h2>
             <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)" }}>
-              Auditoria de execuções agendadas (sistema) e manuais (utilizador).
+              Auditoria de execuções agendadas (sistema) e manuais (usuário).
             </p>
           </div>
           <button type="button" className="btn" onClick={onClose}>
@@ -128,7 +128,7 @@ export function AutomationHistoryModal({ open, onClose }: Props) {
               className="input"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Status, utilizador, erro, período…"
+              placeholder="Status, usuário, erro, período…"
             />
           </label>
         </div>
@@ -149,7 +149,7 @@ export function AutomationHistoryModal({ open, onClose }: Props) {
                   <th>Data / hora</th>
                   <th>Automação</th>
                   <th>Origem</th>
-                  <th>Utilizador</th>
+                  <th>Usuário</th>
                   <th>Status</th>
                   <th>Totais</th>
                 </tr>

@@ -31,7 +31,7 @@ func main() {
 
 	telProbe := flag.Bool("telnet-probe", false, "após SNMP, testar TCP 23 / login texto")
 	tPort := flag.String("telnet-port", "23", "porta telnet")
-	tUser := flag.String("telnet-user", "", "utilizador (opcional)")
+	tUser := flag.String("telnet-user", "", "usuário (opcional)")
 	tPass := flag.String("telnet-pass", "", "palavra-passe (opcional)")
 	flag.Parse()
 

@@ -251,7 +251,7 @@ export function oidFriendlyDescription(oid: string): string | null {
 
 export type ReportMainTableRow = { description: string; value: string };
 
-/** Linhas da tabela principal do relatório: estado + leituras SNMP extra (sem mostrar OID ao utilizador). */
+/** Linhas da tabela principal do relatório: estado + leituras SNMP extra (sem mostrar OID ao usuário). */
 export function buildDeviceReportMainTable(args: {
   pingLatest?: Record<string, unknown> | null;
   telemetryLatest?: { collected_at?: string; metrics?: Record<string, unknown> } | null;
