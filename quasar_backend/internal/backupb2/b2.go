@@ -204,7 +204,7 @@ func (c *Client) ListDumps(ctx context.Context) ([]FileInfo, error) {
 	return out, nil
 }
 
-// UploadFile envia ficheiro para o prefixo B2.
+// UploadFile envia ficheiro para o prefixo B2 (com retries em 5xx/timeout).
 func (c *Client) UploadFile(ctx context.Context, localPath, remoteName string) (fileID string, size int64, err error) {
 	remoteName = strings.TrimPrefix(remoteName, "/")
 	if !strings.Contains(remoteName, "/") {
@@ -217,6 +217,44 @@ func (c *Client) UploadFile(ctx context.Context, localPath, remoteName string) (
 	sum := sha1.Sum(data)
 	sha1hex := hex.EncodeToString(sum[:])
 
+	const maxAttempts = 5
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		fileID, size, lastErr = c.uploadOnce(ctx, data, sha1hex, remoteName)
+		if lastErr == nil {
+			return fileID, size, nil
+		}
+		if !isRetryableB2Err(lastErr) || attempt == maxAttempts {
+			break
+		}
+		backoff := time.Duration(attempt*attempt) * 5 * time.Second // 5s, 20s, 45s, 80s
+		select {
+		case <-ctx.Done():
+			return "", 0, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return "", 0, lastErr
+}
+
+func isRetryableB2Err(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") || strings.Contains(msg, "temporary") {
+		return true
+	}
+	if strings.Contains(msg, "http 503") || strings.Contains(msg, "http 500") ||
+		strings.Contains(msg, "http 429") || strings.Contains(msg, "service_unavailable") ||
+		strings.Contains(msg, "internal_error") || strings.Contains(msg, "no tomes available") {
+		return true
+	}
+	return false
+}
+
+func (c *Client) uploadOnce(ctx context.Context, data []byte, sha1hex, remoteName string) (fileID string, size int64, err error) {
 	payload, _ := json.Marshal(map[string]any{"bucketId": c.auth.Allowed.BucketID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.auth.APIURL+"/b2api/v2/b2_get_upload_url", bytes.NewReader(payload))
 	if err != nil {
@@ -241,7 +279,10 @@ func (c *Client) UploadFile(ctx context.Context, localPath, remoteName string) (
 		return "", 0, err
 	}
 
-	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ur.UploadURL, bytes.NewReader(data))
+	// URL de upload é de uso único; timeout próprio sem herdar deadline curto do caller.
+	upCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+	defer cancel()
+	upReq, err := http.NewRequestWithContext(upCtx, http.MethodPost, ur.UploadURL, bytes.NewReader(data))
 	if err != nil {
 		return "", 0, err
 	}

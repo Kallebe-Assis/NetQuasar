@@ -59,9 +59,14 @@ func (s *Server) clearStaleAutomationRunning(ctx context.Context, table string) 
 	if pool == nil {
 		return
 	}
+	// Backup B2 (dump+upload) pode ultrapassar 30 min; evita marcar como stale cedo demais.
+	stale := "30 minutes"
+	if table == "automation_database_backup" {
+		stale = "2 hours"
+	}
 	_, _ = pool.Exec(ctx, `
 		UPDATE `+table+` SET running = false, updated_at = now()
-		WHERE id = 1 AND running = true AND updated_at < now() - interval '30 minutes'
+		WHERE id = 1 AND running = true AND updated_at < now() - interval '`+stale+`'
 	`)
 }
 

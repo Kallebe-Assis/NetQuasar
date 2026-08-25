@@ -440,6 +440,7 @@ export function MapPage() {
       "map-infrastructure-points",
       infraKinds.join(","),
       projectFilterId,
+      localityFlyId,
       queryBounds?.minLat,
       queryBounds?.maxLat,
       queryBounds?.minLng,
@@ -450,6 +451,7 @@ export function MapPage() {
       const params = new URLSearchParams();
       params.set("kinds", infraKinds.join(","));
       if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
+      if (localityFlyId.trim()) params.set("locality_id", localityFlyId.trim());
       if (queryBounds) {
         params.set("min_lat", String(queryBounds.minLat));
         params.set("max_lat", String(queryBounds.maxLat));
@@ -492,7 +494,7 @@ export function MapPage() {
   const connCacheRef = useRef<Map<string, ConnectionPoint>>(new Map());
 
   useEffect(() => {
-    const scope = `${infraKinds.join(",")}|${projectFilterId}`;
+    const scope = `${infraKinds.join(",")}|${projectFilterId}|${localityFlyId}`;
     if (infraCacheScopeRef.current !== scope) {
       infraCacheRef.current.clear();
       connCacheRef.current.clear();
@@ -527,7 +529,7 @@ export function MapPage() {
       next.push(p);
     }
     setInfraStablePoints(next);
-  }, [infraPts.data?.points, infraPts.isFetching, queryBounds, infraKinds, projectFilterId]);
+  }, [infraPts.data?.points, infraPts.isFetching, queryBounds, infraKinds, projectFilterId, localityFlyId]);
 
   useEffect(() => {
     const incoming = connPts.data?.points;
@@ -1112,19 +1114,58 @@ export function MapPage() {
     setLocalityFlyPending(true);
     setLocalityFlyNote(null);
     try {
-      const r = await apiFetch<{ found?: boolean; lat?: number; lng?: number; name?: string; note?: string }>(
-        `/api/v1/map/locality-center?locality_id=${encodeURIComponent(localityFlyId)}`,
-      );
+      const r = await apiFetch<{
+        found?: boolean;
+        lat?: number;
+        lng?: number;
+        name?: string;
+        note?: string;
+        min_lat?: number;
+        max_lat?: number;
+        min_lng?: number;
+        max_lng?: number;
+      }>(`/api/v1/map/locality-center?locality_id=${encodeURIComponent(localityFlyId)}`);
       if (!r.found || r.lat == null || r.lng == null) {
         setLocalityFlyNote(r.note ?? "Sem coordenadas para esta localidade.");
         return;
       }
+      setShowCtos(true);
+      setShowCables(true);
+      setShowSpliceBoxes(true);
+      setShowPoles(true);
+      setShowProjects(true);
+      setShowPops(true);
       userPickedTab.current = true;
       setView("mapa");
-      setFlyTo({ lat: r.lat, lng: r.lng, zoom: 13 });
+      if (
+        r.min_lat != null &&
+        r.max_lat != null &&
+        r.min_lng != null &&
+        r.max_lng != null &&
+        Number.isFinite(r.min_lat) &&
+        Number.isFinite(r.max_lat) &&
+        Number.isFinite(r.min_lng) &&
+        Number.isFinite(r.max_lng)
+      ) {
+        const latSpan = Math.max(r.max_lat - r.min_lat, 0.004);
+        const lngSpan = Math.max(r.max_lng - r.min_lng, 0.004);
+        const padLat = latSpan * 0.2;
+        const padLng = lngSpan * 0.2;
+        setMapBounds(
+          quantizeMapBounds({
+            minLat: r.min_lat - padLat,
+            maxLat: r.max_lat + padLat,
+            minLng: r.min_lng - padLng,
+            maxLng: r.max_lng + padLng,
+            zoom: 15,
+          }),
+        );
+      }
+      setFlyTo({ lat: r.lat, lng: r.lng, zoom: 15 });
       setFlyKey((k) => k + 1);
+      setFitBoundsVersion((v) => v + 1);
       setFilterModalOpen(false);
-      setMapToast({ ok: true, text: `Mapa centrado em ${r.name ?? "localidade"}.` });
+      setMapToast({ ok: true, text: `A mostrar infraestrutura de ${r.name ?? "localidade"}.` });
     } catch (e) {
       setLocalityFlyNote(e instanceof Error ? e.message : "Falha ao localizar localidade.");
     } finally {
@@ -1198,6 +1239,7 @@ export function MapPage() {
     if (popId) n++;
     if (category) n++;
     if (projectFilterId) n++;
+    if (localityFlyId) n++;
     if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || showSpliceBoxes || showPoles || showProjects) n++;
     if (displayMode !== "cluster") n++;
     return n;
@@ -1205,6 +1247,7 @@ export function MapPage() {
     popId,
     category,
     projectFilterId,
+    localityFlyId,
     showEquipment,
     showConnections,
     showCtos,
@@ -1320,7 +1363,8 @@ export function MapPage() {
         {showInfrastructure && infraPts.data?.truncated ? (
           <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
             Infra limitada neste zoom
-            {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa para ver mais CTOs
+            {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa ou filtre por
+            localidade/projecto
           </span>
         ) : null}
         {showConnections && connTotal != null ? (

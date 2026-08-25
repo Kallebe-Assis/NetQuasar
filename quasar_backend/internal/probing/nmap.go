@@ -4,12 +4,34 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
+var nmapPortsRe = regexp.MustCompile(`^[0-9,\-]+$`)
+
+// ValidateNmapPorts aceita listas nmap (ex.: 22,80,443 ou 1-1024).
+func ValidateNmapPorts(ports string) (string, error) {
+	ports = strings.TrimSpace(ports)
+	if ports == "" {
+		return "", nil
+	}
+	if len(ports) > 200 {
+		return "", fmt.Errorf("lista de portas demasiado longa")
+	}
+	if !nmapPortsRe.MatchString(ports) {
+		return "", fmt.Errorf("portas inválidas — use números, vírgulas e hífens (ex.: 22,80,443 ou 1-1024)")
+	}
+	return ports, nil
+}
+
 // RunNmap executa varredura rápida (requer nmap instalado no servidor).
-func RunNmap(ctx context.Context, host, mode string) (command string, output string, err error) {
+func RunNmap(ctx context.Context, host, mode, ports string) (command string, output string, err error) {
 	host, err = ValidateToolHost(host)
+	if err != nil {
+		return "", "", err
+	}
+	ports, err = ValidateNmapPorts(ports)
 	if err != nil {
 		return "", "", err
 	}
@@ -22,8 +44,17 @@ func RunNmap(ctx context.Context, host, mode string) (command string, output str
 	switch mode {
 	case "ping", "sn", "":
 		args = append(args, "-sn")
+	case "ports", "custom":
+		if ports == "" {
+			return "", "", fmt.Errorf("indique as portas no modo personalizado (ex.: 22,80,443)")
+		}
+		args = append(args, "-p", ports)
 	case "quick", "fast":
-		args = append(args, "-F")
+		if ports != "" {
+			args = append(args, "-p", ports)
+		} else {
+			args = append(args, "-F")
+		}
 	default:
 		args = append(args, "-sn")
 	}

@@ -80,6 +80,48 @@ func parseInfraMapProjectID(r *http.Request) (*uuid.UUID, error) {
 	return &id, nil
 }
 
+func parseInfraMapLocalityID(r *http.Request) (*uuid.UUID, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("locality_id"))
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, errors.New("locality_id inválido")
+	}
+	return &id, nil
+}
+
+// Filtra por localidade directa ou pelo projecto associado (cabos/emendas só têm project_id).
+func infraMapLocalitySQL(table string, localityID *uuid.UUID, n *int, args *[]any) string {
+	if localityID == nil {
+		return ""
+	}
+	switch table {
+	case "network_projects", "pops":
+		clause := fmt.Sprintf(` AND locality_id = $%d`, *n)
+		*args = append(*args, *localityID)
+		*n++
+		return clause
+	case "network_ctos", "network_poles":
+		clause := fmt.Sprintf(` AND (
+			locality_id = $%d
+			OR EXISTS (SELECT 1 FROM network_projects np WHERE np.id = %s.project_id AND np.locality_id = $%d)
+		)`, *n, table, *n)
+		*args = append(*args, *localityID)
+		*n++
+		return clause
+	default:
+		// network_cables, network_splice_boxes, etc.
+		clause := fmt.Sprintf(` AND EXISTS (
+			SELECT 1 FROM network_projects np WHERE np.id = %s.project_id AND np.locality_id = $%d
+		)`, table, *n)
+		*args = append(*args, *localityID)
+		*n++
+		return clause
+	}
+}
+
 func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	kinds := parseInfraMapKindsQuery(r)
@@ -89,8 +131,14 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "VALIDATION", perr.Error(), nil)
 		return
 	}
+	localityID, lerr := parseInfraMapLocalityID(r)
+	if lerr != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", lerr.Error(), nil)
+		return
+	}
 	zoom := parseMapZoomQuery(r)
-	limit := mapInfrastructureLimit(zoom, hasBBox)
+	scoped := projectID != nil || localityID != nil
+	limit := mapInfrastructureLimit(zoom, hasBBox, scoped)
 
 	kindSet := map[string]bool{}
 	for _, k := range kinds {
@@ -99,6 +147,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 
 	var pts []map[string]any
 	remaining := limit
+	hitCap := false
 	centerLat := (minLat + maxLat) / 2
 	centerLng := (minLng + maxLng) / 2
 
@@ -113,7 +162,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	}
 
 	take := func(kind string) int {
-		return mapInfraKindCap(kind, zoom, remaining)
+		return mapInfraKindCap(kind, zoom, remaining, scoped)
 	}
 
 	appendRows := func(table, kind, idPrefix string, extraSelect string) error {
@@ -128,6 +177,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		n := 1
 		q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 		q += infraMapProjectSQL(projectID, &n, &args)
+		q += infraMapLocalitySQL(table, localityID, &n, &args)
 		q += infraMapHideInactiveSQL(table)
 		q += orderNearCenter(&n, &args)
 		q += fmt.Sprintf(` LIMIT $%d`, n)
@@ -139,6 +189,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		}
 		defer rows.Close()
 
+		fetched := 0
 		for rows.Next() {
 			var id uuid.UUID
 			var desc string
@@ -165,10 +216,15 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				pt["color"] = strings.TrimSpace(*color)
 			}
 			pts = append(pts, pt)
+			fetched++
 			remaining--
 			if remaining <= 0 {
+				hitCap = true
 				break
 			}
+		}
+		if fetched >= capN {
+			hitCap = true
 		}
 		return nil
 	}
@@ -183,6 +239,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 			q += infraMapProjectSQL(projectID, &n, &args)
+			q += infraMapLocalitySQL("network_ctos", localityID, &n, &args)
 			q += infraMapHideInactiveSQL("network_ctos")
 			q += orderNearCenter(&n, &args)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
@@ -192,6 +249,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 				return
 			}
+			fetched := 0
 			for rows.Next() {
 				var id uuid.UUID
 				var desc string
@@ -219,12 +277,17 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					pt["fiber_color"] = strings.TrimSpace(*fiberColor)
 				}
 				pts = append(pts, pt)
+				fetched++
 				remaining--
 				if remaining <= 0 {
+					hitCap = true
 					break
 				}
 			}
 			rows.Close()
+			if fetched >= capN {
+				hitCap = true
+			}
 		}
 	}
 	if kindSet["splice_boxes"] {
@@ -243,6 +306,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 			q += infraMapProjectSQL(projectID, &n, &args)
+			q += infraMapLocalitySQL("network_cables", localityID, &n, &args)
 			q += infraMapHideInactiveSQL("network_cables")
 			q += orderNearCenter(&n, &args)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
@@ -252,6 +316,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 				return
 			}
+			fetched := 0
 			for rows.Next() {
 				var id uuid.UUID
 				var desc string
@@ -279,12 +344,17 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					}
 				}
 				pts = append(pts, pt)
+				fetched++
 				remaining--
 				if remaining <= 0 {
+					hitCap = true
 					break
 				}
 			}
 			rows.Close()
+			if fetched >= capN {
+				hitCap = true
+			}
 		}
 	}
 	if kindSet["poles"] {
@@ -352,6 +422,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			args := []any{}
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+			q += infraMapLocalitySQL("pops", localityID, &n, &args)
 			q += orderNearCenter(&n, &args)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
@@ -360,6 +431,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 				return
 			}
+			fetched := 0
 			for rows.Next() {
 				var id uuid.UUID
 				var desc string
@@ -378,94 +450,119 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					"point_type":     "pop",
 					"id_prefix":      "POP",
 				})
+				fetched++
 				remaining--
 				if remaining <= 0 {
+					hitCap = true
 					break
 				}
 			}
 			rows.Close()
+			if fetched >= capN {
+				hitCap = true
+			}
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"points":    pts,
 		"total":     len(pts),
-		"truncated": remaining <= 0,
+		"truncated": hitCap || remaining <= 0,
 		"limit":     limit,
 		"zoom":      zoom,
+		"scoped":    scoped,
 	})
 }
 
-// mapInfrastructureLimit limita pins de infra no mapa (CTOs/cabos/etc.) — mais baixo que logins.
-func mapInfrastructureLimit(zoom float64, hasBBox bool) int {
+// mapInfrastructureLimit limita pins de infra no mapa. Com filtro de projecto/localidade o tecto sobe.
+func mapInfrastructureLimit(zoom float64, hasBBox bool, scoped bool) int {
+	if scoped {
+		if !hasBBox {
+			return 8000
+		}
+		switch {
+		case zoom < 11:
+			return 2500
+		case zoom < 13:
+			return 4500
+		case zoom < 15:
+			return 7000
+		default:
+			return 10000
+		}
+	}
 	if !hasBBox {
-		// Sem viewport: só um tecto de segurança (ex.: filtro de projeto sem bbox).
-		return 250
+		return 500
 	}
 	switch {
 	case zoom < 10:
-		return 120
+		return 180
 	case zoom < 12:
-		return 220
+		return 350
 	case zoom < 14:
-		return 400
+		return 800
 	case zoom < 16:
-		return 700
+		return 1800
 	default:
-		return 1000
+		return 3500
 	}
 }
 
-// mapInfraKindCap evita que um único tipo (ex.: CTOs) ocupe todo o orçamento.
-func mapInfraKindCap(kind string, zoom float64, remaining int) int {
+// mapInfraKindCap evita que um único tipo ocupe todo o orçamento (relaxado com filtro scoped).
+func mapInfraKindCap(kind string, zoom float64, remaining int, scoped bool) int {
 	if remaining <= 0 {
 		return 0
+	}
+	if scoped {
+		return remaining
 	}
 	capN := remaining
 	switch kind {
 	case "cto":
 		switch {
 		case zoom < 11:
-			if capN > 90 {
-				capN = 90
+			if capN > 120 {
+				capN = 120
 			}
 		case zoom < 13:
-			if capN > 180 {
-				capN = 180
+			if capN > 280 {
+				capN = 280
 			}
 		case zoom < 15:
-			if capN > 350 {
-				capN = 350
+			if capN > 800 {
+				capN = 800
 			}
 		default:
-			if capN > 700 {
-				capN = 700
+			if capN > 2500 {
+				capN = 2500
 			}
 		}
 	case "cable":
 		switch {
 		case zoom < 12:
-			if capN > 25 {
-				capN = 25
+			if capN > 40 {
+				capN = 40
 			}
 		case zoom < 14:
-			if capN > 60 {
-				capN = 60
+			if capN > 100 {
+				capN = 100
 			}
 		default:
-			if capN > 120 {
-				capN = 120
+			if capN > 250 {
+				capN = 250
 			}
 		}
 	case "splice_box", "pole":
-		if zoom < 12 && capN > 40 {
-			capN = 40
-		} else if capN > 150 {
-			capN = 150
+		if zoom < 12 && capN > 60 {
+			capN = 60
+		} else if zoom < 15 && capN > 300 {
+			capN = 300
+		} else if capN > 800 {
+			capN = 800
 		}
 	case "project", "pop":
-		if capN > 40 {
-			capN = 40
+		if capN > 80 {
+			capN = 80
 		}
 	}
 	return capN

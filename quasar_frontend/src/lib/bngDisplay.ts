@@ -1,5 +1,5 @@
 import { formatBitrate } from "./formatBitrate";
-import { formatBytes } from "./formatBytes";
+import { formatBytes, formatUptimeTicks } from "./formatBytes";
 
 /** Data/hora legível para coletas BNG (pt-BR, 24h). */
 export function formatBngDateTime(iso?: string | null): string {

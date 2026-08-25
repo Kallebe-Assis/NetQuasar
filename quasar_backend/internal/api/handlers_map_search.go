@@ -89,18 +89,31 @@ func (s *Server) mapLocalityCenter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	var lat, lng *float64
+	var lat, lng, minLat, maxLat, minLng, maxLng *float64
 	err = s.DB().QueryRow(ctx, `
-		SELECT AVG(t.lat), AVG(t.lng)
+		SELECT AVG(t.lat), AVG(t.lng),
+			MIN(t.lat), MAX(t.lat), MIN(t.lng), MAX(t.lng)
 		FROM (
 			SELECT latitude AS lat, longitude AS lng FROM devices
 			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
 			UNION ALL
 			SELECT latitude, longitude FROM network_ctos
-			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			 WHERE (locality_id = $1::uuid
+			    OR EXISTS (SELECT 1 FROM network_projects np WHERE np.id = network_ctos.project_id AND np.locality_id = $1::uuid))
+			   AND latitude IS NOT NULL AND longitude IS NOT NULL
 			UNION ALL
 			SELECT latitude, longitude FROM network_poles
-			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
+			 WHERE (locality_id = $1::uuid
+			    OR EXISTS (SELECT 1 FROM network_projects np WHERE np.id = network_poles.project_id AND np.locality_id = $1::uuid))
+			   AND latitude IS NOT NULL AND longitude IS NOT NULL
+			UNION ALL
+			SELECT c.latitude, c.longitude FROM network_cables c
+			 WHERE EXISTS (SELECT 1 FROM network_projects np WHERE np.id = c.project_id AND np.locality_id = $1::uuid)
+			   AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+			UNION ALL
+			SELECT s.latitude, s.longitude FROM network_splice_boxes s
+			 WHERE EXISTS (SELECT 1 FROM network_projects np WHERE np.id = s.project_id AND np.locality_id = $1::uuid)
+			   AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
 			UNION ALL
 			SELECT latitude, longitude FROM network_projects
 			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
@@ -108,7 +121,7 @@ func (s *Server) mapLocalityCenter(w http.ResponseWriter, r *http.Request) {
 			SELECT latitude, longitude FROM pops
 			 WHERE locality_id = $1::uuid AND latitude IS NOT NULL AND longitude IS NOT NULL
 		) t
-	`, id).Scan(&lat, &lng)
+	`, id).Scan(&lat, &lng, &minLat, &maxLat, &minLng, &maxLng)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -122,13 +135,20 @@ func (s *Server) mapLocalityCenter(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"locality_id": id.String(),
 		"name":        name,
 		"found":       true,
 		"lat":         *lat,
 		"lng":         *lng,
-	})
+	}
+	if minLat != nil && maxLat != nil && minLng != nil && maxLng != nil {
+		out["min_lat"] = *minLat
+		out["max_lat"] = *maxLat
+		out["min_lng"] = *minLng
+		out["max_lng"] = *maxLng
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) mapSearch(w http.ResponseWriter, r *http.Request) {

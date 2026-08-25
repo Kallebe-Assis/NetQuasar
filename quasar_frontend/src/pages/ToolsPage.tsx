@@ -12,6 +12,7 @@ import {
   ToolOutputError,
   WalkJobQueuedOutput,
   NetworkToolTextOutput,
+  NmapOutput,
 } from "../components/ToolsOutputViews";
 import { InfoHint } from "../components/InfoHint";
 import { LatencyLiveChart } from "../components/LatencyLiveChart";
@@ -216,6 +217,7 @@ export function ToolsPage() {
 
   const [nmapHost, setNmapHost] = useState("127.0.0.1");
   const [nmapMode, setNmapMode] = useState("sn");
+  const [nmapPorts, setNmapPorts] = useState("22,80,443");
   const [nmapTo, setNmapTo] = useState("60000");
   const nmapRun = useMutation({
     mutationFn: () =>
@@ -224,6 +226,7 @@ export function ToolsPage() {
         json: {
           host: nmapHost.trim(),
           scan_mode: nmapMode,
+          ports: nmapMode === "ports" ? nmapPorts.trim() : "",
           timeout_ms: Number(nmapTo) || 60000,
         },
       }),
@@ -784,12 +787,12 @@ export function ToolsPage() {
 
       {tab === "nmap" && (
         <ToolsPanel
-          title="Nmap (varredura rápida)"
-          description="Requer nmap instalado no servidor. Modo «ping» (-sn): descobre se o host está ativo; «rápida» (-F): portas mais comuns."
+          title="Nmap (varredura)"
+          description="Executado no servidor NetQuasar (requer nmap no PATH). Ping (-sn) só verifica se o host responde; «rápida» usa -F; «portas» permite lista/intervalo customizado."
           results={
             <>
               <ToolOutputError err={nmapRun.error as Error | null} />
-              {nmapRun.data !== undefined ? <NetworkToolTextOutput data={nmapRun.data} /> : null}
+              {nmapRun.data !== undefined ? <NmapOutput data={nmapRun.data} /> : null}
             </>
           }
         >
@@ -798,20 +801,38 @@ export function ToolsPage() {
             <input id="tools-nmap-host" className="input mono" value={nmapHost} onChange={(e) => setNmapHost(e.target.value)} />
           </div>
           <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
-            <div className="field" style={{ marginBottom: 0, minWidth: 140 }}>
+            <div className="field" style={{ marginBottom: 0, minWidth: 160 }}>
               <label htmlFor="tools-nmap-mode">Modo</label>
               <select id="tools-nmap-mode" className="input" value={nmapMode} onChange={(e) => setNmapMode(e.target.value)}>
                 <option value="sn">Ping / host up (-sn)</option>
                 <option value="quick">Portas comuns (-F)</option>
+                <option value="ports">Portas personalizadas (-p)</option>
               </select>
             </div>
+            {(nmapMode === "ports") && (
+              <div className="field" style={{ marginBottom: 0, minWidth: 180, flex: 1 }}>
+                <label htmlFor="tools-nmap-ports">Portas</label>
+                <input
+                  id="tools-nmap-ports"
+                  className="input mono"
+                  placeholder="22,80,443 ou 1-1024"
+                  value={nmapPorts}
+                  onChange={(e) => setNmapPorts(e.target.value)}
+                />
+              </div>
+            )}
             <div className="field" style={{ marginBottom: 0, maxWidth: 140 }}>
               <label htmlFor="tools-nmap-to">Timeout (ms)</label>
               <input id="tools-nmap-to" className="input mono" value={nmapTo} onChange={(e) => setNmapTo(e.target.value)} />
             </div>
           </div>
           <div className="tools-panel__actions">
-            <button type="button" className="btn btn--primary" disabled={nmapRun.isPending || !nmapHost.trim()} onClick={() => nmapRun.mutate()}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={nmapRun.isPending || !nmapHost.trim() || (nmapMode === "ports" && !nmapPorts.trim())}
+              onClick={() => nmapRun.mutate()}
+            >
               {nmapRun.isPending ? "A varrer…" : "Executar nmap"}
             </button>
           </div>

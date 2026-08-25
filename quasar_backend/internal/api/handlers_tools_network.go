@@ -45,6 +45,7 @@ func (s *Server) toolsNmap(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Host      string `json:"host"`
 		ScanMode  string `json:"scan_mode"`
+		Ports     string `json:"ports"`
 		TimeoutMs int    `json:"timeout_ms"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -54,7 +55,7 @@ func (s *Server) toolsNmap(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), probing.DefaultToolTimeout(body.TimeoutMs))
 	defer cancel()
 
-	cmd, output, err := probing.RunNmap(ctx, body.Host, body.ScanMode)
+	cmd, output, err := probing.RunNmap(ctx, body.Host, body.ScanMode, body.Ports)
 	resp := map[string]any{
 		"host":    body.Host,
 		"command": cmd,
@@ -64,6 +65,6 @@ func (s *Server) toolsNmap(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		resp["error"] = err.Error()
 	}
-	s.auditNetworkTool(r.Context(), r, "nmap", map[string]any{"host": body.Host, "scan_mode": body.ScanMode, "ok": err == nil})
+	s.auditNetworkTool(r.Context(), r, "nmap", map[string]any{"host": body.Host, "scan_mode": body.ScanMode, "ports": body.Ports, "ok": err == nil})
 	writeJSON(w, http.StatusOK, resp)
 }

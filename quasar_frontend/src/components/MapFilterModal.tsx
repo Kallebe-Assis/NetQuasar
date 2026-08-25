@@ -176,10 +176,12 @@ export function MapFilterModal(props: Props) {
           </div>
 
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-            <span style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 6 }}>Ir até localidade</span>
+            <span style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 6 }}>
+              Filtrar por localidade
+            </span>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <select className="select" style={{ flex: 1, minWidth: 180 }} value={props.localityFlyId} onChange={(e) => props.onLocalityFlyId(e.target.value)}>
-                <option value="">— Seleccionar localidade —</option>
+                <option value="">— Todas as localidades —</option>
                 {props.localities.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name}
@@ -187,14 +189,15 @@ export function MapFilterModal(props: Props) {
                 ))}
               </select>
               <button type="button" className="btn btn--primary" disabled={!props.localityFlyId || props.localityFlyPending} onClick={props.onFlyToLocality}>
-                {props.localityFlyPending ? "…" : "Ir no mapa"}
+                {props.localityFlyPending ? "…" : "Ir e filtrar"}
               </button>
             </div>
             {props.localityFlyNote ? (
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>{props.localityFlyNote}</p>
             ) : (
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
-                Usa a média das coordenadas de equipamentos e infraestrutura cadastrados nesta localidade.
+                Com localidade seleccionada, o mapa só pede CTOs/cabos/postes dessa localidade (ou dos seus projectos) e
+                centra a vista nela.
               </p>
             )}
           </div>

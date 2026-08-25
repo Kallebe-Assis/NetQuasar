@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { nmapStateBadgeClass, nmapStateLabel, parseNmapOutput } from "../lib/parseNmapOutput";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -524,6 +525,120 @@ export function NetworkToolTextOutput({ data }: { data: unknown }) {
         </div>
       ) : null}
       {output ? <pre className="mono" style={preBox}>{output}</pre> : !err ? <p style={{ marginTop: 8, color: "var(--muted)", fontSize: 12 }}>Sem saída.</p> : null}
+      <CollapsibleRawJson data={data} />
+    </div>
+  );
+}
+
+function CollapsibleRawText({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false);
+  if (!text.trim()) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button type="button" className="btn" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => setOpen((o) => !o)}>
+        {open ? `Ocultar ${label}` : `Ver ${label}`}
+      </button>
+      {open ? <pre className="mono" style={{ ...preBox, maxHeight: 360 }}>{text}</pre> : null}
+    </div>
+  );
+}
+
+/** Resultado nmap com cards/tabela em vez do texto bruto. */
+export function NmapOutput({ data }: { data: unknown }) {
+  if (!isRecord(data)) return null;
+  const cmd = str(data.command);
+  const output = str(data.output);
+  const err = str(data.error);
+  const ok = data.ok === true;
+  const parsed = parseNmapOutput(output);
+  const hostLabel = parsed.host || str(data.host) || "—";
+  const hasPorts = parsed.ports.length > 0;
+  const latencyMs =
+    parsed.latencySec != null && Number.isFinite(parsed.latencySec)
+      ? Math.round(parsed.latencySec * 1000 * 10) / 10
+      : null;
+
+  return (
+    <div style={panelStyle} className="tools-nmap-result">
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Resultado Nmap</span>
+        {ok ? <span className="badge badge--ok">Concluído</span> : <span className="badge badge--off">Com avisos</span>}
+      </div>
+
+      {err ? (
+        <div className="msg msg--err" style={{ marginBottom: 10, fontSize: 12 }}>
+          {err}
+        </div>
+      ) : null}
+
+      <div className="tools-nmap-result__summary">
+        <div className="tools-nmap-result__host">
+          <span className="tools-nmap-result__host-label">Alvo</span>
+          <span className="mono tools-nmap-result__host-value">{hostLabel}</span>
+        </div>
+        <div className="tools-nmap-result__status">
+          {parsed.hostUp === true ? (
+            <span className="badge badge--ok">Host ativo</span>
+          ) : parsed.hostUp === false ? (
+            <span className="badge badge--err">Host inativo</span>
+          ) : (
+            <span className="badge badge--off">Estado desconhecido</span>
+          )}
+          {latencyMs != null ? (
+            <span className="tools-nmap-result__meta mono">{latencyMs} ms</span>
+          ) : null}
+          {parsed.scannedInSec != null ? (
+            <span className="tools-nmap-result__meta">{parsed.scannedInSec}s de varredura</span>
+          ) : null}
+        </div>
+      </div>
+
+      {parsed.notShown ? (
+        <p className="tools-nmap-result__note">{parsed.notShown}</p>
+      ) : null}
+
+      {hasPorts ? (
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Porta</th>
+                <th>Protocolo</th>
+                <th>Estado</th>
+                <th>Serviço</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parsed.ports.map((p) => (
+                <tr key={`${p.proto}-${p.port}-${p.state}`}>
+                  <td className="mono" style={{ fontWeight: 600 }}>
+                    {p.port}
+                  </td>
+                  <td className="mono" style={{ fontSize: 12, textTransform: "uppercase" }}>
+                    {p.proto}
+                  </td>
+                  <td>
+                    <span className={nmapStateBadgeClass(p.state)}>{nmapStateLabel(p.state)}</span>
+                  </td>
+                  <td style={{ fontSize: 13 }}>{p.service}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : parsed.hostUp === true ? (
+        <p className="tools-nmap-result__empty">Host respondeu; nenhuma porta listada nesta varredura.</p>
+      ) : parsed.hostUp === false ? (
+        <p className="tools-nmap-result__empty">Sem resposta do host nesta varredura.</p>
+      ) : null}
+
+      {cmd ? (
+        <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted)" }}>
+          Comando: <span className="mono">{cmd}</span>
+        </p>
+      ) : null}
+
+      <CollapsibleRawText label="saída bruta do nmap" text={output} />
       <CollapsibleRawJson data={data} />
     </div>
   );

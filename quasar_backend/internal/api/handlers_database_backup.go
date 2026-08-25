@@ -391,15 +391,21 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	}
 	s.clearStaleAutomationRunning(ctx, "automation_database_backup")
 	var en, running bool
-	var freq, th, tz, lastKey *string
+	var freq, th, tz, lastKey, lastStatus *string
 	var dow *int
 	var days []int32
-	var lr *time.Time
+	var lr, updatedAt *time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT enabled, frequency, day_of_week, time_hhmm, timezone, last_run_key, last_run_at, running, days_of_week
+		SELECT enabled, frequency, day_of_week, time_hhmm, timezone, last_run_key, last_run_at, running, days_of_week,
+			last_status, updated_at
 		FROM automation_database_backup WHERE id = 1
-	`).Scan(&en, &freq, &dow, &th, &tz, &lastKey, &lr, &running, &days)
+	`).Scan(&en, &freq, &dow, &th, &tz, &lastKey, &lr, &running, &days, &lastStatus, &updatedAt)
 	if err != nil || !en {
+		return
+	}
+	// Em falha (ex.: 503 B2), o due permanece true e o loop de 30s martelava o B2.
+	if lastStatus != nil && strings.EqualFold(strings.TrimSpace(*lastStatus), "error") &&
+		updatedAt != nil && time.Since(*updatedAt) < 20*time.Minute {
 		return
 	}
 	frequency := "daily"
@@ -418,9 +424,15 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	if !due {
 		return
 	}
-	if err := s.executeDatabaseBackup(ctx, runKey, automationMetaFromActor(auditActorSistema, nil)); err != nil && log != nil {
-		log.Warn().Err(err).Str("run_key", runKey).Msg("backup B2 agendado falhou")
-	}
+	// Igual ao manual: não herda o WorkerCtx do loop (evita cancel/timeout curto no upload).
+	meta := automationMetaFromActor(auditActorSistema, nil)
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+		defer cancel()
+		if err := s.executeDatabaseBackup(runCtx, runKey, meta); err != nil && log != nil {
+			log.Warn().Err(err).Str("run_key", runKey).Msg("backup B2 agendado falhou")
+		}
+	}()
 }
 
 func (s *Server) executeDatabaseBackup(ctx context.Context, runKey string, meta automationRunMeta) error {
