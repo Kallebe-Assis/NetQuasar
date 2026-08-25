@@ -16,6 +16,7 @@ import { formatDistanceMeters } from "../lib/nearestCtoMatch";
 import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
+import { MAP_PROJECT_NONE, isMapProjectAll, isMapProjectNone, mapProjectUuid, shouldLoadMapInfrastructure } from "../lib/mapProjectFilter";
 import { fetchUiAppearance, mapColorsFromAppearance, mapIconsFromAppearance, type MapAppearanceColors } from "../lib/uiAppearance";
 import { looksLikeHTTPURL, parseLatLngPair, shouldLocateQuery, type MapLocateHit } from "../lib/mapLocationQuery";
 
@@ -204,7 +205,7 @@ export function MapPage() {
   const [showProjects, setShowProjects] = useState(false);
   const [showPops, setShowPops] = useState(true);
   const [showEquipment, setShowEquipment] = useState(true);
-  const [projectFilterId, setProjectFilterId] = useState("");
+  const [projectFilterId, setProjectFilterId] = useState(MAP_PROJECT_NONE);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -450,7 +451,8 @@ export function MapPage() {
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("kinds", infraKinds.join(","));
-      if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
+      const projectUuid = mapProjectUuid(projectFilterId);
+      if (projectUuid) params.set("project_id", projectUuid);
       if (localityFlyId.trim()) params.set("locality_id", localityFlyId.trim());
       if (queryBounds) {
         params.set("min_lat", String(queryBounds.minLat));
@@ -464,7 +466,7 @@ export function MapPage() {
         `/api/v1/map/infrastructure-points${qs ? `?${qs}` : ""}`,
       );
     },
-    enabled: showInfrastructure && queryBounds != null,
+    enabled: showInfrastructure && queryBounds != null && shouldLoadMapInfrastructure(projectFilterId, localityFlyId),
     placeholderData: keepPreviousData,
     staleTime: 20_000,
     refetchOnWindowFocus: false,
@@ -494,6 +496,12 @@ export function MapPage() {
   const connCacheRef = useRef<Map<string, ConnectionPoint>>(new Map());
 
   useEffect(() => {
+    if (!shouldLoadMapInfrastructure(projectFilterId, localityFlyId)) {
+      infraCacheRef.current.clear();
+      setInfraStablePoints([]);
+      infraCacheScopeRef.current = `${infraKinds.join(",")}|${projectFilterId}|${localityFlyId}`;
+      return;
+    }
     const scope = `${infraKinds.join(",")}|${projectFilterId}|${localityFlyId}`;
     if (infraCacheScopeRef.current !== scope) {
       infraCacheRef.current.clear();
@@ -557,7 +565,8 @@ export function MapPage() {
   }, [connPts.data?.points, connPts.isFetching, queryBounds]);
 
   const displayedPoints = useMemo(() => {
-    const projectScoped = projectFilterId.trim() !== "";
+    const projectUuid = mapProjectUuid(projectFilterId);
+    const projectScoped = projectUuid != null;
     // Com projeto seleccionado: só infraestrutura desse projeto (sem equipamentos/logins).
     const equip = showEquipment && !projectScoped ? equipPoints : [];
     const connRaw =
@@ -579,7 +588,8 @@ export function MapPage() {
       mapKind: "connection" as const,
       login: c.login,
     }));
-    const infraRaw = showInfrastructure ? infraStablePoints : [];
+    const loadInfra = shouldLoadMapInfrastructure(projectFilterId, localityFlyId);
+    const infraRaw = loadInfra && showInfrastructure ? infraStablePoints : [];
     const infraIds = new Set<string>();
     const infra: Point[] = infraRaw
       .filter((p) => isInfraMapKind(p.point_type))
@@ -611,7 +621,7 @@ export function MapPage() {
           path: Array.isArray(p.path) ? p.path : null,
         };
       });
-    // Garante que as CTOs próximas do GPS aparecem mesmo fora do viewport actual.
+    // Garante que as CTOs próximas do GPS aparecem mesmo fora do viewport actual / sem projecto.
     if (showCtos) {
       for (const c of nearestCtos) {
         const key = `cto:${c.id}`;
@@ -647,6 +657,7 @@ export function MapPage() {
     showCtos,
     nearestCtos,
     projectFilterId,
+    localityFlyId,
     ctoColorByFeed,
     mapPrefsDraft.cto,
     mapPrefsDraft.splice_box,
@@ -735,7 +746,8 @@ export function MapPage() {
         lng: String(lng),
         limit: "3",
       });
-      if (projectFilterId.trim()) params.set("project_id", projectFilterId.trim());
+      const projectUuid = mapProjectUuid(projectFilterId);
+      if (projectUuid) params.set("project_id", projectUuid);
       try {
         const r = await apiFetch<{ ctos?: NearestCtoApi[] }>(`/api/v1/map/nearest-ctos?${params}`);
         setNearestCtos(Array.isArray(r.ctos) ? r.ctos : []);
@@ -1176,9 +1188,17 @@ export function MapPage() {
   const projectFitDoneRef = useRef<string>("");
 
   useEffect(() => {
-    const pid = projectFilterId.trim();
+    const pid = mapProjectUuid(projectFilterId);
     if (!pid) {
       projectFitDoneRef.current = "";
+      if (isMapProjectAll(projectFilterId)) {
+        setShowCtos(true);
+        setShowCables(true);
+        setMapToast({
+          ok: true,
+          text: "A carregar infraestrutura de todos os projetos na área visível…",
+        });
+      }
       return;
     }
     setShowCtos(true);
@@ -1218,7 +1238,7 @@ export function MapPage() {
   }, [projectFilterId]);
 
   useEffect(() => {
-    const pid = projectFilterId.trim();
+    const pid = mapProjectUuid(projectFilterId);
     if (!pid || infraPts.isFetching || !infraPts.data) return;
     if (projectFitDoneRef.current === pid) return;
     const n = Array.isArray(infraPts.data.points) ? infraPts.data.points.length : 0;
@@ -1228,17 +1248,17 @@ export function MapPage() {
   }, [projectFilterId, infraPts.isFetching, infraPts.data]);
 
   useEffect(() => {
-    const pid = projectFilterId.trim();
+    const pid = mapProjectUuid(projectFilterId);
     if (!pid || !projectsList.data?.projects) return;
     const p = projectsList.data.projects.find((x) => x.id === pid);
-    if (p?.status === "inativo") setProjectFilterId("");
+    if (p?.status === "inativo") setProjectFilterId(MAP_PROJECT_NONE);
   }, [projectFilterId, projectsList.data]);
 
   const filterActiveCount = useMemo(() => {
     let n = 0;
     if (popId) n++;
     if (category) n++;
-    if (projectFilterId) n++;
+    if (!isMapProjectNone(projectFilterId)) n++;
     if (localityFlyId) n++;
     if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || showSpliceBoxes || showPoles || showProjects) n++;
     if (displayMode !== "cluster") n++;
@@ -1360,7 +1380,11 @@ export function MapPage() {
         <span className="map-page__points-pill">
           <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
         </span>
-        {showInfrastructure && infraPts.data?.truncated ? (
+        {isMapProjectNone(projectFilterId) && !localityFlyId.trim() ? (
+          <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
+            Projeto: Nenhum — escolha um projeto ou «Todos» nos filtros para carregar CTOs
+          </span>
+        ) : showInfrastructure && infraPts.data?.truncated ? (
           <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
             Infra limitada neste zoom
             {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa ou filtre por
@@ -2082,7 +2106,7 @@ export function MapPage() {
       {canEditMap ? (
         <MapProjectKmlImport
           open={kmlImportOpen}
-          defaultProjectId={projectFilterId}
+          defaultProjectId={mapProjectUuid(projectFilterId) ?? ""}
           projects={mapProjects}
           onClose={() => setKmlImportOpen(false)}
           onImported={(info) => {

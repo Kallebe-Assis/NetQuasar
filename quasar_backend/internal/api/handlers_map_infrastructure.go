@@ -475,36 +475,37 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 }
 
 // mapInfrastructureLimit limita pins de infra no mapa. Com filtro de projecto/localidade o tecto sobe.
+// Sem filtro (todos os projectos) o tecto também é generoso — CTOs espalhadas por várias localidades.
 func mapInfrastructureLimit(zoom float64, hasBBox bool, scoped bool) int {
 	if scoped {
 		if !hasBBox {
-			return 8000
+			return 10000
 		}
 		switch {
 		case zoom < 11:
-			return 2500
+			return 4000
 		case zoom < 13:
-			return 4500
-		case zoom < 15:
 			return 7000
-		default:
+		case zoom < 15:
 			return 10000
+		default:
+			return 15000
 		}
 	}
 	if !hasBBox {
-		return 500
+		return 4000
 	}
 	switch {
 	case zoom < 10:
-		return 180
+		return 2500
 	case zoom < 12:
-		return 350
+		return 5000
 	case zoom < 14:
-		return 800
+		return 8000
 	case zoom < 16:
-		return 1800
+		return 12000
 	default:
-		return 3500
+		return 15000
 	}
 }
 
@@ -519,50 +520,51 @@ func mapInfraKindCap(kind string, zoom float64, remaining int, scoped bool) int 
 	capN := remaining
 	switch kind {
 	case "cto":
+		// Prioridade às CTOs: tecto alto para cobrir várias localidades no viewport.
 		switch {
 		case zoom < 11:
-			if capN > 120 {
-				capN = 120
+			if capN > 2000 {
+				capN = 2000
 			}
 		case zoom < 13:
-			if capN > 280 {
-				capN = 280
+			if capN > 4500 {
+				capN = 4500
 			}
 		case zoom < 15:
-			if capN > 800 {
-				capN = 800
+			if capN > 9000 {
+				capN = 9000
 			}
 		default:
-			if capN > 2500 {
-				capN = 2500
+			if capN > 12000 {
+				capN = 12000
 			}
 		}
 	case "cable":
 		switch {
 		case zoom < 12:
-			if capN > 40 {
-				capN = 40
+			if capN > 80 {
+				capN = 80
 			}
 		case zoom < 14:
-			if capN > 100 {
-				capN = 100
+			if capN > 200 {
+				capN = 200
 			}
 		default:
-			if capN > 250 {
-				capN = 250
+			if capN > 400 {
+				capN = 400
 			}
 		}
 	case "splice_box", "pole":
-		if zoom < 12 && capN > 60 {
-			capN = 60
-		} else if zoom < 15 && capN > 300 {
-			capN = 300
-		} else if capN > 800 {
-			capN = 800
+		if zoom < 12 && capN > 80 {
+			capN = 80
+		} else if zoom < 15 && capN > 400 {
+			capN = 400
+		} else if capN > 1000 {
+			capN = 1000
 		}
 	case "project", "pop":
-		if capN > 80 {
-			capN = 80
+		if capN > 120 {
+			capN = 120
 		}
 	}
 	return capN

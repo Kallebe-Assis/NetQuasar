@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import type { MapDisplayMode } from "./EquipmentMap";
+import { MAP_PROJECT_ALL, MAP_PROJECT_NONE } from "../lib/mapProjectFilter";
 
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
@@ -124,14 +125,23 @@ export function MapFilterModal(props: Props) {
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Projeto</span>
             <select className="select" value={props.projectId} onChange={(e) => props.onProjectId(e.target.value)}>
-              <option value="">Todos os projetos</option>
+              <option value={MAP_PROJECT_NONE}>Nenhum</option>
+              <option value={MAP_PROJECT_ALL}>Todos os projetos</option>
               {props.projectsOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   #{p.display_number} — {p.description}
                 </option>
               ))}
             </select>
-            {props.projectId ? (
+            {props.projectId === MAP_PROJECT_NONE ? (
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                Infraestrutura (CTOs, cabos, etc.) não é carregada. Escolha um projeto ou «Todos» para ver no mapa.
+              </span>
+            ) : props.projectId === MAP_PROJECT_ALL ? (
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                Carrega CTOs e restante infraestrutura de todos os projetos activos na área visível (pode ser mais lento).
+              </span>
+            ) : props.projectId ? (
               <span style={{ fontSize: 11, color: "var(--muted)" }}>
                 O mapa aproxima-se do projeto e mostra apenas a sua infraestrutura (sem equipamentos/logins).
               </span>
