@@ -26,6 +26,7 @@ import {
   sendSystemReportTelegram,
   summaryEntries,
   type ConnectionsReportOptions,
+  type DeviceAlertAnalysisReportOptions,
   type EquipmentByPopReportOptions,
   type OltOverviewReportOptions,
   type PeriodModeReportOptions,
@@ -56,6 +57,31 @@ const DEFAULT_PERIOD_MODE_OPTS: PeriodModeReportOptions = {
 };
 
 const PERIOD_MODE_NEEDS_DATES = new Set<SystemReportId>(["network-events", "pon-down", "automations"]);
+
+const DEFAULT_DEVICE_ALERT_OPTS: DeviceAlertAnalysisReportOptions = { from: "", to: "", category: "" };
+
+const DEVICE_ALERT_DAY_PRESETS = [3, 7, 15, 30, 60, 90, 150, 300, 365];
+
+const DEVICE_ALERT_CATEGORIES = [
+  { value: "", label: "Todas (análise completa)" },
+  { value: "Performance", label: "Performance (temperatura, latência, CPU, memória)" },
+  { value: "Interface", label: "Interface" },
+  { value: "OLT / PON", label: "OLT / PON" },
+  { value: "Equipamento", label: "Equipamento" },
+  { value: "BNG", label: "BNG" },
+  { value: "Óptica / SFP", label: "Óptica / SFP" },
+  { value: "Sistema", label: "Sistema" },
+];
+
+function isoDateDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 type ReportVariant = "screen" | "print";
 
@@ -244,6 +270,74 @@ function PeriodModeOptionsPanel({
           </label>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function DeviceAlertAnalysisOptionsPanel({
+  value,
+  onChange,
+}: {
+  value: DeviceAlertAnalysisReportOptions;
+  onChange: (next: DeviceAlertAnalysisReportOptions) => void;
+}) {
+  const activePreset = useMemo(() => {
+    if (!value.from || value.to !== todayISO()) return null;
+    const found = DEVICE_ALERT_DAY_PRESETS.find((d) => value.from === isoDateDaysAgo(d));
+    return found ?? null;
+  }, [value.from, value.to]);
+  const isCustom = !activePreset && !!(value.from || value.to);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13 }}>
+      <fieldset style={{ border: "none", margin: 0, padding: 0 }}>
+        <legend style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Período</legend>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          {DEVICE_ALERT_DAY_PRESETS.map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`btn btn--sm${activePreset === d ? " btn--primary" : ""}`}
+              onClick={() => onChange({ ...value, from: isoDateDaysAgo(d), to: todayISO() })}
+            >
+              {d}d
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`btn btn--sm${isCustom ? " btn--primary" : ""}`}
+            onClick={() => onChange({ ...value, from: value.from || isoDateDaysAgo(30), to: value.to || todayISO() })}
+          >
+            Personalizado
+          </button>
+        </div>
+        {isCustom ? (
+          <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--muted)" }}>
+              De
+              <input className="input" type="date" value={value.from ?? ""} onChange={(e) => onChange({ ...value, from: e.target.value })} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--muted)" }}>
+              Até
+              <input className="input" type="date" value={value.to ?? ""} onChange={(e) => onChange({ ...value, to: e.target.value })} />
+            </label>
+          </div>
+        ) : (
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
+            {value.from && value.to ? `${value.from} até ${value.to}` : "Sem período definido — usa os últimos 30 dias por omissão."}
+          </p>
+        )}
+      </fieldset>
+      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>Categoria (filtro)</span>
+        <select className="input" value={value.category ?? ""} onChange={(e) => onChange({ ...value, category: e.target.value })}>
+          {DEVICE_ALERT_CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -663,6 +757,7 @@ function ReportCard({
   onConnectionsRequest,
   onOltRequest,
   onPeriodModeRequest,
+  onDeviceAlertRequest,
 }: {
   id: SystemReportId;
   title: string;
@@ -678,6 +773,7 @@ function ReportCard({
   onConnectionsRequest: (action: EquipPopAction) => void;
   onOltRequest: (action: EquipPopAction) => void;
   onPeriodModeRequest: (action: EquipPopAction) => void;
+  onDeviceAlertRequest: (action: EquipPopAction) => void;
 }) {
   const admin = isAdminUser();
 
@@ -696,6 +792,10 @@ function ReportCard({
     }
     if (isPeriodModeReport(id)) {
       onPeriodModeRequest(action);
+      return;
+    }
+    if (id === "device-alert-analysis") {
+      onDeviceAlertRequest(action);
       return;
     }
     fn();
@@ -795,6 +895,12 @@ export function ReportsPage() {
     draft: PeriodModeReportOptions;
     action: EquipPopAction;
   } | null>(null);
+  const [deviceAlertOpts, setDeviceAlertOpts] = useState<DeviceAlertAnalysisReportOptions>(DEFAULT_DEVICE_ALERT_OPTS);
+  const [previewDeviceAlertOpts, setPreviewDeviceAlertOpts] = useState<DeviceAlertAnalysisReportOptions | null>(null);
+  const [deviceAlertModal, setDeviceAlertModal] = useState<{
+    draft: DeviceAlertAnalysisReportOptions;
+    action: EquipPopAction;
+  } | null>(null);
   const admin = isAdminUser();
   const { push: pushToast } = useAppToast();
 
@@ -844,9 +950,22 @@ export function ReportsPage() {
     if (previewId === "equipment-by-pop") return previewEquipPopOpts ?? equipPopOpts;
     if (previewId === "connections") return previewConnectionsOpts ?? connectionsOpts;
     if (previewId === "olt-overview") return previewOltOpts ?? oltOpts;
+    if (previewId === "device-alert-analysis") return previewDeviceAlertOpts ?? deviceAlertOpts;
     if (previewId && isPeriodModeReport(previewId)) return previewPeriodModeOpts ?? periodModeOpts;
     return undefined;
-  }, [previewId, previewEquipPopOpts, equipPopOpts, previewConnectionsOpts, connectionsOpts, previewOltOpts, oltOpts, previewPeriodModeOpts, periodModeOpts]);
+  }, [
+    previewId,
+    previewEquipPopOpts,
+    equipPopOpts,
+    previewConnectionsOpts,
+    connectionsOpts,
+    previewOltOpts,
+    oltOpts,
+    previewDeviceAlertOpts,
+    deviceAlertOpts,
+    previewPeriodModeOpts,
+    periodModeOpts,
+  ]);
 
   const preview = useQuery({
     queryKey: ["system-report", previewId, previewReportOpts],
@@ -859,6 +978,7 @@ export function ReportsPage() {
     setPreviewConnectionsOpts(null);
     setPreviewOltOpts(null);
     setPreviewPeriodModeOpts(null);
+    setPreviewDeviceAlertOpts(null);
     setPreviewId(id);
   }, []);
 
@@ -982,6 +1102,35 @@ export function ReportsPage() {
     [pushToast, triggerPrint],
   );
 
+  const runDeviceAlertAction = useCallback(
+    (opts: DeviceAlertAnalysisReportOptions, action: EquipPopAction) => {
+      setDeviceAlertOpts(opts);
+      setPreviewDeviceAlertOpts(opts);
+      if (action === "preview") {
+        setPreviewId("device-alert-analysis");
+        return;
+      }
+      if (action === "csv") {
+        void downloadSystemReportCsv("device-alert-analysis", opts)
+          .then(() => pushToast({ tone: "ok", text: "CSV descarregado." }))
+          .catch((e) => toastErr(pushToast, e, "Falha ao exportar CSV"));
+        return;
+      }
+      if (action === "pdf") {
+        void fetchSystemReport("device-alert-analysis", opts)
+          .then((data) => triggerPrint(data))
+          .catch((e) => toastErr(pushToast, e, "Falha ao preparar PDF"));
+        return;
+      }
+      if (action === "telegram") {
+        void sendSystemReportTelegram("device-alert-analysis", opts)
+          .then(() => toastOk(pushToast, "Relatório enviado ao Telegram."))
+          .catch((e) => toastErr(pushToast, e, "Falha ao enviar Telegram"));
+      }
+    },
+    [pushToast, triggerPrint],
+  );
+
   const printMut = useMutation({
     mutationFn: (id: SystemReportId) => fetchSystemReport(id),
     onSuccess: (data) => triggerPrint(data),
@@ -1084,6 +1233,7 @@ export function ReportsPage() {
                       action,
                     })
                   }
+                  onDeviceAlertRequest={(action) => setDeviceAlertModal({ draft: { ...deviceAlertOpts }, action })}
                 />
               ))}
             </div>
@@ -1256,6 +1406,47 @@ export function ReportsPage() {
           document.body,
         )}
 
+      {deviceAlertModal &&
+        createPortal(
+          <div className="modal-backdrop" role="presentation" onClick={() => setDeviceAlertModal(null)}>
+            <div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="device-alert-modal-title"
+              style={{ width: "min(480px, 94vw)", padding: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <h2 id="device-alert-modal-title" style={{ margin: 0, fontSize: 17 }}>
+                  Análise de equipamentos por alertas
+                </h2>
+                <button type="button" className="btn btn--icon-menu" aria-label="Fechar" onClick={() => setDeviceAlertModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <DeviceAlertAnalysisOptionsPanel
+                value={deviceAlertModal.draft}
+                onChange={(next) => setDeviceAlertModal((m) => (m ? { ...m, draft: next } : m))}
+              />
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    const { draft, action } = deviceAlertModal;
+                    setDeviceAlertModal(null);
+                    runDeviceAlertAction(draft, action);
+                  }}
+                >
+                  Gerar relatório
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       {previewId != null &&
         createPortal(
           <div className="modal-backdrop" role="presentation" onClick={() => setPreviewId(null)}>
@@ -1298,6 +1489,8 @@ export function ReportsPage() {
                           runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "csv");
                         } else if (previewId === "olt-overview") {
                           runOltAction(previewOltOpts ?? oltOpts, "csv");
+                        } else if (previewId === "device-alert-analysis") {
+                          runDeviceAlertAction(previewDeviceAlertOpts ?? deviceAlertOpts, "csv");
                         } else if (isPeriodModeReport(previewId)) {
                           runPeriodModeAction(previewId, previewPeriodModeOpts ?? periodModeOpts, "csv");
                         } else {
@@ -1320,6 +1513,8 @@ export function ReportsPage() {
                             runConnectionsAction(previewConnectionsOpts ?? connectionsOpts, "telegram");
                           } else if (previewId === "olt-overview") {
                             runOltAction(previewOltOpts ?? oltOpts, "telegram");
+                          } else if (previewId === "device-alert-analysis") {
+                            runDeviceAlertAction(previewDeviceAlertOpts ?? deviceAlertOpts, "telegram");
                           } else if (isPeriodModeReport(previewId)) {
                             runPeriodModeAction(previewId, previewPeriodModeOpts ?? periodModeOpts, "telegram");
                           } else {

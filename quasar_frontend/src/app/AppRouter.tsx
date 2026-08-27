@@ -65,6 +65,24 @@ const IntegrationDetailPage = lazy(() =>
 const IntegrationConsultPage = lazy(() =>
   import("../pages/IntegrationConsultPage").then((m) => ({ default: m.IntegrationConsultPage })),
 );
+const HubsoftConsultPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftConsultPage").then((m) => ({ default: m.HubsoftConsultPage })),
+);
+const HubsoftConfigPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftConfigPage").then((m) => ({ default: m.HubsoftConfigPage })),
+);
+const HubsoftAttendancePage = lazy(() =>
+  import("../pages/hubsoft/HubsoftAttendancePage").then((m) => ({ default: m.HubsoftAttendancePage })),
+);
+const HubsoftWorkOrdersPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftWorkOrdersPage").then((m) => ({ default: m.HubsoftWorkOrdersPage })),
+);
+const HubsoftFinancialPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftFinancialPage").then((m) => ({ default: m.HubsoftFinancialPage })),
+);
+const HubsoftDashboardPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftDashboardPage").then((m) => ({ default: m.HubsoftDashboardPage })),
+);
 const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
 );
@@ -123,6 +141,20 @@ export function AppRouter() {
           <Route path="realtime" element={withSuspense(<RealtimePage />)} />
           <Route path="integrations" element={withSuspense(<IntegrationsHubPage />)} />
           <Route path="integrations/:slug" element={<IntegrationSlugRedirect />} />
+          {/* Rotas literais da HubSoft têm prioridade sobre o :slug genérico abaixo (usado pelo IXC) — ver internal/api/handlers_hubsoft.go. */}
+          <Route path="integrations/hubsoft/consulta" element={withSuspense(<HubsoftConsultPage />)} />
+          <Route path="integrations/hubsoft/atendimentos" element={withSuspense(<HubsoftAttendancePage />)} />
+          <Route path="integrations/hubsoft/ordens-servico" element={withSuspense(<HubsoftWorkOrdersPage />)} />
+          <Route path="integrations/hubsoft/financeiro" element={withSuspense(<HubsoftFinancialPage />)} />
+          <Route path="integrations/hubsoft/dashboard" element={withSuspense(<HubsoftDashboardPage />)} />
+          <Route
+            path="integrations/hubsoft/config"
+            element={
+              <AdminOnly>
+                {withSuspense(<HubsoftConfigPage />)}
+              </AdminOnly>
+            }
+          />
           <Route path="integrations/:slug/consulta" element={withSuspense(<IntegrationConsultPage />)} />
           <Route
             path="integrations/:slug/config"

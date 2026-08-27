@@ -36,9 +36,10 @@ function severityRank(sev: string): number {
   }
 }
 
-function toastTone(sev: string): "err" | "info" {
+function toastTone(sev: string): "err" | "warn" | "info" {
   const s = sev.toLowerCase();
-  if (s === "critical" || s === "warning") return "err";
+  if (s === "critical") return "err";
+  if (s === "warning") return "warn";
   return "info";
 }
 

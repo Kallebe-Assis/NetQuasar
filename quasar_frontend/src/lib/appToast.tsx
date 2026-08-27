@@ -10,7 +10,7 @@ import {
 } from "react";
 import { PAGE_TOAST_AUTO_MS, PAGE_TOAST_LEAVE_MS } from "./pageToast";
 
-export type AppToastTone = "ok" | "err" | "info";
+export type AppToastTone = "ok" | "err" | "warn" | "info";
 
 export type AppToastItem = {
   id: string;
@@ -140,6 +140,7 @@ export function useAppToast() {
 function toneClass(tone: AppToastTone): string {
   if (tone === "ok") return "page-toast--ok";
   if (tone === "err") return "page-toast--err";
+  if (tone === "warn") return "page-toast--warn";
   return "page-toast--info";
 }
 

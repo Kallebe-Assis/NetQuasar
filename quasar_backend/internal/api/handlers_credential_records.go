@@ -258,7 +258,7 @@ func (s *Server) listCredentialRecords(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN devices d ON d.id = c.device_id
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY c.updated_at DESC
-		LIMIT 500`
+		LIMIT 2000`
 	rows, err := s.DB().Query(r.Context(), sql, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

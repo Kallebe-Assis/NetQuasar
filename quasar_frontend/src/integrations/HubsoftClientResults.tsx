@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
-import type { AttendanceItem, ClientCard, ClientServiceSummary, WorkOrderItem } from "./types";
+import type {
+  AttendanceItem,
+  ClientCard,
+  ClientServiceSummary,
+  FinancialSummary,
+  InvoiceItem,
+  WorkOrderItem,
+} from "./types";
 import {
   formatAttendanceStatus,
   formatIntegrationDateTime,
@@ -12,8 +19,6 @@ import {
 } from "./integrationDisplay";
 import { TableCellExpandableText } from "./TableCellExpandableText";
 import { SupportItemDetailModal, type SupportDetailTarget } from "./SupportItemDetailModal";
-
-type SupportTab = "atendimentos" | "ordens" | "logins";
 
 const DETAIL_FONT = "var(--integration-detail-font-size, 11px)";
 
@@ -40,10 +45,12 @@ function serviceStableKey(s: ClientServiceSummary, index: number): string {
 
 function resolveContractStatus(s: ClientServiceSummary): string {
   const code = (s.status_internet ?? "").trim();
-  if (!code) {
-    return "";
+  if (code) {
+    return formatIXCContractStatus(code, s.status_label) || code;
   }
-  return formatIXCContractStatus(code, s.status_label) || code;
+  // Hubsoft não usa status_internet (campo do IXC) — o próprio status do serviço já indica
+  // habilitado/cancelado/suspenso etc. (ex.: "Serviço Habilitado").
+  return (s.status ?? "").trim();
 }
 
 function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
@@ -91,6 +98,44 @@ function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
           <span className="integration-consult-card__value">—</span>
         )}
       </div>
+      {s.connected ? (
+        <div className="integration-consult-card__service-cell integration-consult-card__service-cell--status">
+          <span className="integration-consult-card__label">Conexão</span>
+          <span className={s.connected === "true" ? "badge badge--ok" : "badge badge--err"}>
+            {s.connected === "true" ? "Conectado" : "Desconectado"}
+          </span>
+        </div>
+      ) : null}
+      {s.status_text ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">Situação da conexão</span>
+          <span className="integration-consult-card__value">{s.status_text}</span>
+        </div>
+      ) : null}
+      {s.last_connected_at ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">Última conexão</span>
+          <span className="mono integration-consult-card__value">{s.last_connected_at}</span>
+        </div>
+      ) : null}
+      {s.last_disconnected_at ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">Última desconexão</span>
+          <span className="mono integration-consult-card__value">{s.last_disconnected_at}</span>
+        </div>
+      ) : null}
+      {s.last_ipv4 ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">Último IPv4</span>
+          <span className="mono integration-consult-card__value">{s.last_ipv4}</span>
+        </div>
+      ) : null}
+      {s.last_nas_ip ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">NAS (concentrador)</span>
+          <span className="mono integration-consult-card__value">{s.last_nas_ip}</span>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -248,13 +293,73 @@ function formatScalar(v: unknown): string {
   return String(v).trim();
 }
 
+function isHttpUrl(v: string): boolean {
+  return /^https?:\/\//i.test(v.trim());
+}
+
 function DetailScalar({ label, value }: { label: string; value: unknown }) {
   const text = formatScalar(value);
   if (!text) return null;
+  if (isHttpUrl(text)) {
+    return (
+      <div className="integration-detail__row">
+        <span className="integration-detail__label">{label}</span>
+        <a className="btn btn--sm integration-detail__link-btn" href={text} target="_blank" rel="noreferrer">
+          <ExternalLink size={12} /> Abrir
+        </a>
+      </div>
+    );
+  }
+  // Textos longos (ex.: anotações/observações) ficavam espremidos numa coluna estreita da
+  // grelha e quebravam linha de forma feia — aqui ocupam a largura toda e ganham quebra de
+  // linha normal (não mono, para não forçar largura de fonte fixa em texto livre).
+  const multiline = text.length > 100 || text.includes("\n");
+  if (multiline) {
+    return (
+      <div className="integration-detail__row integration-detail__row--stack">
+        <span className="integration-detail__label">{label}</span>
+        <span className="integration-detail__value integration-detail__value--block">{text}</span>
+      </div>
+    );
+  }
   return (
     <div className="integration-detail__row">
       <span className="integration-detail__label">{label}</span>
       <span className="integration-detail__value">{text}</span>
+    </div>
+  );
+}
+
+// Anexos (fotos/documentos) trazem um campo de link (URL directa ao ficheiro) — mostrar a
+// URL completa como texto ocupava várias linhas e ainda a fatiava (id, extensão, etc.).
+// Deteta o formato "anexo" (link/url + nome/descrição) e mostra uma linha compacta com
+// nome + botão "Abrir" em vez da grelha de campos completa.
+function findAttachmentUrl(obj: Record<string, unknown>): string | null {
+  for (const key of ["link", "url", "arquivo", "anexo_url"]) {
+    const v = obj[key];
+    if (typeof v === "string" && isHttpUrl(v)) return v;
+  }
+  return null;
+}
+
+function isAttachmentLike(obj: Record<string, unknown>): boolean {
+  return findAttachmentUrl(obj) !== null && (typeof obj.nome === "string" || typeof obj.descricao === "string");
+}
+
+function AttachmentItem({ obj }: { obj: Record<string, unknown> }) {
+  const url = findAttachmentUrl(obj);
+  if (!url) return null;
+  const name = (obj.nome as string) || (obj.descricao as string) || "Anexo";
+  const ext = typeof obj.extensao === "string" ? obj.extensao.toUpperCase() : "";
+  return (
+    <div className="integration-detail__attachment">
+      <span className="integration-detail__attachment-name" title={name}>
+        {name}
+        {ext ? <span className="integration-detail__attachment-ext">{ext}</span> : null}
+      </span>
+      <a className="btn btn--sm integration-detail__attachment-btn" href={url} target="_blank" rel="noreferrer">
+        <ExternalLink size={12} /> Abrir
+      </a>
     </div>
   );
 }
@@ -286,8 +391,17 @@ function DetailArrayBlock({ title, items }: { title: string; items: unknown[] })
         {items.map((item, i) => {
           if (item && typeof item === "object" && !Array.isArray(item)) {
             const obj = item as Record<string, unknown>;
+            if (isAttachmentLike(obj)) {
+              return <AttachmentItem key={i} obj={obj} />;
+            }
             const scalars = Object.entries(obj).filter(([, v]) => v === null || typeof v !== "object");
-            if (scalars.length === 0) {
+            // Sub-objectos (ex.: última conexão, equipamento, endereço) — antes eram descartados
+            // silenciosamente aqui; agora viram sub-secções dentro do próprio item.
+            const subObjects = Object.entries(obj).filter(
+              (entry): entry is [string, Record<string, unknown>] =>
+                !!entry[1] && typeof entry[1] === "object" && !Array.isArray(entry[1]),
+            );
+            if (scalars.length === 0 && subObjects.length === 0) {
               return (
                 <pre key={i} className="integration-detail__json mono">
                   {JSON.stringify(obj, null, 2)}
@@ -296,9 +410,25 @@ function DetailArrayBlock({ title, items }: { title: string; items: unknown[] })
             }
             return (
               <div key={i} className="integration-detail__array-item">
-                {scalars.map(([k, v]) => (
-                  <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
-                ))}
+                <div className="integration-detail__rows">
+                  {scalars.map(([k, v]) => (
+                    <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
+                  ))}
+                </div>
+                {subObjects.map(([k, sub]) => {
+                  const subRows = Object.entries(sub).filter(([, v]) => formatScalar(v) !== "");
+                  if (subRows.length === 0) return null;
+                  return (
+                    <div key={k} className="integration-detail__subsection">
+                      <h5 className="integration-detail__subsection-title">{formatFieldLabel(k)}</h5>
+                      <div className="integration-detail__rows">
+                        {subRows.map(([sk, sv]) => (
+                          <DetailScalar key={sk} label={formatFieldLabel(sk)} value={sv} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             );
           }
@@ -315,10 +445,125 @@ function DetailArrayBlock({ title, items }: { title: string; items: unknown[] })
   );
 }
 
-function ClientDetailBody({ raw }: { raw?: Record<string, unknown> }) {
-  if (!raw || Object.keys(raw).length === 0) {
-    return <p className="integration-detail__empty">Sem dados detalhados disponíveis.</p>;
+// Renderização dedicada da aba "Serviços" (raw.servicos, HubSoft) — os campos mais úteis
+// (login, MAC, senha, status, tecnologia, cobrança, velocidades, valor) ganham destaque num
+// grid de no máximo 3 colunas no topo do cartão; o resto continua a render genérica
+// (scalars + sub-secções) usada nas outras abas. "status_txt_resumido" (duplicado de
+// "status_text" já mostrado no cartão resumido) é removido — não é útil aqui.
+const SERVICE_PRIORITY_KEYS = [
+  "login",
+  "mac_addr",
+  "nome",
+  "senha",
+  "status",
+  "status_prefixo",
+  "tecnologia",
+  "tipo_cobranca",
+  "velocidade_download",
+  "velocidade_upload",
+  "valor",
+];
+const SERVICE_HIDDEN_KEYS = new Set(["status_txt_resumido"]);
+
+function serviceStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes("habilit")) return "badge badge--ok";
+  if (s.includes("desconect")) return "badge badge--err";
+  return "badge badge--off";
+}
+
+function omitHiddenServiceFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (SERVICE_HIDDEN_KEYS.has(k)) continue;
+    out[k] = v;
   }
+  return out;
+}
+
+function ServicoItemCard({ obj }: { obj: Record<string, unknown> }) {
+  const clean = omitHiddenServiceFields(obj);
+  const priorityEntries = SERVICE_PRIORITY_KEYS.map((k) => [k, clean[k]] as [string, unknown]).filter(
+    ([, v]) => v !== undefined && v !== null && formatScalar(v) !== "",
+  );
+  const priorityKeys = new Set(priorityEntries.map(([k]) => k));
+
+  const restEntries = Object.entries(clean).filter(([k, v]) => !priorityKeys.has(k) && v !== null && v !== undefined);
+  const restScalars = restEntries.filter(([, v]) => typeof v !== "object");
+  const restSubObjects = restEntries.filter(
+    (entry): entry is [string, Record<string, unknown>] =>
+      !!entry[1] && typeof entry[1] === "object" && !Array.isArray(entry[1]),
+  );
+
+  return (
+    <div className="integration-detail__array-item">
+      <div className="integration-detail__rows integration-detail__rows--service-priority">
+        {priorityEntries.map(([k, v]) => {
+          if (k === "status") {
+            const text = formatScalar(v);
+            if (!text) return null;
+            return (
+              <div key={k} className="integration-detail__row">
+                <span className="integration-detail__label">{formatFieldLabel(k)}</span>
+                <span className={serviceStatusBadgeClass(text)}>{text}</span>
+              </div>
+            );
+          }
+          return <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />;
+        })}
+      </div>
+      {restScalars.length > 0 ? (
+        <div className="integration-detail__rows" style={{ marginTop: 10 }}>
+          {restScalars.map(([k, v]) => (
+            <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
+          ))}
+        </div>
+      ) : null}
+      {restSubObjects.map(([k, sub]) => {
+        const subRows = Object.entries(omitHiddenServiceFields(sub)).filter(([, v]) => formatScalar(v) !== "");
+        if (subRows.length === 0) return null;
+        return (
+          <div key={k} className="integration-detail__subsection">
+            <h5 className="integration-detail__subsection-title">{formatFieldLabel(k)}</h5>
+            <div className="integration-detail__rows">
+              {subRows.map(([sk, sv]) => (
+                <DetailScalar key={sk} label={formatFieldLabel(sk)} value={sv} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ServicosTabContent({ items }: { items: unknown[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="integration-detail__section">
+      <h4 className="integration-detail__section-title">
+        Serviços <span className="integration-detail__count">({items.length})</span>
+      </h4>
+      <div className="integration-detail__array">
+        {items.map((item, i) =>
+          item && typeof item === "object" && !Array.isArray(item) ? (
+            <ServicoItemCard key={i} obj={item as Record<string, unknown>} />
+          ) : null,
+        )}
+      </div>
+    </section>
+  );
+}
+
+type DetailTabDef = { id: string; label: string; content: ReactNode };
+
+// Agrupa os campos de topo do "raw" do cliente em secções pequenas em vez de uma lista
+// única — genérico o suficiente para funcionar tanto com o formato da HubSoft como com o
+// do IXC (casa por palavra-chave no nome do campo, não por nomes exactos de um só
+// fornecedor). Cada array de topo (ex. "grupos", "servicos") vira a sua própria aba —
+// cobre "Grupo"/"Serviços" e qualquer outro array presente ("e etc") sem hardcode.
+function buildDetailTabs(raw?: Record<string, unknown>): DetailTabDef[] {
+  if (!raw || Object.keys(raw).length === 0) return [];
 
   const scalarRows: [string, unknown][] = [];
   const objectSections: { key: string; data: Record<string, unknown> }[] = [];
@@ -335,34 +580,427 @@ function ClientDetailBody({ raw }: { raw?: Record<string, unknown> }) {
     }
   }
 
-  const priority = ["nome_razaosocial", "nome", "codigo_cliente", "cpf_cnpj", "email_principal", "telefone", "status_cadastro"];
-  scalarRows.sort(([a], [b]) => {
-    const ia = priority.indexOf(a);
-    const ib = priority.indexOf(b);
-    if (ia >= 0 && ib >= 0) return ia - ib;
-    if (ia >= 0) return -1;
-    if (ib >= 0) return 1;
-    return a.localeCompare(b);
+  const GROUPS: { title: string; match: (key: string) => boolean }[] = [
+    {
+      title: "Identificação",
+      match: (k) => /nome|razaosocial|fantasia|codigo_cliente|cpf|cnpj|documento|tipo_pessoa|^id(_cliente)?$|status_cadastro|^ativo$/.test(k),
+    },
+    {
+      title: "Contacto",
+      match: (k) => /email|telefone|celular|contato/.test(k),
+    },
+    {
+      title: "Datas",
+      match: (k) => /^data_|_at$/.test(k),
+    },
+  ];
+  const grouped = GROUPS.map((g) => ({
+    title: g.title,
+    rows: scalarRows.filter(([k]) => g.match(k)),
+  })).filter((g) => g.rows.length > 0);
+  const groupedKeys = new Set(grouped.flatMap((g) => g.rows.map(([k]) => k)));
+  const otherRows = scalarRows.filter(([k]) => !groupedKeys.has(k));
+
+  const tabs: DetailTabDef[] = [];
+
+  tabs.push({
+    id: "identificacao",
+    label: "Identificação",
+    content: (
+      <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+        {grouped.map((g) => (
+          <section key={g.title} className="integration-detail__section">
+            <h4 className="integration-detail__section-title">{g.title}</h4>
+            <div className="integration-detail__rows">
+              {g.rows.map(([k, v]) => (
+                <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
+              ))}
+            </div>
+          </section>
+        ))}
+        {otherRows.length > 0 ? (
+          <section className="integration-detail__section">
+            <h4 className="integration-detail__section-title">Outros</h4>
+            <div className="integration-detail__rows">
+              {otherRows.map(([k, v]) => (
+                <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {objectSections.map(({ key, data }) => (
+          <DetailObjectBlock key={key} title={formatFieldLabel(key)} data={data} />
+        ))}
+      </div>
+    ),
   });
 
+  for (const { key, items } of arraySections) {
+    if (items.length === 0) continue;
+    if (key === "servicos") {
+      tabs.push({
+        id: `array:${key}`,
+        label: "Serviços",
+        content: (
+          <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+            <ServicosTabContent items={items} />
+          </div>
+        ),
+      });
+      continue;
+    }
+    tabs.push({
+      id: `array:${key}`,
+      label: formatFieldLabel(key),
+      content: (
+        <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+          <DetailArrayBlock title={formatFieldLabel(key)} items={items} />
+        </div>
+      ),
+    });
+  }
+
+  return tabs;
+}
+
+function formatCurrencyBRL(raw?: string | number): string {
+  if (raw === undefined || raw === null || raw === "") return "—";
+  const n = typeof raw === "number" ? raw : parseFloat(String(raw).replace(",", "."));
+  if (Number.isNaN(n)) return String(raw);
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function invoiceStatusBadgeClass(inv: InvoiceItem): string {
+  if (inv.paid) return "badge badge--ok";
+  if ((inv.status ?? "").trim().toLowerCase() === "vencido") return "badge badge--err";
+  return "badge badge--off";
+}
+
+function invoiceStatusLabel(inv: InvoiceItem): string {
+  if (inv.paid) return "Paga";
+  if ((inv.status ?? "").trim().toLowerCase() === "vencido") return "Vencida";
+  return inv.status?.trim() || "Pendente";
+}
+
+function FinancialSummaryPanel({ summary }: { summary: FinancialSummary }) {
+  return (
+    <section className="integration-detail__section">
+      <h4 className="integration-detail__section-title">Resumo</h4>
+      <div className="integration-detail__rows">
+        <DetailScalar label="Total de faturas" value={summary.total} />
+        <DetailScalar label="Valor total" value={formatCurrencyBRL(summary.total_value)} />
+        <DetailScalar label="Vencidas" value={`${summary.overdue_count} · ${formatCurrencyBRL(summary.overdue_value)}`} />
+        <DetailScalar label="Pendentes" value={`${summary.pending_count} · ${formatCurrencyBRL(summary.pending_value)}`} />
+        <DetailScalar label="Pagas" value={`${summary.paid_count} · ${formatCurrencyBRL(summary.paid_value)}`} />
+      </div>
+    </section>
+  );
+}
+
+export function FinancialTabContent({
+  loading,
+  ok,
+  message,
+  invoices,
+  summary,
+}: {
+  loading: boolean;
+  ok: boolean;
+  message?: string;
+  invoices: InvoiceItem[];
+  summary?: FinancialSummary;
+}) {
+  if (loading) {
+    return <p className="integration-detail__empty">A carregar faturas…</p>;
+  }
+  if (!ok && message) {
+    return <div className="msg msg--err">{message}</div>;
+  }
+  if (invoices.length === 0) {
+    return <div className="msg">{message || "Nenhuma fatura encontrada."}</div>;
+  }
   return (
     <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-      {scalarRows.length > 0 ? (
-        <section className="integration-detail__section">
-          <h4 className="integration-detail__section-title">Geral</h4>
-          <div className="integration-detail__rows">
-            {scalarRows.map(([k, v]) => (
-              <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-      {objectSections.map(({ key, data }) => (
-        <DetailObjectBlock key={key} title={formatFieldLabel(key)} data={data} />
-      ))}
-      {arraySections.map(({ key, items }) => (
-        <DetailArrayBlock key={key} title={formatFieldLabel(key)} items={items} />
-      ))}
+      {summary ? <FinancialSummaryPanel summary={summary} /> : null}
+      <section className="integration-detail__section">
+        <h4 className="integration-detail__section-title">
+          Faturas <span className="integration-detail__count">({invoices.length})</span>
+        </h4>
+        <div className="table-wrap integration-support-table">
+          <table className="integration-support-table__grid">
+            <thead>
+              <tr>
+                <th>Vencimento</th>
+                <th>Valor</th>
+                <th>Status</th>
+                <th>Pagamento</th>
+                <th>Serviço</th>
+                <th>Boleto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv, i) => (
+                <tr key={inv.id ?? i}>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">{inv.due_date || "—"}</td>
+                  <td className="mono integration-support-table__cell">{formatCurrencyBRL(inv.value)}</td>
+                  <td className="integration-support-table__cell">
+                    <span className={invoiceStatusBadgeClass(inv)}>{invoiceStatusLabel(inv)}</span>
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">{inv.payment_date || "—"}</td>
+                  <td className="integration-support-table__cell">{inv.service_name || "—"}</td>
+                  <td className="integration-support-table__cell">
+                    {inv.boleto_link ? (
+                      <a href={inv.boleto_link} target="_blank" rel="noreferrer">
+                        Ver boleto
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export type FinancialState = {
+  ok: boolean;
+  message?: string;
+  invoices: InvoiceItem[];
+  summary?: FinancialSummary;
+};
+export type AttendanceState = { ok: boolean; message?: string; items: AttendanceItem[] };
+export type WorkOrderState = { ok: boolean; message?: string; items: WorkOrderItem[] };
+export type LoginState = { ok: boolean; message?: string; items: ClientServiceSummary[] };
+
+export function AttendanceTabContent({
+  loading,
+  ok,
+  message,
+  items,
+  onShowDetail,
+}: {
+  loading: boolean;
+  ok: boolean;
+  message?: string;
+  items: AttendanceItem[];
+  onShowDetail: (t: SupportDetailTarget) => void;
+}) {
+  if (loading) return <p className="integration-detail__empty">A carregar atendimentos…</p>;
+  if (!ok && message) return <div className="msg msg--err">{message}</div>;
+  if (items.length === 0) return <div className="msg">{message || "Nenhum atendimento encontrado."}</div>;
+  const showClient = items.some((a) => a.client_name || a.client_code);
+  return (
+    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section">
+        <h4 className="integration-detail__section-title">
+          Atendimentos <span className="integration-detail__count">({items.length})</span>
+        </h4>
+        <div className="table-wrap integration-support-table">
+          <table className="integration-support-table__grid integration-support-table__grid--att">
+            <thead>
+              <tr>
+                {showClient ? <th>Cliente</th> : null}
+                <th>Protocolo</th>
+                <th>Estado</th>
+                <th>Assunto</th>
+                <th>Descrição</th>
+                <th>Abertura</th>
+                <th>Fechamento</th>
+                <th className="integration-support-table__col-actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((a, i) => (
+                <tr key={a.id ?? a.protocol ?? i}>
+                  {showClient ? (
+                    <td className="integration-support-table__cell">
+                      {a.client_name || "—"}
+                      {a.client_code ? <span className="mono integration-support-table__meta"> · {a.client_code}</span> : null}
+                    </td>
+                  ) : null}
+                  <td className="mono integration-support-table__cell">{a.protocol || "—"}</td>
+                  <td className="integration-support-table__cell">
+                    {formatAttendanceStatus(a) ? (
+                      <span className={labelStatus(formatAttendanceStatus(a)) ?? "badge"}>{formatAttendanceStatus(a)}</span>
+                    ) : (
+                      "—"
+                    )}
+                    {a.pending === true ? <span className="badge integration-support-table__chip">Pendente</span> : null}
+                  </td>
+                  <td className="integration-support-table__cell">{a.subject || "—"}</td>
+                  <td className="integration-support-table__cell integration-support-table__cell--text">
+                    <TableCellExpandableText text={a.description} />
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">
+                    {formatIntegrationDateTime(a.opened_at) || "—"}
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">
+                    {formatIntegrationDateTime(a.closed_at) || "—"}
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--actions">
+                    <button
+                      type="button"
+                      className="btn btn--sm integration-support-table__more-btn"
+                      onClick={() => onShowDetail({ kind: "attendance", item: a })}
+                    >
+                      Ver mais
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function WorkOrdersTabContent({
+  loading,
+  ok,
+  message,
+  items,
+  onShowDetail,
+}: {
+  loading: boolean;
+  ok: boolean;
+  message?: string;
+  items: WorkOrderItem[];
+  onShowDetail: (t: SupportDetailTarget) => void;
+}) {
+  if (loading) return <p className="integration-detail__empty">A carregar ordens de serviço…</p>;
+  if (!ok && message) return <div className="msg msg--err">{message}</div>;
+  if (items.length === 0) return <div className="msg">{message || "Nenhuma ordem de serviço encontrada."}</div>;
+  const showClient = items.some((o) => o.client_name || o.client_code);
+  return (
+    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section">
+        <h4 className="integration-detail__section-title">
+          Ordens de serviço <span className="integration-detail__count">({items.length})</span>
+        </h4>
+        <div className="table-wrap integration-support-table">
+          <table className="integration-support-table__grid integration-support-table__grid--os">
+            <thead>
+              <tr>
+                {showClient ? <th>Cliente</th> : null}
+                <th>N.º O.S.</th>
+                <th>Estado O.S.</th>
+                <th>Plano / serviço</th>
+                <th>Atendimento</th>
+                <th>Cadastro</th>
+                <th>Agendamento</th>
+                <th className="integration-support-table__col-actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((o, i) => (
+                <tr key={o.id ?? o.number ?? i}>
+                  {showClient ? (
+                    <td className="integration-support-table__cell">
+                      {o.client_name || "—"}
+                      {o.client_code ? <span className="mono integration-support-table__meta"> · {o.client_code}</span> : null}
+                    </td>
+                  ) : null}
+                  <td className="mono integration-support-table__cell">{o.number || "—"}</td>
+                  <td className="integration-support-table__cell">
+                    <span className={labelStatus(formatWorkOrderStatus(o)) ?? "badge"}>{formatWorkOrderStatus(o) || "—"}</span>
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--plan">
+                    <div className="integration-os-plan__title">
+                      <TableCellExpandableText text={o.plan_name || o.description} maxLength={60} />
+                    </div>
+                    {o.service_status ? <div className="integration-os-plan__meta">Estado do serviço: {o.service_status}</div> : null}
+                    {o.value ? <div className="integration-os-plan__meta">Valor: {o.value}</div> : null}
+                  </td>
+                  <td className="mono integration-support-table__cell">{o.attendance_protocol || "—"}</td>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">
+                    {formatIntegrationDateTime(o.created_at) || "—"}
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--date">
+                    {formatIntegrationDateTime(o.scheduled_at) || "—"}
+                  </td>
+                  <td className="integration-support-table__cell integration-support-table__cell--actions">
+                    <button
+                      type="button"
+                      className="btn btn--sm integration-support-table__more-btn"
+                      onClick={() => onShowDetail({ kind: "work_order", item: o })}
+                    >
+                      Ver mais
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function LoginsTabContent({
+  loading,
+  ok,
+  message,
+  items,
+}: {
+  loading: boolean;
+  ok: boolean;
+  message?: string;
+  items: ClientServiceSummary[];
+}) {
+  if (loading) return <p className="integration-detail__empty">A carregar logins…</p>;
+  if (!ok && message) return <div className="msg msg--err">{message}</div>;
+  if (items.length === 0) return <div className="msg">{message || "Nenhum login encontrado."}</div>;
+  return (
+    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section">
+        <h4 className="integration-detail__section-title">
+          Logins <span className="integration-detail__count">({items.length})</span>
+        </h4>
+        <div className="table-wrap integration-support-table">
+          <table className="integration-support-table__grid integration-support-table__grid--login">
+            <thead>
+              <tr>
+                <th>Login</th>
+                <th>Contrato</th>
+                <th>Plano</th>
+                <th>Online</th>
+                <th>Status contrato</th>
+                <th>MAC</th>
+                <th>IPv4</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((s, i) => {
+                const online = formatIXCOnline(s.online, s.online_label);
+                const statusInternet = formatIXCContractStatus(s.status_internet, s.status_label);
+                return (
+                  <tr key={s.id ?? s.login ?? i}>
+                    <td className="mono integration-support-table__cell">{s.login || "—"}</td>
+                    <td className="mono integration-support-table__cell">{s.contrato || "—"}</td>
+                    <td className="integration-support-table__cell">{s.plano_venda || s.name || "—"}</td>
+                    <td className="integration-support-table__cell">
+                      {online ? <span className={labelStatus(online) ?? "badge"}>{online}</span> : "—"}
+                    </td>
+                    <td className="integration-support-table__cell">
+                      {statusInternet ? <span className={labelStatus(statusInternet) ?? "badge"}>{statusInternet}</span> : "—"}
+                    </td>
+                    <td className="mono integration-support-table__cell">{s.mac || "—"}</td>
+                    <td className="mono integration-support-table__cell">{s.ipv4 || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -371,11 +1009,134 @@ function ClientDetailModal({
   client,
   loading,
   onClose,
+  onFetchFinancial,
+  onFetchAttendance,
+  onFetchWorkOrders,
+  onFetchLogins,
+  attendanceEnabled,
+  workOrderEnabled,
+  loginEnabled,
 }: {
   client: ClientCard;
   loading?: boolean;
   onClose: () => void;
+  onFetchFinancial?: (client: ClientCard) => Promise<FinancialState>;
+  onFetchAttendance?: (client: ClientCard) => Promise<AttendanceState>;
+  onFetchWorkOrders?: (client: ClientCard) => Promise<WorkOrderState>;
+  onFetchLogins?: (client: ClientCard) => Promise<LoginState>;
+  attendanceEnabled?: boolean;
+  workOrderEnabled?: boolean;
+  loginEnabled?: boolean;
 }) {
+  const detailTabs = useMemo(() => buildDetailTabs(client.raw), [client.raw]);
+  const tabs = useMemo(() => {
+    const extra: DetailTabDef[] = [];
+    if (onFetchFinancial) extra.push({ id: "financeiro", label: "Financeiro", content: null });
+    if (onFetchAttendance && attendanceEnabled !== false) extra.push({ id: "atendimentos", label: "Atendimentos", content: null });
+    if (onFetchWorkOrders && workOrderEnabled !== false) extra.push({ id: "ordens", label: "Ordens de serviço", content: null });
+    if (onFetchLogins && loginEnabled !== false) extra.push({ id: "logins", label: "Logins", content: null });
+    return [...detailTabs, ...extra];
+  }, [detailTabs, onFetchFinancial, onFetchAttendance, onFetchWorkOrders, onFetchLogins, attendanceEnabled, workOrderEnabled, loginEnabled]);
+
+  const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? "identificacao");
+  const [financial, setFinancial] = useState<FinancialState | null>(null);
+  const [financialLoading, setFinancialLoading] = useState(false);
+  const [attendance, setAttendance] = useState<AttendanceState | null>(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [workOrders, setWorkOrders] = useState<WorkOrderState | null>(null);
+  const [workOrderLoading, setWorkOrderLoading] = useState(false);
+  const [logins, setLogins] = useState<LoginState | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<SupportDetailTarget | null>(null);
+
+  useEffect(() => {
+    setActiveTab(tabs[0]?.id ?? "identificacao");
+    setFinancial(null);
+    setFinancialLoading(false);
+    setAttendance(null);
+    setAttendanceLoading(false);
+    setWorkOrders(null);
+    setWorkOrderLoading(false);
+    setLogins(null);
+    setLoginLoading(false);
+    setDetailTarget(null);
+  }, [client.id, client.code, tabs]);
+
+  useEffect(() => {
+    if (activeTab !== "financeiro" || !onFetchFinancial || financial || financialLoading) return;
+    setFinancialLoading(true);
+    onFetchFinancial(client)
+      .then((r) => setFinancial(r))
+      .catch((e) => setFinancial({ ok: false, message: e instanceof Error ? e.message : String(e), invoices: [] }))
+      .finally(() => setFinancialLoading(false));
+  }, [activeTab, onFetchFinancial, financial, financialLoading, client]);
+
+  useEffect(() => {
+    if (activeTab !== "atendimentos" || !onFetchAttendance || attendance || attendanceLoading) return;
+    setAttendanceLoading(true);
+    onFetchAttendance(client)
+      .then((r) => setAttendance(r))
+      .catch((e) => setAttendance({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
+      .finally(() => setAttendanceLoading(false));
+  }, [activeTab, onFetchAttendance, attendance, attendanceLoading, client]);
+
+  useEffect(() => {
+    if (activeTab !== "ordens" || !onFetchWorkOrders || workOrders || workOrderLoading) return;
+    setWorkOrderLoading(true);
+    onFetchWorkOrders(client)
+      .then((r) => setWorkOrders(r))
+      .catch((e) => setWorkOrders({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
+      .finally(() => setWorkOrderLoading(false));
+  }, [activeTab, onFetchWorkOrders, workOrders, workOrderLoading, client]);
+
+  useEffect(() => {
+    if (activeTab !== "logins" || !onFetchLogins || logins || loginLoading) return;
+    setLoginLoading(true);
+    onFetchLogins(client)
+      .then((r) => setLogins(r))
+      .catch((e) => setLogins({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
+      .finally(() => setLoginLoading(false));
+  }, [activeTab, onFetchLogins, logins, loginLoading, client]);
+
+  let activeContent: ReactNode;
+  if (activeTab === "financeiro") {
+    activeContent = (
+      <FinancialTabContent
+        loading={financialLoading}
+        ok={financial?.ok ?? true}
+        message={financial?.message}
+        invoices={financial?.invoices ?? []}
+        summary={financial?.summary}
+      />
+    );
+  } else if (activeTab === "atendimentos") {
+    activeContent = (
+      <AttendanceTabContent
+        loading={attendanceLoading}
+        ok={attendance?.ok ?? true}
+        message={attendance?.message}
+        items={attendance?.items ?? []}
+        onShowDetail={setDetailTarget}
+      />
+    );
+  } else if (activeTab === "ordens") {
+    activeContent = (
+      <WorkOrdersTabContent
+        loading={workOrderLoading}
+        ok={workOrders?.ok ?? true}
+        message={workOrders?.message}
+        items={workOrders?.items ?? []}
+        onShowDetail={setDetailTarget}
+      />
+    );
+  } else if (activeTab === "logins") {
+    activeContent = (
+      <LoginsTabContent loading={loginLoading} ok={logins?.ok ?? true} message={logins?.message} items={logins?.items ?? []} />
+    );
+  } else {
+    activeContent = tabs.find((t) => t.id === activeTab)?.content ?? null;
+  }
+
   return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -402,278 +1163,22 @@ function ClientDetailModal({
         ) : null}
         {loading ? (
           <p className="integration-detail__empty">A carregar detalhes…</p>
+        ) : tabs.length === 0 ? (
+          <p className="integration-detail__empty">Sem dados detalhados disponíveis.</p>
         ) : (
-          <ClientDetailBody raw={client.raw} />
+          <>
+            <div className="tabs integration-detail-modal__tabs">
+              {tabs.map((t) => (
+                <button key={t.id} type="button" className={t.id === activeTab ? "active" : ""} onClick={() => setActiveTab(t.id)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="integration-detail-modal__tab-body">{activeContent}</div>
+          </>
         )}
       </div>
-    </div>,
-    document.body,
-  );
-}
-
-function SupportModal({
-  client,
-  tab,
-  onTabChange,
-  attendance,
-  workOrders,
-  loadingAttendance,
-  loadingWorkOrders,
-  attendanceEnabled,
-  workOrderEnabled,
-  loginEnabled,
-  logins,
-  loadingLogins,
-  onClose,
-}: {
-  client: ClientCard;
-  tab: SupportTab;
-  onTabChange: (t: SupportTab) => void;
-  attendance: { ok: boolean; message?: string; items: AttendanceItem[] };
-  workOrders: { ok: boolean; message?: string; items: WorkOrderItem[] };
-  logins: { ok: boolean; message?: string; items: ClientServiceSummary[] };
-  loadingAttendance?: boolean;
-  loadingWorkOrders?: boolean;
-  loadingLogins?: boolean;
-  attendanceEnabled?: boolean;
-  workOrderEnabled?: boolean;
-  loginEnabled?: boolean;
-  onClose: () => void;
-}) {
-  const showAttTab = attendanceEnabled !== false;
-  const showWoTab = workOrderEnabled !== false;
-  const showLoginTab = loginEnabled !== false;
-  const [detailTarget, setDetailTarget] = useState<SupportDetailTarget | null>(null);
-
-  return createPortal(
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <div
-        className="modal integration-support-modal"
-        role="dialog"
-        aria-labelledby="client-support-title"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="integration-support-modal__head">
-          <div className="integration-support-modal__head-text">
-            <h3 id="client-support-title" className="integration-support-modal__title">
-              Atendimentos e ordens de serviço
-            </h3>
-            <p className="integration-support-modal__client-name">{client.name || "Cliente"}</p>
-            {client.id || client.code ? (
-              <p className="integration-support-modal__subtitle mono">
-                ID {client.id || client.code}
-                {client.code && client.id && client.code !== client.id ? ` · Código ${client.code}` : ""}
-              </p>
-            ) : null}
-          </div>
-          <button type="button" className="btn" aria-label="Fechar" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="tabs integration-support-modal__tabs">
-          {showAttTab ? (
-            <button type="button" className={tab === "atendimentos" ? "active" : ""} onClick={() => onTabChange("atendimentos")}>
-              Atendimentos
-            </button>
-          ) : null}
-          {showWoTab ? (
-            <button type="button" className={tab === "ordens" ? "active" : ""} onClick={() => onTabChange("ordens")}>
-              Ordens de serviço
-            </button>
-          ) : null}
-          {showLoginTab ? (
-            <button type="button" className={tab === "logins" ? "active" : ""} onClick={() => onTabChange("logins")}>
-              Logins
-            </button>
-          ) : null}
-        </div>
-
-        <div className="integration-support-modal__body">
-          {tab === "atendimentos" && showAttTab ? (
-            loadingAttendance ? (
-              <p className="integration-detail__empty">A carregar atendimentos…</p>
-            ) : !attendance.ok && attendance.message ? (
-              <div className="msg msg--err">{attendance.message}</div>
-            ) : attendance.items.length === 0 ? (
-              <div className="msg">{attendance.message || "Nenhum atendimento encontrado."}</div>
-            ) : (
-              <div className="table-wrap integration-support-table">
-                <table className="integration-support-table__grid integration-support-table__grid--att">
-                  <thead>
-                    <tr>
-                      <th>Protocolo</th>
-                      <th>Estado</th>
-                      <th>Assunto</th>
-                      <th>Descrição</th>
-                      <th>Abertura</th>
-                      <th>Fechamento</th>
-                      <th className="integration-support-table__col-actions" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attendance.items.map((a, i) => (
-                      <tr key={a.id ?? a.protocol ?? i}>
-                        <td className="mono integration-support-table__cell">{a.protocol || "—"}</td>
-                        <td className="integration-support-table__cell">
-                          {formatAttendanceStatus(a) ? (
-                            <span className={labelStatus(formatAttendanceStatus(a)) ?? "badge"}>
-                              {formatAttendanceStatus(a)}
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                          {a.pending === true ? <span className="badge integration-support-table__chip">Pendente</span> : null}
-                        </td>
-                        <td className="integration-support-table__cell">{a.subject || "—"}</td>
-                        <td className="integration-support-table__cell integration-support-table__cell--text">
-                          <TableCellExpandableText text={a.description} />
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--date">
-                          {formatIntegrationDateTime(a.opened_at) || "—"}
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--date">
-                          {formatIntegrationDateTime(a.closed_at) || "—"}
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--actions">
-                          <button
-                            type="button"
-                            className="btn btn--sm integration-support-table__more-btn"
-                            onClick={() => setDetailTarget({ kind: "attendance", item: a })}
-                          >
-                            Ver mais
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : null}
-
-          {tab === "ordens" && showWoTab ? (
-            loadingWorkOrders ? (
-              <p className="integration-detail__empty">A carregar ordens de serviço…</p>
-            ) : !workOrders.ok && workOrders.message ? (
-              <div className="msg msg--err">{workOrders.message}</div>
-            ) : workOrders.items.length === 0 ? (
-              <div className="msg">{workOrders.message || "Nenhuma ordem de serviço encontrada."}</div>
-            ) : (
-              <div className="table-wrap integration-support-table">
-                <table className="integration-support-table__grid integration-support-table__grid--os">
-                  <thead>
-                    <tr>
-                      <th>N.º O.S.</th>
-                      <th>Estado O.S.</th>
-                      <th>Plano / serviço</th>
-                      <th>Atendimento</th>
-                      <th>Cadastro</th>
-                      <th>Agendamento</th>
-                      <th className="integration-support-table__col-actions" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {workOrders.items.map((o, i) => (
-                      <tr key={o.id ?? o.number ?? i}>
-                        <td className="mono integration-support-table__cell">{o.number || "—"}</td>
-                        <td className="integration-support-table__cell">
-                          <span className={labelStatus(formatWorkOrderStatus(o)) ?? "badge"}>
-                            {formatWorkOrderStatus(o) || "—"}
-                          </span>
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--plan">
-                          <div className="integration-os-plan__title">
-                            <TableCellExpandableText text={o.plan_name || o.description} maxLength={60} />
-                          </div>
-                          {o.service_status ? (
-                            <div className="integration-os-plan__meta">Estado do serviço: {o.service_status}</div>
-                          ) : null}
-                          {o.value ? <div className="integration-os-plan__meta">Valor: {o.value}</div> : null}
-                        </td>
-                        <td className="mono integration-support-table__cell">{o.attendance_protocol || "—"}</td>
-                        <td className="integration-support-table__cell integration-support-table__cell--date">
-                          {formatIntegrationDateTime(o.created_at) || "—"}
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--date">
-                          {formatIntegrationDateTime(o.scheduled_at) || "—"}
-                        </td>
-                        <td className="integration-support-table__cell integration-support-table__cell--actions">
-                          <button
-                            type="button"
-                            className="btn btn--sm integration-support-table__more-btn"
-                            onClick={() => setDetailTarget({ kind: "work_order", item: o })}
-                          >
-                            Ver mais
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : null}
-
-          {tab === "logins" && showLoginTab ? (
-            loadingLogins ? (
-              <p className="integration-detail__empty">A carregar logins…</p>
-            ) : !logins.ok && logins.message ? (
-              <div className="msg msg--err">{logins.message}</div>
-            ) : logins.items.length === 0 ? (
-              <div className="msg">{logins.message || "Nenhum login encontrado."}</div>
-            ) : (
-              <div className="table-wrap integration-support-table">
-                <table className="integration-support-table__grid integration-support-table__grid--login">
-                  <thead>
-                    <tr>
-                      <th>Login</th>
-                      <th>Contrato</th>
-                      <th>Plano</th>
-                      <th>Online</th>
-                      <th>Status contrato</th>
-                      <th>MAC</th>
-                      <th>IPv4</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logins.items.map((s, i) => {
-                      const online = formatIXCOnline(s.online, s.online_label);
-                      const statusInternet = formatIXCContractStatus(s.status_internet, s.status_label);
-                      return (
-                        <tr key={s.id ?? s.login ?? i}>
-                          <td className="mono integration-support-table__cell">{s.login || "—"}</td>
-                          <td className="mono integration-support-table__cell">{s.contrato || "—"}</td>
-                          <td className="integration-support-table__cell">
-                            {s.plano_venda || s.name || "—"}
-                          </td>
-                          <td className="integration-support-table__cell">
-                            {online ? (
-                              <span className={labelStatus(online) ?? "badge"}>{online}</span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="integration-support-table__cell">
-                            {statusInternet ? (
-                              <span className={labelStatus(statusInternet) ?? "badge"}>{statusInternet}</span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="mono integration-support-table__cell">{s.mac || "—"}</td>
-                          <td className="mono integration-support-table__cell">{s.ipv4 || "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : null}
-        </div>
-        {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
-      </div>
+      {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
     </div>,
     document.body,
   );
@@ -688,6 +1193,7 @@ export function HubsoftClientResults({
   onFetchAttendance,
   onFetchWorkOrders,
   onFetchLogins,
+  onFetchFinancial,
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
@@ -700,28 +1206,13 @@ export function HubsoftClientResults({
   onFetchAttendance?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: AttendanceItem[] }>;
   onFetchWorkOrders?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: WorkOrderItem[] }>;
   onFetchLogins?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: ClientServiceSummary[] }>;
+  onFetchFinancial?: (client: ClientCard) => Promise<FinancialState>;
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
 }) {
-  const supportEnabled = !!(attendanceEnabled || workOrderEnabled || loginEnabled);
-
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [supportClient, setSupportClient] = useState<ClientCard | null>(null);
-  const [supportTab, setSupportTab] = useState<SupportTab>("atendimentos");
-  const [attendanceItems, setAttendanceItems] = useState<AttendanceItem[]>([]);
-  const [workOrderItems, setWorkOrderItems] = useState<WorkOrderItem[]>([]);
-  const [attendanceLoading, setAttendanceLoading] = useState(false);
-  const [workOrderLoading, setWorkOrderLoading] = useState(false);
-  const [attendanceOk, setAttendanceOk] = useState(true);
-  const [workOrderOk, setWorkOrderOk] = useState(true);
-  const [attendanceMessage, setAttendanceMessage] = useState<string | undefined>();
-  const [workOrderMessage, setWorkOrderMessage] = useState<string | undefined>();
-  const [loginItems, setLoginItems] = useState<ClientServiceSummary[]>([]);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginOk, setLoginOk] = useState(true);
-  const [loginMessage, setLoginMessage] = useState<string | undefined>();
   const [selectedServiceByClient, setSelectedServiceByClient] = useState<Record<string, number>>({});
 
   const filtered = useMemo(() => filterClientCards(clients, localFilter), [clients, localFilter]);
@@ -740,87 +1231,6 @@ export function HubsoftClientResults({
     } finally {
       setDetailLoading(false);
     }
-  };
-
-  const openSupport = async (c: ClientCard) => {
-    if (!onFetchAttendance && !onFetchWorkOrders && !onFetchLogins) return;
-    setSupportClient(c);
-    setSupportTab(
-      attendanceEnabled ? "atendimentos" : workOrderEnabled ? "ordens" : "logins",
-    );
-    setAttendanceItems([]);
-    setWorkOrderItems([]);
-    setLoginItems([]);
-    setAttendanceMessage(undefined);
-    setWorkOrderMessage(undefined);
-    setLoginMessage(undefined);
-    setAttendanceOk(true);
-    setWorkOrderOk(true);
-    setLoginOk(true);
-
-    let client = c;
-    if (onFetchDetail) {
-      try {
-        client = await onFetchDetail(c);
-        setSupportClient(client);
-      } catch {
-        /* usa cartão da listagem */
-      }
-    }
-
-    const jobs: Promise<void>[] = [];
-    if (onFetchAttendance && attendanceEnabled) {
-      setAttendanceLoading(true);
-      jobs.push(
-        onFetchAttendance(client)
-          .then((r) => {
-            setAttendanceOk(!!r.ok);
-            setAttendanceMessage(r.message);
-            setAttendanceItems(r.items ?? []);
-          })
-          .catch((e) => {
-            setAttendanceOk(false);
-            setAttendanceMessage(e instanceof Error ? e.message : String(e));
-            setAttendanceItems([]);
-          })
-          .finally(() => setAttendanceLoading(false)),
-      );
-    }
-    if (onFetchWorkOrders && workOrderEnabled) {
-      setWorkOrderLoading(true);
-      jobs.push(
-        onFetchWorkOrders(client)
-          .then((r) => {
-            setWorkOrderOk(!!r.ok);
-            setWorkOrderMessage(r.message);
-            setWorkOrderItems(r.items ?? []);
-          })
-          .catch((e) => {
-            setWorkOrderOk(false);
-            setWorkOrderMessage(e instanceof Error ? e.message : String(e));
-            setWorkOrderItems([]);
-          })
-          .finally(() => setWorkOrderLoading(false)),
-      );
-    }
-    if (onFetchLogins && loginEnabled) {
-      setLoginLoading(true);
-      jobs.push(
-        onFetchLogins(client)
-          .then((r) => {
-            setLoginOk(!!r.ok);
-            setLoginMessage(r.message);
-            setLoginItems(r.items ?? []);
-          })
-          .catch((e) => {
-            setLoginOk(false);
-            setLoginMessage(e instanceof Error ? e.message : String(e));
-            setLoginItems([]);
-          })
-          .finally(() => setLoginLoading(false)),
-      );
-    }
-    await Promise.all(jobs);
   };
 
   if (!ok && message) {
@@ -852,7 +1262,13 @@ export function HubsoftClientResults({
           <article key={cardKey} className="card integration-consult-card">
             <div className="integration-consult-card__head">
               <div className="integration-consult-card__title-wrap">
-                <div className="integration-consult-card__title">{c.name || "—"}</div>
+                <button
+                  type="button"
+                  className="integration-consult-card__title integration-consult-card__title--link"
+                  onClick={() => void openDetail(c)}
+                >
+                  {c.name || "—"}
+                </button>
                 {c.trade_name ? <div className="integration-consult-card__subtitle">{c.trade_name}</div> : null}
               </div>
               <div className="integration-consult-card__actions">
@@ -865,14 +1281,6 @@ export function HubsoftClientResults({
                       id: "detail",
                       label: "Ver dados completos",
                       onClick: () => void openDetail(c),
-                    },
-                    {
-                      id: "support",
-                      label: "Atendimentos e ordens de serviço",
-                      disabled:
-                        !supportEnabled ||
-                        (!onFetchAttendance && !onFetchWorkOrders && !onFetchLogins),
-                      onClick: () => void openSupport(c),
                     },
                   ]}
                 />
@@ -888,23 +1296,17 @@ export function HubsoftClientResults({
         })}
       </div>
       {detailClient ? (
-        <ClientDetailModal client={detailClient} loading={detailLoading} onClose={() => setDetailClient(null)} />
-      ) : null}
-      {supportClient ? (
-        <SupportModal
-          client={supportClient}
-          tab={supportTab}
-          onTabChange={setSupportTab}
-          attendance={{ ok: attendanceOk, message: attendanceMessage, items: attendanceItems }}
-          workOrders={{ ok: workOrderOk, message: workOrderMessage, items: workOrderItems }}
-          logins={{ ok: loginOk, message: loginMessage, items: loginItems }}
-          loadingAttendance={attendanceLoading}
-          loadingWorkOrders={workOrderLoading}
-          loadingLogins={loginLoading}
+        <ClientDetailModal
+          client={detailClient}
+          loading={detailLoading}
+          onClose={() => setDetailClient(null)}
+          onFetchFinancial={onFetchFinancial}
+          onFetchAttendance={onFetchAttendance}
+          onFetchWorkOrders={onFetchWorkOrders}
+          onFetchLogins={onFetchLogins}
           attendanceEnabled={attendanceEnabled}
           workOrderEnabled={workOrderEnabled}
           loginEnabled={loginEnabled}
-          onClose={() => setSupportClient(null)}
         />
       ) : null}
     </>

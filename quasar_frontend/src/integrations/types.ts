@@ -117,6 +117,21 @@ export type ClientServiceSummary = {
   contrato?: string;
   contrato_id?: string;
   plano_venda?: string;
+  // Campos ricos exclusivos do retorno detalhado da HubSoft (ver internal/integrationhubsoft).
+  technology?: string;
+  plan_value?: string;
+  connected?: string;
+  last_connected_at?: string;
+  last_disconnected_at?: string;
+  last_ipv4?: string;
+  last_nas_ip?: string;
+  status_text?: string;
+  olt?: string;
+  concentrator?: string;
+  pon?: string;
+  install_address?: string;
+  latitude?: string;
+  longitude?: string;
 };
 
 export type ClientCard = {
@@ -159,6 +174,9 @@ export type AttendanceItem = {
   closed_at?: string;
   pending?: boolean;
   raw?: Record<string, unknown>;
+  /** Só preenchido pela varredura "recentes de todos os clientes" (aba Atendimentos). */
+  client_name?: string;
+  client_code?: string;
 };
 
 export type WorkOrderItem = {
@@ -174,6 +192,42 @@ export type WorkOrderItem = {
   created_at?: string;
   attendance_protocol?: string;
   raw?: Record<string, unknown>;
+  /** Só preenchido pela varredura "recentes de todos os clientes" (aba Ordens de serviço). */
+  client_name?: string;
+  client_code?: string;
+};
+
+export type RecentActivityResponse = {
+  ok: boolean;
+  message?: string;
+  sample_clients: number;
+  attendance: AttendanceItem[];
+  work_orders: WorkOrderItem[];
+  total_attendance_found: number;
+  total_work_orders_found: number;
+  attendance_status_breakdown: NamedCount[];
+  work_order_status_breakdown: NamedCount[];
+};
+
+export type ClientDebt = {
+  client_name: string;
+  client_code: string;
+  pending_value: number;
+  overdue_value: number;
+  invoice_count: number;
+};
+
+export type HubsoftFinancialSummaryResponse = {
+  ok: boolean;
+  message?: string;
+  sample_clients: number;
+  clients_with_debt: number;
+  total_invoices: number;
+  total_receivable: number;
+  total_overdue: number;
+  total_pending: number;
+  total_paid: number;
+  top_debtors: ClientDebt[];
 };
 
 export type ClientAttendanceResponse = {
@@ -217,6 +271,74 @@ export type ConsumerMeta = {
   client_login_enabled?: boolean;
   client_login_request_id?: string;
   client_login_request_name?: string;
+};
+
+export type InvoiceDetailLine = {
+  id?: string;
+  description?: string;
+  value?: string;
+  original_value?: string;
+  status?: string;
+};
+
+export type InvoiceItem = {
+  id?: string;
+  status?: string;
+  paid: boolean;
+  value?: string;
+  value_paid?: string;
+  due_date?: string;
+  created_at?: string;
+  payment_date?: string;
+  document_date?: string;
+  nosso_numero?: string;
+  linha_digitavel?: string;
+  codigo_barras?: string;
+  pix_copia_cola?: string;
+  boleto_link?: string;
+  beneficiary?: string;
+  service_name?: string;
+  details?: InvoiceDetailLine[];
+};
+
+export type FinancialSummary = {
+  total: number;
+  total_value: number;
+  paid_count: number;
+  paid_value: number;
+  overdue_count: number;
+  overdue_value: number;
+  pending_count: number;
+  pending_value: number;
+};
+
+export type ClientFinancialResponse = {
+  ok: boolean;
+  message?: string;
+  invoices: InvoiceItem[];
+  summary: FinancialSummary;
+  raw_status?: string;
+};
+
+export type NamedCount = {
+  name: string;
+  count: number;
+  value?: number;
+};
+
+export type HubsoftDashboardResponse = {
+  ok: boolean;
+  message?: string;
+  sample_clients: number;
+  sample_services: number;
+  status_breakdown: NamedCount[];
+  technology_breakdown: NamedCount[];
+  connected_breakdown: NamedCount[];
+  top_plans: NamedCount[];
+  top_cities: NamedCount[];
+  active_services: number;
+  canceled_services: number;
+  estimated_monthly_revenue: number;
 };
 
 export type ClientLoginResponse = {

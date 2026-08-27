@@ -5,20 +5,51 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 )
 
 // DefaultSweepConcurrency: quantos equipamentos podem ser sondados em paralelo
-// dentro do mesmo tipo de ciclo (ping, telemetria, interfaces, BNG).
+// dentro do mesmo tipo de ciclo (ping, telemetria, interfaces, BNG, OLT).
 // O mesmo device continua serializado via snmpdevicelock / WithDeviceProbeRowLock.
-const DefaultSweepConcurrency = 6
+//
+// Valor revisto de 6 para 12 com base num benchmark de simulação (ver
+// DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md): com poucos equipamentos (~75) o ganho
+// de 6->12 já é perceptível, e com centenas de equipamentos o ganho é substancial
+// sem sobrecarregar equipamentos individuais (cada um continua serializado).
+const DefaultSweepConcurrency = 12
+const maxSweepConcurrency = 64
+
+// dbSweepConcurrency é actualizado a cada tick do worker a partir de
+// monitoring_intervals.sweep_concurrency (ver SetSweepConcurrencyFromConfig em
+// interval_config.go). 0 = usar o default. Isto permite tornar a concorrência
+// configurável (futuramente pela UI de Configurações) sem ter de propagar o valor
+// por todos os pontos que chamam sweepConcurrency().
+var dbSweepConcurrency int32
+
+// SetSweepConcurrencyFromConfig regista a concorrência vinda de monitoring_intervals.
+// Chamado uma vez por tick do worker (loadClampMonitoringIntervals). A variável de
+// ambiente NETQUASAR_SWEEP_CONCURRENCY, quando definida, continua a ter prioridade
+// (útil como válvula de escape operacional sem mexer em configuração persistida).
+func SetSweepConcurrencyFromConfig(v int) {
+	if v < 0 {
+		v = 0
+	}
+	if v > maxSweepConcurrency {
+		v = maxSweepConcurrency
+	}
+	atomic.StoreInt32(&dbSweepConcurrency, int32(v))
+}
 
 func sweepConcurrency() int {
 	if v := stringsTrimEnvInt("NETQUASAR_SWEEP_CONCURRENCY"); v > 0 {
-		if v > 32 {
-			return 32
+		if v > maxSweepConcurrency {
+			return maxSweepConcurrency
 		}
+		return v
+	}
+	if v := int(atomic.LoadInt32(&dbSweepConcurrency)); v > 0 {
 		return v
 	}
 	return DefaultSweepConcurrency

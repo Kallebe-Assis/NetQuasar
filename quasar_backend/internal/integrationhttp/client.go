@@ -13,7 +13,12 @@ import (
 	"time"
 )
 
-const maxResponsePreview = 64 * 1024
+// maxResponsePreview era 64KB — teto pensado para respostas normais de teste/depuração, mas
+// isso cortava (e corrompia o JSON de) respostas legítimas de listagens maiores — ex.: a
+// HubSoft permite limit=100 por página em /cliente e cada cliente já pesa ~1-3KB, então uma
+// página cheia facilmente passava de 64KB e vinha truncada a meio do JSON. 2MB dá folga
+// generosa para isso sem custo prático (memória/log de uma chamada de integração).
+const maxResponsePreview = 2 * 1024 * 1024
 
 var pathParamRe = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 

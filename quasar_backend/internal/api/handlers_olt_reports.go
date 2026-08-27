@@ -10,26 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
 )
-
-func recordOLTOnuSample(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, summaryJSON, ponsJSON []byte) {
-	if pool == nil {
-		return
-	}
-	c := oltparse.SnapshotComputed(summaryJSON, ponsJSON)
-	total := intValMap(c, "onu_total_sum")
-	online := intValMap(c, "onu_online_sum")
-	offline := intValMap(c, "onu_offline_sum")
-	if total == 0 && online == 0 && offline == 0 {
-		return
-	}
-	_, _ = pool.Exec(ctx, `
-		INSERT INTO olt_onu_samples (device_id, onu_total, onu_online, onu_offline)
-		VALUES ($1, $2, $3, $4)
-	`, deviceID, total, online, offline)
-}
 
 func intValMap(m map[string]any, key string) int {
 	if m == nil {

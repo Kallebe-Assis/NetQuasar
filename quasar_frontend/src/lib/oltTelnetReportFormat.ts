@@ -268,6 +268,15 @@ function extractPowerFields(text: string, labelRx = "RX", labelTx = "TX"): OltTe
   return fields;
 }
 
+/** Remove o histórico "Authpass Time / OfflineTime / Cause" (e tudo depois) — sem isto, o
+ * parser de números abaixo lia o "-MM" de datas "AAAA-MM-DD" desse histórico como se fosse
+ * uma leitura de potência negativa (ex.: "2026-07-29" virava "-07 dBm"). Mesmo ponto de
+ * corte que extractKeyValueFields já usa para o mesmo motivo. */
+function cutBeforeAuthpassHistory(text: string): string {
+  const m = text.match(/Authpass\s+Time/i);
+  return m && m.index !== undefined ? text.slice(0, m.index) : text;
+}
+
 /** VSOL: show pon onu N rx-power / tx-power — cabeçalho Onu/ONU_Rx e valor após ---. */
 function extractVsolPonOnuPower(text: string, command: string): OltTelnetReportField[] {
   const blob = `${command}\n${text}`.toLowerCase();
@@ -280,6 +289,7 @@ function extractVsolPonOnuPower(text: string, command: string): OltTelnetReportF
     label = "TX";
   }
 
+  text = cutBeforeAuthpassHistory(text);
   const parts = text.split(/\n\s*-{3,}\s*\n/);
   const body = parts.length >= 2 ? parts.slice(1).join("\n") : text;
   const nums = body.match(/-?\d+(?:\.\d+)?/g) ?? [];
@@ -353,6 +363,22 @@ function extractVsolOnuState(text: string): OltTelnetReportField[] {
   return fields;
 }
 
+/** extractVsolPonOnuPower foi feito para o formato de tabela "Onu / ONU_Rx" da VSOL — usar
+ * "show pon onu" sozinho para o disparar (sem rx-power/tx-power) apanhava por engano
+ * comandos ZTE como "show pon onu information"/"show gpon onu detail-info", que nada têm a
+ * ver com potência óptica: o parser de números lia o primeiro decimal/negativo do texto
+ * solto (podendo até confundir "-MM" de uma data com dBm negativo) e produzia uma leitura
+ * fantasma. Só entra quando o comando é mesmo sobre potência (sintaxe real da VSOL).
+ *
+ * Deliberadamente NÃO inclui "onu-rx"/"onu-tx" (sintaxe ZTE, ex. "show pon power onu-rx
+ * gpon_onu-1/1/6:78") — esses comandos já são tratados por extractPowerFields (regex
+ * ancorada no "(dbm)" literal, imune a falsos positivos) mais abaixo; incluí-los aqui faria
+ * este parser mais frágil interceptá-los primeiro e ler, por exemplo, o "-1" que aparece
+ * dentro do próprio identificador "gpon_onu-1/1/6:78" como se fosse a potência. */
+function commandLooksPowerRelated(cmd: string): boolean {
+  return /rx-power|tx-power|rx_power|tx_power|onu_rx|onu_tx/i.test(cmd);
+}
+
 function extractFieldsForCommand(command: string, cleaned: string): OltTelnetReportField[] {
   const cmd = command.toLowerCase();
   if (/show\s+onu\s+info/.test(cmd)) {
@@ -363,7 +389,7 @@ function extractFieldsForCommand(command: string, cleaned: string): OltTelnetRep
     const vsol = extractVsolOnuState(cleaned);
     if (vsol.length > 0) return vsol;
   }
-  if (/rx-power|tx-power|onu_rx|onu_tx|show\s+pon\s+onu/.test(cmd)) {
+  if (commandLooksPowerRelated(cmd)) {
     const vsol = extractVsolPonOnuPower(cleaned, command);
     if (vsol.length > 0) return vsol;
   }
@@ -375,8 +401,9 @@ function extractFieldsForCommand(command: string, cleaned: string): OltTelnetRep
   for (const pf of power) {
     if (!fields.some((f) => fieldKey(f.label) === fieldKey(pf.label))) fields.push(pf);
   }
-  // Fallback: tabela VSOL rx/tx se KV não trouxe potência
-  if (!fields.some((f) => f.label === "RX" || f.label === "TX")) {
+  // Fallback: tabela VSOL rx/tx se KV não trouxe potência — só quando o comando é
+  // realmente sobre potência (ver commandLooksPowerRelated).
+  if (!fields.some((f) => f.label === "RX" || f.label === "TX") && commandLooksPowerRelated(cmd)) {
     for (const pf of extractVsolPonOnuPower(cleaned, command)) {
       if (!fields.some((f) => fieldKey(f.label) === fieldKey(pf.label))) fields.push(pf);
     }

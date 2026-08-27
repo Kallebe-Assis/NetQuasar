@@ -20,7 +20,7 @@ func isUniqueViolation(err error) bool {
 
 func (s *Server) listMonthlyRecords(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, locality_id, year_month, client_count, created_at FROM commercial_monthly_records ORDER BY year_month DESC LIMIT 500
+		SELECT id, locality_id, year_month, client_count, created_at FROM commercial_monthly_records ORDER BY year_month DESC LIMIT 2000
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

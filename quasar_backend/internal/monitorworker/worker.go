@@ -98,6 +98,8 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 
 	TryStartParallelTelemetryCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+	TryStartParallelOltCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+	TryRunHistoryRetention(runCtx, pool, log, cfg)
 
 	var lastPipeline *time.Time
 	if err := pool.QueryRow(ctx, `SELECT last_pipeline_cycle_at FROM monitoring_runtime WHERE id=1`).Scan(&lastPipeline); err != nil {
@@ -121,10 +123,11 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		defer UnlockMonitoringPipeline()
 		l := log.With().Str("component", "monitor_worker").Str("cycle", "pipeline").Logger()
 		if err := RunConfiguredPipeline(pipelineCtx, pool, &l, mode, SweepOpts{
-			Source:                  "worker",
-			SkipPingInPipeline:      skipPing,
-			SkipTelemetryInPipeline: true,
-			SkipBngInPipeline:       true,
+			Source:                    "worker",
+			SkipPingInPipeline:        skipPing,
+			SkipTelemetryInPipeline:   true,
+			SkipBngInPipeline:         true,
+			SkipOltBaselineInPipeline: true,
 		}); err != nil {
 			l.Warn().Err(err).Msg("pipeline de monitoramento")
 		}

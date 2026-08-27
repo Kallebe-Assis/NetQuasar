@@ -45,6 +45,10 @@ func RunConfiguredPipeline(ctx context.Context, pool *pgxpool.Pool, log *zerolog
 		if opts.SkipBngInPipeline && step.Kind == StepKindBng {
 			continue
 		}
+		if opts.SkipOltBaselineInPipeline && step.Kind == StepKindOltOnu &&
+			NormalizeOltOnuMode(step.Options.OltOnuMode) != "full" {
+			continue
+		}
 		if mode == ModeSimplePing && step.Kind != StepKindPing {
 			continue
 		}

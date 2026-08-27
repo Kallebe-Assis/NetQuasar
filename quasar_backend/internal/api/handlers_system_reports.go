@@ -23,6 +23,7 @@ var systemReportCatalog = []map[string]string{
 	{"id": "active-alerts", "title": "Alertas ativos", "description": "Lista detalhada de todos os alertas em aberto.", "group": "Alertas e monitoramento"},
 	{"id": "alerts-by-category", "title": "Alertas por categoria", "description": "Alertas ativos agrupados por categoria operacional.", "group": "Alertas e monitoramento"},
 	{"id": "attention-devices", "title": "Equipamentos precisando de atenção", "description": "Lacunas de cadastro e equipamentos com alertas abertos.", "group": "Alertas e monitoramento"},
+	{"id": "device-alert-analysis", "title": "Análise de equipamentos por alertas", "description": "Ranking dos equipamentos com mais problemas (temperatura, latência, interface, etc.) num período — completa ou filtrada por categoria.", "group": "Alertas e monitoramento"},
 	{"id": "pon-down", "title": "PONs inactivas", "description": "Resumo e detalhe de alertas PON DOWN.", "group": "Alertas e monitoramento"},
 	{"id": "monitoring-health", "title": "Saúde do monitoramento", "description": "Resumo e equipamentos offline / SNMP falho.", "group": "Alertas e monitoramento"},
 	{"id": "connections", "title": "Conexões de clientes", "description": "Quantidade e detalhes das conexões cadastradas.", "group": "Acesso e OLT"},
@@ -153,6 +154,8 @@ func (s *Server) buildSystemReport(ctx context.Context, id string, opts systemRe
 		return s.reportIntegrations(ctx, pool, base)
 	case "attention-devices":
 		return s.reportAttentionDevices(ctx, pool, base)
+	case "device-alert-analysis":
+		return s.reportDeviceAlertAnalysis(ctx, pool, base, opts.DeviceAlertAnalysis)
 	case "alerts-by-category":
 		return s.reportAlertsByCategory(ctx, pool, base)
 	case "onu-per-pon":
@@ -548,15 +551,15 @@ func (s *Server) reportConnectionsFromBngCache(ctx context.Context, pool *pgxpoo
 		base["columns"] = cols
 		base["rows"] = dataRows
 		base["summary"] = map[string]any{
-			"BNG":              bngName,
-			"Snapshot":         snapAt,
-			"Total sessões":    len(sessions),
-			"Por tipo IP":      byIPType,
-			"Por domínio AAA":  byDomain,
-			"Por VLAN":         byVLAN,
-			"IPv4":             ipv4,
-			"IPv6":             ipv6,
-			"Dual-stack":       dual,
+			"BNG":             bngName,
+			"Snapshot":        snapAt,
+			"Total sessões":   len(sessions),
+			"Por tipo IP":     byIPType,
+			"Por domínio AAA": byDomain,
+			"Por VLAN":        byVLAN,
+			"IPv4":            ipv4,
+			"IPv6":            ipv6,
+			"Dual-stack":      dual,
 		}
 		return base, nil
 	}
@@ -603,9 +606,9 @@ type equipmentByPopReportOptions struct {
 }
 
 type connectionsReportOptions struct {
-	Mode         string `json:"mode"`          // summary | detailed
-	Source       string `json:"source"`        // connections | bng_cache
-	BngDeviceID  string `json:"bng_device_id"` // obrigatório se source=bng_cache
+	Mode        string `json:"mode"`          // summary | detailed
+	Source      string `json:"source"`        // connections | bng_cache
+	BngDeviceID string `json:"bng_device_id"` // obrigatório se source=bng_cache
 }
 
 type oltOverviewReportOptions struct {
@@ -618,11 +621,18 @@ type periodModeReportOptions struct {
 	To   string `json:"to"`
 }
 
+type deviceAlertAnalysisReportOptions struct {
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Category string `json:"category"` // vazio = todas ("completa"); senão filtra por alertCategoryLabelGo ("filtrada")
+}
+
 type systemReportOptions struct {
-	EquipmentByPop equipmentByPopReportOptions
-	Connections    connectionsReportOptions
-	OltOverview    oltOverviewReportOptions
-	PeriodMode     periodModeReportOptions
+	EquipmentByPop      equipmentByPopReportOptions
+	Connections         connectionsReportOptions
+	OltOverview         oltOverviewReportOptions
+	PeriodMode          periodModeReportOptions
+	DeviceAlertAnalysis deviceAlertAnalysisReportOptions
 }
 
 func reportUsesPeriodMode(id string) bool {
@@ -658,6 +668,10 @@ func parseSystemReportOptions(r *http.Request, reportID string) systemReportOpti
 		if v := strings.TrimSpace(q.Get("period")); v != "" {
 			opts.OltOverview.Period = v
 		}
+	case "device-alert-analysis":
+		opts.DeviceAlertAnalysis.From = strings.TrimSpace(q.Get("from"))
+		opts.DeviceAlertAnalysis.To = strings.TrimSpace(q.Get("to"))
+		opts.DeviceAlertAnalysis.Category = strings.TrimSpace(q.Get("category"))
 	}
 	if reportUsesPeriodMode(reportID) {
 		if v := strings.TrimSpace(q.Get("mode")); v != "" {
@@ -1187,9 +1201,9 @@ func (s *Server) reportIntegrations(ctx context.Context, pool *pgxpool.Pool, bas
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
-		"Total":      len(dataRows),
-		"Activas":    enabled,
-		"Inactivas":  disabled,
+		"Total":     len(dataRows),
+		"Activas":   enabled,
+		"Inactivas": disabled,
 	}
 	return base, nil
 }
@@ -1292,9 +1306,9 @@ func (s *Server) reportAttentionDevices(ctx context.Context, pool *pgxpool.Pool,
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
-		"Com lacunas":        gapCount,
-		"Com alertas":        alertDevCount,
-		"Total listados":     len(dataRows),
+		"Com lacunas":    gapCount,
+		"Com alertas":    alertDevCount,
+		"Total listados": len(dataRows),
 	}
 	return base, nil
 }
@@ -1384,10 +1398,10 @@ func (s *Server) reportOnuPerPon(ctx context.Context, pool *pgxpool.Pool, base m
 	base["columns"] = cols
 	base["rows"] = dataRows
 	base["summary"] = map[string]any{
-		"Portas PON":   ponCount,
-		"ONUs total":   totalOnu,
-		"Online":       totalOn,
-		"Offline":      totalOff,
+		"Portas PON": ponCount,
+		"ONUs total": totalOnu,
+		"Online":     totalOn,
+		"Offline":    totalOff,
 	}
 	return base, nil
 }
@@ -1466,7 +1480,7 @@ func (s *Server) reportBngSubscribers(ctx context.Context, pool *pgxpool.Pool, b
 		JOIN devices d ON d.id = b.device_id AND coalesce(d.bng_enabled, false) = true
 		WHERE b.collected_at >= $1
 		ORDER BY b.collected_at ASC
-		LIMIT 500
+		LIMIT 2000
 	`, since)
 	if err == nil {
 		defer sampleRows.Close()

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,11 +19,11 @@ import (
 
 // OltCollectSweepResult sumário de um ciclo completo de coleta ONU/PON.
 type OltCollectSweepResult struct {
-	TotalInDB   int
-	Eligible    int
-	Attempted   int
-	OK          int
-	Failed      int
+	TotalInDB    int
+	Eligible     int
+	Attempted    int
+	OK           int
+	Failed       int
 	Skipped      int
 	PrecheckSkip int
 	Outcomes     []map[string]any
@@ -86,10 +88,10 @@ func persistOltCollectStatus(ctx context.Context, pool *pgxpool.Pool, deviceID u
 		source = "worker"
 	}
 	patch := map[string]any{
-		"last_collect_at":     time.Now().UTC().Format(time.RFC3339Nano),
-		"last_collect_ok":     out.OK,
-		"last_collect_source": source,
-		"olt_collection_mode": strings.TrimSpace(out.Mode),
+		"last_collect_at":      time.Now().UTC().Format(time.RFC3339Nano),
+		"last_collect_ok":      out.OK,
+		"last_collect_source":  source,
+		"olt_collection_mode":  strings.TrimSpace(out.Mode),
 		"last_collect_skipped": out.Skipped,
 	}
 	if r := strings.TrimSpace(out.Reason); r != "" {
@@ -111,7 +113,8 @@ func persistOltCollectStatus(ctx context.Context, pool *pgxpool.Pool, deviceID u
 	`, deviceID, sb)
 }
 
-// RunOltCollectAll percorre TODAS as OLTs resolvidas, uma a uma, com validação prévia e registo por equipamento.
+// RunOltCollectAll percorre TODAS as OLTs resolvidas (em paralelo, até sweepConcurrency()),
+// com validação prévia e registo por equipamento.
 func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, mode string, opts SweepOpts) (OltCollectSweepResult, error) {
 	var result OltCollectSweepResult
 	if mode != ModeFull {
@@ -179,16 +182,29 @@ func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logg
 	}
 	partial := oltcollect.IsPartialOnuCollectMode(onuCollectMode)
 
-	for idx, it := range queue {
+	// Coleta das OLTs em paralelo (mesmo padrão de ping/telemetria — forEachLimited com
+	// sweepConcurrency()), em vez do loop sequencial anterior (uma OLT de cada vez).
+	// Cada equipamento continua serializado individualmente via snmpdevicelock, então isto
+	// só paraleliza ENTRE OLTs diferentes, nunca duas sondas à mesma OLT ao mesmo tempo.
+	// Este era o principal gargalo para detectar rapidamente uma queda de ONUs: com N OLTs
+	// e coleta sequencial, o tempo total crescia linearmente com N; em paralelo, cresce com
+	// N/concorrência. Ver DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md (achado ONU/PON).
+	var resMu sync.Mutex
+	var started int32
+	forEachLimited(ctx, len(queue), sweepConcurrency(), func(idx int) {
+		it := queue[idx]
 		row := it.row
 		comm := resolveSNMPCommunity(row, defCommunity)
 		label := monitoringDeviceLabel(row.description, row.ip)
-		setActivity(ctx, pool, fmt.Sprintf("Coleta ONUs OLT [%d/%d] · %s", idx+1, result.Eligible, label))
+		n := atomic.AddInt32(&started, 1)
+		setActivity(ctx, pool, fmt.Sprintf("Coleta ONUs OLT [%d/%d] · %s", n, result.Eligible, label))
 
 		unlock := snmpdevicelock.Acquire(row.id)
 		func() {
 			defer unlock()
+			resMu.Lock()
 			result.Attempted++
+			resMu.Unlock()
 
 			var out OltCollectOutcome
 			if OltUsesIfDerivedPonSnapshots(row.category, row.brand, row.model) {
@@ -214,33 +230,13 @@ func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logg
 			}
 
 			persistOltCollectStatus(ctx, pool, row.id, src, out)
+			resMu.Lock()
 			if out.OK {
 				result.OK++
-				NudgeMonitoringRuntimeRefresh(ctx, pool)
-				if log != nil {
-					log.Info().
-						Str("device_id", row.id.String()).
-						Str("host", strings.TrimSpace(row.ip)).
-						Int("pon_count", out.PonCount).
-						Int("progress", idx+1).
-						Int("total", result.Eligible).
-						Msg("OLT colectada com sucesso")
-				}
+			} else if out.Skipped {
+				result.Skipped++
 			} else {
-				if out.Skipped {
-					result.Skipped++
-				} else {
-					result.Failed++
-				}
-				if log != nil {
-					log.Warn().
-						Str("device_id", row.id.String()).
-						Str("host", strings.TrimSpace(row.ip)).
-						Str("brand", strings.TrimSpace(row.brand)).
-						Bool("skipped", out.Skipped).
-						Str("reason", out.Reason).
-						Msg("coleta ONU/PON OLT falhou")
-				}
+				result.Failed++
 			}
 			if len(result.Outcomes) < 100 {
 				result.Outcomes = append(result.Outcomes, map[string]any{
@@ -250,8 +246,29 @@ func RunOltCollectAll(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logg
 					"pon_count": out.PonCount, "mode": out.Mode, "phase": "collect",
 				})
 			}
+			resMu.Unlock()
+			if out.OK {
+				NudgeMonitoringRuntimeRefresh(ctx, pool)
+				if log != nil {
+					log.Info().
+						Str("device_id", row.id.String()).
+						Str("host", strings.TrimSpace(row.ip)).
+						Int("pon_count", out.PonCount).
+						Int32("progress", n).
+						Int("total", result.Eligible).
+						Msg("OLT colectada com sucesso")
+				}
+			} else if log != nil {
+				log.Warn().
+					Str("device_id", row.id.String()).
+					Str("host", strings.TrimSpace(row.ip)).
+					Str("brand", strings.TrimSpace(row.brand)).
+					Bool("skipped", out.Skipped).
+					Str("reason", out.Reason).
+					Msg("coleta ONU/PON OLT falhou")
+			}
 		}()
-	}
+	})
 
 	if log != nil {
 		log.Info().

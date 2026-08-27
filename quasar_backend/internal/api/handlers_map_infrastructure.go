@@ -151,11 +151,21 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	centerLat := (minLat + maxLat) / 2
 	centerLng := (minLng + maxLng) / 2
 
-	orderNearCenter := func(n *int, args *[]any) string {
-		if !hasBBox {
-			return ` ORDER BY display_number`
+	// withDisplayNumber deve ser false para tabelas sem essa coluna (ex.: pops) — caso contrário
+	// o ORDER BY falha com "column display_number does not exist" e derruba a request inteira
+	// (kinds combinados numa só chamada), escondendo CTOs/cabos/foguetes junto com os pops.
+	orderNearCenter := func(n *int, args *[]any, withDisplayNumber bool) string {
+		tiebreak := ""
+		if withDisplayNumber {
+			tiebreak = ", display_number"
 		}
-		clause := fmt.Sprintf(` ORDER BY ((latitude - $%d)^2 + (longitude - $%d)^2) ASC, display_number`, *n, *n+1)
+		if !hasBBox {
+			if withDisplayNumber {
+				return ` ORDER BY display_number`
+			}
+			return ` ORDER BY id`
+		}
+		clause := fmt.Sprintf(` ORDER BY ((latitude - $%d)^2 + (longitude - $%d)^2) ASC%s`, *n, *n+1, tiebreak)
 		*args = append(*args, centerLat, centerLng)
 		*n += 2
 		return clause
@@ -179,7 +189,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		q += infraMapProjectSQL(projectID, &n, &args)
 		q += infraMapLocalitySQL(table, localityID, &n, &args)
 		q += infraMapHideInactiveSQL(table)
-		q += orderNearCenter(&n, &args)
+		q += orderNearCenter(&n, &args, true)
 		q += fmt.Sprintf(` LIMIT $%d`, n)
 		args = append(args, capN)
 
@@ -241,7 +251,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			q += infraMapProjectSQL(projectID, &n, &args)
 			q += infraMapLocalitySQL("network_ctos", localityID, &n, &args)
 			q += infraMapHideInactiveSQL("network_ctos")
-			q += orderNearCenter(&n, &args)
+			q += orderNearCenter(&n, &args, true)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
 			rows, err := s.DB().Query(ctx, q, args...)
@@ -308,7 +318,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			q += infraMapProjectSQL(projectID, &n, &args)
 			q += infraMapLocalitySQL("network_cables", localityID, &n, &args)
 			q += infraMapHideInactiveSQL("network_cables")
-			q += orderNearCenter(&n, &args)
+			q += orderNearCenter(&n, &args, true)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
 			rows, err := s.DB().Query(ctx, q, args...)
@@ -423,7 +433,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 			n := 1
 			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
 			q += infraMapLocalitySQL("pops", localityID, &n, &args)
-			q += orderNearCenter(&n, &args)
+			q += orderNearCenter(&n, &args, false)
 			q += fmt.Sprintf(` LIMIT $%d`, n)
 			args = append(args, capN)
 			rows, err := s.DB().Query(ctx, q, args...)

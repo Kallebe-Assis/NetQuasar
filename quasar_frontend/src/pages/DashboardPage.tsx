@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DashboardPageLoader } from "../components/DashboardPageLoader";
 import { DeferredMount } from "../components/DeferredMount";
+import { GlobalSearchBar } from "../components/GlobalSearchBar";
 import { InfoHint } from "../components/InfoHint";
 import {
   Bar,
@@ -315,8 +316,8 @@ export function DashboardPage() {
         onCancel={() => !refreshing && setRefreshConfirmOpen(false)}
         onConfirm={() => void runFullRefresh()}
       />
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-        <h1 style={{ margin: 0 }}>
+      <div className="row dashboard-page__head" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <h1 style={{ margin: 0, flex: "0 0 auto" }}>
         Dashboard analítico
         <InfoHint label="Sobre o dashboard analítico">
           <p>
@@ -325,9 +326,13 @@ export function DashboardPage() {
           </p>
         </InfoHint>
         </h1>
+        <div style={{ flex: "1 1 320px", display: "flex", justifyContent: "center", minWidth: 0 }}>
+          <GlobalSearchBar />
+        </div>
         <button
           type="button"
           className="btn"
+          style={{ flex: "0 0 auto" }}
           disabled={refreshing}
           onClick={() => setRefreshConfirmOpen(true)}
           title="Recarregar todos os dados do dashboard"

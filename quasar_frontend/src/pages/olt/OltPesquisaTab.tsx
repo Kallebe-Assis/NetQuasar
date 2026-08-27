@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, Server } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
@@ -10,6 +10,7 @@ import { ApiError, apiFetch } from "../../lib/api";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
+import { OltOnuClientLinkModal } from "./OltOnuClientLinkModal";
 import { OltOnuTelnetReportModal, type OltOnuReportPonMeta } from "./OltOnuTelnetReportModal";
 import {
   buildTelnetReportSections,
@@ -39,6 +40,7 @@ export type OltOnuSearchResult = {
   voltage?: string;
   if_index?: number;
   if_name?: string;
+  client_name?: string | null;
   snapshot_at?: string;
   telnet_only?: boolean;
   telnet_report_at?: string;
@@ -173,6 +175,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [rowOverrides, setRowOverrides] = useState<Record<string, Partial<OltOnuSearchResult>>>({});
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState(1);
+  const [clientLinkOpen, setClientLinkOpen] = useState(false);
 
   const selectedOltLabel = useMemo(() => {
     if (!selectedOltId) return "Todas as OLTs";
@@ -442,7 +445,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           <input
             className="input"
             type="search"
-            placeholder="Número de série (parcial) ou modelo…"
+            placeholder="Número de série (parcial), modelo ou cliente…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             autoComplete="off"
@@ -571,6 +574,20 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           <Filter size={16} />
         </button>
 
+        {canMutate ? (
+          <ActionMenu
+            title="Opções"
+            icon={<Menu size={18} />}
+            items={[
+              {
+                id: "link-client",
+                label: "Vincular ONU ao Cliente",
+                onClick: () => setClientLinkOpen(true),
+              },
+            ]}
+          />
+        ) : null}
+
         <div className="conn-toolbar__spacer" aria-hidden />
         <PageCountPill label="ONUs encontradas" count={enrichedResults.length} />
       </div>
@@ -603,6 +620,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               <th>PON</th>
               <th>ONU</th>
               <th>Série</th>
+              <th>Cliente</th>
               <th>Modelo</th>
               <th>Status</th>
               <th>RX</th>
@@ -619,6 +637,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                 <td className="mono">{r.pon ?? EM_DASH}</td>
                 <td className="mono">{r.onu ?? EM_DASH}</td>
                 <td className="mono">{r.serial ?? EM_DASH}</td>
+                <td>{r.client_name ?? EM_DASH}</td>
                 <td>{r.model ?? EM_DASH}</td>
                 <td>
                   {r.online === true ? (
@@ -832,6 +851,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           onClose={() => setReportOpen(false)}
         />
       ) : null}
+
+      <OltOnuClientLinkModal
+        open={clientLinkOpen}
+        onClose={() => setClientLinkOpen(false)}
+        onImported={() => searchMut.mutate(payload)}
+      />
 
       <ConfirmModal
         open={!!deauthTarget}

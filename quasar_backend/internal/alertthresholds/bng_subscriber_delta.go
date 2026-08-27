@@ -99,7 +99,7 @@ func EvaluateBngSubscriberDropAlerts(
 	for _, spec := range bngDropMetricSpecs {
 		th, metricLabel, enabled := LoadGlobalGteMetricForDevice(ctx, pool, spec.metricID, "bng")
 		if !enabled {
-			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey)
+			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey, spec.title, cur.fieldVal(spec.field))
 			continue
 		}
 		if strings.TrimSpace(metricLabel) == "" {
@@ -109,14 +109,14 @@ func EvaluateBngSubscriberDropAlerts(
 		prevV := prev.fieldVal(spec.field)
 		curV := cur.fieldVal(spec.field)
 		if prevV == nil || curV == nil || *curV >= *prevV {
-			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey)
+			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey, metricLabel, curV)
 			continue
 		}
 
 		delta := float64(*prevV - *curV)
 		sev := severityGteMetric(delta, th)
 		if sev == "ok" {
-			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey)
+			closeBngSubscriberDropAlert(ctx, pool, log, deviceID, spec.metaKey, metricLabel, curV)
 			continue
 		}
 		if alertignore.IsMuted(ctx, pool, deviceID, alertTypeBngSubscriberDrop, spec.metaKey) {
@@ -192,12 +192,24 @@ func openOrUpdateBngSubscriberDropAlert(
 	return res.Created, res.ID, err
 }
 
-func closeBngSubscriberDropAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, key string) {
+// closeBngSubscriberDropAlert fecha o alerta de queda e grava o valor atual (contagem já
+// normalizada) em resolved_value — é isso que a mensagem de Telegram de resolução mostra
+// (ver alertnotify.resolvedValueFromMeta); sem isto a mensagem "normalizada" não dizia
+// quantos PPPoE (ou IPv4/IPv6/total/dual-stack, conforme a métrica) havia de volta.
+func closeBngSubscriberDropAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, key, metricLabel string, currentValue *int) {
+	resolved := map[string]any{
+		"resolved": "normalized", "source": "bng_subscriber_delta", "key": key,
+	}
+	if currentValue != nil {
+		if strings.TrimSpace(metricLabel) != "" {
+			resolved["resolved_value"] = fmt.Sprintf("%d (%s)", *currentValue, metricLabel)
+		} else {
+			resolved["resolved_value"] = fmt.Sprintf("%d", *currentValue)
+		}
+	}
 	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
 		DeviceID: deviceID, AlertType: alertTypeBngSubscriberDrop,
-		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
-		Resolved: map[string]any{
-			"resolved": "normalized", "source": "bng_subscriber_delta", "key": key,
-		},
+		Match:    alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
+		Resolved: resolved,
 	})
 }

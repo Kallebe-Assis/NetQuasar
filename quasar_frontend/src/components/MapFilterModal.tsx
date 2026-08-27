@@ -135,7 +135,7 @@ export function MapFilterModal(props: Props) {
             </select>
             {props.projectId === MAP_PROJECT_NONE ? (
               <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                Infraestrutura (CTOs, cabos, etc.) não é carregada. Escolha um projeto ou «Todos» para ver no mapa.
+                Mostra a infraestrutura das camadas activas abaixo, sem restringir a nenhum projeto, na área visível do mapa.
               </span>
             ) : props.projectId === MAP_PROJECT_ALL ? (
               <span style={{ fontSize: 11, color: "var(--muted)" }}>

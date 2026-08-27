@@ -36,6 +36,11 @@ type SweepOpts struct {
 	SkipTelemetryInPipeline bool
 	// SkipBngInPipeline quando true, passos «bng» são ignorados (correm via TryStartParallelBngCycle).
 	SkipBngInPipeline bool
+	// SkipOltBaselineInPipeline quando true, os tiers OLT "leves" (baseline/pon_status/onu_counts/
+	// status_only/status_rx) são ignorados no pipeline sequencial — correm via
+	// TryStartParallelOltCycle, numa cadência própria e mais rápida, decoupled de interfaces/BNG.
+	// O tier "full" (com telnet/potência óptica completa) continua no pipeline sequencial.
+	SkipOltBaselineInPipeline bool
 }
 
 // ErrSweepBusy indica que já existe uma execução do mesmo tipo em curso (evita SNMP/ICMP sobrepostos).

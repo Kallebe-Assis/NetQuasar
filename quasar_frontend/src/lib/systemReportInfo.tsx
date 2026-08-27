@@ -47,6 +47,14 @@ export const SYSTEM_REPORT_INFO: Record<SystemReportId, SystemReportInfo> = {
     formats: "Lista com motivo; CSV/PDF/Telegram.",
     columns: "Equipamento, Categoria, IP, Motivo, Detalhe",
   },
+  "device-alert-analysis": {
+    delivers:
+      "Ranking dos equipamentos com mais alertas (temperatura, latência, interface, PON, etc.) num período — conta pela data de abertura do alerta, não só os que continuam activos.",
+    formats: "Pré-visualização, CSV, PDF e Telegram.",
+    columns: "Equipamento, Categoria, Marca/Modelo, Total de alertas, Críticos, Maior ocorrência, Detalhe por categoria",
+    notes:
+      "Escolha um período (presets de 3 a 365 dias ou datas personalizadas) e, opcionalmente, filtre por uma categoria de alerta específica.",
+  },
   "alerts-by-category": {
     delivers: "Contagem de alertas activos agrupados por categoria operacional, tipo e severidade.",
     formats: "Tabela agregada; CSV/PDF/Telegram.",

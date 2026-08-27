@@ -137,6 +137,20 @@ func FirstEnabledTelemetryStep(steps []PipelineStep) *PipelineStep {
 	return nil
 }
 
+// FirstEnabledOltLightStep devolve o primeiro passo OLT activo cujo modo NÃO seja "full"
+// (baseline/pon_status/onu_counts/status_only/status_rx) — usado pelo ciclo paralelo
+// dedicado (TryStartParallelOltCycle), que existe para tornar a detecção de queda de
+// ONUs mais ágil sem esperar pelo pipeline sequencial de interfaces/OLT completo.
+func FirstEnabledOltLightStep(steps []PipelineStep) *PipelineStep {
+	for i := range steps {
+		if steps[i].Enabled && steps[i].Kind == StepKindOltOnu &&
+			NormalizeOltOnuMode(steps[i].Options.OltOnuMode) != "full" {
+			return &steps[i]
+		}
+	}
+	return nil
+}
+
 func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep, error) {
 	if pool == nil {
 		return DefaultPipelineSteps(), nil

@@ -95,3 +95,16 @@ func UnlockBngCycle() {
 
 // ErrBngCycleBusy indica que já corre outro ciclo BNG.
 var ErrBngCycleBusy = errors.New("monitor: ciclo BNG ocupado")
+
+// retentionCycleMu evita duas purgas de histórico simultâneas (TryRunHistoryRetention).
+var retentionCycleMu sync.Mutex
+
+// TryLockRetentionCycle tenta adquirir a purga de histórico sem bloquear.
+func TryLockRetentionCycle() bool {
+	return retentionCycleMu.TryLock()
+}
+
+// UnlockRetentionCycle liberta a purga de histórico.
+func UnlockRetentionCycle() {
+	retentionCycleMu.Unlock()
+}

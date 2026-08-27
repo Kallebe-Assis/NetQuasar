@@ -13,6 +13,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltsamples"
 )
 
 // OltRefreshCoreOpts espelha o refresh manual (POST /devices/{id}/refresh) sem parâmetros extra na query.
@@ -183,7 +184,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		out.Reason = err.Error()
 		return out, err
 	}
-	recordOLTOnuSample(ctx, pool, id, sb, pb)
+	oltsamples.RecordSample(ctx, pool, id, sb, pb)
 
 	out.PonCount = len(curMaps)
 	out.OK = out.PonCount > 0

@@ -18,11 +18,11 @@ var (
 	telnetZtePonUncfgRE = regexp.MustCompile(`^(?i)(gpon_olt-\d+/\d+/(\d+))\s+(\S+)\s+([A-Za-z0-9]{6,})\s+(\S+)\s*$`)
 	// VSOL: onu search SERIAL → "pon 3 onu 29 sn ZTEGDA1CCA51 Online"
 	telnetVsolOnuSearchRE = regexp.MustCompile(`(?i)^pon\s+(\d+)\s+onu\s+(\d+)\s+sn\s+(\S+)(?:\s+(\S+))?`)
-	telnetVsolStateRE   = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
-	telnetOnuNumberRE   = regexp.MustCompile(`ONU Number:\s*(\S+)`)
-	telnetFloatRE       = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
-	telnetParenStripRE  = regexp.MustCompile(`\([^)]*\)`)
-	telnetParenSpaceRE  = regexp.MustCompile(`\s*\([^)]*\)\s*`)
+	telnetVsolStateRE     = regexp.MustCompile(`^(\d+\/\d+\/\d+:\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)(?:\s+ONU Number:|$)`)
+	telnetOnuNumberRE     = regexp.MustCompile(`ONU Number:\s*(\S+)`)
+	telnetFloatRE         = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+	telnetParenStripRE    = regexp.MustCompile(`\([^)]*\)`)
+	telnetParenSpaceRE    = regexp.MustCompile(`\s*\([^)]*\)\s*`)
 )
 
 var telnetLabelPT = map[string]string{
@@ -41,19 +41,19 @@ var telnetLabelPT = map[string]string{
 	"rx": "RX", "tx": "TX",
 	"rx optical level": "RX", "tx optical level": "TX",
 	"rx power": "RX", "tx power": "TX",
-	"authentication mode": "Autenticação",
+	"authentication mode":   "Autenticação",
 	"configured speed mode": "Velocidade config.",
-	"current speed mode": "Velocidade actual",
-	"config state": "Config", "onu status": "Status ONU", "fec": "FEC",
+	"current speed mode":    "Velocidade actual",
+	"config state":          "Config", "onu status": "Status ONU", "fec": "FEC",
 	"onu number": "ONU Number", "temperature": "Temperatura", "temp": "Temperatura",
 	"voltage": "Voltagem", "power feed voltage": "Voltagem",
-	"laser bias current": "Bias",
-	"onu pon interface": "Interface PON",
+	"laser bias current":         "Bias",
+	"onu pon interface":          "Interface PON",
 	"lower rx optical threshold": "RX mín.", "upper rx optical threshold": "RX máx.",
 	"lower tx optical threshold": "TX mín.", "upper tx optical threshold": "TX máx.",
-	"onu response time": "Tempo resposta",
+	"onu response time":      "Tempo resposta",
 	"piggyback dba rpt mode": "Piggyback DBA",
-	"alarm": "Alarm",
+	"alarm":                  "Alarm",
 }
 
 func normalizeTelnetLabel(raw string) string {
@@ -219,6 +219,14 @@ func extractVsolPonOnuPowerFields(cmd, text string) map[string]string {
 		label = "TX"
 	}
 
+	// Comandos ZTE tipo "detail-info"/"information" caem aqui como fallback (quando o
+	// comando específico de potência não é reconhecido) e trazem, depois da tabela
+	// principal, um histórico "Authpass Time / OfflineTime" com datas "AAAA-MM-DD" — o
+	// regex de número abaixo lia o "-MM" dessa data como um dBm negativo (ex.: "2026-07-29"
+	// virava "-07"), produzindo uma leitura de potência fantasma. Corta esse histórico fora
+	// antes de procurar números (mesmo ponto de corte já usado por extractTelnetKVFields).
+	text = cutBeforeAuthpassHistory(text)
+
 	body := text
 	if parts := regexp.MustCompile(`(?m)\n\s*-{3,}\s*\n`).Split(text, 2); len(parts) == 2 {
 		body = parts[1]
@@ -238,6 +246,37 @@ func extractVsolPonOnuPowerFields(cmd, text string) map[string]string {
 		return nil
 	}
 	return map[string]string{label: power}
+}
+
+// commandLooksPowerRelated: extractVsolPonOnuPowerFields foi feito para o formato de
+// tabela "Onu / ONU_Rx" da VSOL — usá-lo como fallback para QUALQUER comando sem RX/TX
+// (ex.: "show gpon onu detail-info", "show pon onu information" da ZTE) é o que causava a
+// leitura fantasma (ver comentário acima) — essas saídas nunca tiveram potência para achar,
+// só texto solto onde o parser de números pescava o primeiro decimal/negativo que
+// encontrasse. Só chamar o fallback quando o comando realmente é sobre potência óptica.
+//
+// Deliberadamente NÃO inclui "onu-rx"/"onu-tx" (sintaxe ZTE, ex. "show pon power onu-rx
+// gpon_onu-1/1/6:78") — esses comandos já são tratados por extractTelnetPowerFields
+// (regex ancorada no "(dbm)" literal, imune a falsos positivos) via outro caminho; incluí-los
+// aqui faria ESTE parser mais frágil interceptá-los primeiro e ler, por exemplo, o "-1" que
+// aparece dentro do próprio identificador "gpon_onu-1/1/6:78" como se fosse a potência.
+func commandLooksPowerRelated(cmd string) bool {
+	cmd = strings.ToLower(cmd)
+	return strings.Contains(cmd, "rx-power") || strings.Contains(cmd, "tx-power") ||
+		strings.Contains(cmd, "rx_power") || strings.Contains(cmd, "tx_power") ||
+		strings.Contains(cmd, "onu_rx") || strings.Contains(cmd, "onu_tx")
+}
+
+var telnetAuthpassHistoryRE = regexp.MustCompile(`(?i)Authpass\s+Time`)
+
+// cutBeforeAuthpassHistory remove o histórico "Authpass Time / OfflineTime / Cause" (e
+// tudo depois dele) — usado para blindar parsers de número/potência contra confundir as
+// datas desse histórico com leituras negativas (ver comentário em extractVsolPonOnuPowerFields).
+func cutBeforeAuthpassHistory(text string) string {
+	if loc := telnetAuthpassHistoryRE.FindStringIndex(text); loc != nil {
+		return text[:loc[0]]
+	}
+	return text
 }
 
 func dataRowsAfterHeader(text string, headerRe *regexp.Regexp) string {
@@ -318,8 +357,11 @@ func ParseTelnetReportSteps(steps []struct {
 			fields = extractVsolOnuInfoFields(cleaned)
 		case strings.Contains(cmd, "show onu state"):
 			fields = extractVsolOnuStateFields(cleaned)
-		case strings.Contains(cmd, "rx-power") || strings.Contains(cmd, "tx-power") ||
-			strings.Contains(cmd, "show pon onu"):
+		// "show pon onu" sozinho NÃO entra aqui de propósito — a ZTE tem "show pon onu
+		// information"/"show pon onu detail-info", que nada têm a ver com potência óptica
+		// mas continham essa substring e caíam neste parser por engano (ver
+		// commandLooksPowerRelated) — só rx-power/tx-power (sintaxe real da VSOL) contam.
+		case commandLooksPowerRelated(cmd):
 			fields = extractVsolPonOnuPowerFields(cmd, cleaned)
 		default:
 			fields = extractTelnetKVFields(cleaned)
@@ -329,7 +371,7 @@ func ParseTelnetReportSteps(steps []struct {
 				}
 			}
 			if _, hasRX := fields["RX"]; !hasRX {
-				if _, hasTX := fields["TX"]; !hasTX {
+				if _, hasTX := fields["TX"]; !hasTX && commandLooksPowerRelated(cmd) {
 					for k, v := range extractVsolPonOnuPowerFields(cmd, cleaned) {
 						if _, ok := fields[k]; !ok {
 							fields[k] = v

@@ -20,6 +20,7 @@ import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
 import { buildSnmpBulkResult, exportSnmpBulkCsv, flattenSnmpBulkRows } from "../lib/toolsSnmpBulk";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
+import { SnifferTab } from "./tools/SnifferTab";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -58,7 +59,8 @@ type Tab =
   | "snmp_walk"
   | "mikrotik"
   | "tracert"
-  | "nmap";
+  | "nmap"
+  | "sniffer";
 
 export function ToolsPage() {
   const [tab, setTab] = useState<Tab>("http_matrix");
@@ -556,6 +558,7 @@ export function ToolsPage() {
             ["icmp", "ICMP"],
             ["tracert", "Tracert"],
             ["nmap", "Nmap"],
+            ["sniffer", "Sniffer"],
             ["snmp", "SNMP get"],
             ["snmp_bulk", "SNMP bulk"],
             ["telnet", "Telnet"],
@@ -577,6 +580,8 @@ export function ToolsPage() {
           </button>
         ))}
       </div>
+
+      {tab === "sniffer" && <SnifferTab />}
 
       {tab === "host_ping" && (
         <ToolsPanel

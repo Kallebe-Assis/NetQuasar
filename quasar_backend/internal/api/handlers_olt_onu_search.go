@@ -136,6 +136,12 @@ func (s *Server) searchOLTOnus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	clientNames, err := s.onuClientNameMap(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+
 	q := strings.ToLower(strings.TrimSpace(body.Q))
 	serialQ := strings.ToLower(strings.TrimSpace(body.Serial))
 	modelQ := strings.ToLower(strings.TrimSpace(body.Model))
@@ -166,6 +172,10 @@ func (s *Server) searchOLTOnus(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
+			clientName := clientNames[strings.ToUpper(strings.TrimSpace(stringFromAny(row["serial"])))]
+			if clientName != "" {
+				row["client_name"] = clientName
+			}
 			if !oltOnuRowMatchesFilters(row, body, serialQ, modelQ) {
 				continue
 			}
@@ -181,6 +191,7 @@ func (s *Server) searchOLTOnus(w http.ResponseWriter, r *http.Request) {
 				"serial":          row["serial"],
 				"model":           row["model"],
 				"online":          row["online"],
+				"client_name":     nilIfBlankStr(clientName),
 				"rx_dbm":          row["rx_dbm"],
 				"rx_pwr":          firstNonNil(row["rx_pwr"], row["rx"]),
 				"tx_pwr":          firstNonNil(row["tx_pwr"], row["tx"]),
@@ -466,8 +477,9 @@ func nilIfBlankStr(s string) any {
 func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ, modelQ string) bool {
 	serial := strings.TrimSpace(stringFromAny(row["serial"]))
 	model := strings.ToLower(strings.TrimSpace(stringFromAny(row["model"])))
+	clientName := strings.ToLower(strings.TrimSpace(stringFromAny(row["client_name"])))
 	if serialQ != "" {
-		if !oltcollect.SerialPartialMatch(serial, serialQ) && !strings.Contains(model, strings.ToLower(serialQ)) {
+		if !oltcollect.SerialPartialMatch(serial, serialQ) && !strings.Contains(model, strings.ToLower(serialQ)) && !strings.Contains(clientName, serialQ) {
 			return false
 		}
 	}

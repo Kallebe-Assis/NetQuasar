@@ -281,7 +281,7 @@ func (s *Server) listFleetAlerts(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN fleet_vehicles v ON v.id = a.vehicle_id
 		WHERE (NOT $1 OR a.acknowledged_at IS NULL)
 		ORDER BY a.created_at DESC
-		LIMIT 500
+		LIMIT 2000
 	`, onlyOpen)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

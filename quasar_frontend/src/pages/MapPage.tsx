@@ -200,7 +200,7 @@ export function MapPage() {
   const [showConnections, setShowConnections] = useState(false);
   const [showCtos, setShowCtos] = useState(true);
   const [showCables, setShowCables] = useState(true);
-  const [showSpliceBoxes, setShowSpliceBoxes] = useState(false);
+  const [showSpliceBoxes, setShowSpliceBoxes] = useState(true);
   const [showPoles, setShowPoles] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showPops, setShowPops] = useState(true);
@@ -1260,7 +1260,7 @@ export function MapPage() {
     if (category) n++;
     if (!isMapProjectNone(projectFilterId)) n++;
     if (localityFlyId) n++;
-    if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || showSpliceBoxes || showPoles || showProjects) n++;
+    if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || !showSpliceBoxes || showPoles || showProjects) n++;
     if (displayMode !== "cluster") n++;
     return n;
   }, [
@@ -1380,11 +1380,7 @@ export function MapPage() {
         <span className="map-page__points-pill">
           <PageCountPill label="Pontos visíveis" count={displayedPoints.length} />
         </span>
-        {isMapProjectNone(projectFilterId) && !localityFlyId.trim() ? (
-          <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
-            Projeto: Nenhum — escolha um projeto ou «Todos» nos filtros para carregar CTOs
-          </span>
-        ) : showInfrastructure && infraPts.data?.truncated ? (
+        {showInfrastructure && infraPts.data?.truncated ? (
           <span className="map-page__infra-zoom-hint" style={{ fontSize: 11, color: "var(--muted)" }}>
             Infra limitada neste zoom
             {infraPts.data.limit != null ? ` (máx. ${infraPts.data.limit})` : ""} — aproxime o mapa ou filtre por

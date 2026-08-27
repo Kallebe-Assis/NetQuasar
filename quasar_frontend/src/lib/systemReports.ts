@@ -18,7 +18,8 @@ export type SystemReportId =
   | "pon-down"
   | "automations"
   | "monitoring-health"
-  | "commercial-base";
+  | "commercial-base"
+  | "device-alert-analysis";
 
 export type SystemReportCatalogItem = {
   id: SystemReportId;
@@ -48,11 +49,18 @@ export type PeriodModeReportOptions = {
   to?: string;
 };
 
+export type DeviceAlertAnalysisReportOptions = {
+  from?: string;
+  to?: string;
+  category?: string;
+};
+
 export type SystemReportOptions =
   | EquipmentByPopReportOptions
   | ConnectionsReportOptions
   | OltOverviewReportOptions
-  | PeriodModeReportOptions;
+  | PeriodModeReportOptions
+  | DeviceAlertAnalysisReportOptions;
 
 export const PERIOD_MODE_REPORT_IDS: SystemReportId[] = [
   "network-events",
@@ -134,6 +142,7 @@ export const SYSTEM_REPORT_IDS: SystemReportId[] = [
   "automations",
   "monitoring-health",
   "commercial-base",
+  "device-alert-analysis",
 ];
 
 export function fetchSystemReportCatalog() {
@@ -173,16 +182,27 @@ function periodModeQuery(opts?: PeriodModeReportOptions): string {
   return qs ? `?${qs}` : "";
 }
 
+function deviceAlertAnalysisQuery(opts?: DeviceAlertAnalysisReportOptions): string {
+  const p = new URLSearchParams();
+  if (opts?.from) p.set("from", opts.from);
+  if (opts?.to) p.set("to", opts.to);
+  if (opts?.category) p.set("category", opts.category);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export type AnySystemReportOptions =
   | EquipmentByPopReportOptions
   | ConnectionsReportOptions
   | OltOverviewReportOptions
-  | PeriodModeReportOptions;
+  | PeriodModeReportOptions
+  | DeviceAlertAnalysisReportOptions;
 
 function reportQuery(id: SystemReportId, opts?: AnySystemReportOptions): string {
   if (id === "equipment-by-pop") return equipmentByPopQuery(opts as EquipmentByPopReportOptions);
   if (id === "connections") return connectionsQuery(opts as ConnectionsReportOptions);
   if (id === "olt-overview") return oltOverviewQuery(opts as OltOverviewReportOptions);
+  if (id === "device-alert-analysis") return deviceAlertAnalysisQuery(opts as DeviceAlertAnalysisReportOptions);
   if (isPeriodModeReport(id)) return periodModeQuery(opts as PeriodModeReportOptions);
   return "";
 }
@@ -223,7 +243,11 @@ export function downloadSystemReportCsvClient(payload: SystemReportPayload) {
 
 export function sendSystemReportTelegram(id: SystemReportId, opts?: AnySystemReportOptions) {
   const body =
-    id === "equipment-by-pop" || id === "connections" || id === "olt-overview" || isPeriodModeReport(id)
+    id === "equipment-by-pop" ||
+    id === "connections" ||
+    id === "olt-overview" ||
+    id === "device-alert-analysis" ||
+    isPeriodModeReport(id)
       ? opts ?? {}
       : undefined;
   return apiFetch<{ ok: boolean }>(`/api/v1/reports/system/${id}/telegram`, {

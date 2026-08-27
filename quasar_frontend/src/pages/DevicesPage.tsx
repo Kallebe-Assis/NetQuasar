@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionMenu } from "../components/ActionMenu";
@@ -65,6 +65,11 @@ type Device = {
   snmp_health_reason?: string | null;
   snmp_health_checked_at?: string | null;
 };
+
+// Limita quantas linhas a tabela de Equipamentos renderiza de uma vez (ver paginação
+// client-side mais abaixo, no componente) — mantém a UI responsiva independentemente
+// do tamanho do inventário.
+const DEVICES_PAGE_SIZE = 200;
 
 const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 const OPS = ["Ativo", "Inativo", "Manutenção", "Reserva"] as const;
@@ -694,6 +699,22 @@ export function DevicesPage() {
     return out;
   }, [filteredDevices, sortDir, sortKey]);
 
+  // Paginação client-side da tabela: sem isto, um inventário grande (centenas/milhares
+  // de equipamentos) renderiza uma <tr> por linha de uma vez só, o que fica visivelmente
+  // lento para rolar e re-renderizar. DEVICES_PAGE_SIZE mantém o DOM da tabela limitado
+  // independentemente do tamanho do inventário. Ver DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md
+  // (achado "sem virtualização de listas grandes").
+  const [devicesPage, setDevicesPage] = useState(0);
+  useEffect(() => {
+    setDevicesPage(0);
+  }, [filteredDevices]);
+  const devicesTotalPages = Math.max(1, Math.ceil(sortedDevices.length / DEVICES_PAGE_SIZE));
+  const devicesPageClamped = Math.min(devicesPage, devicesTotalPages - 1);
+  const pagedDevices = useMemo(
+    () => sortedDevices.slice(devicesPageClamped * DEVICES_PAGE_SIZE, (devicesPageClamped + 1) * DEVICES_PAGE_SIZE),
+    [sortedDevices, devicesPageClamped],
+  );
+
   const sortArrow = (k: DeviceSortKey) => (sortKey !== k ? "↕" : sortDir === "asc" ? "↑" : "↓");
   const toggleSort = (k: DeviceSortKey) => {
     setSortKey((cur) => {
@@ -1235,7 +1256,7 @@ export function DevicesPage() {
             </tr>
           </thead>
           <tbody>
-            {sortedDevices.map((d) => {
+            {pagedDevices.map((d) => {
               const br = networkIsBridge(d.network_status);
               return (
               <tr key={d.id}>
@@ -1334,6 +1355,35 @@ export function DevicesPage() {
           </tbody>
         </table>
       </div>
+
+      {sortedDevices.length > DEVICES_PAGE_SIZE && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn btn--icon-menu"
+            disabled={devicesPageClamped <= 0}
+            title="Página anterior"
+            aria-label="Página anterior"
+            onClick={() => setDevicesPage((p) => Math.max(0, p - 1))}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+            {devicesPageClamped * DEVICES_PAGE_SIZE + 1}–
+            {Math.min((devicesPageClamped + 1) * DEVICES_PAGE_SIZE, sortedDevices.length)} de {sortedDevices.length}
+          </span>
+          <button
+            type="button"
+            className="btn btn--icon-menu"
+            disabled={devicesPageClamped >= devicesTotalPages - 1}
+            title="Página seguinte"
+            aria-label="Página seguinte"
+            onClick={() => setDevicesPage((p) => Math.min(devicesTotalPages - 1, p + 1))}
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
 
       {modal && canMutate && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModal(null)}>

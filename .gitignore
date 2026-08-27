@@ -39,3 +39,6 @@ Thumbs.db
 .idea/
 .vscode/
 .cursor/
+
+# Scripts locais de commit/push (não versionados)
+push_github.bat

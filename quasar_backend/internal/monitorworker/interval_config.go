@@ -27,6 +27,19 @@ type intervalConfig struct {
 	MikrotikTimeoutMs      int
 	BngTimeoutMs           int
 	PingParallel           bool
+	// SweepConcurrency — quantos equipamentos sondar em paralelo por ciclo (ping/telemetria/
+	// BNG/OLT). 0 = usar DefaultSweepConcurrency (ver sweep_concurrency.go). Persistido em
+	// monitoring_intervals.sweep_concurrency para não depender só da variável de ambiente
+	// NETQUASAR_SWEEP_CONCURRENCY.
+	SweepConcurrency int
+	// HistoryRetentionDays — dias de histórico mantidos em ping_history/telemetry_samples/
+	// interface_snapshots antes de purga automática. 0 = purga automática desligada
+	// (comportamento antigo: só limpeza manual em Configurações -> Base de dados).
+	HistoryRetentionDays int
+	// OltBaselineParallelSeconds — intervalo do ciclo OLT paralelo dedicado (tiers leves:
+	// baseline/pon_status/onu_counts), independente de pipeline_cycle_seconds. Ver
+	// TryStartParallelOltCycle.
+	OltBaselineParallelSeconds int
 }
 
 // ResolveTelemetrySeconds devolve segundos de telemetria a usar (evita COALESCE em SQL por compatibilidade).
@@ -60,14 +73,18 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			COALESCE(olt_pon_status_seconds, 60),
 			COALESCE(olt_onu_counts_seconds, 180),
 			COALESCE(olt_full_collect_seconds, 0),
-			COALESCE(olt_full_collect_schedule, '')
+			COALESCE(olt_full_collect_schedule, ''),
+			COALESCE(sweep_concurrency, 0),
+			COALESCE(history_retention_days, 90),
+			COALESCE(olt_baseline_parallel_seconds, 30)
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
 		&c.TelemetryTimeoutMs, &c.InterfaceTimeoutMs, &c.OltIfDerivedTimeoutMs,
 		&c.OltOnuTelnetTimeoutMs,
 		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel,
-		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule); err != nil {
+		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule,
+		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)
@@ -118,5 +135,20 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		c.OfflineThreshold = 50
 	}
 	c.ICMPPayloadBytes = probing.ClampICMPPayloadBytes(c.ICMPPayloadBytes)
+	if c.SweepConcurrency < 0 {
+		c.SweepConcurrency = 0
+	}
+	SetSweepConcurrencyFromConfig(c.SweepConcurrency)
+	if c.HistoryRetentionDays < 0 {
+		c.HistoryRetentionDays = 0
+	}
+	if c.HistoryRetentionDays > 0 && c.HistoryRetentionDays < 7 {
+		// Teto de segurança: evita apagar quase tudo por um valor digitado por engano.
+		c.HistoryRetentionDays = 7
+	}
+	if c.OltBaselineParallelSeconds < 15 {
+		// Piso de segurança: evita martelar SNMP nas OLTs por um valor digitado por engano.
+		c.OltBaselineParallelSeconds = 15
+	}
 	return c, nil
 }

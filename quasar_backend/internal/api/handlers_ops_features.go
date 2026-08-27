@@ -276,7 +276,7 @@ func (s *Server) listMaintenanceWindows(w http.ResponseWriter, r *http.Request) 
 		SELECT id, title, scope_type, pop_id, device_id, starts_at, ends_at, checklist::text, notes, status, created_at, updated_at
 		FROM maintenance_windows
 		ORDER BY starts_at DESC
-		LIMIT 500
+		LIMIT 2000
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

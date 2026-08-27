@@ -9,6 +9,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// maxMonitorDevicesPerSweep é um teto de segurança (não um limite operacional): protege
+// contra um cenário patológico (ex.: filtro corrompido a devolver a tabela inteira sem
+// WHERE), mas não deve nunca ser atingido por um inventário real de ISP. Antes desta
+// constante, estas queries tinham LIMIT 500/100 fixos que truncavam silenciosamente o
+// ciclo de monitorização — equipamentos além do limite simplesmente deixavam de ser
+// sondados, sem erro nem alerta. Ver DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md (achado #1).
+const maxMonitorDevicesPerSweep = 20000
+
 // pingableDeviceRow equipamento elegível para sondagem (mesmos filtros do worker legado).
 type pingableDeviceRow struct {
 	id               uuid.UUID
@@ -58,7 +66,7 @@ func scanPingableDevices(ctx context.Context, pool *pgxpool.Pool, base string, o
 		base += ` AND d.id = $1`
 		args = append(args, *only)
 	}
-	base += ` ORDER BY d.description LIMIT 500`
+	base += fmt.Sprintf(" ORDER BY d.description LIMIT %d", maxMonitorDevicesPerSweep)
 	rows, err := pool.Query(ctx, base, args...)
 	if err != nil {
 		return nil, err
@@ -97,7 +105,7 @@ func loadOltDevicesForCollect(ctx context.Context, pool *pgxpool.Pool, only *uui
 		base += ` AND d.id = $1`
 		args = append(args, *only)
 	}
-	base += ` ORDER BY d.description LIMIT 500`
+	base += fmt.Sprintf(" ORDER BY d.description LIMIT %d", maxMonitorDevicesPerSweep)
 	rows, err := pool.Query(ctx, base, args...)
 	if err != nil {
 		return nil, err
@@ -137,7 +145,7 @@ func loadBngDevicesForCollect(ctx context.Context, pool *pgxpool.Pool, only *uui
 		base += ` AND d.id = $1`
 		args = append(args, *only)
 	}
-	base += ` ORDER BY d.description LIMIT 100`
+	base += fmt.Sprintf(" ORDER BY d.description LIMIT %d", maxMonitorDevicesPerSweep)
 	rows, err := pool.Query(ctx, base, args...)
 	if err != nil {
 		return nil, err

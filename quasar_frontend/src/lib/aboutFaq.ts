@@ -165,6 +165,11 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     cat: "configurar",
   },
   {
+    q: "Que cor tem o toast de alerta?",
+    a: "A barra lateral do toast segue a severidade: vermelha para Crítico, amarela para Atenção e azul para Informação. O nome do tipo de alerta (ex. “Temperatura da CPU Mikrotik”) e a severidade aparecem no texto.",
+    cat: "como_funciona",
+  },
+  {
     q: "Como activo o som e o toast de alerta em qualquer ecrã?",
     a: "Configurações → Alertas → Notificações neste dispositivo. São preferências da sua conta. Com o toast ligado, o aviso aparece em qualquer ecrã; desligado, só em Monitoramento e Alertas. O som é um interruptor à parte e pode usar um dos sons padrão ou um MP3 seu.",
     cat: "configurar",
@@ -236,8 +241,13 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como funciona a tela OLT?",
-    a: "Lista OLTs, visão de PONs/ONUs, refresh manual, potências ópticas e alertas de quantidade/óptica.",
+    a: "Lista OLTs, visão de PONs/ONUs, refresh manual, potências ópticas e alertas de quantidade/óptica. A aba Relatório tem um gráfico de evolução de ONUs (total/online/offline) por hora (últimas 24h) ou por dia (3/7/30 dias), construído a partir de cada coleta — manual ou automática — e não só do último snapshot.",
     cat: "funcoes",
+  },
+  {
+    q: "Como vinculo uma ONU a um cliente?",
+    a: "Na aba ONU's → Vincular ONU ao cliente: baixe o modelo CSV, preencha serial + nome do cliente por linha e importe. Só grava vínculos cujo serial é uma ONU conhecida (vista em algum snapshot de OLT). Quando o serial não bate exato, o sistema procura o mais parecido (últimos 5 caracteres iguais, só o último caractere diferente, ou 4 dos últimos 5 iguais) e sugere — você confirma clicando “Usar esta ONU” antes de gravar; nada é vinculado automaticamente por aproximação.",
+    cat: "como_funciona",
   },
   {
     q: "Quais marcas de OLT são suportadas?",
@@ -271,8 +281,23 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que são Integrações?",
-    a: "Ligações a sistemas externos (ex. IXC, Hubsoft) para consulta e sincronização comercial/operacional.",
+    a: "Ligações a sistemas externos (ERPs de provedor) para consultar dados de cliente sem sair do NetQuasar. IXC usa o motor genérico de requisições configuráveis. HubSoft tem uma secção dedicada, com telas próprias de consulta, suporte, financeiro e dashboard (ver perguntas específicas abaixo).",
     cat: "funcoes",
+  },
+  {
+    q: "O que a integração HubSoft oferece?",
+    a: "Cinco abas: Consulta (busca cliente por nome, CPF/CNPJ, código, telefone, login, IPv4 ou MAC, com modal de dados completos em abas — Identificação, Grupo, Serviços, Financeiro, Atendimentos, Ordens de serviço), Atendimentos e Ordens de serviço (os mais recentes encontrados numa amostra de clientes, já que a API não lista tudo de uma vez), Financeiro (total a receber, vencido, pendente e pago, mais os maiores devedores) e Dashboard (gráficos e KPIs, com 3 modos: Clientes e serviços, Atendimentos e ordens de serviço, ou Financeiro).",
+    cat: "funcoes",
+  },
+  {
+    q: "Porque o Financeiro/Dashboard da HubSoft mostra “amostra” em vez do total exato?",
+    a: "A API da HubSoft não tem um endpoint que liste todos os clientes/faturas/atendimentos de uma vez — cada consulta exige um filtro específico. O NetQuasar varre a base por nome (letras e pares de letras) para reunir uma amostra grande e calcular os números a partir dela; por isso os totais são indicativos, não um fecho contábil exato. As abas Atendimentos/Ordens/Financeiro guardam o resultado em cache e têm um botão “Atualizar” — não refazem a varredura sozinhas a cada troca de aba.",
+    cat: "tecnico",
+  },
+  {
+    q: "Posso colocar uma logo na tela da HubSoft?",
+    a: "Sim — na aba Configuração API, envie um ficheiro de imagem ou cole o link de uma imagem na internet. Fica guardada no navegador (por dispositivo) e aparece ao lado do nome “Hubsoft” no topo de todas as telas da integração.",
+    cat: "configurar",
   },
   {
     q: "A tela Clientes é o quê?",

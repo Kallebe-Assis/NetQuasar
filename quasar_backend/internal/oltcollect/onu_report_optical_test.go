@@ -104,6 +104,62 @@ gpon-olt(config-pon-0/1)#`
 	}
 }
 
+// TestParseZteRxPowerIgnoresOtherStepsPhantomReadings reproduz um relatório real de ONU
+// ZTE (4 passos): o RX/TX correto só está no passo "show pon power onu-rx/tx", mas os
+// passos "show gpon onu detail-info" e "show pon onu information" — que nada têm a ver com
+// potência óptica — antes eram roteados por engano para o parser de tabela VSOL (por causa
+// do "show pon onu" bater na condição do primeiro, e do fallback genérico do segundo), que
+// lia o primeiro número negativo/decimal do texto solto como se fosse dBm. Isso incluía o
+// "-1" do próprio identificador "gpon_onu-1/1/6:78" e o "-07" do mês de uma data
+// "2026-07-29" na tabela de histórico Authpass Time — produzindo RX="-07" sempre, em vez do
+// valor real "-19.032" (bug relatado em produção).
+func TestParseZteRxPowerIgnoresOtherStepsPhantomReadings(t *testing.T) {
+	detailInfo := "ONU interface:          gpon_onu-1/1/6:78\n" +
+		"  Name:                 simone\n" +
+		"  Type:                 GU201-G\n" +
+		"  Admin state:          enable\n" +
+		"------------------------------------------\n" +
+		"       Authpass Time          OfflineTime             Cause\n" +
+		"   1   2026-07-29 04:38:42    2026-08-06 19:50:01     DyingGasp"
+	information := "ONU interface:                  gpon_onu-1/1/6:78\n" +
+		"SN reported:                    ITBSCF6B9163\n" +
+		"ONU ID:                         34\n" +
+		"Hardware version:               ONUR1_v2.0\n" +
+		"------------------------------------------\n" +
+		"       Authpass Time          OfflineTime             Cause\n" +
+		"   1   2026-07-29 04:38:42    2026-08-06 19:50:01     DyingGasp"
+	rxPower := "Onu                  Rx power\n" +
+		"------------------------------------\n" +
+		"gpon_onu-1/1/6:78    -19.032(dbm)"
+	txPower := "Onu                  Tx power\n" +
+		"------------------------------------\n" +
+		"gpon_onu-1/1/6:78    2.006(dbm)"
+
+	fields := ParseTelnetReportSteps([]struct {
+		Command string
+		Output  string
+	}{
+		{Command: "show gpon onu detail-info gpon_onu-1/1/6:78", Output: detailInfo},
+		{Command: "show pon onu information gpon_onu-1/1/6:78", Output: information},
+		{Command: "show pon power onu-rx gpon_onu-1/1/6:78", Output: rxPower},
+		{Command: "show pon power onu-tx gpon_onu-1/1/6:78", Output: txPower},
+	})
+	if fields["RX"] != "-19.032" {
+		t.Fatalf("RX=%q want -19.032 (fields=%v)", fields["RX"], fields)
+	}
+	if fields["TX"] != "2.006" {
+		t.Fatalf("TX=%q want 2.006 (fields=%v)", fields["TX"], fields)
+	}
+	// Ainda deve extrair os campos genuínos desses dois passos (isso ficava escondido
+	// antes, porque o retorno adiantado do parser VSOL descartava tudo o resto).
+	if fields["ONU ID"] != "34" {
+		t.Fatalf("ONU ID=%q fields=%v", fields["ONU ID"], fields)
+	}
+	if fields["Nome"] != "simone" {
+		t.Fatalf("Nome=%q fields=%v", fields["Nome"], fields)
+	}
+}
+
 func TestParseVsolPonOnuRxPowerTable(t *testing.T) {
 	out := `Onu         ONU_Rx
 ------------------------------------

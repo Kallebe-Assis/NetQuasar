@@ -39,7 +39,7 @@ func (s *Server) createSuppression(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT id, scope_type, scope_ref, reason, created_by, created_at FROM alert_suppressions ORDER BY created_at DESC LIMIT 500
+		SELECT id, scope_type, scope_ref, reason, created_by, created_at FROM alert_suppressions ORDER BY created_at DESC LIMIT 2000
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

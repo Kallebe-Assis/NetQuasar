@@ -11,6 +11,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltsamples"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 	"github.com/rs/zerolog"
 )
@@ -196,6 +197,7 @@ func CollectOltVendorPeriodic(
 			pons = $3::jsonb,
 			updated_at = now()
 	`, deviceID, sb, pb)
+	oltsamples.RecordSample(sctx, pool, deviceID, sb, pb)
 	if log != nil {
 		log.Info().
 			Str("component", "olt_pon_collect").

@@ -39,6 +39,12 @@ type Config struct {
 	// EmbeddedUI — servir frontend estático compilado incluído no binário (NetQuasar em único processo).
 	EmbeddedUI bool
 	RedisURL   string
+
+	// DBMaxConns/DBMinConns — tamanho do pool pgx. Antes fixos no código (32/2); agora ajustáveis
+	// via NETQUASAR_DB_MAX_CONNS / NETQUASAR_DB_MIN_CONNS sem recompilar (útil quando a API e o
+	// worker de monitorização competem por conexões sob carga). Ver DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md.
+	DBMaxConns int32
+	DBMinConns int32
 }
 
 // RequireAuth indica se requisições /api/* exigem X-API-Key ou JWT de usuário (ambiente de produção típico).
@@ -128,6 +134,8 @@ func Load() (*Config, error) {
 		DBSSLRootCert:    strings.TrimSpace(os.Getenv("NETQUASAR_DB_SSLROOTCERT")),
 		DatabaseURL:      os.Getenv("NETQUASAR_DATABASE_URL"),
 		RedisURL:         strings.TrimSpace(os.Getenv("NETQUASAR_REDIS_URL")),
+		DBMaxConns:       int32(mustAtoi(getenv("NETQUASAR_DB_MAX_CONNS", "32"), 32)),
+		DBMinConns:       int32(mustAtoi(getenv("NETQUASAR_DB_MIN_CONNS", "2"), 2)),
 	}
 
 	if cors := os.Getenv("NETQUASAR_CORS_ORIGINS"); cors != "" {

@@ -15,6 +15,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltsamples"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
@@ -685,6 +686,9 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 		INSERT INTO olt_snapshots (device_id, summary, pons) VALUES ($1, $2::jsonb, $3::jsonb)
 		ON CONFLICT (device_id) DO UPDATE SET summary = $2::jsonb, pons = $3::jsonb, updated_at = now()
 	`, devID, newSum, pb)
+	if err == nil {
+		oltsamples.RecordSample(ctx, pool, devID, newSum, pb)
+	}
 	return err
 }
 

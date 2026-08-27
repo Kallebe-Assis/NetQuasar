@@ -303,7 +303,7 @@ function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: O
         Equipamentos
       </button>
       <button type="button" className={active === "pesquisa" ? "active" : ""} onClick={() => onChange("pesquisa")}>
-        Pesquisa
+        ONU&apos;s
       </button>
       <button type="button" className={active === "nao_autorizadas" ? "active" : ""} onClick={() => onChange("nao_autorizadas")}>
         Não autorizadas

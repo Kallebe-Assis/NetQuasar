@@ -18,9 +18,17 @@ const ALERT_TYPE_PT: Record<string, string> = {
   pon_down: "PON inativa",
   mikrotik_sfp_tx: "SFP — potência TX",
   mikrotik_sfp_rx: "SFP — potência RX",
+  mikrotik_sfp_temp: "SFP — temperatura",
+  mikrotik_cpu_temp: "Temperatura da CPU Mikrotik",
+  mikrotik_pppoe_drop: "Queda de sessões PPPoE (MikroTik)",
   telemetry_threshold: "Telemetria — limiar global",
   olt_onu_drop: "Queda de ONUs online (OLT)",
   olt_onu_rise: "Subida de ONUs online (OLT)",
+  olt_onu_rx: "ONU — potência RX",
+  olt_onu_tx: "ONU — potência TX",
+  olt_pon_rx: "PON — potência RX",
+  olt_pon_tx: "PON — potência TX",
+  olt_pon_temp: "PON — temperatura",
   bng_subscriber_drop: "Queda de logins (BNG)",
 };
 

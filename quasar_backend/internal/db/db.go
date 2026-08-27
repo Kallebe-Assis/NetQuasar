@@ -57,8 +57,14 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse dsn: %w", err)
 	}
 	applySupabaseTxnPoolerCompat(pcfg)
-	pcfg.MaxConns = 32
-	pcfg.MinConns = 2
+	pcfg.MaxConns = cfg.DBMaxConns
+	pcfg.MinConns = cfg.DBMinConns
+	if pcfg.MaxConns < 1 {
+		pcfg.MaxConns = 32
+	}
+	if pcfg.MinConns < 0 || pcfg.MinConns > pcfg.MaxConns {
+		pcfg.MinConns = 2
+	}
 	pcfg.MaxConnLifetime = time.Hour
 	pcfg.MaxConnIdleTime = 10 * time.Minute
 	pcfg.HealthCheckPeriod = time.Minute

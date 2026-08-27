@@ -16,6 +16,11 @@ services:
     restart: unless-stopped
     ports:
       - "${NETQUASAR_PUBLISH_PORT:-8080}:8080"
+    volumes:
+      # Persiste ficheiros gravados em runtime (capturas .pcap do Sniffer, uploads de projeto
+      # KML/KMZ, etc.) entre rebuilds/restarts do container — sem isto, tudo em /app/data
+      # escrito depois do arranque perdia-se em cada `docker compose up` novo.
+      - netquasar_data:/app/data
     env_file:
       - .env
     environment:
@@ -83,6 +88,7 @@ services:
 volumes:
   netquasar_pgdata:
   netquasar_redis:
+  netquasar_data:
 
 networks:
   netquasar_net:

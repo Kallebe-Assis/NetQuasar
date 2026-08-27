@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
 	"github.com/netquasar/netquasar/quasar_backend/internal/embedui"
+	"github.com/netquasar/netquasar/quasar_backend/internal/localdbstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
+	"github.com/netquasar/netquasar/quasar_backend/internal/sniffer"
 	"github.com/rs/zerolog"
 )
 
@@ -33,6 +36,7 @@ type Server struct {
 	dbRestoreMu        sync.Mutex
 	dbRestoreJobs      map[string]*dbRestoreJob
 	bngCollectProgress *bngCollectProgressStore
+	Sniffer            *sniffer.Manager
 }
 
 // DB retorna o pool PostgreSQL ativo ou nil (testes sem holder).
@@ -71,6 +75,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		sysCfgImportJobs:   make(map[string]*sysConfigImportJob),
 		dbRestoreJobs:      make(map[string]*dbRestoreJob),
 		bngCollectProgress: newBngCollectProgressStore(),
+		Sniffer:            sniffer.NewManager(filepath.Join(localdbstore.DataDir(), "captures")),
 	}
 	if workerCtx != nil {
 		registerOltManualRefresher(s)
@@ -384,6 +389,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Post("/{id}/login", s.integrationLogin)
 			r.Post("/{id}/run-all", s.integrationRunAll)
 			r.Post("/{id}/requests/{requestId}/run", s.integrationRunRequest)
+			r.Get("/hubsoft-busca-options", s.hubsoftBuscaOptions)
+			r.Post("/{id}/hubsoft/test", s.hubsoftTest)
+			r.Post("/{id}/hubsoft/search", s.hubsoftSearch)
+			r.Post("/{id}/hubsoft/attendance", s.hubsoftClientAttendance)
+			r.Post("/{id}/hubsoft/work-orders", s.hubsoftClientWorkOrders)
+			r.Post("/{id}/hubsoft/financial", s.hubsoftClientFinancial)
+			r.Get("/{id}/hubsoft/dashboard", s.hubsoftDashboard)
+			r.Get("/{id}/hubsoft/recent-activity", s.hubsoftRecentActivity)
+			r.Get("/{id}/hubsoft/financial-summary", s.hubsoftFinancialSummary)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("integrations.manage", "*"))
 				r.Post("/", s.createIntegration)
@@ -411,6 +425,21 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Post("/mikrotik/quick-metrics", s.toolsMikrotikQuickMetrics)
 			r.Post("/mikrotik/interfaces", s.toolsMikrotikInterfaces)
 			r.Post("/mikrotik/walk", s.toolsMikrotikWalk)
+
+			r.Route("/sniffer", func(r chi.Router) {
+				r.Get("/interfaces", s.snifferInterfaces)
+				r.Post("/sessions", s.snifferStart)
+				r.Get("/sessions/{id}", s.snifferSessionStatus)
+				r.Get("/sessions/{id}/packets", s.snifferSessionPackets)
+				r.Get("/sessions/{id}/packets/{seq}", s.snifferSessionPacketDetail)
+				r.Post("/sessions/{id}/stop", s.snifferSessionStop)
+				r.Post("/sessions/{id}/save", s.snifferSessionSave)
+				r.Post("/sessions/{id}/discard", s.snifferSessionDiscard)
+				r.Get("/captures", s.snifferCapturesList)
+				r.Get("/captures/{id}/packets", s.snifferCapturePackets)
+				r.Get("/captures/{id}/packets/{seq}", s.snifferCapturePacketDetail)
+				r.Delete("/captures/{id}", s.snifferCaptureDelete)
+			})
 		})
 
 		r.Route("/ping", func(r chi.Router) {
@@ -460,6 +489,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/onu-authorize", s.authorizeOLTOnu)
 				r.Post("/devices/{id}/onu-deauthorize", s.deauthorizeOLTOnu)
 				r.Post("/devices/{id}/discover-vlans", s.discoverOLTVlanCatalog)
+				r.Post("/onu-client-links/import", s.importOnuClientLinks)
 			})
 		})
 
@@ -557,6 +587,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/map/locality-center", s.mapLocalityCenter)
 		r.Get("/map/project-center", s.mapProjectCenter)
 		r.Get("/map/nearest-ctos", s.mapNearestCtos)
+
+		r.Get("/search/global", s.globalSearch)
 
 		r.Get("/overview/summary", s.overviewSummary)
 		r.Get("/overview/top-latency", s.overviewTopLatency)

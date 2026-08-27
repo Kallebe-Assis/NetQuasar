@@ -78,7 +78,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		c.snmp_health_status, c.snmp_health_reason, c.snmp_health_checked_at::text
 		FROM devices d
 		LEFT JOIN device_probe_cache c ON c.device_id = d.id
-		ORDER BY d.description LIMIT 500`
+		ORDER BY d.description LIMIT 5000`
 	rows, err := s.DB().Query(r.Context(), q)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)

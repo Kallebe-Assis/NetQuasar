@@ -47,7 +47,10 @@ func (s *Server) reportNetworkEvents(ctx context.Context, pool *pgxpool.Pool, ba
 	summary["Este mês"] = monthN
 	summary["Rompimentos / incidentes"] = incidentN
 
-	type pair struct{ code, label string; n int }
+	type pair struct {
+		code, label string
+		n           int
+	}
 	byCat := []pair{}
 	if rows, err := pool.Query(ctx, `
 		SELECT e.category_code, COUNT(*) FROM network_events e WHERE 1=1`+where+`
@@ -176,13 +179,13 @@ func (s *Server) reportFtthInfra(ctx context.Context, pool *pgxpool.Pool, base m
 		return n
 	}
 	summary := map[string]any{
-		"POPs":              count(`SELECT COUNT(*) FROM pops`),
-		"Projetos":          count(`SELECT COUNT(*) FROM network_projects WHERE COALESCE(status,'') <> 'inativo'`),
-		"CTOs":              count(`SELECT COUNT(*) FROM network_ctos`),
-		"CTOs em manutenção": count(`SELECT COUNT(*) FROM network_ctos WHERE needs_maintenance`),
-		"Cabos":             count(`SELECT COUNT(*) FROM network_cables`),
-		"Postes":            count(`SELECT COUNT(*) FROM network_poles`),
-		"Caixas de emenda":  count(`SELECT COUNT(*) FROM network_splice_boxes`),
+		"POPs":                  count(`SELECT COUNT(*) FROM pops`),
+		"Projetos":              count(`SELECT COUNT(*) FROM network_projects WHERE COALESCE(status,'') <> 'inativo'`),
+		"CTOs":                  count(`SELECT COUNT(*) FROM network_ctos`),
+		"CTOs em manutenção":    count(`SELECT COUNT(*) FROM network_ctos WHERE needs_maintenance`),
+		"Cabos":                 count(`SELECT COUNT(*) FROM network_cables`),
+		"Postes":                count(`SELECT COUNT(*) FROM network_poles`),
+		"Caixas de emenda":      count(`SELECT COUNT(*) FROM network_splice_boxes`),
 		"Emendas em manutenção": count(`SELECT COUNT(*) FROM network_splice_boxes WHERE needs_maintenance`),
 	}
 
@@ -395,7 +398,7 @@ func (s *Server) reportAutomations(ctx context.Context, pool *pgxpool.Pool, base
 	rows, err := pool.Query(ctx, `
 		SELECT job_type, actor, trigger_type, started_at, finished_at, ok, COALESCE(status_message,''), COALESCE(error_message,'')
 		FROM automation_execution_log WHERE 1=1`+where+`
-		ORDER BY started_at DESC LIMIT 500`, args...)
+		ORDER BY started_at DESC LIMIT 2000`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +569,172 @@ func (s *Server) reportCommercialBase(ctx context.Context, pool *pgxpool.Pool, b
 	base["rows"] = data
 	base["summary"] = summary
 	return base, nil
+}
+
+type deviceAlertStat struct {
+	deviceID     string
+	description  string
+	category     string
+	brandModel   string
+	total        int
+	critical     int
+	byCategory   map[string]int
+	byType       map[string]int
+	topType      string
+	topTypeCount int
+}
+
+// reportDeviceAlertAnalysis rankeia equipamentos pelo volume de alertas num período —
+// "qual equipamento deu mais problema" (temperatura, latência, interface, qualquer tipo).
+// Conta pela abertura do alerta (active_since) dentro do período, não pelos que só
+// continuam abertos — assim cada corrida do relatório reflecte só o que aconteceu na
+// janela pedida, sem contar de novo um alerta antigo que continua activo.
+func (s *Server) reportDeviceAlertAnalysis(ctx context.Context, pool *pgxpool.Pool, base map[string]any, opts deviceAlertAnalysisReportOptions) (map[string]any, error) {
+	from := strings.TrimSpace(opts.From)
+	to := strings.TrimSpace(opts.To)
+	if from == "" && to == "" {
+		from = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+	}
+	where, args := reportPeriodWhere(from, to, "a.active_since", 1)
+	category := strings.TrimSpace(opts.Category)
+
+	rows, err := pool.Query(ctx, `
+		SELECT d.id::text, COALESCE(NULLIF(trim(d.description), ''), '—'),
+			COALESCE(NULLIF(trim(d.category), ''), '—'),
+			COALESCE(NULLIF(trim(d.brand), ''), '') , COALESCE(NULLIF(trim(d.model), ''), ''),
+			a.alert_type, a.severity
+		FROM alert_instances a
+		JOIN devices d ON d.id = a.device_id
+		WHERE 1=1`+where+`
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := map[string]*deviceAlertStat{}
+	var order []string
+	catTotals := map[string]int{}
+	topByCategory := map[string]struct {
+		device string
+		n      int
+	}{}
+	totalAlerts := 0
+
+	for rows.Next() {
+		var id, desc, devCat, brand, model, alertType, sev string
+		if err := rows.Scan(&id, &desc, &devCat, &brand, &model, &alertType, &sev); err != nil {
+			return nil, err
+		}
+		alertCat := alertCategoryLabelGo(alertType)
+		if category != "" && !strings.EqualFold(category, alertCat) {
+			continue
+		}
+		st, ok := stats[id]
+		if !ok {
+			bm := strings.TrimSpace(strings.TrimSpace(brand) + " " + strings.TrimSpace(model))
+			st = &deviceAlertStat{
+				deviceID: id, description: desc, category: devCat, brandModel: bm,
+				byCategory: map[string]int{}, byType: map[string]int{},
+			}
+			stats[id] = st
+			order = append(order, id)
+		}
+		st.total++
+		if sev == "critical" {
+			st.critical++
+		}
+		st.byCategory[alertCat]++
+		st.byType[alertType]++
+		if st.byType[alertType] > st.topTypeCount {
+			st.topTypeCount = st.byType[alertType]
+			st.topType = alertType
+		}
+		catTotals[alertCat]++
+		totalAlerts++
+		if cur, ok := topByCategory[alertCat]; !ok || st.byCategory[alertCat] > cur.n {
+			topByCategory[alertCat] = struct {
+				device string
+				n      int
+			}{device: desc, n: st.byCategory[alertCat]}
+		}
+	}
+
+	sort.Slice(order, func(i, j int) bool {
+		a, b := stats[order[i]], stats[order[j]]
+		if a.total != b.total {
+			return a.total > b.total
+		}
+		if a.critical != b.critical {
+			return a.critical > b.critical
+		}
+		return a.description < b.description
+	})
+
+	cols := []string{"Equipamento", "Categoria (equip.)", "Marca/Modelo", "Total de alertas", "Críticos", "Maior ocorrência", "Detalhe por categoria"}
+	var dataRows [][]string
+	for _, id := range order {
+		st := stats[id]
+		catParts := make([]string, 0, len(st.byCategory))
+		catOrder := make([]string, 0, len(st.byCategory))
+		for c := range st.byCategory {
+			catOrder = append(catOrder, c)
+		}
+		sort.Slice(catOrder, func(i, j int) bool { return st.byCategory[catOrder[i]] > st.byCategory[catOrder[j]] })
+		for _, c := range catOrder {
+			catParts = append(catParts, fmt.Sprintf("%s: %d", c, st.byCategory[c]))
+		}
+		topLabel := fmt.Sprintf("%s (%d×)", alertTypeLabelGo(st.topType), st.topTypeCount)
+		dataRows = append(dataRows, []string{
+			st.description, st.category, firstNonEmptyStr(st.brandModel, "—"),
+			strconv.Itoa(st.total), strconv.Itoa(st.critical), topLabel, strings.Join(catParts, "; "),
+		})
+	}
+
+	periodLabel := "todo o histórico"
+	if from != "" && to != "" {
+		periodLabel = fmt.Sprintf("%s a %s", from, to)
+	} else if from != "" {
+		periodLabel = "desde " + from
+	} else if to != "" {
+		periodLabel = "até " + to
+	}
+	title := "Análise de equipamentos por alertas"
+	desc := fmt.Sprintf("Ranking de equipamentos por volume de alertas (%s)", periodLabel)
+	if category != "" {
+		desc += " — filtrado por categoria: " + category
+	} else {
+		desc += " — análise completa (todas as categorias)"
+	}
+	base["title"] = title
+	base["description"] = desc
+	base["columns"] = cols
+	base["rows"] = dataRows
+	base["options"] = map[string]any{"from": from, "to": to, "category": category}
+
+	summary := map[string]any{
+		"Período":               periodLabel,
+		"Total de alertas":      totalAlerts,
+		"Equipamentos afetados": len(order),
+	}
+	// Callouts directos para as categorias que o utilizador mais quer identificar de imediato.
+	calloutOrder := []string{"Performance", "Interface", "OLT / PON", "Equipamento", "BNG", "Óptica / SFP", "Sistema"}
+	for _, c := range calloutOrder {
+		if top, ok := topByCategory[c]; ok && top.n > 0 {
+			summary["Mais "+strings.ToLower(c)] = fmt.Sprintf("%s (%d alerta(s))", top.device, top.n)
+		}
+	}
+	base["summary"] = summary
+	return base, nil
+}
+
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func normalizePeriodMode(mode string) string {
