@@ -165,6 +165,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTitle, setReportTitle] = useState("");
+  const [reportRow, setReportRow] = useState<OltOnuSearchResult | null>(null);
   const [reportSteps, setReportSteps] = useState<OltTelnetReportStep[]>([]);
   const [reportPonMeta, setReportPonMeta] = useState<OltOnuReportPonMeta | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -361,6 +362,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     setReportLoading(true);
     setReportOpen(true);
     setReportTitle(`${row.olt_description ?? "OLT"} — PON ${row.pon ?? "?"} / ONU ${row.onu ?? "?"} ${row.serial ? `(${row.serial})` : ""}`);
+    setReportRow(row);
     setReportSteps([]);
     setReportPonMeta({ pon: row.pon, onu: row.onu });
     try {
@@ -846,9 +848,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           open={reportOpen}
           loading={reportLoading}
           title={reportTitle}
+          oltDescription={reportRow?.olt_description ?? undefined}
           steps={reportSteps}
           ponMeta={reportPonMeta}
           onClose={() => setReportOpen(false)}
+          onRefresh={reportRow ? () => void runReport(reportRow) : undefined}
+          refreshing={reportLoading}
         />
       ) : null}
 

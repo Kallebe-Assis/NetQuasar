@@ -27,6 +27,7 @@ import {
 import { PageCountPill } from "../components/PageCountPill";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { BngOverviewPanel } from "../components/BngOverviewPanel";
+import { BngUplinksPanel } from "../components/BngUplinksPanel";
 import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
 import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
@@ -1939,6 +1940,8 @@ export function BngPage() {
 
           {tab === "relatorio" && (
             <div className="mk-noc-panel" style={{ padding: 14 }}>
+              <BngUplinksPanel deviceId={selectedId} />
+
               <BngSessionReportPanel data={sessionReport.data} loading={sessionReport.isLoading && !sessionReport.data} />
 
               <h3 style={{ fontSize: 14, margin: "0 0 10px", color: "var(--muted)", fontWeight: 600 }}>

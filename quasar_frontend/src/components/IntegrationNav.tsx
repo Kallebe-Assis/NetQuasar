@@ -37,9 +37,11 @@ export function IntegrationNav({
           <Link
             to={APP_ROUTES.integrationConfig(slug)}
             className={onConfig ? "active" : ""}
-            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+            title="Configuração API"
+            aria-label="Configuração API"
           >
-            <Settings size={14} /> Configuração API
+            <Settings size={14} />
           </Link>
         ) : null}
       </div>

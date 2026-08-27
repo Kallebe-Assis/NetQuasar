@@ -39,8 +39,13 @@ export function HubsoftHeader() {
           </Link>
         ))}
         {admin ? (
-          <Link to={APP_ROUTES.integrationConfig("hubsoft")} className={loc.pathname.endsWith("/config") ? "active" : ""}>
-            <Settings size={14} /> Configuração API
+          <Link
+            to={APP_ROUTES.integrationConfig("hubsoft")}
+            className={loc.pathname.endsWith("/config") ? "active" : ""}
+            title="Configuração API"
+            aria-label="Configuração API"
+          >
+            <Settings size={14} />
           </Link>
         ) : null}
       </div>

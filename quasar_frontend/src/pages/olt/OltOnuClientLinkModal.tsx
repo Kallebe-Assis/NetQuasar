@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadBlob, apiFetch } from "../../lib/api";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { useAppToast } from "../../lib/appToast";
@@ -8,10 +8,37 @@ type LinkSuggestion = { serial: string; client_name: string; suggested_serial: s
 type ImportResult = { linked: number; not_found: string[]; suggestions: LinkSuggestion[]; total: number };
 
 const MATCH_TYPE_LABEL: Record<string, string> = {
-  last5: "últimos 5 caracteres iguais",
-  tail1diff: "só o último caractere diverge",
+  last5: "Últimos 5 caracteres iguais",
+  tail1diff: "Só o último caractere diverge",
   last5_4of5: "4 dos últimos 5 caracteres iguais",
 };
+
+// Ordem de confiança decrescente — igual ao rank usado no backend (classifySerialMatch).
+const MATCH_TYPE_ORDER = ["last5", "tail1diff", "last5_4of5"];
+
+/** Checkbox de secção com suporte a estado indeterminado (nem tudo, nem nada selecionado). */
+function SectionCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600 }}>
+      <input ref={ref} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      {label}
+    </label>
+  );
+}
 
 type Props = {
   open: boolean;
@@ -77,11 +104,53 @@ export function OltOnuClientLinkModal({ open, onClose, onImported }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLinking, setBulkLinking] = useState(false);
+
+  const groupedSuggestions = useMemo(() => {
+    const suggestions = result?.suggestions ?? [];
+    const byType = new Map<string, LinkSuggestion[]>();
+    for (const s of suggestions) {
+      const arr = byType.get(s.match_type) ?? [];
+      arr.push(s);
+      byType.set(s.match_type, arr);
+    }
+    const ordered: [string, LinkSuggestion[]][] = [];
+    for (const key of MATCH_TYPE_ORDER) {
+      const arr = byType.get(key);
+      if (arr) {
+        ordered.push([key, arr]);
+        byType.delete(key);
+      }
+    }
+    for (const [k, arr] of byType) ordered.push([k, arr]); // tipos inesperados — mostra por segurança
+    return ordered;
+  }, [result]);
 
   if (!open) return null;
 
   function downloadTemplate() {
     downloadBlob("modelo_vinculo_onu_cliente.csv", buildExcelCsvBlob([TEMPLATE_HEADERS, TEMPLATE_SAMPLE]));
+  }
+
+  function toggleOne(serial: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(serial);
+      else next.delete(serial);
+      return next;
+    });
+  }
+
+  function toggleSection(items: LinkSuggestion[], checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const it of items) {
+        if (checked) next.add(it.serial);
+        else next.delete(it.serial);
+      }
+      return next;
+    });
   }
 
   async function acceptSuggestion(s: LinkSuggestion) {
@@ -93,7 +162,13 @@ export function OltOnuClientLinkModal({ open, onClose, onImported }: Props) {
       if (res.linked > 0) {
         onImported();
         toastOk(pushToast, `${s.client_name} vinculado a ${s.suggested_serial}.`);
-        setResult((prev) => (prev ? { ...prev, suggestions: prev.suggestions.filter((x) => x.serial !== s.serial) } : prev));
+        setResult((prev) => (prev ? { ...prev, linked: prev.linked + res.linked, suggestions: prev.suggestions.filter((x) => x.serial !== s.serial) } : prev));
+        setSelected((prev) => {
+          if (!prev.has(s.serial)) return prev;
+          const next = new Set(prev);
+          next.delete(s.serial);
+          return next;
+        });
       } else {
         toastErr(pushToast, new Error("Não foi possível gravar o vínculo."));
       }
@@ -102,8 +177,46 @@ export function OltOnuClientLinkModal({ open, onClose, onImported }: Props) {
     }
   }
 
+  async function acceptSelected() {
+    const targets = (result?.suggestions ?? []).filter((s) => selected.has(s.serial));
+    if (targets.length === 0) return;
+    setBulkLinking(true);
+    const loadingId = toastLoading(pushToast, `A vincular ${targets.length} ONU(s)…`);
+    try {
+      const res = await apiFetch<ImportResult>("/api/v1/olt/onu-client-links/import", {
+        method: "POST",
+        json: { rows: targets.map((s) => ({ serial: s.suggested_serial, client_name: s.client_name })) },
+      });
+      if (res.linked > 0) onImported();
+      // A resposta em massa refere-se aos seriais reenviados (suggested_serial) — o que não
+      // voltou em not_found/suggestions foi gravado com sucesso.
+      const stillUnresolved = new Set<string>([...(res.not_found ?? []), ...res.suggestions.map((x) => x.serial)]);
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              linked: prev.linked + res.linked,
+              suggestions: prev.suggestions.filter((s) => !selected.has(s.serial) || stillUnresolved.has(s.suggested_serial)),
+            }
+          : prev,
+      );
+      setSelected(new Set());
+      if (res.linked === targets.length) {
+        toastOk(pushToast, `${res.linked} vínculo(s) gravado(s) com sucesso.`);
+      } else {
+        toastInfo(pushToast, `${res.linked} de ${targets.length} vínculo(s) gravado(s). Confira os que ficaram pendentes.`);
+      }
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao vincular selecionados.");
+    } finally {
+      setBulkLinking(false);
+      dismissToast(loadingId);
+    }
+  }
+
   async function handleFile(file: File) {
     setResult(null);
+    setSelected(new Set());
     const rows = await parseOnuClientCsv(file);
     if (rows.length === 0) {
       toastErr(pushToast, new Error("Nenhuma linha válida no CSV. Use o modelo: coluna 1 = serial, coluna 2 = cliente."));
@@ -136,7 +249,7 @@ export function OltOnuClientLinkModal({ open, onClose, onImported }: Props) {
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={() => !importing && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 480 }} onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 860, width: "94vw" }} onMouseDown={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>Vincular ONU ao cliente</h3>
         <p style={{ fontSize: 12, color: "var(--muted)" }}>
           Baixe o modelo, preencha uma linha por ONU (número de série e nome do cliente) e envie de volta. Só são
@@ -170,35 +283,75 @@ export function OltOnuClientLinkModal({ open, onClose, onImported }: Props) {
             </p>
             {result.suggestions.length > 0 ? (
               <div style={{ marginBottom: 10 }}>
-                <p style={{ margin: "0 0 4px", color: "var(--muted)" }}>
-                  Não bateram exato, mas encontramos uma ONU parecida — confira e aceite se for a certa:
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {result.suggestions.map((s) => (
-                    <div
-                      key={s.serial}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "6px 8px",
-                        background: "var(--surface-2, rgba(127,127,127,.08))",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="mono">
-                          {s.serial} → <strong>{s.suggested_serial}</strong>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <p style={{ margin: 0, color: "var(--muted)" }}>
+                    Não bateram exato, mas encontramos uma ONU parecida — marque as certas e vincule em massa, ou aceite uma por uma:
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    disabled={selected.size === 0 || bulkLinking}
+                    onClick={() => void acceptSelected()}
+                  >
+                    {bulkLinking ? "A vincular…" : `Vincular selecionados (${selected.size})`}
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {groupedSuggestions.map(([matchType, items]) => {
+                    const allChecked = items.every((it) => selected.has(it.serial));
+                    const someChecked = !allChecked && items.some((it) => selected.has(it.serial));
+                    return (
+                      <div key={matchType}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "6px 8px",
+                            borderBottom: "1px solid var(--border)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <SectionCheckbox
+                            checked={allChecked}
+                            indeterminate={someChecked}
+                            onChange={(checked) => toggleSection(items, checked)}
+                            label={`${MATCH_TYPE_LABEL[matchType] ?? matchType} (${items.length})`}
+                          />
                         </div>
-                        <div style={{ color: "var(--muted)" }}>
-                          {s.client_name} · {MATCH_TYPE_LABEL[s.match_type] ?? s.match_type}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {items.map((s) => (
+                            <div
+                              key={s.serial}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "6px 8px",
+                                background: "var(--surface-2, rgba(127,127,127,.08))",
+                                borderRadius: 6,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected.has(s.serial)}
+                                onChange={(e) => toggleOne(s.serial, e.target.checked)}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div className="mono">
+                                  {s.serial} → <strong>{s.suggested_serial}</strong>
+                                </div>
+                                <div style={{ color: "var(--muted)" }}>{s.client_name}</div>
+                              </div>
+                              <button type="button" className="btn btn--sm" onClick={() => void acceptSuggestion(s)}>
+                                Usar esta ONU
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                      <button type="button" className="btn btn--sm" onClick={() => void acceptSuggestion(s)}>
-                        Usar esta ONU
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ) : null}

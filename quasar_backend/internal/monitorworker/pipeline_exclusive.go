@@ -96,6 +96,34 @@ func UnlockBngCycle() {
 // ErrBngCycleBusy indica que já corre outro ciclo BNG.
 var ErrBngCycleBusy = errors.New("monitor: ciclo BNG ocupado")
 
+// bngSessionsCycleMu — ciclo dedicado de sessões PPPoE detalhadas (walk completo de logins +
+// GET por índice), separado do ciclo de totais BNG por ser bem mais pesado/lento.
+var bngSessionsCycleMu sync.Mutex
+
+// TryLockBngSessionsCycle tenta adquirir o ciclo de sessões PPPoE sem bloquear.
+func TryLockBngSessionsCycle() bool {
+	return bngSessionsCycleMu.TryLock()
+}
+
+// UnlockBngSessionsCycle liberta o ciclo de sessões PPPoE.
+func UnlockBngSessionsCycle() {
+	bngSessionsCycleMu.Unlock()
+}
+
+// bngInterfacesCycleMu — ciclo dedicado de snapshot IF-MIB para equipamentos BNG (ver
+// TryStartParallelBngInterfaceCycle), separado do ciclo de totais e do de sessões PPPoE.
+var bngInterfacesCycleMu sync.Mutex
+
+// TryLockBngInterfacesCycle tenta adquirir o ciclo de interfaces BNG sem bloquear.
+func TryLockBngInterfacesCycle() bool {
+	return bngInterfacesCycleMu.TryLock()
+}
+
+// UnlockBngInterfacesCycle liberta o ciclo de interfaces BNG.
+func UnlockBngInterfacesCycle() {
+	bngInterfacesCycleMu.Unlock()
+}
+
 // retentionCycleMu evita duas purgas de histórico simultâneas (TryRunHistoryRetention).
 var retentionCycleMu sync.Mutex
 

@@ -746,7 +746,7 @@ export function OltPage() {
           <h1>OLT</h1>
         </div>
         <OltPageTabs active={pageTab} onChange={setPageTab} />
-        <OltReportsTab />
+        <OltReportsTab olts={list.data?.olts ?? []} />
       </>
     );
   }

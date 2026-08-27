@@ -87,9 +87,25 @@ func (s *Server) syncCommercialMonthlyFromOLTSnapshots(ctx context.Context, year
 	return n, nil
 }
 
+// pickOLTHistoryBucket escolhe a granularidade do bucket a partir do período pedido: janelas
+// de até ~1 dia usam minuto (mostra cada coleta real em vez de esconder variação dentro da
+// hora), até ~4 dias usam hora, o resto usa dia — evita gerar milhares de pontos em períodos
+// longos mantendo boa resolução em períodos curtos.
+func pickOLTHistoryBucket(span time.Duration) (bucket string, interval string) {
+	switch {
+	case span <= 26*time.Hour:
+		return "minute", "1 minute"
+	case span <= 4*24*time.Hour:
+		return "hour", "1 hour"
+	default:
+		return "day", "1 day"
+	}
+}
+
 func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	days := 7
-	if d := strings.TrimSpace(r.URL.Query().Get("days")); d != "" {
+	if d := strings.TrimSpace(q.Get("days")); d != "" {
 		if n, err := strconv.Atoi(d); err == nil {
 			days = n
 		}
@@ -99,11 +115,56 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 	default:
 		days = 7
 	}
-	bucket := "day"
-	if days == 1 {
-		bucket = "hour"
+
+	// Período customizado (from/to) tem prioridade sobre o preset `days` — usado pela consulta
+	// livre de período específico na aba Relatórios. Sem from/to, mantém o comportamento antigo
+	// (preset relativo a "agora").
+	now := time.Now().UTC()
+	since := now.Add(-time.Duration(days) * 24 * time.Hour)
+	until := now
+	customRange := false
+	if fromStr := strings.TrimSpace(q.Get("from")); fromStr != "" {
+		t, err := time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", "Parâmetro \"from\" inválido — use formato ISO 8601 (RFC3339).", nil)
+			return
+		}
+		since = t.UTC()
+		customRange = true
 	}
-	since := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	if toStr := strings.TrimSpace(q.Get("to")); toStr != "" {
+		t, err := time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", "Parâmetro \"to\" inválido — use formato ISO 8601 (RFC3339).", nil)
+			return
+		}
+		until = t.UTC()
+		customRange = true
+	}
+	if !until.After(since) {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "Período inválido: \"to\" deve ser depois de \"from\".", nil)
+		return
+	}
+	if since.Before(now.Add(-366 * 24 * time.Hour)) {
+		since = now.Add(-366 * 24 * time.Hour) // teto de sanidade — evita varrer o histórico inteiro por engano
+	}
+
+	var deviceFilter *uuid.UUID
+	if idStr := strings.TrimSpace(q.Get("device_id")); idStr != "" && idStr != "all" {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", "device_id inválido.", nil)
+			return
+		}
+		deviceFilter = &id
+	}
+
+	bucket, interval := pickOLTHistoryBucket(until.Sub(since))
+	if !customRange && days != 1 {
+		// Mantém o comportamento antigo dos presets >1 dia (bucket diário) mesmo que o cálculo
+		// de span desse "hour" para 3 dias — só o preset 24h ganha a granularidade fina nova.
+		bucket, interval = "day", "1 day"
+	}
 
 	rows, err := s.DB().Query(r.Context(), `
 		WITH per_device AS (
@@ -113,14 +174,15 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 				max(s.onu_online) AS onu_online,
 				max(s.onu_offline) AS onu_offline
 			FROM olt_onu_samples s
-			WHERE s.recorded_at >= $2
+			WHERE s.recorded_at >= $2 AND s.recorded_at < $3
+				AND ($4::uuid IS NULL OR s.device_id = $4::uuid)
 			GROUP BY s.device_id, bucket
 		)
 		SELECT d.id, d.description, pd.bucket, pd.onu_total, pd.onu_online, pd.onu_offline
 		FROM per_device pd
 		JOIN devices d ON d.id = pd.device_id
 		ORDER BY d.description, pd.bucket
-	`, bucket, since)
+	`, bucket, since, until, deviceFilter)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -167,20 +229,18 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 		return fmt.Sprint(series[i]["description"]) < fmt.Sprint(series[j]["description"])
 	})
 
-	interval := "1 day"
-	if bucket == "hour" {
-		interval = "1 hour"
-	}
 	aggRows, err := s.DB().Query(r.Context(), `
 		WITH bucket_series AS (
 			SELECT generate_series(
 				date_trunc($1, $2::timestamptz),
-				date_trunc($1, now() AT TIME ZONE 'UTC'),
-				$3::interval
+				date_trunc($1, $3::timestamptz),
+				$4::interval
 			) AS bucket_start
 		),
 		device_ids AS (
-			SELECT DISTINCT device_id FROM olt_onu_samples WHERE recorded_at >= $2
+			SELECT DISTINCT device_id FROM olt_onu_samples
+			WHERE recorded_at >= $2 AND recorded_at < $3
+				AND ($5::uuid IS NULL OR device_id = $5::uuid)
 		),
 		per_device_bucket AS (
 			SELECT DISTINCT ON (bs.bucket_start, di.device_id)
@@ -193,14 +253,14 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 			CROSS JOIN device_ids di
 			INNER JOIN olt_onu_samples s ON s.device_id = di.device_id
 				AND s.recorded_at >= $2
-				AND s.recorded_at < bs.bucket_start + $3::interval
+				AND s.recorded_at < bs.bucket_start + $4::interval
 			ORDER BY bs.bucket_start, di.device_id, s.recorded_at DESC
 		)
 		SELECT bucket, COALESCE(SUM(onu_total), 0), COALESCE(SUM(onu_online), 0), COALESCE(SUM(onu_offline), 0)
 		FROM per_device_bucket
 		GROUP BY bucket
 		ORDER BY bucket
-	`, bucket, since, interval)
+	`, bucket, since, until, interval, deviceFilter)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -232,14 +292,21 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 			SELECT DISTINCT ON (s.device_id)
 				s.onu_total, s.onu_online, s.onu_offline
 			FROM olt_onu_samples s
+			WHERE $1::uuid IS NULL OR s.device_id = $1::uuid
 			ORDER BY s.device_id, s.recorded_at DESC
 		) sub
-	`).Scan(&fleetTotal, &fleetOn, &fleetOff)
+	`, deviceFilter).Scan(&fleetTotal, &fleetOn, &fleetOff)
 
+	deviceIDResp := "all"
+	if deviceFilter != nil {
+		deviceIDResp = deviceFilter.String()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"days":      days,
 		"bucket":    bucket,
 		"since":     since.Format(time.RFC3339),
+		"until":     until.Format(time.RFC3339),
+		"device_id": deviceIDResp,
 		"series":    series,
 		"aggregate": map[string]any{"points": aggPts},
 		"current_fleet": map[string]any{

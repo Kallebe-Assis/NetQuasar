@@ -218,6 +218,7 @@ export function HubsoftConsultPage() {
               onFetchFinancial={fetchClientFinancial}
               attendanceEnabled
               workOrderEnabled
+              prefetchExtras
             />
           </>
         ) : (

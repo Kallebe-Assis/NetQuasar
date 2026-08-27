@@ -4361,6 +4361,8 @@ h3 .info-hint {
 }
 .integration-detail__rows--service-priority {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
 }
 @media (max-width: 720px) {
   .integration-detail__rows--service-priority {
@@ -6896,6 +6898,7 @@ h3 .info-hint {
   position: relative;
   width: 100%;
   max-width: 640px;
+  margin-top: 5px;
 }
 .dashboard-page__head {
   margin-bottom: 14px;
@@ -6904,7 +6907,7 @@ h3 .info-hint {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 6px);
   background: var(--panel);
@@ -8807,6 +8810,204 @@ details.collapsible-section .collapsible-section__body {
   gap: 6px;
   margin-top: 10px;
   font-size: 12px;
+}
+
+/* Modal "Detalhes da ONU" — cartões visuais em vez de tabela crua de rótulo/valor. */
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.btn-link:hover:not(:disabled) {
+  color: var(--accent-ink, var(--accent));
+}
+.btn-link:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+.onu-report-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel2);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.onu-report-card--ok {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  background: color-mix(in srgb, var(--ok) 8%, var(--panel2));
+}
+.onu-report-card--err {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  background: color-mix(in srgb, var(--err) 10%, var(--panel2));
+}
+.onu-report-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+.onu-report-card__icon {
+  display: inline-flex;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.onu-report-card--err .onu-report-card__icon {
+  color: var(--err);
+}
+.onu-report-card--ok .onu-report-card__icon {
+  color: var(--ok);
+}
+.onu-report-alertmsg {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--err);
+  line-height: 1.5;
+}
+
+.onu-report-linkstatus {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.onu-report-linkstatus__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  padding: 4px 2px;
+}
+
+.onu-report-gauge {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.onu-report-gauge__value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.onu-report-gauge__track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+  overflow: hidden;
+}
+.onu-report-gauge__fill {
+  height: 100%;
+  border-radius: 999px;
+}
+.onu-report-gauge__bands {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.onu-report-gauge__label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.onu-report-inforow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.onu-report-inforow__icon {
+  color: var(--accent);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.onu-report-inforow__label {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.onu-report-inforow__value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onu-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 4px;
+}
+.onu-report-col__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+.onu-report-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.onu-report-kv:last-child {
+  border-bottom: none;
+}
+.onu-report-kv__label {
+  color: var(--muted);
+}
+.onu-report-kv__value {
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-word;
+}
+
+.onu-report-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.onu-report-param {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--accent);
+}
+.onu-report-param__label {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.onu-report-param__value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 

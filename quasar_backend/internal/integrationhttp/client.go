@@ -22,6 +22,35 @@ const maxResponsePreview = 2 * 1024 * 1024
 
 var pathParamRe = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 
+// sharedTransport/sharedTransportInsecure — reutilizados entre chamadas (em vez de um
+// *http.Transport novo por requisição) para que o pool de conexões TCP/TLS keep-alive do Go
+// funcione de verdade. Sem isso, toda chamada de integração (login, busca, atendimento, O.S.,
+// financeiro…) pagava handshake TCP+TLS do zero mesmo para chamadas seguidas ao mesmo host —
+// custo real que se soma quando uma tela dispara várias chamadas (ex.: HubSoft) em sequência
+// ou em paralelo. Dois transports fixos (seguro/inseguro) cobrem o único parâmetro que varia
+// por integração (TLSInsecure); timeout continua por-chamada via http.Client.Timeout, que pode
+// diferir livremente entre clientes que partilham o mesmo *http.Transport.
+var (
+	sharedTransport = &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	sharedTransportInsecure = &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+	}
+)
+
+func sharedTransportFor(insecure bool) *http.Transport {
+	if insecure {
+		return sharedTransportInsecure
+	}
+	return sharedTransport
+}
+
 type ParamKV struct {
 	Key     string `json:"key"`
 	Value   string `json:"value"`
@@ -338,10 +367,8 @@ func Execute(ctx context.Context, integ IntegrationConfig, req RequestConfig) Ru
 		timeout = 15 * time.Second
 	}
 	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: integ.TLSInsecure},
-		},
+		Timeout:   timeout,
+		Transport: sharedTransportFor(integ.TLSInsecure),
 	}
 
 	resp, err := client.Do(httpReq)

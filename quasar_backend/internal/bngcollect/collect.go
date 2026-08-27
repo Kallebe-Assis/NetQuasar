@@ -309,6 +309,133 @@ func StoreSessionSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid
 	return err
 }
 
+// SessionsCollectionComplete indica se um CollectSessionsWalk enumerou mesmo TODOS os logins
+// (walk sem erro e sem truncar por MaxRows) — só quando isto é verdade é seguro tratar "login
+// que não veio nesta leitura" como "ficou offline" (ver SyncKnownLogins). Uma leitura truncada
+// ou com falha continua útil para MergeSessionSnapshot (o que veio, actualiza), mas NÃO deve
+// alimentar SyncKnownLogins, sob pena de marcar como offline logins que só não couberam nesta
+// volta (ou faltaram por um erro pontual de SNMP) — exactamente o cenário que a coleta
+// periódica deve evitar.
+func SessionsCollectionComplete(out CollectOutput) bool {
+	fr, ok := out.Fields["access_login"]
+	if !ok || !fr.OK {
+		return false
+	}
+	return !fr.Truncated
+}
+
+// MergeSessionSnapshot funde uma leitura de sessões com o snapshot mais recente já gravado:
+// sessões encontradas nesta leitura são actualizadas (ou inseridas, se novas); sessões do
+// snapshot anterior que NÃO vieram nesta leitura ficam exactamente como estavam — nunca são
+// apagadas nem alteradas só por não terem sido recolhidas desta vez. Isto evita que uma coleta
+// periódica parcial (walk truncado, timeout a meio dos GETs de detalhe) faça "desaparecer"
+// logins que continuam online. Chave de correspondência: índice SNMP primeiro, login como
+// reserva — mesmo critério já usado por UpsertSessionInLatestSnapshot.
+func MergeSessionSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, sessions []SessionRow, source, stripSuffix string) (int, error) {
+	if pool == nil {
+		return 0, fmt.Errorf("pool indisponível")
+	}
+	if len(sessions) == 0 {
+		return 0, nil
+	}
+
+	var snapID int64
+	var raw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT id, data::text FROM bng_session_snapshots
+		WHERE device_id=$1 ORDER BY captured_at DESC LIMIT 1
+	`, deviceID).Scan(&snapID, &raw)
+	if err != nil && err != pgx.ErrNoRows {
+		return 0, err
+	}
+
+	existing := parseSessionRowsFromSnapshotJSON(raw)
+	byIndex := make(map[string]int, len(existing))
+	byLogin := make(map[string]int, len(existing))
+	for i, s := range existing {
+		if idx := strings.TrimSpace(s.Index); idx != "" {
+			byIndex[idx] = i
+		}
+		if lg := strings.TrimSpace(NormalizeSNMPLoginValue(s.Login, stripSuffix)); lg != "" {
+			byLogin[strings.ToLower(lg)] = i
+		}
+	}
+
+	merged := existing
+	for _, row := range sessions {
+		row.Login = strings.TrimSpace(NormalizeSNMPLoginValue(row.Login, stripSuffix))
+		idx := strings.TrimSpace(row.Index)
+		loginKey := strings.ToLower(row.Login)
+		pos := -1
+		if idx != "" {
+			if p, ok := byIndex[idx]; ok {
+				pos = p
+			}
+		}
+		if pos < 0 && loginKey != "" {
+			if p, ok := byLogin[loginKey]; ok {
+				pos = p
+			}
+		}
+		if pos >= 0 {
+			merged[pos] = row
+			continue
+		}
+		merged = append(merged, row)
+		newPos := len(merged) - 1
+		if idx != "" {
+			byIndex[idx] = newPos
+		}
+		if loginKey != "" {
+			byLogin[loginKey] = newPos
+		}
+	}
+
+	if err == pgx.ErrNoRows {
+		return len(merged), StoreSessionSnapshot(ctx, pool, deviceID, merged, source)
+	}
+
+	payload := map[string]any{"sessions": merged, "source": source, "count": len(merged)}
+	b, mErr := json.Marshal(payload)
+	if mErr != nil {
+		return 0, mErr
+	}
+	_, err = pool.Exec(ctx, `
+		UPDATE bng_session_snapshots
+		SET data=$1::jsonb, session_count=$2, captured_at=now()
+		WHERE id=$3
+	`, b, len(merged), snapID)
+	return len(merged), err
+}
+
+// CollectAndMergeSessionsPeriodic — versão do "coletar sessões" adequada a um ciclo automático:
+// funde (nunca substitui) o snapshot existente e só sincroniza o inventário online/offline
+// (SyncKnownLogins) quando a leitura desta volta enumerou mesmo todos os logins (ver
+// SessionsCollectionComplete) — uma leitura parcial ainda actualiza o que foi visto, mas não
+// mexe no que não foi.
+func CollectAndMergeSessionsPeriodic(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (mergedCount int, syncedOnlineOffline bool, err error) {
+	profile := LoadGlobalProfile(ctx, pool)
+	out, sessions := CollectSessionsWalk(ctx, host, community, profile, timeout, nil)
+	if len(sessions) == 0 {
+		if out.Status.Message != "" {
+			return 0, false, fmt.Errorf("%s", out.Status.Message)
+		}
+		return 0, false, nil
+	}
+	stripSuffix := profile.Options.PPPoELoginStripSuffix
+	n, mErr := MergeSessionSnapshot(ctx, pool, deviceID, sessions, "snmp_access_table_periodic", stripSuffix)
+	if mErr != nil {
+		return 0, false, mErr
+	}
+	if SessionsCollectionComplete(out) {
+		if sErr := SyncKnownLogins(ctx, pool, deviceID, sessions, stripSuffix); sErr != nil {
+			return n, false, sErr
+		}
+		return n, true, nil
+	}
+	return n, false, nil
+}
+
 // UpsertSessionInLatestSnapshot actualiza ou insere uma sessão no snapshot mais recente do BNG.
 func UpsertSessionInLatestSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, row SessionRow, stripSuffix string) error {
 	if pool == nil {

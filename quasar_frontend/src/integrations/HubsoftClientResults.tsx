@@ -112,12 +112,6 @@ function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
           <span className="integration-consult-card__value">{s.status_text}</span>
         </div>
       ) : null}
-      {s.last_connected_at ? (
-        <div className="integration-consult-card__service-cell">
-          <span className="integration-consult-card__label">Última conexão</span>
-          <span className="mono integration-consult-card__value">{s.last_connected_at}</span>
-        </div>
-      ) : null}
       {s.last_disconnected_at ? (
         <div className="integration-consult-card__service-cell">
           <span className="integration-consult-card__label">Última desconexão</span>
@@ -128,12 +122,6 @@ function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
         <div className="integration-consult-card__service-cell">
           <span className="integration-consult-card__label">Último IPv4</span>
           <span className="mono integration-consult-card__value">{s.last_ipv4}</span>
-        </div>
-      ) : null}
-      {s.last_nas_ip ? (
-        <div className="integration-consult-card__service-cell">
-          <span className="integration-consult-card__label">NAS (concentrador)</span>
-          <span className="mono integration-consult-card__value">{s.last_nas_ip}</span>
         </div>
       ) : null}
     </>
@@ -167,14 +155,20 @@ export function clientStableKey(c: ClientCard, index: number): string {
   return [c.id, c.code, c.document, c.name, String(index)].filter(Boolean).join("|");
 }
 
+function digitsOnly(s?: string): string {
+  return (s ?? "").replace(/\D+/g, "");
+}
+
 export function clientSearchBlob(c: ClientCard): string {
   const parts = [
     c.name,
     c.trade_name,
     c.code,
     c.document,
+    digitsOnly(c.document),
     c.email,
     c.phone,
+    digitsOnly(c.phone),
     c.ipv4,
     c.address,
     c.status,
@@ -457,6 +451,7 @@ const SERVICE_PRIORITY_KEYS = [
   "senha",
   "status",
   "status_prefixo",
+  "status_txt",
   "tecnologia",
   "tipo_cobranca",
   "velocidade_download",
@@ -1016,6 +1011,7 @@ function ClientDetailModal({
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
+  prefetchExtras,
 }: {
   client: ClientCard;
   loading?: boolean;
@@ -1027,6 +1023,10 @@ function ClientDetailModal({
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
+  // Busca atendimentos/ordens de serviço em paralelo assim que o modal abre, em vez de só ao
+  // clicar na aba — reduz a espera percebida ao trocar de aba. Opt-in (default false) para não
+  // mudar o comportamento do IXC, que continua a buscar só ao clicar na aba.
+  prefetchExtras?: boolean;
 }) {
   const detailTabs = useMemo(() => buildDetailTabs(client.raw), [client.raw]);
   const tabs = useMemo(() => {
@@ -1072,22 +1072,24 @@ function ClientDetailModal({
   }, [activeTab, onFetchFinancial, financial, financialLoading, client]);
 
   useEffect(() => {
-    if (activeTab !== "atendimentos" || !onFetchAttendance || attendance || attendanceLoading) return;
+    if (!onFetchAttendance || attendance || attendanceLoading) return;
+    if (!prefetchExtras && activeTab !== "atendimentos") return;
     setAttendanceLoading(true);
     onFetchAttendance(client)
       .then((r) => setAttendance(r))
       .catch((e) => setAttendance({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
       .finally(() => setAttendanceLoading(false));
-  }, [activeTab, onFetchAttendance, attendance, attendanceLoading, client]);
+  }, [activeTab, onFetchAttendance, attendance, attendanceLoading, client, prefetchExtras]);
 
   useEffect(() => {
-    if (activeTab !== "ordens" || !onFetchWorkOrders || workOrders || workOrderLoading) return;
+    if (!onFetchWorkOrders || workOrders || workOrderLoading) return;
+    if (!prefetchExtras && activeTab !== "ordens") return;
     setWorkOrderLoading(true);
     onFetchWorkOrders(client)
       .then((r) => setWorkOrders(r))
       .catch((e) => setWorkOrders({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
       .finally(() => setWorkOrderLoading(false));
-  }, [activeTab, onFetchWorkOrders, workOrders, workOrderLoading, client]);
+  }, [activeTab, onFetchWorkOrders, workOrders, workOrderLoading, client, prefetchExtras]);
 
   useEffect(() => {
     if (activeTab !== "logins" || !onFetchLogins || logins || loginLoading) return;
@@ -1197,6 +1199,7 @@ export function HubsoftClientResults({
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
+  prefetchExtras,
 }: {
   clients: ClientCard[];
   message?: string;
@@ -1210,6 +1213,7 @@ export function HubsoftClientResults({
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
+  prefetchExtras?: boolean;
 }) {
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1307,6 +1311,7 @@ export function HubsoftClientResults({
           attendanceEnabled={attendanceEnabled}
           workOrderEnabled={workOrderEnabled}
           loginEnabled={loginEnabled}
+          prefetchExtras={prefetchExtras}
         />
       ) : null}
     </>

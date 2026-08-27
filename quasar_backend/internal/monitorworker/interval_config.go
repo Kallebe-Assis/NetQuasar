@@ -40,6 +40,10 @@ type intervalConfig struct {
 	// baseline/pon_status/onu_counts), independente de pipeline_cycle_seconds. Ver
 	// TryStartParallelOltCycle.
 	OltBaselineParallelSeconds int
+	// BngSessionsParallelSeconds — intervalo do ciclo dedicado de sessões PPPoE detalhadas
+	// (walk completo de logins), independente do ciclo leve de totais BNG. Ver
+	// TryStartParallelBngSessionsCycle.
+	BngSessionsParallelSeconds int
 }
 
 // ResolveTelemetrySeconds devolve segundos de telemetria a usar (evita COALESCE em SQL por compatibilidade).
@@ -76,7 +80,8 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			COALESCE(olt_full_collect_schedule, ''),
 			COALESCE(sweep_concurrency, 0),
 			COALESCE(history_retention_days, 90),
-			COALESCE(olt_baseline_parallel_seconds, 30)
+			COALESCE(olt_baseline_parallel_seconds, 30),
+			COALESCE(bng_sessions_parallel_seconds, 1800)
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
@@ -84,7 +89,7 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		&c.OltOnuTelnetTimeoutMs,
 		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel,
 		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule,
-		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds); err != nil {
+		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds, &c.BngSessionsParallelSeconds); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)
@@ -149,6 +154,11 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 	if c.OltBaselineParallelSeconds < 15 {
 		// Piso de segurança: evita martelar SNMP nas OLTs por um valor digitado por engano.
 		c.OltBaselineParallelSeconds = 15
+	}
+	if c.BngSessionsParallelSeconds < 300 {
+		// Piso de segurança: um walk completo de sessões PPPoE é pesado — evita repeti-lo
+		// com mais frequência que a cada 5 minutos mesmo que alguém digite um valor menor.
+		c.BngSessionsParallelSeconds = 300
 	}
 	return c, nil
 }

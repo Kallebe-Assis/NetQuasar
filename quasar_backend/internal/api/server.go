@@ -532,10 +532,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/auth/logs", s.bngAuthLogs)
 			r.Get("/traffic/users", s.bngTrafficUsers)
 			r.Get("/stats/summary", s.bngStatsSummary)
+			r.Get("/devices/{id}/uplinks", s.listBngUplinks)
+			r.Get("/devices/{id}/uplinks/history", s.bngUplinksHistory)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("bng.collect", "*"))
 				r.Post("/devices/{id}/sessions/collect", s.bngDeviceSessionsCollect)
 				r.Post("/devices/{id}/collect", s.bngDeviceCollect)
+				r.Post("/devices/{id}/uplinks", s.createBngUplink)
+				r.Patch("/devices/{id}/uplinks/{uplinkId}", s.updateBngUplink)
+				r.Delete("/devices/{id}/uplinks/{uplinkId}", s.deleteBngUplink)
 			})
 		})
 
@@ -595,6 +600,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/dashboard/analytics", s.dashboardAnalytics)
 		r.Get("/dashboard/data-gaps", s.dashboardDataGaps)
 		r.Get("/dashboard/olt-capacity", s.dashboardOltCapacity)
+		r.Get("/system/health-panel", s.systemHealthPanel)
 
 		r.Route("/fleet", func(r chi.Router) {
 			r.Get("/dashboard", s.fleetDashboard)

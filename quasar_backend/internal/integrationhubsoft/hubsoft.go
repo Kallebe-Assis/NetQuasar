@@ -876,9 +876,9 @@ func mapClientItem(it any) (ClientCard, bool) {
 		Code:      pickStr(m, "codigo_cliente", "id_cliente"),
 		Name:      pickStr(m, "nome_razaosocial", "nome"),
 		TradeName: pickStr(m, "nome_fantasia"),
-		Document:  pickStr(m, "cpf_cnpj", "cnpj_cpf"),
+		Document:  formatCPFCNPJ(pickStr(m, "cpf_cnpj", "cnpj_cpf")),
 		Email:     pickStr(m, "email_principal", "email"),
-		Phone:     pickStr(m, "telefone_primario", "telefone"),
+		Phone:     formatPhoneBR(pickStr(m, "telefone_primario", "telefone")),
 		Status:    pickStr(m, "status_cadastro", "status"),
 		Details:   map[string]string{},
 	}
@@ -1280,6 +1280,46 @@ func parseBRFloat(s string) float64 {
 
 // --- helpers pequenos (deliberadamente próprios deste pacote — não importa
 // internal/integrationconsumer para manter a Hubsoft isolada do código do IXC) -------------
+
+// digitsOnly mantém só os dígitos de uma string — usado para formatar CPF/CNPJ e telefone.
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// formatCPFCNPJ aplica a máscara brasileira padrão: CPF 000.000.000-00 (11 dígitos) ou
+// CNPJ 00.000.000/0000-00 (14 dígitos). Fora disso (já formatado de outro jeito, incompleto
+// etc.) devolve o valor original sem mexer.
+func formatCPFCNPJ(raw string) string {
+	d := digitsOnly(raw)
+	switch len(d) {
+	case 11:
+		return d[0:3] + "." + d[3:6] + "." + d[6:9] + "-" + d[9:11]
+	case 14:
+		return d[0:2] + "." + d[2:5] + "." + d[5:8] + "/" + d[8:12] + "-" + d[12:14]
+	default:
+		return raw
+	}
+}
+
+// formatPhoneBR aplica "(DD) NNNN-NNNN" (fixo, 10 dígitos) ou "(DD) NNNNN-NNNN" (celular,
+// 11 dígitos). Fora disso devolve o valor original.
+func formatPhoneBR(raw string) string {
+	d := digitsOnly(raw)
+	switch len(d) {
+	case 10:
+		return "(" + d[0:2] + ") " + d[2:6] + "-" + d[6:10]
+	case 11:
+		return "(" + d[0:2] + ") " + d[2:7] + "-" + d[7:11]
+	default:
+		return raw
+	}
+}
 
 func pickStr(m map[string]any, keys ...string) string {
 	for _, k := range keys {

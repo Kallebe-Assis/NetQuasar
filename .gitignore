@@ -42,3 +42,7 @@ Thumbs.db
 
 # Scripts locais de commit/push (não versionados)
 push_github.bat
+
+# Arquivos soltos que não pertencem ao repositório (entraram por engano)
+/Certified-postgres.crt
+/winget

@@ -77,11 +77,11 @@ func extractPPPoEFromInterfaceJSON(raw []byte) []map[string]any {
 			continue
 		}
 		out = append(out, map[string]any{
-			"name":              name,
-			"login":             pppoeLoginFromIface(name),
-			"oper_status":       firstString(m, "oper_status", "oper_status_label"),
-			"in_octets":         toUint64(m["in_octets"]),
-			"out_octets":        toUint64(m["out_octets"]),
+			"name":        name,
+			"login":       pppoeLoginFromIface(name),
+			"oper_status": firstString(m, "oper_status", "oper_status_label"),
+			"in_octets":   toUint64(m["in_octets"]),
+			"out_octets":  toUint64(m["out_octets"]),
 		})
 	}
 	return out
@@ -330,9 +330,9 @@ func (s *Server) bngStatsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bng_devices":     len(devices),
-		"sessions_total":  len(sessions),
-		"sessions_online": online,
+		"bng_devices":      len(devices),
+		"sessions_total":   len(sessions),
+		"sessions_online":  online,
 		"sessions_offline": len(sessions) - online,
 	})
 }
@@ -356,12 +356,12 @@ func (s *Server) bngTrafficUsers(w http.ResponseWriter, r *http.Request) {
 	rows := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {
 		rows = append(rows, map[string]any{
-			"login":          s.Login,
-			"device_ip":      s.DeviceIP,
-			"in_octets":      s.InOctets,
-			"out_octets":     s.OutOctets,
-			"total_octets":   s.InOctets + s.OutOctets,
-			"collected_at":   s.CollectedAt,
+			"login":        s.Login,
+			"device_ip":    s.DeviceIP,
+			"in_octets":    s.InOctets,
+			"out_octets":   s.OutOctets,
+			"total_octets": s.InOctets + s.OutOctets,
+			"collected_at": s.CollectedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": rows})
@@ -523,12 +523,12 @@ func (s *Server) bngDeviceOverview(w http.ResponseWriter, r *http.Request) {
 		"telemetry_collected_at": telAt,
 		"fields":                 fields,
 		"latest_stats": map[string]any{
-			"collected_at":       statsAt,
-			"total_online":       total,
-			"pppoe_online":       pppoe,
-			"ipv4_online":        ipv4,
-			"ipv6_online":        ipv6,
-			"dual_stack_online":  dual,
+			"collected_at":      statsAt,
+			"total_online":      total,
+			"pppoe_online":      pppoe,
+			"ipv4_online":       ipv4,
+			"ipv6_online":       ipv6,
+			"dual_stack_online": dual,
 		},
 	})
 }
@@ -555,13 +555,13 @@ func (s *Server) bngDeviceSubscribersLive(w http.ResponseWriter, r *http.Request
 	out := bngcollect.CollectPeriodic(ctx, strings.TrimSpace(dev.IP), comm, profile, 20*time.Second)
 	st := bngcollect.ExtractStatsTotals(out)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"device_id":          id,
-		"fetched_at":         time.Now().UTC(),
-		"total_online":       st.TotalOnline,
-		"pppoe_online":       st.PPPoEOnline,
-		"ipv4_online":        st.IPv4Online,
-		"ipv6_online":        st.IPv6Online,
-		"dual_stack_online":  st.DualStackOnline,
+		"device_id":         id,
+		"fetched_at":        time.Now().UTC(),
+		"total_online":      st.TotalOnline,
+		"pppoe_online":      st.PPPoEOnline,
+		"ipv4_online":       st.IPv4Online,
+		"ipv6_online":       st.IPv6Online,
+		"dual_stack_online": st.DualStackOnline,
 	})
 }
 
@@ -875,12 +875,22 @@ func (s *Server) runBngSessionsCollect(deviceID uuid.UUID, host, comm string) {
 		s.bngCollectProgress.finish(deviceID, 0, out.Status.Message)
 		return
 	}
-	if err := bngcollect.StoreSessionSnapshot(ctx, s.DB(), deviceID, sessions, "snmp_access_table"); err != nil {
+	// Funde com o snapshot existente em vez de o substituir por inteiro — se esta leitura
+	// ficou incompleta (walk truncado, timeout a meio dos detalhes), os logins que não
+	// vieram desta vez continuam exactamente como estavam, em vez de "desaparecerem".
+	if _, err := bngcollect.MergeSessionSnapshot(ctx, s.DB(), deviceID, sessions, "snmp_access_table", profile.Options.PPPoELoginStripSuffix); err != nil {
 		s.bngCollectProgress.finish(deviceID, 0, err.Error())
 		return
 	}
-	if err := bngcollect.SyncKnownLogins(ctx, s.DB(), deviceID, sessions, profile.Options.PPPoELoginStripSuffix); err != nil {
-		s.Log.Warn().Err(err).Str("device_id", deviceID.String()).Msg("bng sync known logins")
+	// SyncKnownLogins marca ausentes como offline — só é seguro fazer isso quando a leitura
+	// enumerou mesmo todos os logins (ver SessionsCollectionComplete); com uma leitura
+	// parcial, os que faltaram podem só não ter sido lidos, não ter saído do ar.
+	if bngcollect.SessionsCollectionComplete(out) {
+		if err := bngcollect.SyncKnownLogins(ctx, s.DB(), deviceID, sessions, profile.Options.PPPoELoginStripSuffix); err != nil {
+			s.Log.Warn().Err(err).Str("device_id", deviceID.String()).Msg("bng sync known logins")
+		}
+	} else {
+		s.Log.Info().Str("device_id", deviceID.String()).Msg("bng sessions: leitura parcial — inventário online/offline não sincronizado nesta volta")
 	}
 	_ = bngcollect.CollectAndStoreInfrastructure(ctx, s.DB(), deviceID, host, comm, 2*time.Minute, profile.Options)
 	_ = out
