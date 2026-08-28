@@ -6,6 +6,7 @@ import {
   Cable,
   ChevronLeft,
   ChevronRight,
+  Database,
   Eye,
   Filter,
   KeyRound,
@@ -28,6 +29,7 @@ import { PageCountPill } from "../components/PageCountPill";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { BngOverviewPanel } from "../components/BngOverviewPanel";
 import { BngUplinksPanel } from "../components/BngUplinksPanel";
+import { BngCgnatPoolsTab } from "./bng/BngCgnatPoolsTab";
 import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
 import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
@@ -338,11 +340,12 @@ type TrafficRateSnapshot = {
   sampled_at?: string;
 };
 
-type BngTab = "overview" | "relatorio" | "vlans" | "interfaces" | "auth" | "sessions";
+type BngTab = "overview" | "relatorio" | "cgnat_pools" | "vlans" | "interfaces" | "auth" | "sessions";
 
 const BNG_TABS: Array<{ id: BngTab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "relatorio", label: "Relatório", icon: BarChart3 },
+  { id: "cgnat_pools", label: "CGNAT e Pools", icon: Database },
   { id: "vlans", label: "VLANs", icon: Tags },
   { id: "interfaces", label: "Interfaces", icon: Cable },
   { id: "auth", label: "Autenticações", icon: KeyRound },
@@ -587,14 +590,6 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
     ) : null;
   }
   const aaa = infra.aaa_scalars;
-  const poolTotals = (infra.ipv4_pools ?? []).reduce(
-    (acc, p) => ({
-      total: acc.total + (p.total_ips ?? 0),
-      used: acc.used + (p.used_ips ?? 0),
-      idle: acc.idle + (p.idle_ips ?? 0),
-    }),
-    { total: 0, used: 0, idle: 0 },
-  );
 
   return (
     <>
@@ -618,84 +613,6 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
           </div>
         ))}
       </div>
-
-      {poolTotals.total > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Pools IPv4 (totais)</h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>IPs totais</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{poolTotals.total.toLocaleString("pt-PT")}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>Em uso</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{poolTotals.used.toLocaleString("pt-PT")}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>Ociosos</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{poolTotals.idle.toLocaleString("pt-PT")}</div>
-            </div>
-          </div>
-          {(infra.ipv4_pools ?? []).length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Pool</th>
-                    <th>VRF</th>
-                    <th>Total</th>
-                    <th>Usados</th>
-                    <th>Ociosos</th>
-                    <th>% uso</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {infra.ipv4_pools!.map((p) => (
-                    <tr key={`${p.index}-${p.name}`}>
-                      <td className="mono">{p.name}</td>
-                      <td className="mono">{p.vrf || "—"}</td>
-                      <td>{p.total_ips?.toLocaleString("pt-PT") ?? "—"}</td>
-                      <td>{p.used_ips?.toLocaleString("pt-PT") ?? "—"}</td>
-                      <td>{p.idle_ips?.toLocaleString("pt-PT") ?? "—"}</td>
-                      <td>{p.used_percent != null ? `${p.used_percent}%` : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {(infra.ipv6_pools ?? []).length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Pools IPv6</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Pool</th>
-                  <th>Endereços %</th>
-                  <th>PD %</th>
-                  <th>Usados / total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {infra.ipv6_pools!.map((p) => (
-                  <tr key={`${p.index}-${p.name}`}>
-                    <td className="mono">{p.name}</td>
-                    <td>{p.address_used_percent != null ? `${p.address_used_percent}%` : "—"}</td>
-                    <td>{p.pd_prefix_used_percent != null ? `${p.pd_prefix_used_percent}%` : "—"}</td>
-                    <td>
-                      {p.address_used ?? "—"} / {p.address_total ?? "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {(infra.radius_servers ?? []).length > 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 16 }}>
@@ -723,27 +640,6 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-      )}
-
-      {infra.cgn && Object.values(infra.cgn).some(Boolean) && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>CGN / NAT</h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-            {[
-              { label: "Sessões actuais", value: infra.cgn.current_sessions },
-              { label: "Licença total (M)", value: infra.cgn.license_total_m },
-              { label: "Licença usada (M)", value: infra.cgn.license_used_m },
-              { label: "Licença livre (M)", value: infra.cgn.license_free_m },
-              { label: "Throughput up (bits)", value: infra.cgn.bit_throughput_up },
-              { label: "Throughput down (bits)", value: infra.cgn.bit_throughput_down },
-            ].map((c) => (
-              <div key={c.label}>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{c.label}</div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{c.value ?? "—"}</div>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -887,37 +783,6 @@ function BngInfrastructureReport({ infra, capturedAt, note }: { infra?: BngInfra
         </div>
       )}
 
-      {(infra.cgn_public_pools ?? []).length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Pools públicos CGNAT</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Pool</th>
-                  <th>Instância</th>
-                  <th>Range público</th>
-                  <th>% uso</th>
-                </tr>
-              </thead>
-              <tbody>
-                {infra.cgn_public_pools!.map((p) => (
-                  <tr key={p.index ?? `${p.pool_name}-${p.start_addr}`}>
-                    <td className="mono">{p.pool_name || "—"}</td>
-                    <td>{p.instance || "—"}</td>
-                    <td className="mono">
-                      {p.start_addr && p.end_addr && p.start_addr !== p.end_addr
-                        ? `${p.start_addr} – ${p.end_addr}`
-                        : p.start_addr || p.end_addr || "—"}
-                    </td>
-                    <td>{p.usage_percent != null ? `${p.usage_percent}%` : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -1022,39 +887,6 @@ function BngSessionReportPanel({ data, loading }: { data?: SessionReportResponse
         capturedAt={data?.infrastructure_captured_at}
         note={data?.infrastructure_note}
       />
-
-      {(data?.cgnat_summary ?? []).length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 6px", fontSize: 15 }}>CGNAT — IP privado × pool público</h3>
-          <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
-            O IP por sessão em hwAccessIPAddress é o endereço WAN do cliente (privado em CGNAT). O mapeamento exacto
-            privado→público por sessão não existe na HUAWEI-AAA-MIB; abaixo são listados os pools públicos CGNAT
-            (HUAWEI-CGN-MIB) associados a cada faixa privada.
-          </p>
-          <div className="table-wrap" style={{ maxHeight: 360, overflow: "auto" }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>IP privado / WAN</th>
-                  <th>Pool / IP público</th>
-                  <th>Pool</th>
-                  <th>Sessões</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data!.cgnat_summary!.map((row) => (
-                  <tr key={row.private_ip}>
-                    <td className="mono">{row.private_ip || "—"}</td>
-                    <td className="mono">{row.public_hint || "—"}</td>
-                    <td>{row.pool_name || (row.cgnat ? "CGNAT" : "—")}</td>
-                    <td>{row.session_count?.toLocaleString("pt-PT") ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -1137,6 +969,9 @@ function BngStatsMiniChart({
               const n = value == null ? null : Number(value);
               return [n == null || !Number.isFinite(n) ? "—" : n, label];
             }}
+            contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+            itemStyle={{ color: "var(--text)" }}
+            labelStyle={{ color: "var(--text)" }}
           />
           <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} connectNulls={false} />
         </LineChart>
@@ -1965,6 +1800,12 @@ export function BngPage() {
                   />
                 ))}
               </div>
+            </div>
+          )}
+
+          {tab === "cgnat_pools" && (
+            <div className="mk-noc-panel" style={{ padding: 14 }}>
+              <BngCgnatPoolsTab deviceId={selectedId} active={tab === "cgnat_pools"} />
             </div>
           )}
 

@@ -14,6 +14,7 @@ const (
 	StepKindPing               = "ping"
 	StepKindTelemetry          = "telemetry"
 	StepKindBng                = "bng"
+	StepKindBgp                = "bgp"
 	StepKindOltOnu             = "olt_onu"
 	StepKindMikrotik           = "mikrotik"
 	StepKindSwitch             = "switch"
@@ -52,6 +53,7 @@ func DefaultPipelineSteps() []PipelineStep {
 		{ID: "ping-all", Kind: StepKindPing, Enabled: true, Scope: StepScope{Target: "all"}},
 		{ID: "telemetry-all", Kind: StepKindTelemetry, Enabled: true, Scope: StepScope{Target: "all"}},
 		{ID: "bng-monitoring", Kind: StepKindBng, Enabled: true, Scope: StepScope{Target: "category", Category: "bng"}, Options: StepOptions{BngMode: "monitoring"}},
+		{ID: "bgp-monitoring", Kind: StepKindBgp, Enabled: true, Scope: StepScope{Target: "category", Category: "bgp"}},
 		{ID: "mikrotik-if", Kind: StepKindMikrotik, Enabled: true, Scope: StepScope{Target: "category", Category: "mikrotik"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "switch-if", Kind: StepKindSwitch, Enabled: true, Scope: StepScope{Target: "category", Category: "switch"}, Options: StepOptions{MikrotikMode: "full"}},
 		{ID: "olt-if", Kind: StepKindInterfacesOLT, Enabled: true, Scope: StepScope{Target: "category", Category: "olt"}},
@@ -164,7 +166,7 @@ func LoadPipelineSteps(ctx context.Context, pool *pgxpool.Pool) ([]PipelineStep,
 	if len(steps) == 0 {
 		return DefaultPipelineSteps(), nil
 	}
-	return ensureMonitoringBaselineSteps(ensureOltTierPipelineSteps(ensureBngPipelineStep(steps))), nil
+	return ensureMonitoringBaselineSteps(ensureOltTierPipelineSteps(ensureBgpPipelineStep(ensureBngPipelineStep(steps)))), nil
 }
 
 // ensureMonitoringBaselineSteps garante uma tentativa do conjunto mínimo em
@@ -245,6 +247,11 @@ func EnsureMonitoringBaselineSteps(steps []PipelineStep) []PipelineStep {
 	return ensureMonitoringBaselineSteps(steps)
 }
 
+// EnsureBgpPipelineStep expõe inserção do passo BGP para API/UI.
+func EnsureBgpPipelineStep(steps []PipelineStep) []PipelineStep {
+	return ensureBgpPipelineStep(steps)
+}
+
 // ensureBngPipelineStep insere passo BNG após telemetria quando ausente (instalações anteriores à migração 070).
 func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 	if hasPipelineKind(steps, StepKindBng) {
@@ -265,6 +272,27 @@ func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 		}
 	}
 	return append([]PipelineStep{bng}, steps...)
+}
+
+// ensureBgpPipelineStep insere passo BGP após BNG quando ausente (instalações anteriores a esta feature).
+func ensureBgpPipelineStep(steps []PipelineStep) []PipelineStep {
+	if hasPipelineKind(steps, StepKindBgp) {
+		return steps
+	}
+	bgp := PipelineStep{
+		ID: "bgp-monitoring", Kind: StepKindBgp, Enabled: true,
+		Scope: StepScope{Target: "category", Category: "bgp"},
+	}
+	for i, s := range steps {
+		if s.Kind == StepKindBng {
+			out := make([]PipelineStep, 0, len(steps)+1)
+			out = append(out, steps[:i+1]...)
+			out = append(out, bgp)
+			out = append(out, steps[i+1:]...)
+			return out
+		}
+	}
+	return append(steps, bgp)
 }
 
 // ensureOltTierPipelineSteps promove o passo único olt_onu "full" para 3 cadências.
@@ -307,6 +335,8 @@ func pipelineStepLabel(kind string) string {
 		return "Telemetria SNMP"
 	case StepKindBng:
 		return "BNG (logins / saúde)"
+	case StepKindBgp:
+		return "BGP (peers / interfaces / tráfego)"
 	case StepKindOltOnu:
 		return "Coleta ONUs (OLT)"
 	case StepKindMikrotik:
@@ -339,6 +369,10 @@ func isBngDevice(row pingableDeviceRow) bool {
 	return row.bngEnabled || strings.EqualFold(strings.TrimSpace(row.category), "bng")
 }
 
+func isBgpDevice(row pingableDeviceRow) bool {
+	return row.bgpEnabled || strings.EqualFold(strings.TrimSpace(row.category), "bgp")
+}
+
 func deviceMatchesScope(row pingableDeviceRow, scope StepScope) bool {
 	target := strings.ToLower(strings.TrimSpace(scope.Target))
 	if target == "" || target == "all" {
@@ -351,6 +385,9 @@ func deviceMatchesScope(row pingableDeviceRow, scope StepScope) bool {
 		}
 		if cat == "bng" {
 			return isBngDevice(row)
+		}
+		if cat == "bgp" {
+			return isBgpDevice(row)
 		}
 		if cat == "mikrotik" {
 			return workerLikelyMikrotik(row.category, row.brand, row.model, row.description)
@@ -393,6 +430,8 @@ func loadDevicesForPipelineStep(ctx context.Context, pool *pgxpool.Pool, step Pi
 		base, err = loadOltDevicesForCollect(ctx, pool, only)
 	case StepKindBng:
 		base, err = loadBngDevicesForCollect(ctx, pool, only)
+	case StepKindBgp:
+		base, err = loadBgpDevicesForCollect(ctx, pool, only)
 	default:
 		base, err = loadPingableDevices(ctx, pool, only)
 	}
@@ -408,6 +447,10 @@ func loadDevicesForPipelineStep(ctx context.Context, pool *pgxpool.Pool, step Pi
 	}
 	// BNG: por defeito todos os BNG com coleta activa; filtro só com alvo «equipamentos».
 	if step.Kind == StepKindBng && !strings.EqualFold(strings.TrimSpace(step.Scope.Target), "devices") {
+		return base, nil
+	}
+	// BGP: por defeito todos os equipamentos com coleta BGP activa; filtro só com alvo «equipamentos».
+	if step.Kind == StepKindBgp && !strings.EqualFold(strings.TrimSpace(step.Scope.Target), "devices") {
 		return base, nil
 	}
 	return filterDevicesByScope(base, step.Scope), nil

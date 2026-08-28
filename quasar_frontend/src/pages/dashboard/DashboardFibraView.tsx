@@ -48,7 +48,7 @@ export function DashboardFibraView({
                 <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-28} textAnchor="end" height={70} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={tooltipStyle}
+                  contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle}
                   formatter={(v: number, name: string) => [`${fmtInt(v)}`, name]}
                   labelFormatter={(label, p) => {
                     const b = (p as { payload?: { brand?: string } })?.payload?.brand;
@@ -110,7 +110,7 @@ export function DashboardFibraView({
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-28} textAnchor="end" height={70} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} />
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
                 <Bar dataKey="% uso" fill="#d29922" />
               </BarChart>
             </ChartBox>

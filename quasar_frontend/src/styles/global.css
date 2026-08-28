@@ -2623,6 +2623,10 @@ tr:hover td {
   background: #484f5833;
   color: var(--muted);
 }
+.badge--warn {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
 .badge--err {
   background: #f8514933;
   color: var(--err);
@@ -3368,6 +3372,12 @@ h3 .info-hint {
   }
 }
 .map-refresh-spin {
+  display: inline-flex;
+  animation: map-refresh-spin 0.75s linear infinite;
+}
+
+/* Ícone genérico em rotação contínua (ex.: RefreshCw durante um pedido em curso). */
+.spin {
   display: inline-flex;
   animation: map-refresh-spin 0.75s linear infinite;
 }

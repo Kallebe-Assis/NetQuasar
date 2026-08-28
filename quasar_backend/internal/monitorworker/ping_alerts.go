@@ -29,7 +29,7 @@ func repairMissingPingUnreachableAlerts(ctx context.Context, pool *pgxpool.Pool,
 		JOIN devices d ON d.id = c.device_id
 		WHERE c.reach_ok = false
 		  AND COALESCE(c.ping_fail_streak, 0) >= $1
-		  AND ` + SQLDeviceEligibleForPingAlerts + `
+		  AND `+SQLDeviceEligibleForPingAlerts+`
 		  AND NOT EXISTS (
 			SELECT 1 FROM alert_instances ai
 			WHERE ai.device_id = c.device_id

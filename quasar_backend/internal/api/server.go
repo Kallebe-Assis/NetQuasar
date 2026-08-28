@@ -198,6 +198,11 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Delete("/switch-telnet-profiles/{id}", s.deleteSwitchTelnetProfile)
 				r.Get("/bng-collection", s.getBngCollection)
 				r.Patch("/bng-collection", s.patchBngCollection)
+				r.Get("/bgp-snmp-profiles", s.listBgpSnmpProfiles)
+				r.Post("/bgp-snmp-profiles", s.createBgpSnmpProfile)
+				r.Get("/bgp-snmp-profiles/{id}", s.getBgpSnmpProfile)
+				r.Patch("/bgp-snmp-profiles/{id}", s.patchBgpSnmpProfile)
+				r.Delete("/bgp-snmp-profiles/{id}", s.deleteBgpSnmpProfile)
 				r.Get("/notifications/telegram/monitoring", s.getTelegramMonitoring)
 				r.Patch("/notifications/telegram/monitoring", s.patchTelegramMonitoring)
 				r.Post("/notifications/telegram/monitoring/test", s.testTelegramMonitoring)
@@ -490,6 +495,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/onu-deauthorize", s.deauthorizeOLTOnu)
 				r.Post("/devices/{id}/discover-vlans", s.discoverOLTVlanCatalog)
 				r.Post("/onu-client-links/import", s.importOnuClientLinks)
+				r.Delete("/onu-client-links/{serial}", s.deleteOnuClientLink)
 			})
 		})
 
@@ -541,6 +547,31 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/uplinks", s.createBngUplink)
 				r.Patch("/devices/{id}/uplinks/{uplinkId}", s.updateBngUplink)
 				r.Delete("/devices/{id}/uplinks/{uplinkId}", s.deleteBngUplink)
+			})
+		})
+
+		r.Route("/bgp", func(r chi.Router) {
+			r.Get("/devices", s.listBGPDevices)
+			r.Get("/devices/{id}/report", s.bgpDeviceReport)
+			r.Get("/devices/{id}/history", s.bgpDeviceHistory)
+			r.Get("/devices/{id}/uplinks", s.listBgpUplinks)
+			r.Get("/devices/{id}/carrier-limits", s.listBgpCarrierLimits)
+			r.Get("/devices/{id}/carrier-traffic-history", s.bgpCarrierTrafficHistory)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("bgp.collect", "devices.collect", "*"))
+				r.Post("/devices/{id}/collect", s.bgpDeviceCollect)
+				r.Post("/devices/{id}/uplinks", s.createBgpUplink)
+				r.Patch("/devices/{id}/uplinks/{uplinkId}", s.updateBgpUplink)
+				r.Delete("/devices/{id}/uplinks/{uplinkId}", s.deleteBgpUplink)
+				r.Put("/devices/{id}/carrier-limits/{label}", s.upsertBgpCarrierLimit)
+			})
+		})
+
+		r.Route("/topology", func(r chi.Router) {
+			r.Get("/", s.getTopologyCanvas)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("map.manage", "*"))
+				r.Put("/", s.putTopologyCanvas)
 			})
 		})
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, Server } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
@@ -11,6 +11,7 @@ import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors"
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { OltOnuClientLinkModal } from "./OltOnuClientLinkModal";
+import { OltOnuClientEditModal } from "./OltOnuClientEditModal";
 import { OltOnuTelnetReportModal, type OltOnuReportPonMeta } from "./OltOnuTelnetReportModal";
 import {
   buildTelnetReportSections,
@@ -87,6 +88,7 @@ type SearchFilters = {
   temp_max: string;
   voltage_min: string;
   voltage_max: string;
+  client_filled: "" | "true" | "false";
 };
 
 const EMPTY_FILTERS: SearchFilters = {
@@ -100,6 +102,7 @@ const EMPTY_FILTERS: SearchFilters = {
   temp_max: "",
   voltage_min: "",
   voltage_max: "",
+  client_filled: "",
 };
 
 function parseOptFloat(s: string): number | undefined {
@@ -177,6 +180,9 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState(1);
   const [clientLinkOpen, setClientLinkOpen] = useState(false);
+  const [clientEditTarget, setClientEditTarget] = useState<OltOnuSearchResult | null>(null);
+  const [clientEditBusy, setClientEditBusy] = useState(false);
+  const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
 
   const selectedOltLabel = useMemo(() => {
     if (!selectedOltId) return "Todas as OLTs";
@@ -227,6 +233,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (filters.tx_dbm_min.trim() || filters.tx_dbm_max.trim()) n++;
     if (filters.temp_min.trim() || filters.temp_max.trim()) n++;
     if (filters.voltage_min.trim() || filters.voltage_max.trim()) n++;
+    if (filters.client_filled) n++;
     return n;
   }, [filters]);
 
@@ -259,6 +266,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (tempMax != null) body.temp_max = tempMax;
     if (voltMin != null) body.voltage_min = voltMin;
     if (voltMax != null) body.voltage_max = voltMax;
+    if (filters.client_filled === "true") body.client_filled = true;
+    if (filters.client_filled === "false") body.client_filled = false;
     return body;
   }, [debouncedQ, filters, selectedOltId, effectivePon]);
 
@@ -357,6 +366,35 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  async function fetchOnuTelnetReport(row: OltOnuSearchResult) {
+    const res = await apiFetch<{
+      ok: boolean;
+      output?: string;
+      error?: string;
+      commands?: OltTelnetReportStep[];
+      pon?: number;
+      onu?: number;
+      pon_description?: string;
+      pon_vlan?: string | number;
+    }>(
+      `/api/v1/olt/devices/${row.olt_id}/onu-report`,
+      {
+        method: "POST",
+        json: {
+          pon: row.pon ?? 0,
+          onu: row.onu ?? 0,
+          serial: row.serial ?? "",
+          if_index: row.if_index ?? 0,
+          if_name: row.if_name ?? "",
+        },
+      },
+    );
+    const steps = Array.isArray(res.commands) && res.commands.length > 0
+      ? res.commands
+      : [{ command: "onu-report", ok: res.ok, output: res.output ?? "", error: res.error }];
+    return { res, steps };
+  }
+
   async function runReport(row: OltOnuSearchResult) {
     if (!canMutate) return;
     setReportLoading(true);
@@ -366,31 +404,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     setReportSteps([]);
     setReportPonMeta({ pon: row.pon, onu: row.onu });
     try {
-      const res = await apiFetch<{
-        ok: boolean;
-        output?: string;
-        error?: string;
-        commands?: OltTelnetReportStep[];
-        pon?: number;
-        onu?: number;
-        pon_description?: string;
-        pon_vlan?: string | number;
-      }>(
-        `/api/v1/olt/devices/${row.olt_id}/onu-report`,
-        {
-          method: "POST",
-          json: {
-            pon: row.pon ?? 0,
-            onu: row.onu ?? 0,
-            serial: row.serial ?? "",
-            if_index: row.if_index ?? 0,
-            if_name: row.if_name ?? "",
-          },
-        },
-      );
-      const steps = Array.isArray(res.commands) && res.commands.length > 0
-        ? res.commands
-        : [{ command: "onu-report", ok: res.ok, output: res.output ?? "", error: res.error }];
+      const { res, steps } = await fetchOnuTelnetReport(row);
       setReportSteps(steps);
       setReportPonMeta({
         pon: res.pon ?? row.pon,
@@ -405,6 +419,29 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       setReportOpen(false);
     } finally {
       setReportLoading(false);
+    }
+  }
+
+  // Mesma coleta telnet de runReport, mas sem abrir o modal — só actualiza a linha na tabela
+  // (rowOverrides) e mostra um toast. Pedido explícito: "ver os dados atualizados por fora
+  // mesmo, sem o modal".
+  async function runReportHeadless(row: OltOnuSearchResult) {
+    if (!canMutate) return;
+    const key = rowKey(row);
+    setRefreshingRows((prev) => new Set(prev).add(key));
+    try {
+      const { steps } = await fetchOnuTelnetReport(row);
+      const updated = applyTelnetFieldsToRow(row, steps);
+      setRowOverrides((prev) => ({ ...prev, [key]: updated }));
+      toastOk(pushToast, `ONU ${row.serial ?? key} atualizada.`);
+    } catch (e) {
+      toastErr(pushToast, e);
+    } finally {
+      setRefreshingRows((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -439,6 +476,45 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       openErrorModal(err, "Erro ao desautorizar ONU");
     },
   });
+
+  async function saveClientEdit(row: OltOnuSearchResult, name: string) {
+    const serial = (row.serial ?? "").trim();
+    if (!serial) return;
+    setClientEditBusy(true);
+    try {
+      const res = await apiFetch<{ linked: number; not_found: string[]; suggestions: unknown[] }>(
+        "/api/v1/olt/onu-client-links/import",
+        { method: "POST", json: { rows: [{ serial, client_name: name }] } },
+      );
+      if (res.linked > 0) {
+        setRowOverrides((prev) => ({ ...prev, [rowKey(row)]: { ...prev[rowKey(row)], client_name: name } }));
+        toastOk(pushToast, "Cliente vinculado à ONU.");
+        setClientEditTarget(null);
+      } else {
+        toastErr(pushToast, new Error("Serial não reconhecido em nenhum snapshot de OLT."), "Não foi possível vincular.");
+      }
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao salvar cliente.");
+    } finally {
+      setClientEditBusy(false);
+    }
+  }
+
+  async function removeClientEdit(row: OltOnuSearchResult) {
+    const serial = (row.serial ?? "").trim();
+    if (!serial) return;
+    setClientEditBusy(true);
+    try {
+      await apiFetch(`/api/v1/olt/onu-client-links/${encodeURIComponent(serial)}`, { method: "DELETE" });
+      setRowOverrides((prev) => ({ ...prev, [rowKey(row)]: { ...prev[rowKey(row)], client_name: undefined } }));
+      toastOk(pushToast, "Cliente removido da ONU.");
+      setClientEditTarget(null);
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao remover cliente.");
+    } finally {
+      setClientEditBusy(false);
+    }
+  }
 
   return (
     <>
@@ -656,27 +732,46 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                 <td className="mono">{r.voltage ? formatSnmpMetricCell(r.voltage) : EM_DASH}</td>
                 {canMutate ? (
                   <td>
-                    {r.pon && r.onu ? (
-                      <ActionMenu
-                        title="Mais opções"
-                        align="end"
-                        items={[
-                          {
-                            id: "report",
-                            label: "Relatório telnet",
-                            disabled: reportLoading,
-                            onClick: () => void runReport(r),
-                          },
-                          {
-                            id: "deauth",
-                            label: "Desautorizar ONU",
-                            danger: true,
-                            disabled: deauthMut.isPending,
-                            onClick: () => setDeauthTarget(r),
-                          },
-                        ]}
-                      />
-                    ) : null}
+                    <div className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                      {r.pon && r.onu ? (
+                        <button
+                          type="button"
+                          className="btn btn--icon"
+                          title="Atualizar dados da ONU (sem abrir relatório)"
+                          aria-label="Atualizar dados da ONU"
+                          disabled={refreshingRows.has(rowKey(r))}
+                          onClick={() => void runReportHeadless(r)}
+                        >
+                          <RefreshCw size={14} className={refreshingRows.has(rowKey(r)) ? "spin" : undefined} />
+                        </button>
+                      ) : null}
+                      {r.pon && r.onu ? (
+                        <ActionMenu
+                          title="Mais opções"
+                          align="end"
+                          items={[
+                            {
+                              id: "report",
+                              label: "Relatório telnet",
+                              disabled: reportLoading,
+                              onClick: () => void runReport(r),
+                            },
+                            {
+                              id: "edit-client",
+                              label: r.client_name ? "Editar cliente" : "Vincular cliente",
+                              onClick: () => setClientEditTarget(r),
+                            },
+                            {
+                              id: "deauth",
+                              label: "Desautorizar ONU",
+                              danger: true,
+                              disabled: deauthMut.isPending,
+                              onClick: () => setDeauthTarget(r),
+                            },
+                          ]}
+                        />
+                      ) : null}
+                    </div>
                   </td>
                 ) : null}
               </tr>
@@ -751,21 +846,35 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
       {filtersOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setFiltersOpen(false)}>
-          <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 520 }} onMouseDown={(e) => e.stopPropagation()}>
+          <div className="modal modal--wide" role="dialog" aria-modal="true" style={{ maxWidth: 760 }} onMouseDown={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Filtros de pesquisa ONU</h3>
-            <div className="field">
-              <label>Modelo (contém)</label>
-              <input className="input" value={draftFilters.model} onChange={(e) => setDraftFilters({ ...draftFilters, model: e.target.value })} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Modelo (contém)</label>
+                <input className="input" value={draftFilters.model} onChange={(e) => setDraftFilters({ ...draftFilters, model: e.target.value })} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Status</label>
+                <select className="input" value={draftFilters.online} onChange={(e) => setDraftFilters({ ...draftFilters, online: e.target.value as SearchFilters["online"] })}>
+                  <option value="">Qualquer</option>
+                  <option value="true">Online</option>
+                  <option value="false">Offline</option>
+                </select>
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Cliente</label>
+                <select
+                  className="input"
+                  value={draftFilters.client_filled}
+                  onChange={(e) => setDraftFilters({ ...draftFilters, client_filled: e.target.value as SearchFilters["client_filled"] })}
+                >
+                  <option value="">Qualquer</option>
+                  <option value="true">Com cliente</option>
+                  <option value="false">Sem cliente</option>
+                </select>
+              </div>
             </div>
-            <div className="field">
-              <label>Status</label>
-              <select className="input" value={draftFilters.online} onChange={(e) => setDraftFilters({ ...draftFilters, online: e.target.value as SearchFilters["online"] })}>
-                <option value="">Qualquer</option>
-                <option value="true">Online</option>
-                <option value="false">Offline</option>
-              </select>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
               <div className="field">
                 <label>RX mín. (dBm)</label>
                 <input className="input mono" value={draftFilters.rx_dbm_min} onChange={(e) => setDraftFilters({ ...draftFilters, rx_dbm_min: e.target.value })} />
@@ -861,6 +970,18 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         open={clientLinkOpen}
         onClose={() => setClientLinkOpen(false)}
         onImported={() => searchMut.mutate(payload)}
+      />
+
+      <OltOnuClientEditModal
+        open={!!clientEditTarget}
+        serial={clientEditTarget?.serial ?? ""}
+        currentName={clientEditTarget?.client_name ?? ""}
+        busy={clientEditBusy}
+        onCancel={() => {
+          if (!clientEditBusy) setClientEditTarget(null);
+        }}
+        onSave={(name) => clientEditTarget && void saveClientEdit(clientEditTarget, name)}
+        onRemove={() => clientEditTarget && void removeClientEdit(clientEditTarget)}
       />
 
       <ConfirmModal

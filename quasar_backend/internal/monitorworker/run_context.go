@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	activeRunMu sync.Mutex
-	activeRun   context.Context
+	activeRunMu  sync.Mutex
+	activeRun    context.Context
 	activeCancel context.CancelFunc
 )
 

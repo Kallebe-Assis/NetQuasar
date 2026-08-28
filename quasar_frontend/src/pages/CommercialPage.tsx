@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { InfoHint } from "../components/InfoHint";
+import { SendIcon } from "../components/icons/SendIcon";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, getStoredApiKey, can, isAdminUser } from "../lib/auth";
@@ -898,6 +899,9 @@ export function CommercialPage() {
                     <Tooltip
                       formatter={(v: number) => [v.toLocaleString("pt-PT"), "Clientes"]}
                       labelFormatter={(l) => String(l)}
+                      contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+                      itemStyle={{ color: "var(--text)" }}
+                      labelStyle={{ color: "var(--text)" }}
                     />
                     <Bar dataKey="total" name="Total clientes" fill="#58a6ff" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -910,7 +914,12 @@ export function CommercialPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="month" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                     <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip formatter={(v: number) => [v.toLocaleString("pt-PT"), "Δ clientes"]} />
+                    <Tooltip
+                      formatter={(v: number) => [v.toLocaleString("pt-PT"), "Δ clientes"]}
+                      contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+                      itemStyle={{ color: "var(--text)" }}
+                      labelStyle={{ color: "var(--text)" }}
+                    />
                     <Legend />
                     <Line type="monotone" dataKey="delta" name="Variação" stroke="#3fb950" strokeWidth={2} dot={{ r: 3 }} />
                   </LineChart>
@@ -974,8 +983,15 @@ export function CommercialPage() {
             Export CSV
           </button>
           {canMutate ? (
-            <button type="button" className="btn" disabled={sendTg.isPending} onClick={() => setTgSendConfirmOpen(true)}>
-              Telegram relatório
+            <button
+              type="button"
+              className="btn btn--icon"
+              title="Enviar relatório por Telegram"
+              aria-label="Enviar relatório por Telegram"
+              disabled={sendTg.isPending}
+              onClick={() => setTgSendConfirmOpen(true)}
+            >
+              <SendIcon size={16} />
             </button>
           ) : null}
         </div>

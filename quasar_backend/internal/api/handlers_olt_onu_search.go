@@ -31,8 +31,10 @@ type oltOnuSearchRequest struct {
 	TempMax    *float64 `json:"temp_max"`
 	VoltageMin *float64 `json:"voltage_min"`
 	VoltageMax *float64 `json:"voltage_max"`
-	OltID      string   `json:"olt_id"`
-	Pon        int      `json:"pon"`
+	// ClientFilled filtra ONUs com (true) ou sem (false) cliente vinculado; nil = qualquer.
+	ClientFilled *bool  `json:"client_filled"`
+	OltID        string `json:"olt_id"`
+	Pon          int    `json:"pon"`
 }
 
 type oltOnuReportRequest struct {
@@ -478,6 +480,12 @@ func oltOnuRowMatchesFilters(row map[string]any, f oltOnuSearchRequest, serialQ,
 	serial := strings.TrimSpace(stringFromAny(row["serial"]))
 	model := strings.ToLower(strings.TrimSpace(stringFromAny(row["model"])))
 	clientName := strings.ToLower(strings.TrimSpace(stringFromAny(row["client_name"])))
+	if f.ClientFilled != nil {
+		has := clientName != ""
+		if has != *f.ClientFilled {
+			return false
+		}
+	}
 	if serialQ != "" {
 		if !oltcollect.SerialPartialMatch(serial, serialQ) && !strings.Contains(model, strings.ToLower(serialQ)) && !strings.Contains(clientName, serialQ) {
 			return false

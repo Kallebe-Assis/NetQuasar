@@ -28,32 +28,34 @@ import (
 )
 
 type deviceDTO struct {
-	ID                    uuid.UUID       `json:"id"`
-	PopID                 *uuid.UUID      `json:"pop_id"`
-	LocalityID            *uuid.UUID      `json:"locality_id"`
-	Category              string          `json:"category"`
-	Description           string          `json:"description"`
-	IP                    *string         `json:"ip"`
-	NetworkStatus         string          `json:"network_status"`
-	AccessMode            *string         `json:"access_mode"`
-	TelemetryMode         *string         `json:"telemetry_mode"`
-	PingEnabled           bool            `json:"ping_enabled"`
-	TelemetryEnabled      bool            `json:"telemetry_enabled"`
-	BngEnabled            bool            `json:"bng_enabled"`
-	OperationalMode       string          `json:"operational_mode"`
-	Latitude              *float64        `json:"latitude"`
-	Longitude             *float64        `json:"longitude"`
-	Brand                 *string         `json:"brand"`
-	Model                 *string         `json:"model"`
-	MAC                   *string         `json:"mac"`
-	SerialNumber          *string         `json:"serial_number"`
-	SoftwareVersion       *string         `json:"software_version"`
-	HardwareVersion       *string         `json:"hardware_version"`
-	AcquiredAt            *string         `json:"acquired_at"`
-	SNMPCommunity         *string         `json:"snmp_community,omitempty"`
-	MIBFolderPath         *string         `json:"mib_folder_path,omitempty"`
-	TelemetryOIDStrategy  *string         `json:"telemetry_oid_strategy,omitempty"`
-	TelemetryOIDOverrides json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
+	ID                       uuid.UUID       `json:"id"`
+	PopID                    *uuid.UUID      `json:"pop_id"`
+	LocalityID               *uuid.UUID      `json:"locality_id"`
+	Category                 string          `json:"category"`
+	Description              string          `json:"description"`
+	IP                       *string         `json:"ip"`
+	NetworkStatus            string          `json:"network_status"`
+	AccessMode               *string         `json:"access_mode"`
+	TelemetryMode            *string         `json:"telemetry_mode"`
+	PingEnabled              bool            `json:"ping_enabled"`
+	TelemetryEnabled         bool            `json:"telemetry_enabled"`
+	BngEnabled               bool            `json:"bng_enabled"`
+	BgpEnabled               bool            `json:"bgp_enabled"`
+	OfflineAlertLogic        string          `json:"offline_alert_logic"`
+	OperationalMode          string          `json:"operational_mode"`
+	Latitude                 *float64        `json:"latitude"`
+	Longitude                *float64        `json:"longitude"`
+	Brand                    *string         `json:"brand"`
+	Model                    *string         `json:"model"`
+	MAC                      *string         `json:"mac"`
+	SerialNumber             *string         `json:"serial_number"`
+	SoftwareVersion          *string         `json:"software_version"`
+	HardwareVersion          *string         `json:"hardware_version"`
+	AcquiredAt               *string         `json:"acquired_at"`
+	SNMPCommunity            *string         `json:"snmp_community,omitempty"`
+	MIBFolderPath            *string         `json:"mib_folder_path,omitempty"`
+	TelemetryOIDStrategy     *string         `json:"telemetry_oid_strategy,omitempty"`
+	TelemetryOIDOverrides    json.RawMessage `json:"telemetry_oid_overrides,omitempty"`
 	MaxPons                  *int            `json:"max_pons,omitempty"`
 	PonDescriptions          json.RawMessage `json:"pon_descriptions,omitempty"`
 	PonVlans                 json.RawMessage `json:"pon_vlans,omitempty"`
@@ -65,13 +67,28 @@ type deviceDTO struct {
 	TelnetPasswordConfigured bool            `json:"telnet_password_configured,omitempty"`
 	SSHPasswordConfigured    bool            `json:"ssh_password_configured,omitempty"`
 	SNMPHealthStatus         *string         `json:"snmp_health_status,omitempty"`
-	SNMPHealthReason      *string         `json:"snmp_health_reason,omitempty"`
-	SNMPHealthCheckedAt   *string         `json:"snmp_health_checked_at,omitempty"`
+	SNMPHealthReason         *string         `json:"snmp_health_reason,omitempty"`
+	SNMPHealthCheckedAt      *string         `json:"snmp_health_checked_at,omitempty"`
+	// ExtraIPs — IPs além do primário (d.ip). Não faz parte do SELECT/INSERT/UPDATE
+	// posicional de `devices` (é outra tabela); ver createDevice/patchDevice/getDevice para
+	// como é lido/gravado/anexado à resposta.
+	ExtraIPs []deviceIPDTO `json:"extra_ips,omitempty"`
+}
+
+// deviceIPDTO um IP extra do equipamento (device_ips) — ver internal/db/migrations/118_device_ips.sql.
+type deviceIPDTO struct {
+	ID           *uuid.UUID `json:"id,omitempty"`
+	IP           string     `json:"ip"`
+	Description  string     `json:"description"`
+	Monitored    bool       `json:"monitored"`
+	ForTelemetry bool       `json:"for_telemetry"`
+	ForBng       bool       `json:"for_bng"`
+	ForBgp       bool       `json:"for_bgp"`
 }
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	q := `SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
-		d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
+		d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.bgp_enabled, d.offline_alert_logic, d.operational_mode,
 		d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
 		d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, COALESCE(d.pon_descriptions::text, '{}'), COALESCE(d.pon_vlans::text, '{}'), d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
 		d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
@@ -93,7 +110,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		var ponDesc, ponVlans []byte
 		var telPass, sshPass *string
 		if err := rows.Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
-			&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
+			&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.BgpEnabled, &d.OfflineAlertLogic, &d.OperationalMode,
 			&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
 			&d.TelemetryOIDStrategy, &overrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 			&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass,
@@ -108,6 +125,15 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		d.TelnetPasswordConfigured = hasSecret(telPass)
 		d.SSHPasswordConfigured = hasSecret(sshPass)
 		out = append(out, d)
+	}
+	ids := make([]uuid.UUID, len(out))
+	for i, d := range out {
+		ids[i] = d.ID
+	}
+	if extraIPs, err := loadDeviceExtraIPsBulk(r.Context(), s.DB(), ids); err == nil {
+		for i := range out {
+			out[i].ExtraIPs = extraIPs[out[i].ID]
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"devices": out})
 }
@@ -334,6 +360,13 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 422, "VALIDATION", "telemetria exige ping ativo", nil)
 		return
 	}
+	if strings.TrimSpace(body.OfflineAlertLogic) == "" {
+		body.OfflineAlertLogic = "any"
+	}
+	if err := validateDeviceExtraIPs(body.IP, body.ExtraIPs); err != nil {
+		writeErr(w, 422, "VALIDATION", err.Error(), nil)
+		return
+	}
 	op := body.OperationalMode
 	if op == "" {
 		op = "Ativo"
@@ -349,16 +382,17 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at, snmp_community, mib_folder_path,
 			telemetry_oid_strategy, telemetry_oid_overrides, max_pons, pon_descriptions, pon_vlans,
 			mikrotik_telnet_profile_id, switch_telnet_profile_id,
-			telnet_user, telnet_password, telnet_enable, ssh_user, ssh_password)
+			telnet_user, telnet_password, telnet_enable, ssh_user, ssh_password,
+			bgp_enabled, offline_alert_logic)
 		VALUES ($1,$2,$3,$4, NULLIF($5::text,'')::inet, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::date, $22, $23,
 			COALESCE($24,'default'), COALESCE($25::jsonb,'{}'::jsonb), $26, COALESCE($27::jsonb,'{}'::jsonb), COALESCE($28::jsonb,'{}'::jsonb),
-			$29, $30, $31, $32, $33, $34, $35)
+			$29, $30, $31, $32, $33, $34, $35, $36, $37)
 		RETURNING id
 	`, body.PopID, body.LocalityID, body.Category, body.Description, ipArg, ns, body.AccessMode, body.TelemetryMode, body.PingEnabled, body.TelemetryEnabled, body.BngEnabled, op,
 		body.Latitude, body.Longitude, body.Brand, body.Model, body.MAC, body.SerialNumber, body.SoftwareVersion, body.HardwareVersion, acquiredAtArg(body.AcquiredAt), body.SNMPCommunity, body.MIBFolderPath,
 		body.TelemetryOIDStrategy, body.TelemetryOIDOverrides, body.MaxPons, normalizePonDescriptionsJSON(body.PonDescriptions), normalizePonVlansJSON(body.PonVlans),
 		body.MikrotikTelnetProfileID, body.SwitchTelnetProfileID,
-		body.TelnetUser, telPass, body.TelnetEnable, body.SSHUser, sshPass).Scan(&id)
+		body.TelnetUser, telPass, body.TelnetEnable, body.SSHUser, sshPass, body.BgpEnabled, body.OfflineAlertLogic).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "telemetry_requires_ping") {
 			writeErr(w, 422, "VALIDATION", "telemetria exige ping", nil)
@@ -366,6 +400,12 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
+	}
+	if len(body.ExtraIPs) > 0 {
+		if err := replaceDeviceExtraIPs(r.Context(), s.DB(), id, body.ExtraIPs); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
 	}
 	if body.TelemetryEnabled {
 		s.scheduleSNMPDiscovery(id)
@@ -870,7 +910,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	var ponDesc, ponVlans []byte
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT d.id, d.pop_id, d.locality_id, d.category, d.description, host(d.ip)::text, d.network_status, d.access_mode, d.telemetry_mode,
-			d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.operational_mode,
+			d.ping_enabled, d.telemetry_enabled, d.bng_enabled, d.bgp_enabled, d.offline_alert_logic, d.operational_mode,
 			d.latitude, d.longitude, d.brand, d.model, d.mac, d.serial_number, d.software_version, d.hardware_version, d.acquired_at::text, d.snmp_community, d.mib_folder_path,
 			d.telemetry_oid_strategy, d.telemetry_oid_overrides::text, d.max_pons, COALESCE(d.pon_descriptions::text, '{}'), COALESCE(d.pon_vlans::text, '{}'), d.mikrotik_telnet_profile_id, d.switch_telnet_profile_id,
 			d.telnet_user, d.telnet_enable, d.ssh_user, d.telnet_password, d.ssh_password,
@@ -880,7 +920,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN commercial_localities l ON l.id = d.locality_id
 		WHERE d.id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
-		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
+		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.BgpEnabled, &d.OfflineAlertLogic, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
 		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPass, &sshPass, &popName, &locName)
@@ -897,6 +937,7 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) {
 	d.PonVlans = normalizePonVlansJSON(ponVlans)
 	d.TelnetPasswordConfigured = hasSecret(telPass)
 	d.SSHPasswordConfigured = hasSecret(sshPass)
+	d.ExtraIPs, _ = loadDeviceExtraIPs(r.Context(), s.DB(), id)
 	raw, _ := json.Marshal(d)
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
@@ -926,13 +967,13 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	var ponDesc, ponVlans []byte
 	err = s.DB().QueryRow(r.Context(), `
 		SELECT id, pop_id, locality_id, category, description, host(ip)::text, network_status, access_mode, telemetry_mode,
-			ping_enabled, telemetry_enabled, bng_enabled, operational_mode,
+			ping_enabled, telemetry_enabled, bng_enabled, bgp_enabled, offline_alert_logic, operational_mode,
 			latitude, longitude, brand, model, mac, serial_number, software_version, hardware_version, acquired_at::text, snmp_community, mib_folder_path,
 			telemetry_oid_strategy, telemetry_oid_overrides::text, max_pons, COALESCE(pon_descriptions::text, '{}'), COALESCE(pon_vlans::text, '{}'), mikrotik_telnet_profile_id, switch_telnet_profile_id,
 			telnet_user, telnet_enable, ssh_user, telnet_password, ssh_password
 		FROM devices WHERE id=$1
 	`, id).Scan(&d.ID, &d.PopID, &d.LocalityID, &d.Category, &d.Description, &ip, &d.NetworkStatus, &d.AccessMode, &d.TelemetryMode,
-		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.OperationalMode,
+		&d.PingEnabled, &d.TelemetryEnabled, &d.BngEnabled, &d.BgpEnabled, &d.OfflineAlertLogic, &d.OperationalMode,
 		&d.Latitude, &d.Longitude, &d.Brand, &d.Model, &d.MAC, &d.SerialNumber, &d.SoftwareVersion, &d.HardwareVersion, &d.AcquiredAt, &d.SNMPCommunity, &d.MIBFolderPath,
 		&d.TelemetryOIDStrategy, &d.TelemetryOIDOverrides, &d.MaxPons, &ponDesc, &ponVlans, &d.MikrotikTelnetProfileID, &d.SwitchTelnetProfileID,
 		&d.TelnetUser, &d.TelnetEnable, &d.SSHUser, &telPassCur, &sshPassCur)
@@ -996,6 +1037,13 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 422, "VALIDATION", "telemetria exige ping ativo", nil)
 		return
 	}
+	if strings.TrimSpace(d.OfflineAlertLogic) == "" {
+		d.OfflineAlertLogic = "any"
+	}
+	if err := validateDeviceExtraIPs(d.IP, d.ExtraIPs); err != nil {
+		writeErr(w, 422, "VALIDATION", err.Error(), nil)
+		return
+	}
 	var ipArg any
 	if d.IP != nil {
 		ipArg = strings.TrimSpace(*d.IP)
@@ -1003,7 +1051,7 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 	_, err = s.DB().Exec(r.Context(), `
 		UPDATE devices SET pop_id=$2, locality_id=$3, category=$4, description=$5, ip=NULLIF($6::text,'')::inet, network_status=$7,
 			access_mode=$8, telemetry_mode=$9,
-			ping_enabled=$10, telemetry_enabled=$11, operational_mode=$12, bng_enabled=$13,
+			ping_enabled=$10, telemetry_enabled=$11, operational_mode=$12, bng_enabled=$13, bgp_enabled=$37, offline_alert_logic=$38,
 			latitude=$14, longitude=$15, brand=$16, model=$17, mac=$18, serial_number=$19, software_version=$20, hardware_version=$21,
 			acquired_at=$22::date, snmp_community=$23, mib_folder_path=$24,
 			telemetry_oid_strategy=COALESCE($25,'default'),
@@ -1024,10 +1072,16 @@ func (s *Server) patchDevice(w http.ResponseWriter, r *http.Request) {
 		d.PingEnabled, d.TelemetryEnabled, d.OperationalMode, d.BngEnabled,
 		d.Latitude, d.Longitude, d.Brand, d.Model, d.MAC, d.SerialNumber, d.SoftwareVersion, d.HardwareVersion, acquiredAtArg(d.AcquiredAt), d.SNMPCommunity, d.MIBFolderPath,
 		d.TelemetryOIDStrategy, d.TelemetryOIDOverrides, d.MaxPons, normalizePonDescriptionsJSON(d.PonDescriptions), normalizePonVlansJSON(d.PonVlans), d.MikrotikTelnetProfileID, d.SwitchTelnetProfileID,
-		d.TelnetUser, telPassArg, d.TelnetEnable, d.SSHUser, sshPassArg)
+		d.TelnetUser, telPassArg, d.TelnetEnable, d.SSHUser, sshPassArg, d.BgpEnabled, d.OfflineAlertLogic)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
+	}
+	if _, ok := body["extra_ips"]; ok {
+		if err := replaceDeviceExtraIPs(r.Context(), s.DB(), id, d.ExtraIPs); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
 	}
 	if d.TelemetryEnabled && !prevTelemetry {
 		s.scheduleSNMPDiscovery(id)
@@ -1077,6 +1131,18 @@ func mergeDeviceJSON(d *deviceDTO, body map[string]json.RawMessage) {
 	}
 	if v, ok := body["bng_enabled"]; ok {
 		_ = json.Unmarshal(v, &d.BngEnabled)
+	}
+	if v, ok := body["bgp_enabled"]; ok {
+		_ = json.Unmarshal(v, &d.BgpEnabled)
+	}
+	if v, ok := body["offline_alert_logic"]; ok {
+		_ = json.Unmarshal(v, &d.OfflineAlertLogic)
+	}
+	if v, ok := body["extra_ips"]; ok {
+		var ips []deviceIPDTO
+		if json.Unmarshal(v, &ips) == nil {
+			d.ExtraIPs = ips
+		}
 	}
 	if v, ok := body["operational_mode"]; ok {
 		_ = json.Unmarshal(v, &d.OperationalMode)

@@ -17,6 +17,8 @@ import { ScheduledReportsPanel } from "./settings/ScheduledReportsPanel";
 import { MikrotikSettingsPanel } from "./settings/MikrotikSettingsPanel";
 import { SwitchSettingsPanel } from "./settings/SwitchSettingsPanel";
 import { BngCollectionPanel } from "./settings/BngCollectionPanel";
+import { BgpSnmpProfilesPanel } from "./settings/BgpSnmpProfilesPanel";
+import { BgpUplinkCarriersPanel } from "./settings/BgpUplinkCarriersPanel";
 import { DatabasePanel } from "./settings/DatabasePanel";
 import { FleetSettingsPanel } from "./settings/FleetSettingsPanel";
 import { OltVendorsPanel } from "./settings/OltVendorsPanel";
@@ -37,12 +39,13 @@ type SettingsTab =
   | "mikrotik"
   | "switch"
   | "bng"
+  | "bgp"
   | "fleet"
   | "automation";
 
 const SETTINGS_TABS: SettingsTab[] = [
   "database", "logs", "users", "alerts", "monitoring", "appearance", "connection",
-  "telegram", "olt", "mikrotik", "switch", "bng", "fleet", "automation",
+  "telegram", "olt", "mikrotik", "switch", "bng", "bgp", "fleet", "automation",
 ];
 
 const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
@@ -58,6 +61,7 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   mikrotik: "MikroTik",
   switch: "Switch",
   bng: "BNG",
+  bgp: "BGP",
   fleet: "Frota",
   automation: "Automações",
 };
@@ -67,7 +71,7 @@ function canSeeSettingsTab(tab: SettingsTab): boolean {
   if (tab === "appearance" || tab === "alerts") return true;
   if (tab === "users" || tab === "logs") return can("settings.users") || can("settings.permissions");
   if (tab === "database" || tab === "connection") return can("settings.system");
-  if (tab === "monitoring" || tab === "olt" || tab === "mikrotik" || tab === "switch" || tab === "bng") {
+  if (tab === "monitoring" || tab === "olt" || tab === "mikrotik" || tab === "switch" || tab === "bng" || tab === "bgp") {
     return can("settings.monitoring");
   }
   if (tab === "telegram" || tab === "automation") return can("settings.notifications");
@@ -131,6 +135,12 @@ export function SettingsPage() {
       {tab === "mikrotik" && <MikrotikSettingsPanel />}
       {tab === "switch" && <SwitchSettingsPanel />}
       {tab === "bng" && <BngCollectionPanel />}
+      {tab === "bgp" && (
+        <>
+          <BgpSnmpProfilesPanel />
+          <BgpUplinkCarriersPanel />
+        </>
+      )}
       {tab === "fleet" && <FleetSettingsPanel />}
       {tab === "automation" && <ScheduledReportsPanel />}
     </>

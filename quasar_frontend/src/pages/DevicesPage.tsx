@@ -15,6 +15,16 @@ import { DeviceEditHistoricoTab } from "../components/device/DeviceEditHistorico
 import { DeviceEditInterfacesTab } from "../components/device/DeviceEditInterfacesTab";
 import { DeviceEditMonitoramentoTab } from "../components/device/DeviceEditMonitoramentoTab";
 
+export type DeviceExtraIP = {
+  id?: string | null;
+  ip: string;
+  description: string;
+  monitored: boolean;
+  for_telemetry: boolean;
+  for_bng: boolean;
+  for_bgp: boolean;
+};
+
 type Device = {
   id: string;
   pop_id?: string | null;
@@ -28,6 +38,9 @@ type Device = {
   ping_enabled: boolean;
   telemetry_enabled: boolean;
   bng_enabled?: boolean;
+  bgp_enabled?: boolean;
+  offline_alert_logic?: "any" | "all";
+  extra_ips?: DeviceExtraIP[];
   operational_mode: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -308,6 +321,9 @@ function emptyForm(): Partial<Device> {
     ping_enabled: true,
     telemetry_enabled: false,
     bng_enabled: false,
+    bgp_enabled: false,
+    offline_alert_logic: "any",
+    extra_ips: [],
     operational_mode: "Ativo",
     locality_id: null,
     access_mode: null,
@@ -511,6 +527,9 @@ export function DevicesPage() {
       ssh_user: d.ssh_user ?? null,
       telnet_password_configured: d.telnet_password_configured,
       ssh_password_configured: d.ssh_password_configured,
+      bgp_enabled: !!d.bgp_enabled,
+      offline_alert_logic: d.offline_alert_logic === "all" ? "all" : "any",
+      extra_ips: (d.extra_ips ?? []).map((ip) => ({ ...ip })),
       ...(networkIsBridge(d.network_status)
         ? { ping_enabled: false, telemetry_enabled: false }
         : {}),
@@ -817,6 +836,19 @@ export function DevicesPage() {
       const ponErr = validatePonInterfacesForm(form);
       if (ponErr) throw new Error(ponErr);
 
+      const extraIps = (form.extra_ips ?? []).filter((ip) => String(ip.ip ?? "").trim() !== "");
+      const totalIps = extraIps.length + (form.ip && String(form.ip).trim() !== "" ? 1 : 0);
+      const seenIps = new Set<string>();
+      if (form.ip && String(form.ip).trim() !== "") seenIps.add(String(form.ip).trim());
+      for (const ip of extraIps) {
+        const v = String(ip.ip).trim();
+        if (seenIps.has(v)) throw new Error(`IP extra "${v}" repetido (já usado pelo equipamento).`);
+        seenIps.add(v);
+        if (totalIps >= 2 && !String(ip.description ?? "").trim()) {
+          throw new Error(`IP extra "${v}": descrição obrigatória quando há 2 ou mais IPs.`);
+        }
+      }
+
       const telOn = !!form.telemetry_enabled && !bridge;
       const pingOn = !!form.ping_enabled && !bridge;
       const body = {
@@ -831,6 +863,16 @@ export function DevicesPage() {
         ping_enabled: pingOn,
         telemetry_enabled: telOn,
         bng_enabled: !!form.bng_enabled,
+        bgp_enabled: !!form.bgp_enabled,
+        offline_alert_logic: form.offline_alert_logic === "all" ? "all" : "any",
+        extra_ips: extraIps.map((ip) => ({
+          ip: String(ip.ip).trim(),
+          description: String(ip.description ?? "").trim(),
+          monitored: !!ip.monitored,
+          for_telemetry: !!ip.for_telemetry,
+          for_bng: !!ip.for_bng,
+          for_bgp: !!ip.for_bgp,
+        })),
         operational_mode: form.operational_mode || "Ativo",
         latitude: form.latitude ?? null,
         longitude: form.longitude ?? null,
@@ -1633,8 +1675,91 @@ export function DevicesPage() {
                 <input className="input" style={{ width: "100%" }} value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
               <div className="field field--full">
-                <label>{formIsBridge ? "IP (opcional em Bridge)" : "IP"}</label>
+                <label>{formIsBridge ? "IP principal (opcional em Bridge)" : "IP principal"}</label>
                 <input className="input mono" style={{ width: "100%" }} value={(form.ip as string) ?? ""} onChange={(e) => setForm({ ...form, ip: e.target.value })} />
+              </div>
+
+              <div className="field field--full">
+                <label>IPs extra (opcional)</label>
+                <p style={{ color: "var(--muted)", fontSize: 12, margin: "0 0 8px" }}>
+                  Um mesmo equipamento pode ter mais de um IP (ex.: gestão e um virtual-system de BGP).
+                  Se houver 2 ou mais IPs no total, cada um precisa de descrição. Marque quais devem
+                  ser monitorados e para que servem na aba <strong>Monitoramento</strong>.
+                </p>
+                {(form.extra_ips ?? []).map((ip, idx) => (
+                  <div
+                    key={idx}
+                    className="row"
+                    style={{ gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}
+                  >
+                    <input
+                      className="input mono"
+                      style={{ flex: "1 1 160px", minWidth: 0 }}
+                      placeholder="IP extra"
+                      value={ip.ip}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const next = [...(f.extra_ips ?? [])];
+                          next[idx] = { ...next[idx], ip: e.target.value };
+                          return { ...f, extra_ips: next };
+                        })
+                      }
+                    />
+                    <input
+                      className="input"
+                      style={{ flex: "2 1 220px", minWidth: 0 }}
+                      placeholder="Descrição (ex.: Virtual-system BGP)"
+                      value={ip.description}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const next = [...(f.extra_ips ?? [])];
+                          next[idx] = { ...next[idx], description: e.target.value };
+                          return { ...f, extra_ips: next };
+                        })
+                      }
+                    />
+                    <label className="row" style={{ gap: 4, alignItems: "center", fontSize: 12, flexShrink: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={ip.monitored}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const next = [...(f.extra_ips ?? [])];
+                            next[idx] = { ...next[idx], monitored: e.target.checked };
+                            return { ...f, extra_ips: next };
+                          })
+                        }
+                      />
+                      Monitorar
+                    </label>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ flexShrink: 0 }}
+                      title="Remover este IP"
+                      onClick={() =>
+                        setForm((f) => ({ ...f, extra_ips: (f.extra_ips ?? []).filter((_, i) => i !== idx) }))
+                      }
+                    >
+                      <X size={16} strokeWidth={2} aria-hidden />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      extra_ips: [
+                        ...(f.extra_ips ?? []),
+                        { ip: "", description: "", monitored: true, for_telemetry: false, for_bng: false, for_bgp: false },
+                      ],
+                    }))
+                  }
+                >
+                  + Adicionar IP extra
+                </button>
               </div>
 
               {!formIsOlt ? (

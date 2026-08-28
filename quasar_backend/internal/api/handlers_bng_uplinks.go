@@ -12,8 +12,41 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 )
+
+// huaweiIfExt{In,Out}BitRateOID — HUAWEI-IF-EXT-MIB::hwIFExtInputBitRate/hwIFExtOutputBitRate
+// (colunas 39/40 de hwIFExtTable), coletadas por internal/monitorworker quando o equipamento
+// é Huawei (ver collectHuaweiIfExtRates). Taxa instantânea em bps, já calculada no
+// equipamento — preferida sobre o delta de ifHCInOctets/ifHCOutOctets quando disponível.
+const (
+	huaweiIfExtInBitRateOID  = "1.3.6.1.4.1.2011.5.25.41.1.1.1.1.39"
+	huaweiIfExtOutBitRateOID = "1.3.6.1.4.1.2011.5.25.41.1.1.1.1.40"
+)
+
+func findHuaweiIfExtRate(vars []probing.SNMPVar, ifIndex int) (inBps, outBps float64, ok bool) {
+	inSuffix := "." + strconv.Itoa(ifIndex)
+	var foundIn, foundOut bool
+	for _, v := range vars {
+		oid := probing.NormalizeSNMPOID(v.OID)
+		if !foundIn && oid == huaweiIfExtInBitRateOID+inSuffix {
+			if n, err := strconv.ParseFloat(strings.TrimSpace(v.Value), 64); err == nil {
+				inBps = n
+				foundIn = true
+			}
+		} else if !foundOut && oid == huaweiIfExtOutBitRateOID+inSuffix {
+			if n, err := strconv.ParseFloat(strings.TrimSpace(v.Value), 64); err == nil {
+				outBps = n
+				foundOut = true
+			}
+		}
+		if foundIn && foundOut {
+			break
+		}
+	}
+	return inBps, outBps, foundIn && foundOut
+}
 
 // handlers_bng_uplinks.go — monitoramento de tráfego dos uplinks de operadora (ex.: K2, FORTE)
 // num equipamento BNG. Rotula interfaces específicas (bng_uplink_interfaces) e calcula
@@ -320,21 +353,47 @@ func (s *Server) bngUplinksHistory(w http.ResponseWriter, r *http.Request) {
 		results[i] = uplinkResult{bngUplinkInterface: u, Points: []uplinkPoint{}}
 	}
 
-	for i := 1; i < len(snaps); i++ {
-		prev, cur := snaps[i-1], snaps[i]
-		dt := cur.at.Sub(prev.at).Seconds()
-		if dt <= 0 {
-			continue
-		}
-		prevRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(prev.raw))
-		curRows := snmpifparse.BuildIfTable(walkJSONToSNMPVars(cur.raw))
-		if len(prevRows) == 0 || len(curRows) == 0 {
+	// vars/rows por snapshot, calculados uma vez e reaproveitados: leitura directa (Huawei
+	// hwIFExtInputBitRate/hwIFExtOutputBitRate, ver interface_snapshot_worker.go) quando
+	// disponível para o ifIndex — não depende de par anterior, é a taxa já suavizada pelo
+	// próprio equipamento. Sem isso (outro vendor, ou snapshot anterior à extensão Huawei),
+	// cai para o delta clássico entre ifHCInOctets/ifHCOutOctets consecutivos.
+	type parsedSnap struct {
+		vars []probing.SNMPVar
+		rows []snmpifparse.IfRow
+	}
+	parsed := make([]parsedSnap, len(snaps))
+	for i, sn := range snaps {
+		v := walkJSONToSNMPVars(sn.raw)
+		parsed[i] = parsedSnap{vars: v, rows: snmpifparse.BuildIfTable(v)}
+	}
+
+	for i, cur := range snaps {
+		if len(parsed[i].rows) == 0 {
 			continue
 		}
 		for idx, u := range uplinks {
-			pr, pOK := findIfRowForUplink(prevRows, u)
-			cr, cOK := findIfRowForUplink(curRows, u)
-			if !pOK || !cOK || cr.InOctets < pr.InOctets || cr.OutOctets < pr.OutOctets {
+			cr, cOK := findIfRowForUplink(parsed[i].rows, u)
+			if !cOK {
+				continue
+			}
+			if inRate, outRate, ok := findHuaweiIfExtRate(parsed[i].vars, cr.IfIndex); ok {
+				pt := uplinkPoint{T: cur.at.UTC().Format(time.RFC3339), InBps: round2(inRate), OutBps: round2(outRate)}
+				results[idx].Points = append(results[idx].Points, pt)
+				last := pt
+				results[idx].Current = &last
+				continue
+			}
+			if i == 0 {
+				continue
+			}
+			prev := snaps[i-1]
+			dt := cur.at.Sub(prev.at).Seconds()
+			if dt <= 0 || len(parsed[i-1].rows) == 0 {
+				continue
+			}
+			pr, pOK := findIfRowForUplink(parsed[i-1].rows, u)
+			if !pOK || cr.InOctets < pr.InOctets || cr.OutOctets < pr.OutOctets {
 				continue
 			}
 			pt := uplinkPoint{

@@ -62,7 +62,7 @@ export function DashboardEquipamentosView({
                     <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
                 <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: 11, lineHeight: 1.35, paddingTop: 8 }} />
               </PieChart>
             </ChartBox>
@@ -72,7 +72,7 @@ export function DashboardEquipamentosView({
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={70} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
-                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
                 <Bar dataKey="Equipamentos" fill="var(--accent)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ChartBox>
@@ -84,7 +84,7 @@ export function DashboardEquipamentosView({
                   <Cell key={i} fill={CHART_COLORS[(i + 2) % CHART_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
               <Legend />
             </PieChart>
           </ChartBox>
@@ -93,7 +93,7 @@ export function DashboardEquipamentosView({
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={100} tick={{ fill: "var(--muted)", fontSize: 10 }} />
-              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
               <Bar dataKey="Quantidade" fill="#a371f7" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ChartBox>
@@ -113,7 +113,7 @@ export function DashboardEquipamentosView({
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-30} textAnchor="end" height={70} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
-                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
                 <Bar dataKey="Equipamentos" fill="var(--ok)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ChartBox>
@@ -125,7 +125,7 @@ export function DashboardEquipamentosView({
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-30} textAnchor="end" height={70} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} allowDecimals={false} />
-                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+                <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
                 <Bar dataKey="Equipamentos" fill="var(--warn)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ChartBox>
@@ -226,7 +226,7 @@ export function DashboardEquipamentosView({
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-35} textAnchor="end" height={70} />
             <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} />
-            <Tooltip formatter={(v: number) => fmt1(v)} contentStyle={tooltipStyle} />
+            <Tooltip formatter={(v: number) => fmt1(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
             <Bar dataKey="Latência média (ms)" fill="var(--err)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ChartBox>

@@ -11,7 +11,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { FileDown, FileText, Eye, Send, X } from "lucide-react";
+import { FileDown, FileText, Eye, X } from "lucide-react";
+import { SendIcon } from "../components/icons/SendIcon";
 import { PageCountPill } from "../components/PageCountPill";
 import { InfoHint } from "../components/InfoHint";
 import { formatBngDateTime } from "../lib/bngDisplay";
@@ -468,6 +469,9 @@ function BngDeviceChart({
               const iso = items?.[0]?.payload?.iso;
               return iso ? new Date(String(iso)).toLocaleString("pt-BR") : "";
             }}
+            contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+            itemStyle={{ color: "var(--text)" }}
+            labelStyle={{ color: "var(--text)" }}
           />
           <Legend />
           <Line type="monotone" dataKey="Total" stroke="#64748b" strokeWidth={2} dot={false} connectNulls={false} />
@@ -579,7 +583,11 @@ function ReportChart({ payload, variant = "screen" }: { payload: SystemReportPay
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
           <YAxis tick={{ fontSize: 10 }} width={44} allowDecimals={false} />
-          <Tooltip />
+          <Tooltip
+            contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+            itemStyle={{ color: "var(--text)" }}
+            labelStyle={{ color: "var(--text)" }}
+          />
           <Legend />
           <Line type="monotone" dataKey="Total" stroke="#58a6ff" strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="Online" stroke="#3fb950" strokeWidth={2} dot={false} />
@@ -853,7 +861,7 @@ function ReportCard({
         </ReportIconButton>
         {admin ? (
           <ReportIconButton title="Enviar Telegram" disabled={tgPending} onClick={() => runOrModal("telegram", () => onTelegram(id))}>
-            <Send size={16} />
+            <SendIcon size={16} />
           </ReportIconButton>
         ) : null}
       </div>
@@ -1504,7 +1512,9 @@ export function ReportsPage() {
                     {admin && (
                       <button
                         type="button"
-                        className="btn"
+                        className="btn btn--icon-menu"
+                        title="Enviar por Telegram"
+                        aria-label="Enviar por Telegram"
                         disabled={tgMut.isPending}
                         onClick={() => {
                           if (previewId === "equipment-by-pop") {
@@ -1522,8 +1532,7 @@ export function ReportsPage() {
                           }
                         }}
                       >
-                        <Send size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-                        Telegram
+                        <SendIcon size={16} />
                       </button>
                     )}
                   </div>

@@ -78,7 +78,7 @@ export function DashboardGeralView({
                   <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} />
+              <Tooltip formatter={(v: number) => fmtInt(v)} contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
               <Legend
                 layout="horizontal"
                 verticalAlign="bottom"

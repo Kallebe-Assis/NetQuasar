@@ -80,6 +80,9 @@ function OnuHistoryChart({
           <Tooltip
             formatter={(v: number, name: string) => [v.toLocaleString("pt-PT"), name === "total" ? "Total" : name === "online" ? "Online" : "Offline"]}
             labelFormatter={(l) => String(l)}
+            contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+            itemStyle={{ color: "var(--text)" }}
+            labelStyle={{ color: "var(--text)" }}
           />
           <Legend formatter={(v) => (v === "total" ? "Total" : v === "online" ? "Online" : "Offline")} />
           <Line type="monotone" dataKey="total" name="total" stroke={CHART_COLORS.total} strokeWidth={2} dot={rows.length <= 60} />

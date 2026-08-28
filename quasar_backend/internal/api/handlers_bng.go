@@ -960,7 +960,11 @@ func (s *Server) bngDeviceSessionReport(w http.ResponseWriter, r *http.Request) 
 	} else {
 		resp["infrastructure_note"] = "Execute a coleta completa SNMP ou «Coletar totais agora» para obter pools, RADIUS, CGN, BGP, energia e interfaces."
 	}
-	if len(sessions) > 0 {
+	// BuildCGNATSummary percorre TODAS as sessões para montar o mapeamento IP privado × pool
+	// público — o custo real por trás da lentidão da aba "Relatório" (ver aba "CGNAT e Pools"
+	// no frontend, que passa ?cgnat=1). Só calcula quando pedido explicitamente.
+	includeCgnat := r.URL.Query().Get("cgnat") == "1" || strings.EqualFold(r.URL.Query().Get("cgnat"), "true")
+	if includeCgnat && len(sessions) > 0 {
 		resp["cgnat_summary"] = bngcollect.BuildCGNATSummary(sessions, infra.CGNPublicPools)
 	}
 	writeJSON(w, http.StatusOK, resp)

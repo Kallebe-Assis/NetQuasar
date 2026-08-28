@@ -34,6 +34,8 @@ export type PermissionKey =
   | "switch.collect"
   | "bng.view"
   | "bng.collect"
+  | "bgp.view"
+  | "bgp.collect"
   | "reports.view"
   | "reports.send"
   | "reports.manage"
@@ -101,6 +103,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "switch.collect", module: "switch", module_label: "Switch", label: "Atualizar telemetria e interfaces" },
   { key: "bng.view", module: "bng", module_label: "BNG", label: "Visualizar" },
   { key: "bng.collect", module: "bng", module_label: "BNG", label: "Atualizar sessões e infraestrutura" },
+  { key: "bgp.view", module: "bgp", module_label: "BGP", label: "Visualizar" },
+  { key: "bgp.collect", module: "bgp", module_label: "BGP", label: "Atualizar coleta SNMP" },
   { key: "reports.view", module: "reports", module_label: "Relatórios", label: "Visualizar e exportar" },
   { key: "reports.send", module: "reports", module_label: "Relatórios", label: "Enviar relatórios" },
   { key: "reports.manage", module: "reports", module_label: "Relatórios", label: "Gerir agendamentos" },
@@ -133,6 +137,7 @@ export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = [
   "mikrotik.view",
   "switch.view",
   "bng.view",
+  "bgp.view",
   "reports.view",
   "fleet.view",
   "network_events.view",
@@ -174,11 +179,13 @@ export const ROUTE_VIEW_PERMISSION: Record<string, PermissionKey> = {
   "/connections": "connections.view",
   "/alerts": "alerts.view",
   "/map": "map.view",
+  "/topology": "map.view",
   "/tools": "tools.view",
   "/olt": "olt.view",
   "/mikrotik": "mikrotik.view",
   "/switch": "switch.view",
   "/bng": "bng.view",
+  "/bgp": "bgp.view",
   "/reports": "reports.view",
   "/fleet": "fleet.view",
   "/fleet/dashboard": "fleet.view",

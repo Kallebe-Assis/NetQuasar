@@ -212,7 +212,9 @@ export function FleetDashboardPage() {
                         const [y, m, dd] = iso.split("-");
                         return `${dd}/${m}/${y}`;
                       }}
-                      contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8 }}
+                      contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)" }}
+                      itemStyle={{ color: "var(--text)" }}
+                      labelStyle={{ color: "var(--text)" }}
                     />
                     <Legend />
                     <Bar dataKey="Abastecimentos" stackId="g" fill="var(--accent)" radius={[0, 0, 0, 0]} />

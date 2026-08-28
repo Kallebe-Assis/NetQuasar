@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SendIcon } from "../../components/icons/SendIcon";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
@@ -79,8 +80,15 @@ export function FleetReportsPage() {
                 {busy === `csv-${k.id}` ? "A exportar…" : `Exportar ${k.label} (CSV)`}
               </button>
               {canSend ? (
-                <button type="button" className="btn" disabled={busy === `tg-${k.id}`} onClick={() => void sendTelegram(k.id)}>
-                  {busy === `tg-${k.id}` ? "A enviar…" : `Enviar ${k.label} no Telegram`}
+                <button
+                  type="button"
+                  className="btn btn--icon"
+                  title={`Enviar ${k.label} no Telegram`}
+                  aria-label={`Enviar ${k.label} no Telegram`}
+                  disabled={busy === `tg-${k.id}`}
+                  onClick={() => void sendTelegram(k.id)}
+                >
+                  <SendIcon size={16} />
                 </button>
               ) : null}
             </div>

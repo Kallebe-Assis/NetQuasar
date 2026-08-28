@@ -340,7 +340,12 @@ export function BngUplinksPanel({ deviceId }: { deviceId: string }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 10 }} width={60} tickFormatter={(v) => formatBitrate(Number(v))} />
-                  <Tooltip formatter={(v: number, name: string) => [formatBitrate(v), name]} />
+                  <Tooltip
+                    formatter={(v: number, name: string) => [formatBitrate(v), name]}
+                    contentStyle={{ background: "var(--panel2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+                    itemStyle={{ color: "var(--text)" }}
+                    labelStyle={{ color: "var(--text)" }}
+                  />
                   <Legend />
                   {carrierKeys.map((c, i) => (
                     <Line

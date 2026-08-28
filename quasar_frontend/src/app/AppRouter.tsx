@@ -37,6 +37,7 @@ const RecordsPage = lazy(() =>
   import("../pages/RecordsPage").then((m) => ({ default: m.RecordsPage })),
 );
 const MapPage = lazy(() => import("../pages/MapPage").then((m) => ({ default: m.MapPage })));
+const TopologyPage = lazy(() => import("../pages/TopologyPage").then((m) => ({ default: m.TopologyPage })));
 const ToolsPage = lazy(() =>
   import("../pages/ToolsPage").then((m) => ({ default: m.ToolsPage })),
 );
@@ -55,6 +56,9 @@ const SwitchPage = lazy(() =>
 );
 const BngPage = lazy(() =>
   import("../pages/BngPage").then((m) => ({ default: m.BngPage })),
+);
+const BgpPage = lazy(() =>
+  import("../pages/BgpPage").then((m) => ({ default: m.BgpPage })),
 );
 const IntegrationsHubPage = lazy(() =>
   import("../pages/IntegrationsHubPage").then((m) => ({ default: m.IntegrationsHubPage })),
@@ -172,12 +176,14 @@ export function AppRouter() {
           <Route path="events" element={withSuspense(<NetworkEventsPage />)} />
           <Route path="registros" element={withSuspense(<RecordsPage />)} />
           <Route path="map" element={withSuspense(<MapPage />)} />
+          <Route path="topology" element={withSuspense(<TopologyPage />)} />
           <Route path="tools" element={withSuspense(<ToolsPage />)} />
           <Route path="settings" element={withSuspense(<SettingsPage />)} />
           <Route path="olt" element={withSuspense(<OltPage />)} />
           <Route path="mikrotik" element={withSuspense(<MikrotikPage />)} />
           <Route path="switch" element={withSuspense(<SwitchPage />)} />
           <Route path="bng" element={withSuspense(<BngPage />)} />
+          <Route path="bgp" element={withSuspense(<BgpPage />)} />
           <Route path="reports" element={withSuspense(<ReportsPage />)} />
           <Route path="about" element={withSuspense(<AboutPage />)} />
           <Route path="fleet" element={<Navigate to={APP_ROUTES.fleetDashboard} replace />} />

@@ -1,0 +1,235 @@
+.topo-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 140px);
+  min-height: 480px;
+}
+
+.topo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.topo-toolbar__legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.topo-toolbar__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.topo-toolbar__legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.topo-body {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.topo-canvas-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 10px);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+/* React Flow herda as variáveis de tema do NetQuasar em vez das cores default da lib */
+.topo-canvas-wrap .react-flow__background {
+  background: var(--panel);
+}
+.topo-canvas-wrap .react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.topo-canvas-wrap .react-flow__controls-button {
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.topo-canvas-wrap .react-flow__controls-button:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+}
+.topo-canvas-wrap .react-flow__minimap {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.topo-canvas-wrap .react-flow__attribution {
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.topo-device-list {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 10px);
+  background: var(--panel);
+  padding: 10px;
+  overflow: hidden;
+}
+.topo-device-list__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.topo-device-list__search .input {
+  flex: 1 1 auto;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.topo-device-list__items {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.topo-device-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: grab;
+  background: var(--panel2);
+}
+.topo-device-list__item:hover {
+  border-color: var(--border);
+}
+.topo-device-list__item--placed {
+  opacity: 0.55;
+}
+.topo-device-list__item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.topo-device-list__item-text strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topo-device-list__item-text span {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nó de equipamento */
+.topo-device-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  background: var(--panel2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+}
+.topo-device-icon--selected {
+  border-color: var(--accent, #58a6ff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #58a6ff) 30%, transparent);
+}
+.topo-device-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 140px;
+}
+.topo-device-label strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.topo-device-label .mono {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+/* Grupo / POP */
+.topo-group {
+  border: 2px dashed var(--border);
+  background: color-mix(in srgb, var(--panel2) 60%, transparent);
+}
+.topo-group__label {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  background: var(--panel);
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: text;
+}
+
+/* Aresta / conexão */
+.topo-edge-icon {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border-radius: 50%;
+}
+.topo-edge-toolbar {
+  position: absolute;
+  z-index: 1000;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Botão de remover no NodeToolbar de equipamento/POP (DeviceNode.tsx/GroupNode.tsx) */
+.topo-node-toolbar__btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Alvo de clique um pouco maior nos handles de ligação (ficam invisíveis via opacity:0 inline,
+   mas o hit-box pequeno por omissão dificultava agarrar os lados esquerdo/direito). */
+.topo-canvas-wrap .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}

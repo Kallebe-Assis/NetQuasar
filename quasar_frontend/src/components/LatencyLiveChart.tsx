@@ -57,7 +57,10 @@ export function LatencyLiveChart({
               border: "1px solid var(--border)",
               borderRadius: 8,
               fontSize: 12,
+              color: "var(--text)",
             }}
+            itemStyle={{ color: "var(--text)" }}
+            labelStyle={{ color: "var(--text)" }}
             formatter={(value) => {
               if (value == null || typeof value !== "number") return ["timeout / falha", "Latência"];
               return [`${value} ms`, "Latência"];

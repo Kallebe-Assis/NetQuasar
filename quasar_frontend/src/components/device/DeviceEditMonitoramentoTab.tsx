@@ -8,12 +8,26 @@ const TELEMETRY_MODES = [
   { value: "ssh", label: "SSH" },
 ] as const;
 
+export type DeviceMonitoringExtraIP = {
+  id?: string | null;
+  ip: string;
+  description: string;
+  monitored: boolean;
+  for_telemetry: boolean;
+  for_bng: boolean;
+  for_bgp: boolean;
+};
+
 export type DeviceMonitoringForm = {
   category?: string;
   network_status?: string;
+  ip?: string | null;
   ping_enabled?: boolean;
   telemetry_enabled?: boolean;
   bng_enabled?: boolean;
+  bgp_enabled?: boolean;
+  offline_alert_logic?: "any" | "all";
+  extra_ips?: DeviceMonitoringExtraIP[];
   telemetry_mode?: string | null;
   snmp_community?: string | null;
   mib_folder_path?: string | null;
@@ -115,6 +129,14 @@ export function DeviceEditMonitoramentoTab({
   const formIsSwitch = (form.category ?? "").trim() === "Switch";
   const formTelemetryOIDStrategy = (form.telemetry_oid_strategy as "default" | "manual" | null) ?? "default";
   const telemetryMode = normalizeTelemetryMode(form.telemetry_mode ?? "SNMP");
+  const extraIPs = form.extra_ips ?? [];
+  const totalIpCount = extraIPs.length + (String(form.ip ?? "").trim() !== "" ? 1 : 0);
+  const setExtraIPPurpose = (idx: number, key: "for_telemetry" | "for_bng" | "for_bgp", value: boolean) =>
+    setForm((f) => {
+      const next = [...(f.extra_ips ?? [])];
+      next[idx] = { ...next[idx], [key]: value };
+      return { ...f, extra_ips: next };
+    });
 
   const mikrotikProfiles = useQuery({
     queryKey: ["mikrotik-telnet-profiles"],
@@ -169,12 +191,87 @@ export function DeviceEditMonitoramentoTab({
             checked={!!form.bng_enabled}
             onChange={(bngOn) => setForm((f) => ({ ...f, bng_enabled: bngOn }))}
           />
+          <PanelSwitch
+            id="device-bgp-mon"
+            label="BGP"
+            checked={!!form.bgp_enabled}
+            onChange={(bgpOn) => setForm((f) => ({ ...f, bgp_enabled: bgpOn }))}
+          />
         </div>
 
         {formIsBridge && (
           <p style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)", margin: "-0.25rem 0 0.5rem" }}>
             Estado Bridge: ping e telemetria não estão disponíveis.
           </p>
+        )}
+
+        {totalIpCount >= 2 && (
+          <div className="field field--full" style={{ marginTop: 4 }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>IPs monitorados</h4>
+            <p style={{ color: "var(--muted)", fontSize: 12, margin: "0 0 8px" }}>
+              Escolha qual IP alimenta cada coleta (quando nenhum IP for marcado para um propósito,
+              o sistema usa o IP principal, como sempre). IPs extra não monitorados aqui (checkbox
+              "Monitorar" desmarcado na aba Cadastro) não entram no ping nem no alerta offline.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="row" style={{ gap: 8, fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
+                <span style={{ flex: "1 1 220px" }}>IP principal: {form.ip || "—"}</span>
+              </div>
+              {extraIPs.map((ip, idx) => (
+                <div
+                  key={ip.id ?? idx}
+                  className="row"
+                  style={{ gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}
+                >
+                  <span className="mono" style={{ flex: "1 1 160px" }}>
+                    {ip.ip || "(IP vazio)"} {ip.monitored ? "" : "— não monitorado"}
+                  </span>
+                  {form.telemetry_enabled && (
+                    <label className="row" style={{ gap: 4, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={ip.for_telemetry}
+                        onChange={(e) => setExtraIPPurpose(idx, "for_telemetry", e.target.checked)}
+                      />
+                      Telemetria
+                    </label>
+                  )}
+                  {form.bng_enabled && (
+                    <label className="row" style={{ gap: 4, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={ip.for_bng}
+                        onChange={(e) => setExtraIPPurpose(idx, "for_bng", e.target.checked)}
+                      />
+                      BNG
+                    </label>
+                  )}
+                  {form.bgp_enabled && (
+                    <label className="row" style={{ gap: 4, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={ip.for_bgp}
+                        onChange={(e) => setExtraIPPurpose(idx, "for_bgp", e.target.checked)}
+                      />
+                      BGP
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="field" style={{ marginTop: 10, maxWidth: 320 }}>
+              <label>Alarmar offline quando</label>
+              <select
+                className="select"
+                style={{ width: "100%" }}
+                value={form.offline_alert_logic === "all" ? "all" : "any"}
+                onChange={(e) => setForm((f) => ({ ...f, offline_alert_logic: e.target.value as "any" | "all" }))}
+              >
+                <option value="any">Qualquer IP monitorado falhar</option>
+                <option value="all">Todos os IPs monitorados falharem</option>
+              </select>
+            </div>
+          </div>
         )}
 
         {!formIsBridge && (

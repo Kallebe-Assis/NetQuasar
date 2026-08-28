@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { CircleHelp, ExternalLink } from "lucide-react";
+import { CircleHelp, ExternalLink, Mail } from "lucide-react";
+import { InstagramIcon } from "../components/icons/InstagramIcon";
 import { ABOUT_FAQ, ABOUT_FAQ_CATEGORIES, type AboutFaqCategory } from "../lib/aboutFaq";
 
 const DEVELOPER = {
   name: "Kallebe Assis Nogueira",
   portfolio: "https://portfolio-kallebe-assis.vercel.app/",
+  instagram: "kallbeassiss_",
+  email: "kallebe.assiss@gmail.com",
   createdAtLabel: "11 de maio de 2026",
 };
 
@@ -126,15 +129,25 @@ export function AboutPage() {
           <section className="card about-section about-section--wide">
             <h3>Desenvolvedor</h3>
             <p className="about-lead-name">{DEVELOPER.name}</p>
-            <p>
-              Autor e responsável técnico pelo NetQuasar. Para contacto, portfólio e outros projectos, visite a landing page:
-            </p>
-            <p>
+            <p className="row" style={{ gap: 16, flexWrap: "wrap", margin: "0 0 12px" }}>
+              <a
+                href={`https://instagram.com/${DEVELOPER.instagram}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="about-link"
+              >
+                <InstagramIcon size={14} />@{DEVELOPER.instagram}
+              </a>
+              <a href={`mailto:${DEVELOPER.email}`} className="about-link">
+                <Mail size={14} aria-hidden />
+                {DEVELOPER.email}
+              </a>
               <a href={DEVELOPER.portfolio} target="_blank" rel="noopener noreferrer" className="about-link">
-                {DEVELOPER.portfolio}
                 <ExternalLink size={14} aria-hidden />
+                Portfólio
               </a>
             </p>
+            <p>Autor e responsável técnico pelo NetQuasar.</p>
             <h3>Data de criação</h3>
             <p>
               Início do monorepo NetQuasar: <strong>{DEVELOPER.createdAtLabel}</strong>. O produto evolui continuamente com

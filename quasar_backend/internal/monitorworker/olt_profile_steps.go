@@ -660,7 +660,7 @@ func oltWorkerZTEPonIDFromIfLabel(s string) string {
 
 func oltWorkerDatacomPonRows(rows []map[string]any) []map[string]any {
 	type agg struct {
-		key, name, status string
+		key, name, status      string
 		total, online, offline int
 	}
 	byKey := map[string]*agg{}

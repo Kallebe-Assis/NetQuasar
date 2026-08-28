@@ -3,13 +3,13 @@ package monitorworker
 import "time"
 
 const (
-	defaultTelemetryTimeoutMs      = 120_000
-	defaultInterfaceTimeoutMs      = 120_000
-	defaultOltIfDerivedTimeoutMs   = 180_000
-	defaultOltOnuTelnetTimeoutMs   = 600_000
-	minCollectionTimeoutMs         = 5_000
-	maxCollectionTimeoutMs         = 600_000
-	maxOltOnuTelnetTimeoutMs       = 3_600_000
+	defaultTelemetryTimeoutMs    = 120_000
+	defaultInterfaceTimeoutMs    = 120_000
+	defaultOltIfDerivedTimeoutMs = 180_000
+	defaultOltOnuTelnetTimeoutMs = 600_000
+	minCollectionTimeoutMs       = 5_000
+	maxCollectionTimeoutMs       = 600_000
+	maxOltOnuTelnetTimeoutMs     = 3_600_000
 )
 
 // ClampCollectionTimeoutMsPublic expõe o clamp de timeouts de coleta para o pacote api.

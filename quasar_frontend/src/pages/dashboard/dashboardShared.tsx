@@ -94,6 +94,7 @@ export const tooltipStyle = {
   border: "1px solid var(--border)",
   borderRadius: "var(--radius)",
   fontSize: 12,
+  color: "var(--text)",
 };
 
 export function Section({

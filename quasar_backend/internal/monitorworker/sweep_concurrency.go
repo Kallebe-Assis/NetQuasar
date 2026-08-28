@@ -93,7 +93,7 @@ func forEachLimited(ctx context.Context, n, limit int, fn func(i int)) {
 
 // counter helpers for concurrent sweeps
 type sweepCounters struct {
-	mu                                 sync.Mutex
+	mu                                  sync.Mutex
 	ok, fail, skip, eligible, processed int
 }
 

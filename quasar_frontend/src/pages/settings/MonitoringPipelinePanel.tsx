@@ -66,6 +66,7 @@ const STEP_KINDS = [
   { value: "ping", label: "Ping (Latência)", desc: "Verificação de disponibilidade via ICMP/TCP" },
   { value: "telemetry", label: "SNMP — Telemetria", desc: "Temperatura, uptime, CPU, memória e demais métricas" },
   { value: "bng", label: "BNG — Totais", desc: "PPPoE, IPv4, IPv6 e dual-stack" },
+  { value: "bgp", label: "BGP — Peers/Interfaces", desc: "Peers, interfaces e tráfego BGP (perfil SNMP em Configurações → BGP)" },
   { value: "mikrotik", label: "Interfaces — MikroTik", desc: "Tráfego, erros, status UP/DOWN e óptica SFP" },
   { value: "switch", label: "Interfaces — Switch", desc: "Tráfego, erros, status UP/DOWN e óptica SFP" },
   { value: "interfaces_olt", label: "Interfaces — OLT", desc: "IF-MIB das OLTs" },
@@ -74,7 +75,7 @@ const STEP_KINDS = [
   { value: "olt_onu", label: "ONUs / PON — OLT", desc: "Status ONU, status e TX das PONs" },
 ];
 
-const CATEGORIES = ["olt", "bng", "mikrotik", "router", "switch", "radio", "servidor", "outro"];
+const CATEGORIES = ["olt", "bng", "bgp", "mikrotik", "router", "switch", "radio", "servidor", "outro"];
 
 const TELEMETRY_FIELDS = [
   { value: "cpu", label: "CPU" },
@@ -128,6 +129,12 @@ function defaultPipelineSteps(): PipelineStep[] {
       options: { bng_mode: "monitoring" },
     },
     {
+      id: "bgp-monitoring",
+      kind: "bgp",
+      enabled: true,
+      scope: { target: "category", category: "bgp" },
+    },
+    {
       id: "mikrotik-if",
       kind: "mikrotik",
       enabled: true,
@@ -172,6 +179,9 @@ function newStep(kind: string): PipelineStep {
     base.scope = { target: "category", category: "bng" };
     base.options = { bng_mode: "monitoring" };
   }
+  if (kind === "bgp") {
+    base.scope = { target: "category", category: "bgp" };
+  }
   if (kind === "olt_onu") {
     base.scope = { target: "category", category: "olt" };
     base.options = { olt_onu_mode: "baseline" };
@@ -198,6 +208,7 @@ function stepIcon(kind: string, mode?: string): { node: ReactNode; tone: string 
   if (kind === "ping") return { node: <Wifi size={18} />, tone: "green" };
   if (kind === "telemetry") return { node: <Thermometer size={18} />, tone: "blue" };
   if (kind === "bng") return { node: <Server size={18} />, tone: "indigo" };
+  if (kind === "bgp") return { node: <Network size={18} />, tone: "teal" };
   if (kind === "mikrotik" || kind === "interfaces_mikrotik") return { node: <Router size={18} />, tone: "purple" };
   if (kind === "switch" || kind === "interfaces_switch") return { node: <Network size={18} />, tone: "violet" };
   if (kind === "interfaces_olt") return { node: <Radio size={18} />, tone: "teal" };
@@ -247,6 +258,7 @@ function frequencyForStep(step: PipelineStep, intervals: MonitoringIntervalsPayl
       return intervals.ping_seconds;
     case "telemetry":
     case "bng":
+    case "bgp":
       return intervals.telemetry_seconds ?? intervals.telemetry_minutes * 60;
     case "mikrotik":
     case "switch":

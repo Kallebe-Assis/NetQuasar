@@ -105,10 +105,23 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 				"latency_source": src,
 			}
 
-			if shouldOpenPingUnreachableAlert(probeReachOK, streakAfter, cfg.alertConsecutiveRequired()) {
+			// Combina o IP primário com quaisquer IPs extra monitorados (device_ips) conforme
+			// devices.offline_alert_logic — sem IPs extra, é exactamente o mesmo cálculo de
+			// sempre (shouldOpenPingUnreachableAlert == pingOfflineConfirmed).
+			primaryConfirmedOffline := pingOfflineConfirmed(probeReachOK, streakAfter, cfg.alertConsecutiveRequired())
+			combinedOffline := primaryConfirmedOffline
+			if extraIPs, exErr := loadMonitoredExtraIPs(ctx, pool, id); exErr == nil && len(extraIPs) > 0 {
+				extrasConfirmed := make([]bool, 0, len(extraIPs))
+				for _, ex := range extraIPs {
+					extrasConfirmed = append(extrasConfirmed, probeExtraIPConfirmedOffline(ctx, pool, ex, icmpPart, tcpPart, cfg.ICMPPayloadBytes, cfg.alertConsecutiveRequired()))
+				}
+				combinedOffline = combinedOfflineConfirmed(primaryConfirmedOffline, extrasConfirmed, row.offlineAlertLogic)
+			}
+
+			if combinedOffline {
 				InsertPingUnreachableIfNewForMonitoredDevice(ctx, pool, log, id, description, host, probe, src)
 			}
-			if probeReachOK && shouldResolvePingUnreachableAfterOK(streak) {
+			if !combinedOffline && probeReachOK && shouldResolvePingUnreachableAfterOK(streak) {
 				recoveredMu.Lock()
 				recoveredPing[id] = lat
 				recoveredMu.Unlock()
@@ -207,12 +220,12 @@ func RunLatencySweep(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logge
 			Int("concurrency", limit).Msg("ciclo latência")
 	}
 	appendWorkerAudit(ctx, pool, log, "monitoring_cycle", CycleSlugLatency, "run", map[string]any{
-		"source":       src,
-		"mode":         mode,
-		"ok":           int(okN.Load()),
-		"fail":         int(failN.Load()),
-		"total":        len(devices),
-		"concurrency":  limit,
+		"source":      src,
+		"mode":        mode,
+		"ok":          int(okN.Load()),
+		"fail":        int(failN.Load()),
+		"total":       len(devices),
+		"concurrency": limit,
 	})
 	return err
 }

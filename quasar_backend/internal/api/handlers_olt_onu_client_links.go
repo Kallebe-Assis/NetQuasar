@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
 
@@ -222,4 +223,21 @@ func (s *Server) importOnuClientLinks(w http.ResponseWriter, r *http.Request) {
 		"suggestions": suggestions,
 		"total":       len(body.Rows),
 	})
+}
+
+// deleteOnuClientLink remove o vínculo serial → cliente de uma única ONU (edição individual
+// a partir da pesquisa de ONUs — ver deviceIPDTO/OltOnuClientEditModal no frontend). Ao
+// contrário de importOnuClientLinks, aceita nome vazio implicitamente: é sempre uma remoção.
+func (s *Server) deleteOnuClientLink(w http.ResponseWriter, r *http.Request) {
+	serial := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "serial")))
+	if serial == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "serial obrigatório", nil)
+		return
+	}
+	_, err := s.DB().Exec(r.Context(), `DELETE FROM onu_client_links WHERE serial=$1`, serial)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

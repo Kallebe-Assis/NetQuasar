@@ -44,6 +44,8 @@ var permissionCatalog = []permissionDefinition{
 	{Key: "switch.collect", Module: "switch", ModuleLabel: "Switch", Label: "Atualizar telemetria e interfaces"},
 	{Key: "bng.view", Module: "bng", ModuleLabel: "BNG", Label: "Visualizar"},
 	{Key: "bng.collect", Module: "bng", ModuleLabel: "BNG", Label: "Atualizar sessões e infraestrutura"},
+	{Key: "bgp.view", Module: "bgp", ModuleLabel: "BGP", Label: "Visualizar"},
+	{Key: "bgp.collect", Module: "bgp", ModuleLabel: "BGP", Label: "Atualizar coleta SNMP"},
 	{Key: "reports.view", Module: "reports", ModuleLabel: "Relatórios", Label: "Visualizar e exportar"},
 	{Key: "reports.send", Module: "reports", ModuleLabel: "Relatórios", Label: "Enviar relatórios"},
 	{Key: "reports.manage", Module: "reports", ModuleLabel: "Relatórios", Label: "Gerir agendamentos"},
