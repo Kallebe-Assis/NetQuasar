@@ -11,7 +11,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
-import { formatFleetPlate, isValidFleetPlate, UF_OPTIONS, VEHICLE_STATUS } from "./fleetUtils";
+import { formatFleetPlate, formatFleetPlateOrUnknown, isValidFleetPlate, UF_OPTIONS, VEHICLE_STATUS } from "./fleetUtils";
 
 function VehicleStatusIcon({ status }: { status: string }) {
   const label = VEHICLE_STATUS.find((s) => s.value === status)?.label ?? status;
@@ -225,7 +225,7 @@ export function FleetVehiclesPage() {
     if (statusFilter && v.status !== statusFilter) return false;
     const s = q.trim().toLowerCase();
     if (!s) return true;
-    const plate = formatFleetPlate(v.plate).toLowerCase();
+    const plate = formatFleetPlateOrUnknown(v.plate).toLowerCase();
     const plateKey = plate.replace(/-/g, "");
     const qKey = s.replace(/-/g, "");
     return plate.includes(s) || plateKey.includes(qKey) || v.description.toLowerCase().includes(s) || (v.model ?? "").toLowerCase().includes(s);
@@ -290,7 +290,7 @@ export function FleetVehiclesPage() {
           <h3>{editing ? "Editar veículo" : "Novo veículo"}</h3>
           <div className="fleet-form-grid">
             <label>Descrição*<input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-            <label>Placa*<input className="input" placeholder="AAA-0000 ou AAA-0A00" value={form.plate} onChange={(e) => setForm({ ...form, plate: formatFleetPlate(e.target.value) })} /></label>
+            <label>Placa (opcional)<input className="input" placeholder="AAA-0000 ou AAA-0A00" value={form.plate} onChange={(e) => setForm({ ...form, plate: formatFleetPlate(e.target.value) })} /></label>
             <label>Ano<input className="input" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} /></label>
             <label>Modelo<input className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
             <label>Cor<input className="input" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label>
@@ -308,7 +308,7 @@ export function FleetVehiclesPage() {
           </div>
           <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
             <button type="button" className="btn" onClick={closeForm}>Cancelar</button>
-            <button type="button" className="btn btn--primary" disabled={save.isPending || !form.description.trim() || !isValidFleetPlate(form.plate)} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
+            <button type="button" className="btn btn--primary" disabled={save.isPending || !form.description.trim() || (!!form.plate.trim() && !isValidFleetPlate(form.plate))} onClick={() => save.mutate()}>{editing ? "Guardar" : "Criar"}</button>
           </div>
           </div>
         </div>,
@@ -321,7 +321,7 @@ export function FleetVehiclesPage() {
           <tbody>
             {filtered.map((v) => (
               <tr key={v.id}>
-                <td><strong>{formatFleetPlate(v.plate)}</strong></td>
+                <td><strong>{formatFleetPlateOrUnknown(v.plate)}</strong></td>
                 <td>{v.description}</td>
                 <td>{v.model ?? "—"}</td>
                 <td>{v.odometer_current?.toLocaleString("pt-BR")}</td>
@@ -369,7 +369,7 @@ export function FleetVehiclesPage() {
         title="Inativar veículo"
         message={
           inactivateTarget
-            ? `Inativar ${formatFleetPlate(inactivateTarget.plate)} — ${inactivateTarget.description}? O veículo deixa de contar como ativo na frota.`
+            ? `Inativar ${formatFleetPlateOrUnknown(inactivateTarget.plate)} — ${inactivateTarget.description}? O veículo deixa de contar como ativo na frota.`
             : ""
         }
         confirmLabel="Inativar"

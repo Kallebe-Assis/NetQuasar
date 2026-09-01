@@ -5,7 +5,7 @@ import { APP_ROUTES } from "../../app/routes";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { addDaysISO, fleetMoney, fleetNum, formatFleetPlate, isFleetVehicleInactive, monthEndISO, monthStartISO, todayISO } from "./fleetUtils";
+import { addDaysISO, fleetMoney, fleetNum, formatFleetPlateOrUnknown, isFleetVehicleInactive, monthEndISO, monthStartISO, todayISO } from "./fleetUtils";
 
 type Dash = {
   fleet: { vehicles_total: number; vehicles_active: number };
@@ -119,7 +119,7 @@ export function FleetDashboardPage() {
             <option value="">Todos os Veículos</option>
             {selectableVehicles.map((v) => (
               <option key={v.id} value={v.id}>
-                {formatFleetPlate(v.plate)} — {v.description}
+                {formatFleetPlateOrUnknown(v.plate)} — {v.description}
               </option>
             ))}
           </select>
@@ -154,7 +154,7 @@ export function FleetDashboardPage() {
       </div>
       {selected ? (
         <p className="muted" style={{ marginTop: 0 }}>
-          Exibindo apenas {formatFleetPlate(selected.plate)} — {selected.description}.
+          Exibindo apenas {formatFleetPlateOrUnknown(selected.plate)} — {selected.description}.
         </p>
       ) : null}
       {q.isLoading ? <p className="muted">A carregar…</p> : null}
@@ -164,7 +164,7 @@ export function FleetDashboardPage() {
           <div className="fleet-kpi-grid">
             <div className="card fleet-kpi">
               <span>{vehicleId ? "Veículo" : "Veículos"}</span>
-              <strong>{vehicleId ? (selected ? formatFleetPlate(selected.plate) : "1") : d.fleet.vehicles_total}</strong>
+              <strong>{vehicleId ? (selected ? formatFleetPlateOrUnknown(selected.plate) : "1") : d.fleet.vehicles_total}</strong>
               <small>{vehicleId ? (selected?.description ?? "") : `${d.fleet.vehicles_active} ativos`}</small>
             </div>
             <div className="card fleet-kpi">
@@ -226,9 +226,9 @@ export function FleetDashboardPage() {
           </div>
 
           <div className="fleet-rank-grid">
-            <RankCard title="Mais econômicos (KM/L)" rows={d.rankings.most_efficient.map((r) => ({ label: formatFleetPlate(r.plate), sub: r.description, value: `${fleetNum(r.value)} KM/L` }))} />
-            <RankCard title="Maior consumo (litros)" rows={d.rankings.highest_consumption.map((r) => ({ label: formatFleetPlate(r.plate), sub: r.description, value: `${fleetNum(r.value, 1)} L` }))} />
-            <RankCard title="Maiores gastos" rows={d.rankings.highest_cost_per_km.map((r) => ({ label: formatFleetPlate(r.plate), sub: r.description, value: fleetMoney(r.value) }))} />
+            <RankCard title="Mais econômicos (KM/L)" rows={d.rankings.most_efficient.map((r) => ({ label: formatFleetPlateOrUnknown(r.plate), sub: r.description, value: `${fleetNum(r.value)} KM/L` }))} />
+            <RankCard title="Maior consumo (litros)" rows={d.rankings.highest_consumption.map((r) => ({ label: formatFleetPlateOrUnknown(r.plate), sub: r.description, value: `${fleetNum(r.value, 1)} L` }))} />
+            <RankCard title="Maiores gastos" rows={d.rankings.highest_cost_per_km.map((r) => ({ label: formatFleetPlateOrUnknown(r.plate), sub: r.description, value: fleetMoney(r.value) }))} />
             <RankCard title="Postos mais baratos" rows={d.rankings.cheapest_stations.map((r) => ({ label: r.description, sub: `${fleetNum(r.liters, 0)} L`, value: fleetMoney(r.avg_price) }))} />
           </div>
         </>

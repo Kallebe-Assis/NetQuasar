@@ -415,6 +415,17 @@ function mergeFields(into: Map<string, OltTelnetReportField>, list: OltTelnetRep
   for (const f of list) {
     const key = fieldKey(f.label);
     const prev = into.get(key);
+    // RX/TX (potência óptica): quando o mesmo relatório traz mais de um comando com leitura de
+    // potência (comum — um comando de listagem "cacheado" pelo lado da OLT e um comando dedicado
+    // de leitura da ONU específica), fica sempre com a ÚLTIMA leitura não vazia — é a mais
+    // próxima do fim da sequência de comandos, tipicamente a mais específica/actual. Comparar
+    // por comprimento de string (usado para os outros campos) é arbitrário para um valor
+    // numérico e já mostrou escolher a leitura errada (ex.: "-28.00" vence "-22.5" só por ter
+    // mais caracteres, mesmo sendo a mais antiga/menos específica).
+    if (key === "rx" || key === "tx") {
+      if (f.value.trim()) into.set(key, f);
+      continue;
+    }
     if (!prev || f.value.length > prev.value.length) {
       into.set(key, f);
     }

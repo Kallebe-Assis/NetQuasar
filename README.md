@@ -170,6 +170,8 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 
 **Como funciona:** cada integração tem URL base, autenticação e **pedidos** configuráveis (templates HTTP). O motor `integrationhttp` executa pedidos; `integrationconsumer` expõe acções de consulta (cliente, OS, login PPPoE). Logs em `integration_logs`. Uso típico: pesquisar cliente por CPF/login a partir da tela **Conexões**.
 
+**HubSoft** (`internal/integrationhubsoft`, caminho dedicado — não passa pelo motor genérico acima) tem 6 abas próprias: Consulta, Atendimentos, Ordens de serviço, Financeiro, Dashboard e **Relatório** (`/integrations/hubsoft/relatorio`) — filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC, e relatórios por período de atendimentos, ordens de serviço (por técnico) e financeiro (percentual recebido/aberto/vencido, com opção de mês específico ou média dos últimos X meses), cada um com botão **Enviar por Telegram**. Usa os endpoints `/todos` da própria HubSoft (paginação real) em vez de varrer a base por amostra; os resultados de Atendimentos/O.S./Financeiro (Dashboard) ficam em cache no servidor (Redis) por alguns minutos — "Carregar dados ao iniciar o sistema" (Configurações → Integrações → HubSoft) aquece esse cache no arranque do servidor em vez de esperar a primeira visita à tela.
+
 ---
 
 ### POPs (`/pops`)
@@ -231,6 +233,14 @@ Estado operacional vem de `device_probe_cache` atualizado pelo worker.
 
 ---
 
+### Topologia (`/topology`)
+
+**Função:** diagrama de rede desenhado **manualmente** (equipamentos, agrupamentos por POP, ligações tipadas) — deliberadamente sem descoberta automática (LLDP na tela BGP é só informativo, não alimenta este diagrama).
+
+**Como funciona:** canvas React Flow com equipamentos arrastados da lista lateral, agrupadores "POP" (quadrado ou círculo, redimensionáveis, nome editável) e ligações entre equipamentos de 4 tipos (fibra, transporte, rádio, UTP/VPN), cada uma com cor/traço próprio e ícone redimensionável. Liga-se a partir de qualquer um dos 4 lados de um equipamento. Desfazer/refazer (Ctrl+Z / Ctrl+Y, com histórico agrupando gestos contínuos como arrastar/redimensionar num só passo) e remoção de um único equipamento, POP ou ligação (apagar um POP desagrupa os equipamentos, não os remove). Documento único gravado em `GET/PUT /api/v1/topology`.
+
+---
+
 ### Ferramentas (`/tools`)
 
 **Função:** diagnóstico ad hoc (sem persistir inventário).
@@ -274,6 +284,30 @@ Estado operacional vem de `device_probe_cache` atualizado pelo worker.
 
 ---
 
+### BGP (`/bgp`)
+
+**Função:** monitorização de equipamentos com sessões BGP (tipicamente a borda/edge da rede) — peers, tráfego por operadora, saúde do hardware.
+
+**Como funciona:** equipamentos com `bgp_enabled`; perfis SNMP próprios em **Configurações → BGP** (múltiplos perfis nomeados, ao contrário do perfil único do BNG). Abas:
+
+| Aba | Conteúdo |
+|-----|----------|
+| **Visão geral** | Peers estabelecidos, saúde básica (CPU/memória/uptime), alertas de sessão, tráfego por operadora |
+| **Peers** | Tabela de peers BGP (estado, AS remoto, prefixos recebidos/activos/anunciados) e sessões BFD |
+| **Interfaces & LAG** | Interfaces IF-MIB e E-Trunk (LAG entre equipamentos: master/backup e motivo real da troca) |
+| **Óptica** | Diagnóstico por porta: potência Rx/Tx, corrente do laser, temperatura, tensão |
+| **CPU & Memória** | CPU por núcleo (actual + médias 1/5 min) e CPU/memória da Virtual System |
+| **Saúde do Chassi** | Semáforo de alarme por placa, ventoinhas, fontes, temperatura e tensão por sensor |
+| **QoS** | Descarte por fila/classe (HQoS/CBQoS) |
+| **RADIUS** | Saúde por servidor RADIUS (pode não estar visível em VS dedicadas só a BGP) |
+| **LLDP** | Vizinhos LLDP por porta — só informativo, não alimenta a Topologia |
+
+O tráfego (Visão geral) mostra sempre 1 gráfico **TOTAL geral** (soma de todas as operadoras) no topo, seguido de 1 gráfico dedicado por operadora — cada um com toggle Separado/Somado próprio quando a operadora tem 2+ interfaces (`GET /api/v1/bgp/devices/{id}/carrier-traffic-history`), selector de período (24 h a 300 dias ou intervalo específico) e teto do eixo Y a partir do limite de banda cadastrado.
+
+Operadoras são um cadastro próprio (`bgp_carriers` — nome, CNPJ, endereço, 1+ AS, limite de banda; `bgp_carrier_as_numbers` para os AS), gerido em **Configurações → BGP → Operadoras**; ligar uma interface a uma operadora sempre escolhe de uma lista já cadastrada (nunca texto livre), com atalho para cadastrar/editar/remover operadoras sem sair do formulário.
+
+---
+
 ### BNG / PPPoE (`/bng`)
 
 **Função:** operação do concentrador: sessões PPPoE, autenticações, interfaces, relatório e catálogo de VLANs.
@@ -313,7 +347,7 @@ O endpoint legado `GET /api/v1/events` continua a ser a linha do tempo de sistem
 
 **Função:** relatórios do sistema (exceto frota), resumidos ou detalhados, com CSV / PDF / Telegram.
 
-Inclui: alertas activos, alertas por categoria, equipamentos em atenção, PONs DOWN, saúde do monitoramento, conexões, OLT, ONUs por PON, BNG, **eventos de rede**, infraestrutura FTTH (POPs, projetos, CTOs, cabos, postes, emendas), equipamentos por POP, visão geral, integrações, automações e base comercial.
+Inclui: alertas activos, alertas por categoria, equipamentos em atenção, PONs DOWN, saúde do monitoramento, conexões, OLT, ONUs por PON, BNG, **BGP** (peers established/caídos e operadoras cadastradas), **eventos de rede**, infraestrutura FTTH (POPs, projetos, CTOs, cabos, postes, emendas), equipamentos por POP, visão geral, integrações, **HubSoft** (atendimentos/O.S./financeiro dos últimos 30 dias), automações e base comercial.
 
 ---
 
@@ -332,11 +366,11 @@ Qualquer usuário autenticado acede às preferências pessoais. As restantes aba
 | **Alertas** | **Pessoal:** toast em qualquer ecrã, som de alerta (4 sons padrão + MP3). **Global** (se tiver permissão): limiares CPU/temp/SFP/OLT/BNG |
 | **Aparência** | Tema claro/escuro **por usuário** (`users.preferences`) |
 | **Base de dados** | DSN, teste, limpeza, backup B2 |
-| **Usuários** | CRUD e perfis de permissão |
+| **Usuários** | CRUD, perfis de permissão e «Forçar desconexão» (invalida a sessão de outro usuário — efeito quase imediato, a app já verifica a sessão a cada poucos segundos) |
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
-| **OLT / MikroTik / Switch / BNG** | Perfis e coleta |
+| **OLT / MikroTik / Switch / BNG / BGP** | Perfis, coleta e (BGP) cadastro de operadoras (CNPJ, AS, limite de banda) |
 | **Telegram** | Bot monitoring e relatórios |
-| **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial |
+| **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial — mais **Automações personalizadas** (ilimitadas, qualquer relatório do sistema ou de frota, recorrência própria) |
 | **Auditoria** | `ops_audit_log` |
 
 Preferências por conta (novos usuários: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
@@ -360,7 +394,7 @@ O watcher global reage a `monitoring_runtime.last_alerts_change_at` (offline, PO
 
 ### Automações agendadas
 
-Em **Configurações → Automações**: backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial. Recorrência diária/semanal/mensal/personalizada. Histórico em `automation_execution_log`.
+Em **Configurações → Automações**: os 5 cadastros fixos — backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial — mais **Automações personalizadas** (`automation_schedules`, tabela própria, sem limite de instâncias): cada uma escolhe qualquer relatório do catálogo `/api/v1/reports/system` (alertas, BGP, HubSoft, OLT, BNG, etc.) ou um relatório de frota/combustível, com recorrência diária/semanal/dias específicos/mensal e janela de dados própria — enviado pelo bot Telegram "reports". Mesmo motor de agendamento (`scheduleutil`) dos 5 cadastros fixos, executando a cada verificação de 30 s do worker. Histórico em `automation_execution_log`.
 
 ---
 
@@ -392,6 +426,7 @@ NetQuasar/
 │   │   ├── alertcorrelation/# Incidentes
 │   │   ├── oltcollect/      # Perfis e coleta OLT
 │   │   ├── oltifderive/     # Derivação PON/ONU via IF-MIB
+│   │   ├── bgpcollect/      # Catálogo SNMP e pivot de dados BGP (peers/óptica/hardware/…)
 │   │   ├── networkevents/   # Catálogo de eventos de rede
 │   │   └── db/migrations/   # Esquema PostgreSQL
 │   └── data/mibs/           # MIBs SNMP de referência
@@ -500,9 +535,12 @@ Guia completo: [deploy/linux-debian/README.md](deploy/linux-debian/README.md)
 | `/connections` | Conexões PPPoE/DHCP |
 | `/alerts` | Alertas |
 | `/map` | Mapa |
+| `/topology` | Topologia (diagrama de rede manual) |
 | `/tools` | Ferramentas |
 | `/olt` | OLT |
 | `/mikrotik` | MikroTik |
+| `/switch` | Switch |
+| `/bgp` | BGP (peers, tráfego por operadora, hardware) |
 | `/bng` | BNG / sessões PPPoE / VLANs |
 | `/events` | Eventos da Rede (manutenções e incidentes) |
 | `/registros` | Cofre de senhas (próprios; admin vê todos) |

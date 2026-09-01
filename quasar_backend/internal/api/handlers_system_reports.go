@@ -13,8 +13,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/netquasar/netquasar/quasar_backend/internal/bgpcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
+	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
+	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhubsoft"
 	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 )
@@ -30,11 +34,13 @@ var systemReportCatalog = []map[string]string{
 	{"id": "olt-overview", "title": "OLTs — informações e gráfico", "description": "Frota OLT, ONUs e evolução recente (últimos 7 dias).", "group": "Acesso e OLT"},
 	{"id": "onu-per-pon", "title": "ONUs por PON", "description": "Última coleta por porta PON (sem nova coleta SNMP).", "group": "Acesso e OLT"},
 	{"id": "bng-subscribers", "title": "BNG — totais de logins", "description": "Totais PPPoE, IPv4, IPv6 e dual-stack por BNG e evolução recente (7 dias).", "group": "Acesso e OLT"},
+	{"id": "bgp-overview", "title": "BGP — peers e operadoras", "description": "Sessões BGP (established/caídas), prefixos por peer e operadoras cadastradas por equipamento.", "group": "Acesso e OLT"},
 	{"id": "network-events", "title": "Eventos de rede", "description": "Manutenções, alterações e rompimentos — resumido ou detalhado.", "group": "Rede e manutenção"},
 	{"id": "ftth-infra", "title": "Infraestrutura FTTH", "description": "POPs, projetos, CTOs, cabos, postes e emendas — resumido ou detalhado.", "group": "Rede e manutenção"},
 	{"id": "equipment-by-pop", "title": "Equipamentos por POP", "description": "Lista de equipamentos agrupados por ponto de presença.", "group": "Rede e manutenção"},
 	{"id": "system-general", "title": "Visão geral do sistema", "description": "Métricas consolidadas de equipamentos, localidades, clientes, PONs, eventos e mais.", "group": "Sistema e cadastros"},
 	{"id": "integrations", "title": "Integrações", "description": "Integrações configuradas e estado de cada uma.", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-overview", "title": "HubSoft — atendimentos, O.S. e financeiro", "description": "Totais de atendimentos, ordens de serviço e faturas dos últimos 30 dias, direto da integração HubSoft.", "group": "Sistema e cadastros"},
 	{"id": "automations", "title": "Automações", "description": "Execuções de automações e relatórios agendados.", "group": "Sistema e cadastros"},
 	{"id": "commercial-base", "title": "Base comercial", "description": "Clientes por localidade — totais mensais ou detalhe.", "group": "Sistema e cadastros"},
 }
@@ -162,6 +168,10 @@ func (s *Server) buildSystemReport(ctx context.Context, id string, opts systemRe
 		return s.reportOnuPerPon(ctx, pool, base)
 	case "bng-subscribers":
 		return s.reportBngSubscribers(ctx, pool, base)
+	case "bgp-overview":
+		return s.reportBGPOverview(ctx, pool, base)
+	case "hubsoft-overview":
+		return s.reportHubsoftOverview(ctx, pool, base)
 	case "network-events":
 		return s.reportNetworkEvents(ctx, pool, base, opts.PeriodMode)
 	case "ftth-infra":
@@ -1572,4 +1582,187 @@ func bngSubscriberAverages(ctx context.Context, pool *pgxpool.Pool) map[string]a
 		out = append(out, win)
 	}
 	return map[string]any{"windows": out}
+}
+
+// reportBGPOverview resume sessões BGP (peers established/caídas, prefixos) e operadoras
+// cadastradas por equipamento — última amostra persistida por equipamento (mesma fonte que
+// bgpDeviceReport, handlers_bgp_report.go), sem disparar nova coleta SNMP.
+func (s *Server) reportBGPOverview(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
+	devRows, err := pool.Query(ctx, `
+		SELECT d.id, coalesce(d.description,''), coalesce(host(d.ip)::text,'')
+		FROM devices d WHERE coalesce(d.bgp_enabled, false) = true ORDER BY d.description
+	`)
+	if err != nil {
+		return nil, err
+	}
+	type devInfo struct {
+		id   uuid.UUID
+		desc string
+		ip   string
+	}
+	var devices []devInfo
+	for devRows.Next() {
+		var di devInfo
+		if err := devRows.Scan(&di.id, &di.desc, &di.ip); err != nil {
+			devRows.Close()
+			return nil, err
+		}
+		devices = append(devices, di)
+	}
+	devRows.Close()
+
+	cols := []string{"Equipamento", "IP", "Última coleta", "Peers established", "Peers caídos", "Prefixos recebidos"}
+	var dataRows [][]string
+	var totalEstablished, totalDown, totalPrefixes int
+	for _, d := range devices {
+		var collected time.Time
+		var metrics []byte
+		err := pool.QueryRow(ctx, `
+			SELECT collected_at, metrics::text FROM telemetry_samples
+			WHERE device_id=$1 AND metrics ? 'bgp_collection'
+			ORDER BY collected_at DESC LIMIT 1
+		`, d.id).Scan(&collected, &metrics)
+		if err != nil {
+			dataRows = append(dataRows, []string{d.desc, d.ip, "—", "—", "—", "—"})
+			continue
+		}
+		rep := bgpcollect.BuildReportFromStoredMetrics(metrics)
+		established, down, prefixes := 0, 0, 0
+		for _, p := range rep.Peers {
+			if strings.EqualFold(p.StateLabel, "established") {
+				established++
+			} else {
+				down++
+			}
+			if p.PrefixesReceived != nil {
+				prefixes += int(*p.PrefixesReceived)
+			}
+		}
+		totalEstablished += established
+		totalDown += down
+		totalPrefixes += prefixes
+		dataRows = append(dataRows, []string{
+			d.desc, d.ip, reporttelegram.FormatGeneratedAt(collected.UTC().Format(time.RFC3339)),
+			strconv.Itoa(established), strconv.Itoa(down), strconv.Itoa(prefixes),
+		})
+	}
+
+	carrierRows, err := pool.Query(ctx, `
+		SELECT c.name, c.bandwidth_limit_mbps, count(u.id)
+		FROM bgp_carriers c LEFT JOIN bgp_uplink_interfaces u ON u.carrier_id = c.id
+		GROUP BY c.id, c.name, c.bandwidth_limit_mbps ORDER BY c.name
+	`)
+	carrierCols := []string{"Operadora", "Limite de banda", "Interfaces ligadas"}
+	var carrierData [][]string
+	if err == nil {
+		defer carrierRows.Close()
+		for carrierRows.Next() {
+			var name string
+			var limit *float64
+			var ifCount int
+			if carrierRows.Scan(&name, &limit, &ifCount) == nil {
+				limitStr := "—"
+				if limit != nil && *limit > 0 {
+					if *limit >= 1000 {
+						limitStr = fmt.Sprintf("%.0f Gbps", *limit/1000)
+					} else {
+						limitStr = fmt.Sprintf("%.0f Mbps", *limit)
+					}
+				}
+				carrierData = append(carrierData, []string{name, limitStr, strconv.Itoa(ifCount)})
+			}
+		}
+	}
+
+	base["title"] = "BGP — peers e operadoras"
+	base["columns"] = cols
+	base["rows"] = dataRows
+	base["summary"] = map[string]any{
+		"Equipamentos BGP":       len(devices),
+		"Peers established":      totalEstablished,
+		"Peers caídos":           totalDown,
+		"Prefixos recebidos":     totalPrefixes,
+		"Operadoras cadastradas": len(carrierData),
+	}
+	base["groups"] = []map[string]any{
+		{"pop": "Operadoras cadastradas", "devices": carrierGroupDevices(carrierCols, carrierData)},
+	}
+	return base, nil
+}
+
+// carrierGroupDevices adapta as linhas de operadoras ao formato "devices" já usado por
+// SystemReportPayload.groups (reaproveita a mesma estrutura de exibição do relatório de
+// equipamentos por POP, em vez de inventar um novo formato só para isto).
+func carrierGroupDevices(cols []string, rows [][]string) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		label := strings.Join(row, " · ")
+		out = append(out, map[string]any{"name": row[0], "category": "Operadora", "label": label})
+	}
+	return out
+}
+
+// reportHubsoftOverview resume os últimos 30 dias de atendimentos, ordens de serviço e faturas
+// da integração HubSoft — reaproveita BuildAttendancePeriodReport/BuildWorkOrderPeriodReport/
+// BuildFinancialPeriodReport (internal/integrationhubsoft, ver aba Relatório da integração) em
+// vez de duplicar lógica de coleta.
+func (s *Server) reportHubsoftOverview(ctx context.Context, pool *pgxpool.Pool, base map[string]any) (map[string]any, error) {
+	var integID uuid.UUID
+	var baseURL string
+	var authCfg []byte
+	err := pool.QueryRow(ctx, `SELECT id, base_url, auth_config FROM integrations WHERE slug='hubsoft' LIMIT 1`).
+		Scan(&integID, &baseURL, &authCfg)
+	if err == pgx.ErrNoRows {
+		base["title"] = "HubSoft — atendimentos, O.S. e financeiro"
+		base["columns"] = []string{}
+		base["rows"] = [][]string{}
+		base["summary"] = map[string]any{"Nota": "Integração HubSoft não configurada."}
+		return base, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	cfg := integrationhubsoft.Config{
+		BaseURL: strings.TrimSpace(baseURL),
+		Auth:    integrationhttp.AuthConfigFromJSON(authCfg),
+	}
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		base["title"] = "HubSoft — atendimentos, O.S. e financeiro"
+		base["columns"] = []string{}
+		base["rows"] = [][]string{}
+		base["summary"] = map[string]any{"Nota": "Falha ao autenticar na HubSoft: " + err.Error()}
+		return base, nil
+	}
+
+	att := integrationhubsoft.BuildAttendancePeriodReport(ctx, cfg, token, "", "")
+	wo := integrationhubsoft.BuildWorkOrderPeriodReport(ctx, cfg, token, "", "")
+	fin := integrationhubsoft.BuildFinancialPeriodReport(ctx, cfg, token, "", "")
+
+	cols := []string{"Indicador", "Valor"}
+	rows := [][]string{
+		{"Atendimentos no período", strconv.Itoa(att.Total)},
+		{"Atendimentos fechados", strconv.Itoa(att.Total - att.Open)},
+		{"Atendimentos em aberto", strconv.Itoa(att.Open)},
+		{"O.S. no período", strconv.Itoa(wo.Total)},
+		{"O.S. finalizadas", strconv.Itoa(wo.Finished)},
+		{"O.S. finalizadas (%)", fmt.Sprintf("%.1f%%", wo.FinishedPct)},
+		{"Faturas no período", strconv.Itoa(fin.Total)},
+		{"Valor total", fmt.Sprintf("R$ %.2f", fin.TotalValue)},
+		{"Recebido", fmt.Sprintf("R$ %.2f (%.1f%%)", fin.PaidValue, fin.PaidPct)},
+		{"Em aberto", fmt.Sprintf("R$ %.2f (%.1f%%)", fin.OpenValue, fin.OpenPct)},
+		{"Vencido", fmt.Sprintf("R$ %.2f (%.1f%%)", fin.OverdueValue, fin.OverduePct)},
+	}
+
+	base["title"] = "HubSoft — atendimentos, O.S. e financeiro (últimos 30 dias)"
+	base["columns"] = cols
+	base["rows"] = rows
+	base["summary"] = map[string]any{
+		"Atendimentos": att.Total,
+		"O.S.":         wo.Total,
+		"Faturas":      fin.Total,
+		"Valor total":  fmt.Sprintf("R$ %.2f", fin.TotalValue),
+		"Recebido (%)": fmt.Sprintf("%.1f%%", fin.PaidPct),
+	}
+	return base, nil
 }

@@ -192,8 +192,8 @@ export function HubsoftConsultPage() {
         </div>
         {busca === "ipv4" || busca === "mac" ? (
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
-            A HubSoft não tem busca nativa por {busca === "ipv4" ? "IPv4" : "MAC"} — o NetQuasar varre a listagem de clientes até
-            encontrar (pode demorar alguns segundos).
+            Busca pelo extrato de conexão da HubSoft — encontra o cliente pelo {busca === "ipv4" ? "IPv4" : "MAC"} directamente,
+            sem varrer a base.
           </p>
         ) : null}
       </div>

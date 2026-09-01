@@ -8,10 +8,10 @@ import (
 )
 
 type collectionTimeouts struct {
-	TelemetryMs      int
-	InterfaceMs      int
-	OltIfDerivedMs   int
-	OltOnuTelnetMs   int
+	TelemetryMs    int
+	InterfaceMs    int
+	OltIfDerivedMs int
+	OltOnuTelnetMs int
 }
 
 func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts {
@@ -33,7 +33,11 @@ func (s *Server) loadCollectionTimeouts(ctx context.Context) collectionTimeouts 
 }
 
 func (t collectionTimeouts) OltRefreshTotal() time.Duration {
-	ms := monitorworker.ClampCollectionTimeoutMsPublic(t.OltIfDerivedMs, 300_000)
+	// Tecto próprio (até 1 h, ver ClampOltIfDerivedTimeoutMsPublic) — não o genérico de 10 min
+	// partilhado por telemetria/interfaces: OLTs de centenas/milhares de ONUs em várias PONs
+	// precisam de bem mais do que isso para uma coleta SNMP completa (confirmado em produção —
+	// 10 min cortava a varredura a meio, sem erro visível, só ONUs em falta nas últimas PONs).
+	ms := monitorworker.ClampOltIfDerivedTimeoutMsPublic(t.OltIfDerivedMs, 300_000)
 	if tel := monitorworker.ClampCollectionTimeoutMsPublic(t.TelemetryMs, 120_000); tel > ms {
 		ms = tel
 	}

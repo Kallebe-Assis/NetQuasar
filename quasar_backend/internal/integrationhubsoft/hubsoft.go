@@ -13,11 +13,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
 )
@@ -200,6 +202,48 @@ func SearchByIPOrMAC(ctx context.Context, cfg Config, token, termo, kind string)
 		Message: fmt.Sprintf("Nenhum cliente encontrado com esse %s (varridos %d clientes únicos na base).",
 			map[string]string{"ipv4": "IPv4", "mac": "MAC"}[kind], len(seenClientIDs)),
 	}, nil
+}
+
+// SearchClientByConnectionTerm localiza um cliente por IPv4/MAC/login via
+// /cliente/extrato_conexao (busca directa e rápida — ver reportFromConnectionExtract) e, a
+// partir do código do cliente encontrado, busca o cartão COMPLETO com SearchClients (mesma
+// chamada já usada pela Consulta normal). Substitui SearchByIPOrMAC (scan por letras do nome,
+// lento e sem garantia de achar) nesse mesmo uso — mantida a assinatura/forma de resposta
+// (ClientSearchResult) para não mexer na tela de Consulta.
+func SearchClientByConnectionTerm(ctx context.Context, cfg Config, token, termo, kind string) (ClientSearchResult, error) {
+	busca := kind // "ipv4" ou "mac" — mesmos valores já usados pelo chamador
+	needle := strings.TrimSpace(termo)
+	if kind == "mac" {
+		needle = normalizeMAC(needle)
+	}
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "GET", Path: "/api/v1/integracao/cliente/extrato_conexao",
+		QueryParams: paramKVs(map[string]string{"busca": busca, "termo_busca": needle, "limit": "5"}),
+	})
+	if !res.OK && res.StatusCode != 404 {
+		return ClientSearchResult{}, fmt.Errorf("%s", firstNonEmpty(res.ErrorMessage, fmt.Sprintf("HTTP %d", res.StatusCode)))
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(ResponseBodyBytes(res), &doc)
+	var codigo string
+	for _, it := range extractArray(doc, "registros", "dados", "data") {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		if cli, ok := m["cliente"].(map[string]any); ok {
+			if c := pickStr(cli, "codigo_cliente"); c != "" {
+				codigo = c
+				break
+			}
+		}
+	}
+	if codigo == "" {
+		label := map[string]string{"ipv4": "IPv4", "mac": "MAC"}[kind]
+		return ClientSearchResult{OK: true, Clients: []ClientCard{}, Message: fmt.Sprintf("Nenhum cliente encontrado com esse %s.", label)}, nil
+	}
+	result, _ := SearchClients(ctx, cfg, token, "codigo_cliente", codigo, true)
+	return result, nil
 }
 
 func normalizeMAC(s string) string {
@@ -486,6 +530,214 @@ func SearchWorkOrders(ctx context.Context, cfg Config, token, busca, termo strin
 	return ParseWorkOrder(ResponseBodyBytes(res)), res
 }
 
+// --- Detalhe completo (aba Relatório/Atendimentos/O.S. → "Ver mais") -------------------------
+//
+// /cliente/atendimento e /cliente/ordem_servico (usados acima por SearchAttendance/
+// SearchWorkOrders) devolvem, quando buscados por protocolo/número (um único registo), um
+// formato BEM mais rico que /atendimento/todos e /ordem_servico/todos (usados pela lista —
+// BuildRecentActivityFast): campos de texto livre próprios (descricao_abertura — não existe em
+// /atendimento/todos, só descricao_fechamento) e, com relacoes=atendimento_mensagem /
+// ordem_servico_mensagem, a conversa completa. Por isso o "ver mais" faz UM pedido novo e
+// específico (por protocolo/número, limit=1) em vez de reaproveitar os dados já carregados na
+// lista — mais rico E mais leve que buscar mensagens de toda a lista de uma vez.
+
+// SupportMessage uma mensagem da conversa de um atendimento ou O.S.
+type SupportMessage struct {
+	Text string `json:"text,omitempty"`
+	At   string `json:"at,omitempty"`
+}
+
+func extractSupportMessages(m map[string]any, relKey string) []SupportMessage {
+	arr, ok := m[relKey].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]SupportMessage, 0, len(arr))
+	for _, it := range arr {
+		mm, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		text := pickStr(mm, "mensagem", "texto", "descricao", "conteudo")
+		if text == "" {
+			continue
+		}
+		out = append(out, SupportMessage{
+			Text: text,
+			At:   firstNonEmpty(pickStr(mm, "data_cadastro_br"), pickStr(mm, "data_cadastro")),
+		})
+	}
+	return out
+}
+
+// AttendanceDetail detalhe completo de UM atendimento (via /cliente/atendimento?busca=protocolo).
+type AttendanceDetail struct {
+	OK                bool             `json:"ok"`
+	Message           string           `json:"message,omitempty"`
+	ID                string           `json:"id,omitempty"`
+	Protocol          string           `json:"protocol,omitempty"`
+	Status            string           `json:"status,omitempty"`
+	Subject           string           `json:"subject,omitempty"`
+	Description       string           `json:"description,omitempty"`
+	OpenedAt          string           `json:"opened_at,omitempty"`
+	OpenedByUser      string           `json:"opened_by_user,omitempty"`
+	ClosedAt          string           `json:"closed_at,omitempty"`
+	ClosedByUser      string           `json:"closed_by_user,omitempty"`
+	ClosedDescription string           `json:"closed_description,omitempty"`
+	ClosingReason     string           `json:"closing_reason,omitempty"`
+	Sector            string           `json:"sector,omitempty"`
+	ResponsibleUser   string           `json:"responsible_user,omitempty"`
+	ClientName        string           `json:"client_name,omitempty"`
+	ClientCode        string           `json:"client_code,omitempty"`
+	PlanName          string           `json:"plan_name,omitempty"`
+	WorkOrders        []WorkOrderItem  `json:"work_orders,omitempty"`
+	Messages          []SupportMessage `json:"messages"`
+}
+
+// FetchAttendanceDetail busca UM atendimento pelo protocolo, com a conversa completa.
+func FetchAttendanceDetail(ctx context.Context, cfg Config, token, protocolo string) (AttendanceDetail, error) {
+	protocolo = strings.TrimSpace(protocolo)
+	if protocolo == "" {
+		return AttendanceDetail{}, fmt.Errorf("protocolo obrigatório")
+	}
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "GET", Path: "/api/v1/integracao/cliente/atendimento",
+		QueryParams: paramKVs(map[string]string{
+			"busca": "protocolo", "termo_busca": protocolo, "limit": "1",
+			"relacoes": "atendimento_mensagem",
+		}),
+	})
+	if !res.OK {
+		return AttendanceDetail{}, fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao consultar atendimento"))
+	}
+	body := ResponseBodyBytes(res)
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return AttendanceDetail{}, fmt.Errorf("resposta inválida da HubSoft")
+	}
+	arr := extractArray(doc, "atendimentos", "registros", "results", "data", "items")
+	if len(arr) == 0 {
+		return AttendanceDetail{OK: true, Message: "Atendimento não encontrado."}, nil
+	}
+	m, _ := arr[0].(map[string]any)
+	out := AttendanceDetail{
+		OK: true,
+		ID: pickStr(m, "id_atendimento"), Protocol: pickStr(m, "protocolo"),
+		Status: pickStr(m, "status"), Subject: pickStr(m, "tipo_atendimento"),
+		Description: pickStr(m, "descricao_abertura"),
+		OpenedAt:    pickStr(m, "data_cadastro"), OpenedByUser: pickStr(m, "usuario_abertura"),
+		ClosedAt: pickStr(m, "data_fechamento"), ClosedByUser: pickStr(m, "usuario_fechamento"),
+		ClosedDescription: pickStr(m, "descricao_fechamento"),
+		ClosingReason:     pickStr(m, "motivo_fechamento"),
+		Sector:            pickStr(m, "setor_responsavel"),
+		ResponsibleUser:   firstNonEmpty(pickStr(m, "usuario_responsavel"), pickStr(m, "usuario_abertura")),
+		Messages:          extractSupportMessages(m, "atendimento_mensagem"),
+	}
+	if cli, ok := m["cliente"].(map[string]any); ok {
+		out.ClientName = pickStr(cli, "nome_razaosocial")
+		out.ClientCode = pickStr(cli, "codigo_cliente")
+	}
+	if sv, ok := m["servico"].(map[string]any); ok {
+		out.PlanName = pickStr(sv, "nome")
+	}
+	if osArr, ok := m["ordens_servico"].([]any); ok {
+		for _, oi := range osArr {
+			om, ok := oi.(map[string]any)
+			if !ok {
+				continue
+			}
+			wo := WorkOrderItem{
+				ID: pickStr(om, "id_ordem_servico"), Number: pickStr(om, "numero_ordem_servico"),
+				Status:      pickStr(om, "status"),
+				Description: pickStr(om, "descricao_abertura"),
+				CreatedAt:   pickStr(om, "data_cadastro"), ScheduledAt: pickStr(om, "data_inicio_programado"),
+			}
+			if sv, ok := om["servico"].(map[string]any); ok {
+				wo.PlanName = pickStr(sv, "nome")
+			}
+			out.WorkOrders = append(out.WorkOrders, wo)
+		}
+	}
+	return out, nil
+}
+
+// WorkOrderDetail detalhe completo de UMA O.S. (via /cliente/ordem_servico?busca=numero_ordem_servico).
+type WorkOrderDetail struct {
+	OK                 bool             `json:"ok"`
+	Message            string           `json:"message,omitempty"`
+	ID                 string           `json:"id,omitempty"`
+	Number             string           `json:"number,omitempty"`
+	Type               string           `json:"type,omitempty"`
+	Status             string           `json:"status,omitempty"`
+	StatusClosed       string           `json:"status_closed,omitempty"`
+	Description        string           `json:"description,omitempty"`
+	ServiceDescription string           `json:"service_description,omitempty"`
+	ClosedDescription  string           `json:"closed_description,omitempty"`
+	ScheduledStart     string           `json:"scheduled_start,omitempty"`
+	ScheduledEnd       string           `json:"scheduled_end,omitempty"`
+	ExecutedStart      string           `json:"executed_start,omitempty"`
+	ExecutedEnd        string           `json:"executed_end,omitempty"`
+	CreatedAt          string           `json:"created_at,omitempty"`
+	OpenedByUser       string           `json:"opened_by_user,omitempty"`
+	ClosedByUser       string           `json:"closed_by_user,omitempty"`
+	ClientName         string           `json:"client_name,omitempty"`
+	ClientCode         string           `json:"client_code,omitempty"`
+	PlanName           string           `json:"plan_name,omitempty"`
+	AttendanceProtocol string           `json:"attendance_protocol,omitempty"`
+	Messages           []SupportMessage `json:"messages"`
+}
+
+// FetchWorkOrderDetail busca UMA O.S. pelo número, com a conversa completa.
+func FetchWorkOrderDetail(ctx context.Context, cfg Config, token, numero string) (WorkOrderDetail, error) {
+	numero = strings.TrimSpace(numero)
+	if numero == "" {
+		return WorkOrderDetail{}, fmt.Errorf("número da O.S. obrigatório")
+	}
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "GET", Path: "/api/v1/integracao/cliente/ordem_servico",
+		QueryParams: paramKVs(map[string]string{
+			"busca": "numero_ordem_servico", "termo_busca": numero, "limit": "1",
+			"relacoes": "ordem_servico_mensagem", "exibir_atendimento": "true",
+		}),
+	})
+	if !res.OK {
+		return WorkOrderDetail{}, fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao consultar ordem de serviço"))
+	}
+	body := ResponseBodyBytes(res)
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return WorkOrderDetail{}, fmt.Errorf("resposta inválida da HubSoft")
+	}
+	arr := extractArray(doc, "ordens_servico", "ordem_servico", "ordens", "registros", "results", "data", "items")
+	if len(arr) == 0 {
+		return WorkOrderDetail{OK: true, Message: "Ordem de serviço não encontrada."}, nil
+	}
+	m, _ := arr[0].(map[string]any)
+	out := WorkOrderDetail{
+		OK: true,
+		ID: pickStr(m, "id_ordem_servico"), Number: pickStr(m, "numero_ordem_servico"),
+		Type: pickStr(m, "tipo"), Status: pickStr(m, "status"), StatusClosed: pickStr(m, "status_fechamento"),
+		Description: pickStr(m, "descricao_abertura"), ServiceDescription: pickStr(m, "descricao_servico"),
+		ClosedDescription: pickStr(m, "descricao_fechamento"),
+		ScheduledStart:    pickStr(m, "data_inicio_programado"), ScheduledEnd: pickStr(m, "data_termino_programado"),
+		ExecutedStart: pickStr(m, "data_inicio_executado"), ExecutedEnd: pickStr(m, "data_termino_executado"),
+		CreatedAt: pickStr(m, "data_cadastro"), OpenedByUser: pickStr(m, "usuario_abertura"),
+		ClosedByUser: pickStr(m, "usuario_fechamento"),
+		Messages:     extractSupportMessages(m, "ordem_servico_mensagem"),
+	}
+	if cli, ok := m["cliente"].(map[string]any); ok {
+		out.ClientName = pickStr(cli, "nome_razaosocial")
+		out.ClientCode = pickStr(cli, "codigo_cliente")
+	}
+	if sv, ok := m["servico"].(map[string]any); ok {
+		out.PlanName = pickStr(sv, "nome")
+	}
+	if at, ok := m["atendimento"].(map[string]any); ok {
+		out.AttendanceProtocol = pickStr(at, "protocolo")
+	}
+	return out, nil
+}
+
 // --- Atendimentos/Ordens recentes (amostra) -------------------------------------------------
 //
 // Nem /cliente/atendimento nem /cliente/ordem_servico têm modo de listagem "de todos os
@@ -621,6 +873,35 @@ func SearchFinancial(ctx context.Context, cfg Config, token, busca, termo string
 	return ParseFinancial(ResponseBodyBytes(res)), res
 }
 
+// ResendInvoiceEmail reenvia UMA fatura por e-mail (POST /cliente/financeiro/enviar_email) — a
+// própria HubSoft dispara o envio (servidor de e-mail dela, não o NetQuasar); "ver mais" da aba
+// Financeiro. extraEmails é opcional (além dos e-mails já cadastrados do cliente).
+func ResendInvoiceEmail(ctx context.Context, cfg Config, token, idFatura string, extraEmails []string) error {
+	idFatura = strings.TrimSpace(idFatura)
+	if idFatura == "" {
+		return fmt.Errorf("id_fatura obrigatório")
+	}
+	body := map[string]any{"id_fatura": idFatura}
+	if len(extraEmails) > 0 {
+		body["email_adicional"] = extraEmails
+	}
+	bodyJSON, _ := json.Marshal(body)
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "POST", Path: "/api/v1/integracao/cliente/financeiro/enviar_email",
+		BodyTemplate: string(bodyJSON), BodyType: "json",
+	})
+	if !res.OK {
+		var doc map[string]any
+		if json.Unmarshal(ResponseBodyBytes(res), &doc) == nil {
+			if msg := pickStr(doc, "msg", "message"); msg != "" {
+				return fmt.Errorf("%s", msg)
+			}
+		}
+		return fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao reenviar fatura"))
+	}
+	return nil
+}
+
 // --- Resumo financeiro agregado (amostra) ---------------------------------------------------
 //
 // Mesma limitação: /cliente/financeiro só existe por cliente, não há "todas as faturas da
@@ -723,6 +1004,932 @@ func BuildFinancialSummary(ctx context.Context, cfg Config, token string) Financ
 		OK: true, SampleClients: len(clients), ClientsWithDebt: clientsWithDebt,
 		TotalInvoices: totalInvoices, TotalReceivable: totalOverdue + totalPending,
 		TotalOverdue: totalOverdue, TotalPending: totalPending, TotalPaid: totalPaid,
+		TopDebtors: debtors,
+	}
+}
+
+// --- Paginação real (endpoints "todos"/"listar") ----------------------------------------------
+//
+// Ao contrário de /cliente (Consultar) e dos endpoints /cliente/atendimento, /cliente/
+// ordem_servico, /cliente/financeiro (todos exigem busca+termo_busca por CLIENTE e não paginam
+// de verdade — ver comentário no início do ficheiro), a HubSoft tem uma segunda família de
+// endpoints "todos"/"listar" que pagina de verdade (paginacao.pagina_atual/ultima_pagina/
+// total_registros, até 500 itens/página) e não depende de varrer nome por letras:
+//   - GET /api/v1/integracao/cliente/todos            (clientes+serviços, filtros servico_status/cancelado)
+//   - GET /api/v1/integracao/atendimento/todos        (todos os atendimentos, filtro por data obrigatório)
+//   - GET /api/v1/integracao/ordem_servico/todos      (todas as O.S., filtro por data obrigatório)
+//   - GET /api/v1/integracao/financeiro/fatura        (todas as faturas, filtro por data)
+// Confirmado na documentação oficial (https://docs.hubsoft.com.br) — a collection completa foi
+// consultada directamente (API de docs deles, não só o texto da página) para confirmar nomes de
+// parâmetros e formato de resposta antes de implementar isto.
+
+// maxReportPages teto de segurança: 40 páginas × 500 itens = até 20.000 registos por relatório,
+// dá para cobrir a base de qualquer ISP de porte médio/grande num pedido só, sem risco de loop
+// infinito nem de estourar o timeout do handler HTTP que chama isto.
+const maxReportPages = 40
+
+// fetchAllPages percorre um endpoint paginado da HubSoft (mesma estrutura "paginacao" em todos
+// os 4 endpoints "todos"/"listar" acima) até esgotar as páginas ou atingir maxPages, juntando o
+// array indicado por um dos arrayKeys (tenta cada um — os endpoints usam nomes diferentes:
+// "clientes", "atendimentos", "ordens_servico", "faturas"). baseParams não deve incluir "pagina"
+// nem "itens_por_pagina" (preenchidos aqui a cada volta). Devolve também total_registros
+// (contagem real da API, pode ser maior que len(items) se o teto de páginas foi atingido).
+func fetchAllPages(ctx context.Context, cfg Config, token, path string, baseParams map[string]string, maxPages int, arrayKeys ...string) (items []map[string]any, totalRegistros int, err error) {
+	if maxPages <= 0 {
+		maxPages = maxReportPages
+	}
+	// 500/página (o máximo aceite) com relações pesadas (endereço, última conexão, etc.) por
+	// vezes estoura o timeout HTTP por página antes da HubSoft terminar de montar a resposta —
+	// confirmado em produção. 100/página fica bem dentro da margem, só custa mais idas e vindas
+	// (o rate limit da API, 20 req/s com rajada de 200, tem folga de sobra para isso).
+	const perPage = 100
+	// O timeout por omissão do motor HTTP genérico (15s, quando cfg.Timeout não é definido) é
+	// curto demais para uma página de 100 itens com relações — usa um piso mais alto só aqui.
+	reqCfg := cfg
+	if reqCfg.Timeout < 45000 {
+		reqCfg.Timeout = 45000
+	}
+	for page := 0; page < maxPages; page++ {
+		q := make(map[string]string, len(baseParams)+2)
+		for k, v := range baseParams {
+			q[k] = v
+		}
+		q["pagina"] = strconv.Itoa(page)
+		q["itens_por_pagina"] = strconv.Itoa(perPage)
+		res := integrationhttp.Execute(ctx, reqCfg.integ(token), integrationhttp.RequestConfig{
+			Method: "GET", Path: path, QueryParams: paramKVs(q),
+		})
+		if !res.OK {
+			if page == 0 {
+				return nil, 0, fmt.Errorf("%s", firstNonEmpty(res.ErrorMessage, fmt.Sprintf("HTTP %d", res.StatusCode)))
+			}
+			break // já reunimos algumas páginas — devolve o que há em vez de descartar tudo
+		}
+		var doc map[string]any
+		if jsonErr := json.Unmarshal(ResponseBodyBytes(res), &doc); jsonErr != nil {
+			break
+		}
+		arr := extractArray(doc, arrayKeys...)
+		for _, it := range arr {
+			if m, ok := it.(map[string]any); ok {
+				items = append(items, m)
+			}
+		}
+		if pg, ok := doc["paginacao"].(map[string]any); ok {
+			if tr, ok := pg["total_registros"].(float64); ok {
+				totalRegistros = int(tr)
+			}
+			last := scalarToString(pg["ultima_pagina"])
+			cur := scalarToString(pg["pagina_atual"])
+			if last != "" && cur != "" && cur == last {
+				break
+			}
+		}
+		if len(arr) == 0 {
+			break
+		}
+	}
+	if totalRegistros < len(items) {
+		totalRegistros = len(items)
+	}
+	return items, totalRegistros, nil
+}
+
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+// defaultPeriod aplica os últimos 30 dias quando from/to não vêm preenchidos — os endpoints
+// "todos" de atendimento/O.S./financeiro exigem um intervalo de datas, e um relatório sem
+// período nenhum não faria sentido (varreria a base inteira desde sempre).
+func defaultPeriod(from, to string) (string, string) {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" || to == "" {
+		now := time.Now()
+		to = now.Format("2006-01-02")
+		from = now.AddDate(0, 0, -30).Format("2006-01-02")
+	}
+	return from, to
+}
+
+// brStateUF mapeia sigla (UF) -> nome completo dos estados brasileiros — usado por stateVariants
+// para o filtro de estado casar independentemente de o tenant guardar a sigla ou o nome completo
+// no campo "estado" (confirmado ao vivo: varia por tenant).
+var brStateUF = map[string]string{
+	"ac": "acre", "al": "alagoas", "ap": "amapa", "am": "amazonas", "ba": "bahia",
+	"ce": "ceara", "df": "distrito federal", "es": "espirito santo", "go": "goias",
+	"ma": "maranhao", "mt": "mato grosso", "ms": "mato grosso do sul", "mg": "minas gerais",
+	"pa": "para", "pb": "paraiba", "pr": "parana", "pe": "pernambuco", "pi": "piaui",
+	"rj": "rio de janeiro", "rn": "rio grande do norte", "rs": "rio grande do sul",
+	"ro": "rondonia", "rr": "roraima", "sc": "santa catarina", "sp": "sao paulo",
+	"se": "sergipe", "to": "tocantins",
+}
+
+// stateVariants devolve as formas (minúsculas, sem acento) contra as quais tentar
+// strings.Contains: o termo digitado tal como veio, mais a sigla<->nome completo quando aplicável
+// (ex.: "RJ" também casa "rio de janeiro"; "Rio de Janeiro" também casa "rj"). Devolve vazio
+// quando o termo digitado é vazio (sem filtro).
+func stateVariants(input string) []string {
+	in := strings.ToLower(strings.TrimSpace(stripAccents(input)))
+	if in == "" {
+		return nil
+	}
+	out := []string{in}
+	if full, ok := brStateUF[in]; ok {
+		out = append(out, full)
+	}
+	for uf, full := range brStateUF {
+		if full == in {
+			out = append(out, uf)
+			break
+		}
+	}
+	return out
+}
+
+// stripAccents troca as vogais acentuadas mais comuns em nomes de estado (ç/ã/é/í/…) pela forma
+// sem acento — a resposta da API às vezes vem sem, então normaliza dos dois lados antes de
+// comparar (evita "não bater" só por causa de acentuação).
+func stripAccents(s string) string {
+	repl := strings.NewReplacer(
+		"á", "a", "à", "a", "â", "a", "ã", "a", "ä", "a",
+		"é", "e", "è", "e", "ê", "e", "ë", "e",
+		"í", "i", "ì", "i", "î", "i", "ï", "i",
+		"ó", "o", "ò", "o", "ô", "o", "õ", "o", "ö", "o",
+		"ú", "u", "ù", "u", "û", "u", "ü", "u",
+		"ç", "c",
+		"Á", "a", "À", "a", "Â", "a", "Ã", "a", "Ä", "a",
+		"É", "e", "È", "e", "Ê", "e", "Ë", "e",
+		"Í", "i", "Ì", "i", "Î", "i", "Ï", "i",
+		"Ó", "o", "Ò", "o", "Ô", "o", "Õ", "o", "Ö", "o",
+		"Ú", "u", "Ù", "u", "Û", "u", "Ü", "u",
+		"Ç", "c",
+	)
+	return repl.Replace(s)
+}
+
+// --- Relatório: clientes/serviços filtrados (aba Relatório → Clientes) -------------------------
+
+// ReportServiceRow uma linha do relatório — um por serviço/login (um cliente pode ter mais de
+// um). É deliberadamente enxuto (login/IPv4/MAC/status) — os dados completos só são carregados
+// ao clicar no cliente (reaproveita SearchClients com detailed=true, já existente).
+type ReportServiceRow struct {
+	ClientID     string `json:"client_id,omitempty"`
+	ClientCode   string `json:"client_code,omitempty"`
+	ClientName   string `json:"client_name,omitempty"`
+	Document     string `json:"document,omitempty"`
+	ServiceID    string `json:"service_id,omitempty"`
+	ServiceName  string `json:"service_name,omitempty"`
+	Login        string `json:"login,omitempty"`
+	IPv4         string `json:"ipv4,omitempty"`
+	MAC          string `json:"mac,omitempty"`
+	Status       string `json:"status,omitempty"`
+	StatusPrefix string `json:"status_prefix,omitempty"`
+	City         string `json:"city,omitempty"`
+	State        string `json:"state,omitempty"`
+	Neighborhood string `json:"neighborhood,omitempty"`
+	Connected    string `json:"connected,omitempty"` // "true"/"false"/"" (sem dado)
+}
+
+// ReportListFilter — Estado/Cidade/Bairro não são parâmetros nativos da API (só existe filtro
+// por código IBGE da cidade, `ibge_cidade_instalacao`, que exigiria uma tabela de municípios só
+// para traduzir nome→código); em vez disso, filtramos aqui do lado do NetQuasar, depois de
+// buscar (com paginação real, não é amostra) — o volume já vem reduzido pelos filtros nativos
+// (ServiceStatus/Cancelado) quando preenchidos.
+type ReportListFilter struct {
+	ServiceStatus string
+	Cancelado     string // "sim" | "nao" | ""
+	State         string // UF, ex.: "MG" — comparado contra o campo `estado` da HubSoft
+	City          string // substring, case-insensitive
+	Neighborhood  string // substring, case-insensitive
+	IPv4          string // preenchido → usa extrato_conexao (busca directa, não pagina tudo)
+	MAC           string
+	Login         string
+}
+
+type ReportListResult struct {
+	OK           bool               `json:"ok"`
+	Message      string             `json:"message,omitempty"`
+	Rows         []ReportServiceRow `json:"rows"`
+	TotalScanned int                `json:"total_scanned"`
+	Truncated    bool               `json:"truncated,omitempty"`
+}
+
+// ListClientServiceReport ponto de entrada do relatório de clientes/serviços — quando IPv4/MAC/
+// Login estão preenchidos, usa a busca directa (extrato_conexao, rápida, poucos resultados);
+// caso contrário pagina /cliente/todos com os filtros nativos disponíveis e filtra
+// Estado/Cidade/Bairro do lado do NetQuasar.
+func ListClientServiceReport(ctx context.Context, cfg Config, token string, filter ReportListFilter) (ReportListResult, error) {
+	if strings.TrimSpace(filter.IPv4) != "" || strings.TrimSpace(filter.MAC) != "" || strings.TrimSpace(filter.Login) != "" {
+		return reportFromConnectionExtract(ctx, cfg, token, filter)
+	}
+	return reportFromClientsTodos(ctx, cfg, token, filter)
+}
+
+func reportFromConnectionExtract(ctx context.Context, cfg Config, token string, filter ReportListFilter) (ReportListResult, error) {
+	busca, termo := "", ""
+	switch {
+	case strings.TrimSpace(filter.IPv4) != "":
+		busca, termo = "ipv4", strings.TrimSpace(filter.IPv4)
+	case strings.TrimSpace(filter.MAC) != "":
+		busca, termo = "mac", normalizeMAC(filter.MAC)
+	case strings.TrimSpace(filter.Login) != "":
+		busca, termo = "login", strings.TrimSpace(filter.Login)
+	}
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "GET", Path: "/api/v1/integracao/cliente/extrato_conexao",
+		QueryParams: paramKVs(map[string]string{"busca": busca, "termo_busca": termo, "limit": "50"}),
+	})
+	if !res.OK && res.StatusCode != 404 {
+		return ReportListResult{}, fmt.Errorf("%s", firstNonEmpty(res.ErrorMessage, fmt.Sprintf("HTTP %d", res.StatusCode)))
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(ResponseBodyBytes(res), &doc)
+	seen := map[string]bool{}
+	rows := []ReportServiceRow{}
+	for _, it := range extractArray(doc, "registros", "dados", "data") {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		row := ReportServiceRow{
+			Login: pickStr(m, "username", "login"),
+			IPv4:  pickStr(m, "framedipaddress"),
+			MAC:   pickStr(m, "callingstationid"),
+		}
+		if cli, ok := m["cliente"].(map[string]any); ok {
+			row.ClientID = pickStr(cli, "id_cliente")
+			row.ClientCode = pickStr(cli, "codigo_cliente")
+			row.ClientName = pickStr(cli, "nome_razaosocial")
+			row.Document = formatCPFCNPJ(pickStr(cli, "cpf_cnpj"))
+		}
+		if svc, ok := m["servico"].(map[string]any); ok {
+			row.ServiceName = pickStr(svc, "nome")
+			row.Status = pickStr(svc, "status")
+			row.StatusPrefix = pickStr(svc, "status_prefixo")
+		}
+		if pickStr(m, "acctstoptime") == "" {
+			row.Connected = "true" // sem hora de término = sessão ainda activa
+		} else {
+			row.Connected = "false"
+		}
+		key := row.ClientCode + "|" + row.Login + "|" + row.IPv4
+		if row.ClientCode == "" && row.Login == "" {
+			continue
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		rows = append(rows, row)
+	}
+	msg := ""
+	if len(rows) == 0 {
+		msg = "Nenhuma conexão encontrada para esse termo (extrato de conexão cobre por omissão os últimos 30 dias)."
+	}
+	return ReportListResult{OK: true, Rows: rows, TotalScanned: len(rows), Message: msg}, nil
+}
+
+func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filter ReportListFilter) (ReportListResult, error) {
+	q := map[string]string{"relacoes": "endereco_instalacao,ultima_conexao"}
+	if s := strings.TrimSpace(filter.ServiceStatus); s != "" {
+		q["servico_status"] = s
+	}
+	if c := strings.TrimSpace(filter.Cancelado); c != "" {
+		q["cancelado"] = c
+	}
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/cliente/todos", q, maxReportPages, "clientes")
+	if err != nil {
+		return ReportListResult{}, err
+	}
+
+	// Contains (não EqualFold) porque o campo "estado" vem ora como sigla ("RJ"), ora como nome
+	// completo ("RIO DE JANEIRO") dependendo do tenant/dado — confirmado ao vivo em produção.
+	// stateVariants expande a sigla digitada para o nome completo (e vice-versa) para casar com
+	// qualquer uma das duas convenções.
+	stateWant := stateVariants(strings.TrimSpace(filter.State))
+	cityWant := strings.ToLower(strings.TrimSpace(filter.City))
+	neighWant := strings.ToLower(strings.TrimSpace(filter.Neighborhood))
+
+	rows := []ReportServiceRow{}
+	for _, m := range items {
+		clientID := pickStr(m, "id_cliente")
+		clientCode := pickStr(m, "codigo_cliente")
+		clientName := pickStr(m, "nome_razaosocial")
+		doc := formatCPFCNPJ(pickStr(m, "cpf_cnpj"))
+		svcArr, _ := m["servicos"].([]any)
+		for _, sit := range svcArr {
+			sm, ok := sit.(map[string]any)
+			if !ok {
+				continue
+			}
+			row := ReportServiceRow{
+				ClientID: clientID, ClientCode: clientCode, ClientName: clientName, Document: doc,
+				ServiceID:    pickStr(sm, "id_cliente_servico"),
+				ServiceName:  pickStr(sm, "nome"),
+				Login:        pickStr(sm, "login"),
+				IPv4:         pickStr(sm, "ipv4"),
+				MAC:          pickStr(sm, "mac_addr", "phy_addr"),
+				Status:       pickStr(sm, "status"),
+				StatusPrefix: pickStr(sm, "status_prefixo"),
+			}
+			if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {
+				row.City = pickStr(addr, "cidade")
+				row.State = pickStr(addr, "estado")
+				row.Neighborhood = pickStr(addr, "bairro")
+			}
+			if ac, ok := sm["ultima_conexao"].(map[string]any); ok {
+				row.Connected = pickStr(ac, "conectado")
+			}
+			if len(stateWant) > 0 {
+				got := strings.ToLower(strings.TrimSpace(stripAccents(row.State)))
+				matched := false
+				for _, w := range stateWant {
+					if strings.Contains(got, w) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
+			if cityWant != "" && !strings.Contains(strings.ToLower(row.City), cityWant) {
+				continue
+			}
+			if neighWant != "" && !strings.Contains(strings.ToLower(row.Neighborhood), neighWant) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+	}
+	return ReportListResult{OK: true, Rows: rows, TotalScanned: total, Truncated: total > len(items)}, nil
+}
+
+// --- Relatório: atendimentos por período (aba Relatório → Atendimentos) ------------------------
+
+type AttendancePeriodReport struct {
+	OK        bool         `json:"ok"`
+	Message   string       `json:"message,omitempty"`
+	From      string       `json:"from"`
+	To        string       `json:"to"`
+	Total     int          `json:"total"`
+	Open      int          `json:"open"`
+	Closed    int          `json:"closed"`
+	ClosedPct float64      `json:"closed_pct"`
+	ByStatus  []NamedCount `json:"by_status"`
+	Truncated bool         `json:"truncated,omitempty"`
+}
+
+// BuildAttendancePeriodReport varre TODOS os atendimentos abertos no período (não uma amostra —
+// /atendimento/todos pagina de verdade) e calcula abertos/realizados + repartição por status.
+func BuildAttendancePeriodReport(ctx context.Context, cfg Config, token, from, to string) AttendancePeriodReport {
+	from, to = defaultPeriod(from, to)
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/atendimento/todos",
+		map[string]string{"data_inicio": from, "data_fim": to}, maxReportPages, "atendimentos")
+	if err != nil {
+		return AttendancePeriodReport{Message: "Falha ao coletar atendimentos: " + err.Error(), From: from, To: to}
+	}
+	statusCount := map[string]int{}
+	open, closed := 0, 0
+	for _, m := range items {
+		label := "Sem status"
+		if st, ok := m["status"].(map[string]any); ok {
+			label = firstNonEmpty(pickStr(st, "descricao"), label)
+		} else {
+			label = firstNonEmpty(pickStr(m, "status"), label)
+		}
+		statusCount[label]++
+		if strings.TrimSpace(pickStr(m, "data_fechamento")) == "" {
+			open++
+		} else {
+			closed++
+		}
+	}
+	n := len(items)
+	pct := 0.0
+	if n > 0 {
+		pct = round2(float64(closed) / float64(n) * 100)
+	}
+	return AttendancePeriodReport{
+		OK: true, From: from, To: to, Total: total, Open: open, Closed: closed, ClosedPct: pct,
+		ByStatus: topNamedCounts(statusCount, nil, 20), Truncated: total > n,
+	}
+}
+
+// --- Relatório: ordens de serviço por período e por técnico (aba Relatório → O.S.) -------------
+
+type TechnicianStat struct {
+	Technician    string  `json:"technician"`
+	Total         int     `json:"total"`
+	Finished      int     `json:"finished"`
+	PctOfFinished float64 `json:"pct_of_total_finished"` // % deste técnico sobre o TOTAL finalizado (todos os técnicos juntos)
+}
+
+type WorkOrderPeriodReport struct {
+	OK           bool             `json:"ok"`
+	Message      string           `json:"message,omitempty"`
+	From         string           `json:"from"`
+	To           string           `json:"to"`
+	Total        int              `json:"total"`
+	Finished     int              `json:"finished"`
+	FinishedPct  float64          `json:"finished_pct"`
+	ByStatus     []NamedCount     `json:"by_status"`
+	ByTechnician []TechnicianStat `json:"by_technician"`
+	Truncated    bool             `json:"truncated,omitempty"`
+}
+
+var finishedWorkOrderStatuses = map[string]bool{"finalizado": true, "finalizada": true, "concluido": true, "concluído": true}
+
+func extractTechnicianName(m map[string]any) string {
+	tryField := func(key string) string {
+		switch v := m[key].(type) {
+		case []any:
+			var names []string
+			for _, it := range v {
+				if tm, ok := it.(map[string]any); ok {
+					if n := pickStr(tm, "nome", "name", "display", "descricao"); n != "" {
+						names = append(names, n)
+					}
+				}
+			}
+			return strings.Join(names, ", ")
+		case map[string]any:
+			return pickStr(v, "nome", "name", "display", "descricao")
+		}
+		return ""
+	}
+	for _, key := range []string{"tecnico", "tecnicos", "usuarios_responsaveis", "usuario_responsavel"} {
+		if n := tryField(key); n != "" {
+			return n
+		}
+	}
+	return pickStr(m, "tecnico", "responsavel")
+}
+
+// BuildWorkOrderPeriodReport varre TODAS as O.S. abertas/cadastradas no período
+// (/ordem_servico/todos pagina de verdade) e calcula finalizadas/total + repartição por status e
+// por técnico responsável (quantidade finalizada e % sobre o total finalizado por todos).
+func BuildWorkOrderPeriodReport(ctx context.Context, cfg Config, token, from, to string) WorkOrderPeriodReport {
+	from, to = defaultPeriod(from, to)
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/ordem_servico/todos",
+		map[string]string{"data_inicio": from, "data_fim": to, "relacoes": "tecnico,tecnicos"}, maxReportPages, "ordens_servico", "ordem_servico", "ordens")
+	if err != nil {
+		return WorkOrderPeriodReport{Message: "Falha ao coletar ordens de serviço: " + err.Error(), From: from, To: to}
+	}
+	statusCount := map[string]int{}
+	techTotal := map[string]int{}
+	techFinished := map[string]int{}
+	finishedTotal := 0
+	for _, m := range items {
+		status := firstNonEmpty(pickStr(m, "status"), "Sem status")
+		statusCount[status]++
+		isFinished := finishedWorkOrderStatuses[strings.ToLower(strings.TrimSpace(status))] || strings.TrimSpace(pickStr(m, "data_termino_executado")) != ""
+		tech := firstNonEmpty(extractTechnicianName(m), "Sem técnico")
+		techTotal[tech]++
+		if isFinished {
+			finishedTotal++
+			techFinished[tech]++
+		}
+	}
+	byTech := make([]TechnicianStat, 0, len(techTotal))
+	for name, cnt := range techTotal {
+		fin := techFinished[name]
+		pct := 0.0
+		if finishedTotal > 0 {
+			pct = round2(float64(fin) / float64(finishedTotal) * 100)
+		}
+		byTech = append(byTech, TechnicianStat{Technician: name, Total: cnt, Finished: fin, PctOfFinished: pct})
+	}
+	sort.Slice(byTech, func(i, j int) bool {
+		if byTech[i].Finished != byTech[j].Finished {
+			return byTech[i].Finished > byTech[j].Finished
+		}
+		return byTech[i].Technician < byTech[j].Technician
+	})
+	n := len(items)
+	pct := 0.0
+	if n > 0 {
+		pct = round2(float64(finishedTotal) / float64(n) * 100)
+	}
+	return WorkOrderPeriodReport{
+		OK: true, From: from, To: to, Total: total, Finished: finishedTotal, FinishedPct: pct,
+		ByStatus: topNamedCounts(statusCount, nil, 20), ByTechnician: byTech, Truncated: total > n,
+	}
+}
+
+// --- Relatório: financeiro por período (aba Relatório → Financeiro) ----------------------------
+
+type FinancialPeriodReport struct {
+	OK           bool    `json:"ok"`
+	Message      string  `json:"message,omitempty"`
+	From         string  `json:"from"`
+	To           string  `json:"to"`
+	Total        int     `json:"total"`
+	TotalValue   float64 `json:"total_value"`
+	PaidCount    int     `json:"paid_count"`
+	PaidValue    float64 `json:"paid_value"`
+	PaidPct      float64 `json:"paid_pct"` // % do VALOR pago sobre o valor total do período
+	OpenCount    int     `json:"open_count"`
+	OpenValue    float64 `json:"open_value"`
+	OpenPct      float64 `json:"open_pct"`
+	OverdueCount int     `json:"overdue_count"`
+	OverdueValue float64 `json:"overdue_value"`
+	OverduePct   float64 `json:"overdue_pct"`
+	Truncated    bool    `json:"truncated,omitempty"`
+}
+
+// BuildFinancialPeriodReport varre TODAS as faturas com vencimento no período
+// (/financeiro/fatura pagina de verdade, ao contrário de /cliente/financeiro que precisa de um
+// cliente por vez) e calcula o percentual de valor recebido vs em aberto vs vencido.
+func BuildFinancialPeriodReport(ctx context.Context, cfg Config, token, from, to string) FinancialPeriodReport {
+	from, to = defaultPeriod(from, to)
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/financeiro/fatura",
+		map[string]string{"tipo_data": "data_vencimento", "data_inicio": from, "data_fim": to, "tipo_resultado": "simplificado"},
+		maxReportPages, "faturas")
+	if err != nil {
+		return FinancialPeriodReport{Message: "Falha ao coletar faturas: " + err.Error(), From: from, To: to}
+	}
+	today := time.Now()
+	var totalValue, paidValue, openValue, overdueValue float64
+	var paidCount, openCount, overdueCount int
+	for _, m := range items {
+		val := parseBRFloat(pickStr(m, "valor"))
+		totalValue += val
+		if strings.TrimSpace(pickStr(m, "data_pagamento")) != "" {
+			paidCount++
+			paidVal := parseBRFloat(pickStr(m, "valor_pago"))
+			if paidVal <= 0 {
+				paidVal = val
+			}
+			paidValue += paidVal
+			continue
+		}
+		due := parseBRDate(pickStr(m, "data_vencimento"))
+		if !due.IsZero() && due.Before(today) {
+			overdueCount++
+			overdueValue += val
+		} else {
+			openCount++
+			openValue += val
+		}
+	}
+	pct := func(v float64) float64 {
+		if totalValue <= 0 {
+			return 0
+		}
+		return round2(v / totalValue * 100)
+	}
+	return FinancialPeriodReport{
+		OK: true, From: from, To: to, Total: total, TotalValue: round2(totalValue),
+		PaidCount: paidCount, PaidValue: round2(paidValue), PaidPct: pct(paidValue),
+		OpenCount: openCount, OpenValue: round2(openValue), OpenPct: pct(openValue),
+		OverdueCount: overdueCount, OverdueValue: round2(overdueValue), OverduePct: pct(overdueValue),
+		Truncated: total > len(items),
+	}
+}
+
+// --- Relatório: financeiro — lista paginada (aba Financeiro da integração) ---------------------
+//
+// Ao contrário de BuildFinancialPeriodReport (acima — varre TODAS as páginas para somar
+// percentuais), esta função busca UMA página de cada vez, passando a paginação da HubSoft
+// directamente para o frontend — a tela "Financeiro" pagina de verdade (1 pedido HTTP por
+// página pedida pelo usuário), continua rápida mesmo com milhares de faturas no período.
+
+type InvoiceRow struct {
+	ID            string `json:"id,omitempty"`
+	ClientName    string `json:"client_name,omitempty"`
+	ClientCode    string `json:"client_code,omitempty"`
+	Value         string `json:"value,omitempty"`
+	ValuePaid     string `json:"value_paid,omitempty"`
+	DueDate       string `json:"due_date,omitempty"`
+	PaymentDate   string `json:"payment_date,omitempty"`
+	Status        string `json:"status,omitempty"` // "paid" | "overdue" | "pending" — derivado, ver deriveInvoiceStatus
+	DigitableLine string `json:"digitable_line,omitempty"`
+	BarCode       string `json:"bar_code,omitempty"`
+	Link          string `json:"link,omitempty"`
+}
+
+func deriveInvoiceStatus(m map[string]any) string {
+	if strings.TrimSpace(pickStr(m, "data_pagamento")) != "" {
+		return "paid"
+	}
+	due := parseBRDate(pickStr(m, "data_vencimento"))
+	if !due.IsZero() && due.Before(time.Now()) {
+		return "overdue"
+	}
+	return "pending"
+}
+
+type InvoiceListResult struct {
+	OK             bool         `json:"ok"`
+	Message        string       `json:"message,omitempty"`
+	Invoices       []InvoiceRow `json:"invoices"`
+	Page           int          `json:"page"`
+	PerPage        int          `json:"per_page"`
+	TotalPages     int          `json:"total_pages"`
+	TotalRegistros int          `json:"total_registros"`
+}
+
+// InvoiceListFilter filtros aceites por ListInvoices — todos opcionais.
+type InvoiceListFilter struct {
+	From           string // data_inicio (vencimento)
+	To             string // data_fim (vencimento)
+	ApenasEmAberto string
+	ApenasQuitado  string
+	Busca          string // termo de busca (nome/código/documento do cliente)
+}
+
+// ListInvoices busca UMA página de faturas (/financeiro/fatura) — página/tamanho vindos do
+// chamador, sem varrer o período inteiro.
+func ListInvoices(ctx context.Context, cfg Config, token string, filter InvoiceListFilter, page, perPage int) (InvoiceListResult, error) {
+	if perPage <= 0 || perPage > 100 {
+		perPage = 30
+	}
+	if page < 0 {
+		page = 0
+	}
+	q := map[string]string{
+		"pagina": strconv.Itoa(page), "itens_por_pagina": strconv.Itoa(perPage),
+		"tipo_data": "data_vencimento", "tipo_resultado": "simplificado",
+	}
+	if v := strings.TrimSpace(filter.From); v != "" {
+		q["data_inicio"] = v
+	}
+	if v := strings.TrimSpace(filter.To); v != "" {
+		q["data_fim"] = v
+	}
+	if v := strings.TrimSpace(filter.ApenasEmAberto); v != "" {
+		q["apenas_em_aberto"] = v
+	}
+	if v := strings.TrimSpace(filter.ApenasQuitado); v != "" {
+		q["apenas_quitado"] = v
+	}
+	if v := strings.TrimSpace(filter.Busca); v != "" {
+		q["busca"] = v
+		q["termo_busca"] = v
+	}
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "GET", Path: "/api/v1/integracao/financeiro/fatura", QueryParams: paramKVs(q),
+	})
+	if !res.OK {
+		return InvoiceListResult{}, fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao consultar faturas"))
+	}
+	body := ResponseBodyBytes(res)
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return InvoiceListResult{}, fmt.Errorf("resposta inválida da HubSoft")
+	}
+	out := InvoiceListResult{OK: true, Page: page, PerPage: perPage, Invoices: []InvoiceRow{}}
+	if pg, ok := doc["paginacao"].(map[string]any); ok {
+		if last, err := strconv.Atoi(scalarToString(pg["ultima_pagina"])); err == nil {
+			out.TotalPages = last + 1
+		}
+		if tr, ok := pg["total_registros"].(float64); ok {
+			out.TotalRegistros = int(tr)
+		}
+	}
+	for _, it := range extractArray(doc, "faturas") {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		row := InvoiceRow{
+			ID: pickStr(m, "id_fatura"), Value: pickStr(m, "valor"), ValuePaid: pickStr(m, "valor_pago"),
+			DueDate: pickStr(m, "data_vencimento"), PaymentDate: pickStr(m, "data_pagamento"),
+			DigitableLine: pickStr(m, "linha_digitavel"), BarCode: pickStr(m, "codigo_barras"),
+			Link: pickStr(m, "link"), Status: deriveInvoiceStatus(m),
+		}
+		if cli, ok := m["cliente"].(map[string]any); ok {
+			row.ClientName = pickStr(cli, "nome_razaosocial")
+			row.ClientCode = pickStr(cli, "codigo_cliente")
+		}
+		out.Invoices = append(out.Invoices, row)
+	}
+	if len(out.Invoices) == 0 {
+		out.Message = "Nenhuma fatura encontrada para o período/filtro."
+	}
+	return out, nil
+}
+
+// --- Versões rápidas do Dashboard (Atendimentos/O.S. recentes e Resumo financeiro) -------------
+//
+// BuildRecentActivity/BuildFinancialSummary (acima) varrem uma AMOSTRA de clientes e fazem 1-2
+// pedidos extra POR CLIENTE em paralelo — lento (dezenas/centenas de pedidos) mesmo com
+// concorrência, e "amostra" porque só cobre os clientes que a varredura por letras encontrou.
+// Estas versões usam os endpoints "todos"/"listar" (paginação real, ver fetchAllPages) — 1
+// pedido paginado cobre TODOS os atendimentos/O.S./faturas do período de uma vez, mais rápido e
+// completo (não é amostra). Substituem BuildRecentActivity/BuildFinancialSummary nos handlers
+// (handlers_hubsoft.go) — mantidas as antigas só por não termos motivo para as apagar.
+
+const fastRecentMaxPages = 4 // 4×500 = até 2000 registos recentes — de sobra para "os N mais recentes"
+
+// enrichDescriptionConcurrency limita pedidos simultâneos de FetchAttendanceDetail — só é
+// chamado para os `limitEach` (20) atendimentos finais da lista, não para os até 2000 varridos.
+const enrichDescriptionConcurrency = 6
+
+// enrichAttendanceDescriptions preenche AttendanceItem.Description com a descrição de abertura
+// real (descricao_abertura) — /atendimento/todos não tem esse campo (confirmado: nem a relação
+// atendimento_mensagem o traz, só notas avulsas sem relação com a abertura). Só é chamado com a
+// lista JÁ truncada aos itens finais mostrados na tela — mantém o pedido principal rápido e
+// paginado, e adiciona só ~20 pedidos leves e paralelos (1 por atendimento, via
+// /cliente/atendimento?busca=protocolo, o mesmo usado pelo "ver mais").
+func enrichAttendanceDescriptions(ctx context.Context, cfg Config, token string, items []AttendanceItem) {
+	sem := make(chan struct{}, enrichDescriptionConcurrency)
+	var wg sync.WaitGroup
+	for i := range items {
+		protocolo := items[i].Protocol
+		if protocolo == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, protocolo string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			detail, err := FetchAttendanceDetail(ctx, cfg, token, protocolo)
+			if err != nil || !detail.OK {
+				return
+			}
+			items[i].Description = detail.Description
+		}(i, protocolo)
+	}
+	wg.Wait()
+}
+
+// BuildRecentActivityFast últimos 30 dias de atendimentos + O.S., devolve os `limitEach` mais
+// recentes de cada mais as repartições por status — mesma forma de resposta de
+// BuildRecentActivity (RecentActivityResult), só a fonte dos dados muda.
+func BuildRecentActivityFast(ctx context.Context, cfg Config, token string, limitEach int) RecentActivityResult {
+	from, to := defaultPeriod("", "")
+
+	// relacoes=cliente_servico traz tipo_atendimento (assunto) e cliente_servico.cliente (nome do
+	// cliente) — leve. /atendimento/todos NÃO tem descricao_abertura nem a conversa (confirmado:
+	// nem com relacoes=atendimento_mensagem — essa relação traz notas avulsas, não a descrição de
+	// abertura real); por isso a "Descrição" da lista é preenchida depois, só para os
+	// `limitEach` registos finais, com 1 pedido leve por atendimento (ver enrichAttendanceDescriptions).
+	attItems, attTotal, attErr := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/atendimento/todos",
+		map[string]string{"data_inicio": from, "data_fim": to, "relacoes": "cliente_servico"}, fastRecentMaxPages, "atendimentos")
+	woItems, woTotal, woErr := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/ordem_servico/todos",
+		map[string]string{"data_inicio": from, "data_fim": to}, fastRecentMaxPages, "ordens_servico", "ordem_servico", "ordens")
+	if attErr != nil && woErr != nil {
+		return RecentActivityResult{Message: "Falha ao coletar atendimentos/O.S.: " + attErr.Error()}
+	}
+
+	attStatusCount := map[string]int{}
+	attendance := make([]AttendanceItem, 0, len(attItems))
+	for _, m := range attItems {
+		label := "Sem status"
+		if st, ok := m["status"].(map[string]any); ok {
+			label = firstNonEmpty(pickStr(st, "descricao"), label)
+		} else {
+			label = firstNonEmpty(pickStr(m, "status"), label)
+		}
+		attStatusCount[label]++
+		item := AttendanceItem{
+			ID: pickStr(m, "id_atendimento"), Protocol: pickStr(m, "protocolo"),
+			Status: label, OpenedAt: pickStr(m, "data_cadastro"), ClosedAt: pickStr(m, "data_fechamento"),
+		}
+		if tipo, ok := m["tipo_atendimento"].(map[string]any); ok {
+			item.Subject = pickStr(tipo, "descricao")
+		}
+		if cs, ok := m["cliente_servico"].(map[string]any); ok {
+			if cli, ok := cs["cliente"].(map[string]any); ok {
+				item.ClientName = pickStr(cli, "nome_razaosocial")
+				item.ClientCode = pickStr(cli, "codigo_cliente")
+			}
+		}
+		attendance = append(attendance, item)
+	}
+
+	woStatusCount := map[string]int{}
+	workOrders := make([]WorkOrderItem, 0, len(woItems))
+	for _, m := range woItems {
+		status := firstNonEmpty(pickStr(m, "status"), "Sem status")
+		woStatusCount[status]++
+		workOrders = append(workOrders, WorkOrderItem{
+			ID:          pickStr(m, "id_ordem_servico"),
+			Number:      firstNonEmpty(pickStr(m, "numero"), pickStr(m, "id_ordem_servico")),
+			Status:      status,
+			Type:        pickStr(m, "tipo"),
+			Description: firstNonEmpty(pickStr(m, "descricao_abertura"), pickStr(m, "descricao_servico")),
+			// "servico" vem como texto "(numero_plano) NOME DO PLANO" — confirmado na doc/amostra
+			// da API, DIFERENTE de descricao_servico (texto livre, não é o nome do plano).
+			PlanName:    pickStr(m, "servico"),
+			ScheduledAt: pickStr(m, "data_inicio_programado"),
+			CreatedAt:   pickStr(m, "data_cadastro"),
+			ClientName:  pickStr(m, "cliente"), // já vem como texto "(código) NOME" neste endpoint
+		})
+	}
+
+	sort.Slice(attendance, func(i, j int) bool {
+		return parseBRDate(attendance[i].OpenedAt).After(parseBRDate(attendance[j].OpenedAt))
+	})
+	sort.Slice(workOrders, func(i, j int) bool {
+		return parseBRDate(workOrders[i].CreatedAt).After(parseBRDate(workOrders[j].CreatedAt))
+	})
+	if len(attendance) > limitEach {
+		attendance = attendance[:limitEach]
+	}
+	if len(workOrders) > limitEach {
+		workOrders = workOrders[:limitEach]
+	}
+	enrichAttendanceDescriptions(ctx, cfg, token, attendance)
+
+	return RecentActivityResult{
+		OK: true, SampleClients: 0, // já não é amostra por cliente — cobre todos os registos do período (últimos 30 dias)
+		Attendance: attendance, WorkOrders: workOrders,
+		TotalAttendanceFound: attTotal, TotalWorkOrdersFound: woTotal,
+		AttendanceStatusBreakdown: topNamedCounts(attStatusCount, nil, 8),
+		WorkOrderStatusBreakdown:  topNamedCounts(woStatusCount, nil, 8),
+	}
+}
+
+// financialSummaryLookbackDays janela usada pelo "Resumo financeiro" (não é um relatório por
+// período escolhido pelo utilizador — é "estado actual" das faturas) — cobre vencimentos dos
+// últimos 6 meses, o suficiente para qualquer fatura vencida/pendente realista sem varrer o
+// histórico inteiro da base.
+const financialSummaryLookbackDays = 180
+
+// BuildFinancialSummaryFast agrupa as faturas do período (por cliente, via o campo `cliente`
+// que cada fatura já traz) para montar os maiores devedores — mesma forma de resposta de
+// BuildFinancialSummary (FinancialSummaryResult), sem precisar de 1 pedido por cliente.
+func BuildFinancialSummaryFast(ctx context.Context, cfg Config, token string) FinancialSummaryResult {
+	now := time.Now()
+	from := now.AddDate(0, 0, -financialSummaryLookbackDays).Format("2006-01-02")
+	to := now.Format("2006-01-02")
+	items, _, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/financeiro/fatura",
+		map[string]string{"tipo_data": "data_vencimento", "data_inicio": from, "data_fim": to, "tipo_resultado": "simplificado"},
+		maxReportPages, "faturas")
+	if err != nil {
+		return FinancialSummaryResult{OK: false, Message: "Falha ao coletar faturas: " + err.Error()}
+	}
+
+	type acc struct {
+		name         string
+		pendingValue float64
+		overdueValue float64
+		invoiceCount int
+	}
+	debtByClient := map[string]*acc{}
+	var totalOverdue, totalPending, totalPaid float64
+	for _, m := range items {
+		val := parseBRFloat(pickStr(m, "valor"))
+		if strings.TrimSpace(pickStr(m, "data_pagamento")) != "" {
+			paidVal := parseBRFloat(pickStr(m, "valor_pago"))
+			if paidVal <= 0 {
+				paidVal = val
+			}
+			totalPaid += paidVal
+			continue
+		}
+		cli, _ := m["cliente"].(map[string]any)
+		code := ""
+		name := ""
+		if cli != nil {
+			code = pickStr(cli, "codigo_cliente")
+			name = pickStr(cli, "nome_razaosocial")
+		}
+		due := parseBRDate(pickStr(m, "data_vencimento"))
+		a := debtByClient[code]
+		if a == nil {
+			a = &acc{name: name}
+			debtByClient[code] = a
+		}
+		a.invoiceCount++
+		if !due.IsZero() && due.Before(now) {
+			totalOverdue += val
+			a.overdueValue += val
+		} else {
+			totalPending += val
+			a.pendingValue += val
+		}
+	}
+	debtors := make([]ClientDebt, 0, len(debtByClient))
+	for code, a := range debtByClient {
+		if a.pendingValue+a.overdueValue <= 0 {
+			continue
+		}
+		debtors = append(debtors, ClientDebt{
+			ClientName: a.name, ClientCode: code,
+			PendingValue: round2(a.pendingValue), OverdueValue: round2(a.overdueValue), InvoiceCount: a.invoiceCount,
+		})
+	}
+	sort.Slice(debtors, func(i, j int) bool {
+		return (debtors[i].PendingValue + debtors[i].OverdueValue) > (debtors[j].PendingValue + debtors[j].OverdueValue)
+	})
+	if len(debtors) > financialSummaryTopDebtors {
+		debtors = debtors[:financialSummaryTopDebtors]
+	}
+
+	return FinancialSummaryResult{
+		OK: true, SampleClients: 0, ClientsWithDebt: len(debtByClient),
+		TotalInvoices: len(items), TotalReceivable: round2(totalOverdue + totalPending),
+		TotalOverdue: round2(totalOverdue), TotalPending: round2(totalPending), TotalPaid: round2(totalPaid),
 		TopDebtors: debtors,
 	}
 }
@@ -1019,10 +2226,18 @@ func ParseAttendance(raw []byte) AttendanceResult {
 
 // WorkOrderItem ordem de serviço normalizada.
 type WorkOrderItem struct {
-	ID          string `json:"id,omitempty"`
-	Number      string `json:"number,omitempty"`
-	Status      string `json:"status,omitempty"`
+	ID     string `json:"id,omitempty"`
+	Number string `json:"number,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Type é o tipo da O.S. (campo "tipo" — ex.: "ATIVAÇÃO FIBRA", "RETIRADA DE EQUIPAMENTO"),
+	// mostrado na coluna "Tipo de O.S." (substitui a antiga coluna "Atendimento").
+	Type        string `json:"type,omitempty"`
 	Description string `json:"description,omitempty"`
+	// PlanName é o plano/serviço contratado (campo "servico" da HubSoft — ex.: "(10) 200MB
+	// FIBRA"), DIFERENTE de Description (texto livre de abertura/observação da O.S., campo
+	// "descricao_abertura"/"descricao_servico"). Confirmado ao vivo que a coluna "Plano /
+	// serviço" da tela estava a mostrar Description por falta deste campo.
+	PlanName    string `json:"plan_name,omitempty"`
 	ScheduledAt string `json:"scheduled_at,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
 	// Ver comentário equivalente em AttendanceItem.
@@ -1377,8 +2592,23 @@ func ResponseBodyBytes(res integrationhttp.RunResult) []byte {
 	if len(body) >= 2 && body[0] == '"' && body[len(body)-1] == '"' {
 		var s string
 		if json.Unmarshal(body, &s) == nil {
-			return []byte(s)
+			body = []byte(s)
 		}
 	}
-	return body
+	return fixLatin1(body)
+}
+
+// fixLatin1 corrige respostas da HubSoft que, para alguns endpoints (confirmado ao vivo em
+// /cliente/todos), chegam em Latin-1/ISO-8859-1 em vez de UTF-8 — caracteres acentuados ficam
+// corrompidos ("Serviço" vira "Servi�o"). Só entra em ação quando os bytes não são UTF-8
+// válido, então é inofensivo para os demais endpoints (já corretos hoje).
+func fixLatin1(body []byte) []byte {
+	if utf8.Valid(body) {
+		return body
+	}
+	runes := make([]rune, len(body))
+	for i, b := range body {
+		runes[i] = rune(b)
+	}
+	return []byte(string(runes))
 }

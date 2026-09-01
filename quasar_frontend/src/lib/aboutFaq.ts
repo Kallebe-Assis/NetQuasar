@@ -286,12 +286,12 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que a integração HubSoft oferece?",
-    a: "Cinco abas: Consulta (busca cliente por nome, CPF/CNPJ, código, telefone, login, IPv4 ou MAC, com modal de dados completos em abas — Identificação, Grupo, Serviços, Financeiro, Atendimentos, Ordens de serviço), Atendimentos e Ordens de serviço (os mais recentes encontrados numa amostra de clientes, já que a API não lista tudo de uma vez), Financeiro (total a receber, vencido, pendente e pago, mais os maiores devedores) e Dashboard (gráficos e KPIs, com 3 modos: Clientes e serviços, Atendimentos e ordens de serviço, ou Financeiro).",
+    a: "Seis abas: Consulta (busca cliente por nome, CPF/CNPJ, código, telefone, login, IPv4 ou MAC — IPv4/MAC pelo extrato de conexão real da HubSoft, sem varrer a base — com modal de dados completos em abas: Identificação, Grupo, Serviços, Financeiro, Atendimentos, Ordens de serviço), Atendimentos e Ordens de serviço (últimos 30 dias, direto dos endpoints paginados da HubSoft — \"Tipo de O.S.\" e \"Plano/serviço\" como colunas próprias, botão \"Ver mais\" busca o detalhe completo incluindo a descrição de abertura e a conversa), Financeiro (KPIs dos últimos 6 meses + lista paginada de faturas com filtro por período/estado/cliente e datas em DD/MM/AAAA), Dashboard (gráficos e KPIs) e Relatório (filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC, relatórios por período de atendimentos/O.S. por técnico/financeiro — com opção de mês específico ou média dos últimos X meses — e botão \"Enviar por Telegram\" em cada um).",
     cat: "funcoes",
   },
   {
-    q: "Porque o Financeiro/Dashboard da HubSoft mostra “amostra” em vez do total exato?",
-    a: "A API da HubSoft não tem um endpoint que liste todos os clientes/faturas/atendimentos de uma vez — cada consulta exige um filtro específico. O NetQuasar varre a base por nome (letras e pares de letras) para reunir uma amostra grande e calcular os números a partir dela; por isso os totais são indicativos, não um fecho contábil exato. As abas Atendimentos/Ordens/Financeiro guardam o resultado em cache e têm um botão “Atualizar” — não refazem a varredura sozinhas a cada troca de aba.",
+    q: "Os números da HubSoft (Atendimentos/O.S./Financeiro) são uma amostra ou o total real?",
+    a: "É o total real do período (últimos 30 dias para Atendimentos/O.S., últimos 6 meses para o resumo Financeiro), não uma amostra: o NetQuasar usa os endpoints \"/todos\" da HubSoft, que paginam de verdade sobre a base inteira. Os resultados ficam em cache no servidor por alguns minutos (mais rápido para quem entrar a seguir) — o botão \"Atualizar\" força uma nova coleta. Em Configurações → Integrações → HubSoft dá para ligar \"Carregar dados ao iniciar o sistema\", que aquece esse cache assim que o servidor arranca, em vez de esperar a primeira visita à tela.",
     cat: "tecnico",
   },
   {
@@ -306,7 +306,27 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "Como funcionam Relatórios?",
-    a: "Relatórios agregados (capacidade OLT, lacunas de dados, resumos) com envio agendado por Telegram/e-mail quando configurado.",
+    a: "Catálogo de relatórios do sistema (menu Relatórios, agrupados por Alertas e monitoramento, Acesso e OLT, Rede e manutenção, Sistema e cadastros) — inclui alertas activos/por categoria, equipamentos em atenção, PONs DOWN, saúde do monitoramento, conexões, OLT, ONUs por PON, BNG, BGP (peers established/caídos e operadoras cadastradas), eventos de rede, infraestrutura FTTH, equipamentos por POP, visão geral, integrações, HubSoft (atendimentos/O.S./financeiro), automações e base comercial. Cada um tem pré-visualização, CSV, PDF e Telegram (quando configurado). Frota tem os seus próprios relatórios, à parte.",
+    cat: "funcoes",
+  },
+  {
+    q: "O que é a tela BGP?",
+    a: "Monitorização de equipamentos com sessões BGP (ex.: borda com upstreams de operadoras): peers (estado established/caído, AS remoto, prefixos recebidos/activos/anunciados), interfaces, saúde do equipamento (CPU, memória, chassi, fontes, ventoinhas, temperaturas), ópticos SFP, LLDP, QoS e RADIUS quando o perfil SNMP tiver essas métricas activas. A aba principal mostra 1 gráfico de tráfego TOTAL (soma de todas as operadoras) e 1 gráfico dedicado por operadora — cada um com toggle Separado/Somado quando a operadora tem 2+ interfaces.",
+    cat: "funcoes",
+  },
+  {
+    q: "Como cadastro uma operadora BGP (para o gráfico de tráfego por operadora)?",
+    a: "Em Configurações → BGP → Operadoras: cadastre a operadora (nome, CNPJ, endereço, um ou mais AS, limite de banda contratado) e depois ligue uma ou mais interfaces do equipamento a ela. Uma operadora pode ter várias interfaces (ex.: 2 uplinks independentes) — todas somadas no gráfico dela. O nome da operadora ao ligar uma interface é sempre escolhido de uma lista já cadastrada, nunca texto livre.",
+    cat: "configurar",
+  },
+  {
+    q: "O que são as Automações personalizadas?",
+    a: "Em Configurações → Automações, além dos 5 cadastros fixos (backup, resumo de alertas, relatório ONU, totais BNG, base comercial), a secção \"Automações personalizadas\" permite criar quantas automações quiser: escolhe qualquer relatório do catálogo do sistema (alertas, BGP, HubSoft, tráfego, OLT, BNG, etc.) ou um relatório de frota/combustível, define a recorrência (diária, semanal, dias específicos ou mensal) e a janela de dados — enviado por Telegram no bot \"reports\". Cada uma pode ser editada, removida ou executada manualmente (\"Executar agora\") a qualquer momento.",
+    cat: "funcoes",
+  },
+  {
+    q: "Como funciona \"Forçar desconexão\" de um usuário?",
+    a: "Em Configurações → Usuários, um admin pode forçar a sessão de outro usuário a expirar imediatamente — o token dele deixa de ser aceite na próxima requisição, mesmo que ainda não tivesse expirado naturalmente (48 h). Como a aplicação já verifica a sessão a cada poucos segundos em segundo plano, o efeito é quase imediato: a pessoa é redireccionada para o login sozinha, sem precisar de fechar a aba.",
     cat: "funcoes",
   },
   {

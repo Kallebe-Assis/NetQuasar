@@ -184,6 +184,8 @@ export type WorkOrderItem = {
   number?: string;
   status?: string;
   status_label?: string;
+  /** Tipo da O.S. (ex.: "ATIVAÇÃO FIBRA", "RETIRADA DE EQUIPAMENTO") — coluna "Tipo de O.S.". */
+  type?: string;
   plan_name?: string;
   service_status?: string;
   value?: string;
@@ -250,6 +252,80 @@ export type ClientWorkOrderResponse = {
   latency_ms?: number;
   request_url?: string;
   request_method?: string;
+};
+
+export type HubsoftSupportMessage = { text?: string; at?: string };
+
+export type HubsoftAttendanceDetail = {
+  ok: boolean;
+  message?: string;
+  id?: string;
+  protocol?: string;
+  status?: string;
+  subject?: string;
+  description?: string;
+  opened_at?: string;
+  opened_by_user?: string;
+  closed_at?: string;
+  closed_by_user?: string;
+  closed_description?: string;
+  closing_reason?: string;
+  sector?: string;
+  responsible_user?: string;
+  client_name?: string;
+  client_code?: string;
+  plan_name?: string;
+  work_orders?: WorkOrderItem[];
+  messages: HubsoftSupportMessage[];
+};
+
+export type HubsoftWorkOrderDetail = {
+  ok: boolean;
+  message?: string;
+  id?: string;
+  number?: string;
+  type?: string;
+  status?: string;
+  status_closed?: string;
+  description?: string;
+  service_description?: string;
+  closed_description?: string;
+  scheduled_start?: string;
+  scheduled_end?: string;
+  executed_start?: string;
+  executed_end?: string;
+  created_at?: string;
+  opened_by_user?: string;
+  closed_by_user?: string;
+  client_name?: string;
+  client_code?: string;
+  plan_name?: string;
+  attendance_protocol?: string;
+  messages: HubsoftSupportMessage[];
+};
+
+export type HubsoftInvoiceRow = {
+  id?: string;
+  client_name?: string;
+  client_code?: string;
+  value?: string;
+  value_paid?: string;
+  due_date?: string;
+  payment_date?: string;
+  status?: "paid" | "overdue" | "pending";
+  digitable_line?: string;
+  bar_code?: string;
+  link?: string;
+};
+
+export type HubsoftInvoiceListResponse = {
+  ok: boolean;
+  message?: string;
+  invoices: HubsoftInvoiceRow[];
+  page: number;
+  per_page: number;
+  total_pages: number;
+  total_registros: number;
 };
 
 export type ConsumerMeta = {
@@ -339,6 +415,86 @@ export type HubsoftDashboardResponse = {
   active_services: number;
   canceled_services: number;
   estimated_monthly_revenue: number;
+};
+
+// --- Aba Relatório (HubsoftReportPage.tsx) — ver internal/api/handlers_hubsoft.go hubsoftReport* ---
+
+export type HubsoftReportServiceRow = {
+  client_id?: string;
+  client_code?: string;
+  client_name?: string;
+  document?: string;
+  service_id?: string;
+  service_name?: string;
+  login?: string;
+  ipv4?: string;
+  mac?: string;
+  status?: string;
+  status_prefix?: string;
+  city?: string;
+  state?: string;
+  neighborhood?: string;
+  connected?: string;
+};
+
+export type HubsoftReportClientsResponse = {
+  ok: boolean;
+  message?: string;
+  rows: HubsoftReportServiceRow[];
+  total_scanned: number;
+  truncated?: boolean;
+};
+
+export type HubsoftAttendanceReportResponse = {
+  ok: boolean;
+  message?: string;
+  from: string;
+  to: string;
+  total: number;
+  open: number;
+  closed: number;
+  closed_pct: number;
+  by_status: NamedCount[];
+  truncated?: boolean;
+};
+
+export type HubsoftTechnicianStat = {
+  technician: string;
+  total: number;
+  finished: number;
+  pct_of_total_finished: number;
+};
+
+export type HubsoftWorkOrderReportResponse = {
+  ok: boolean;
+  message?: string;
+  from: string;
+  to: string;
+  total: number;
+  finished: number;
+  finished_pct: number;
+  by_status: NamedCount[];
+  by_technician: HubsoftTechnicianStat[];
+  truncated?: boolean;
+};
+
+export type HubsoftFinancialReportResponse = {
+  ok: boolean;
+  message?: string;
+  from: string;
+  to: string;
+  total: number;
+  total_value: number;
+  paid_count: number;
+  paid_value: number;
+  paid_pct: number;
+  open_count: number;
+  open_value: number;
+  open_pct: number;
+  overdue_count: number;
+  overdue_value: number;
+  overdue_pct: number;
+  truncated?: boolean;
 };
 
 export type ClientLoginResponse = {

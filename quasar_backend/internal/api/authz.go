@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
@@ -45,13 +46,13 @@ func defaultViewerPermissions() []string {
 	}
 }
 
-func (s *Server) resolveUserPermissions(ctx context.Context, userID uuid.UUID, role string) (profileID *uuid.UUID, profileSlug string, perms []string) {
+func (s *Server) resolveUserPermissions(ctx context.Context, userID uuid.UUID, role string) (profileID *uuid.UUID, profileSlug string, perms []string, sessionsInvalidatedAt *time.Time) {
 	role = strings.ToLower(strings.TrimSpace(role))
 	if s.DB() == nil {
 		if role == "admin" {
-			return nil, "admin", []string{"*"}
+			return nil, "admin", []string{"*"}, nil
 		}
-		return nil, "user", defaultViewerPermissions()
+		return nil, "user", defaultViewerPermissions(), nil
 	}
 	var pid uuid.UUID
 	var slug string
@@ -59,27 +60,28 @@ func (s *Server) resolveUserPermissions(ctx context.Context, userID uuid.UUID, r
 	err := s.DB().QueryRow(ctx, `
 		SELECT COALESCE(u.permission_profile_id, p_fallback.id),
 			COALESCE(p.slug, p_fallback.slug),
-			COALESCE(p.permissions, p_fallback.permissions)
+			COALESCE(p.permissions, p_fallback.permissions),
+			u.sessions_invalidated_at
 		FROM users u
 		LEFT JOIN permission_profiles p ON p.id = u.permission_profile_id
 		LEFT JOIN permission_profiles p_fallback ON p_fallback.slug = CASE WHEN u.role = 'admin' THEN 'admin' ELSE 'user' END
 		WHERE u.id = $1
-	`, userID).Scan(&pid, &slug, &raw)
+	`, userID).Scan(&pid, &slug, &raw, &sessionsInvalidatedAt)
 	if err != nil {
 		if role == "admin" {
-			return nil, "admin", []string{"*"}
+			return nil, "admin", []string{"*"}, nil
 		}
-		return nil, "user", defaultViewerPermissions()
+		return nil, "user", defaultViewerPermissions(), nil
 	}
 	idCopy := pid
 	perms = decodePermissionsJSON(raw)
 	if role == "admin" || strings.EqualFold(slug, "admin") || permissionGranted(perms, "*") {
-		return &idCopy, "admin", []string{"*"}
+		return &idCopy, "admin", []string{"*"}, sessionsInvalidatedAt
 	}
 	if len(perms) == 0 {
 		perms = defaultViewerPermissions()
 	}
-	return &idCopy, slug, perms
+	return &idCopy, slug, perms, sessionsInvalidatedAt
 }
 
 // requestAuthRole devolve o papel efetivo: "admin", "viewer", ou ("", false) se não autenticado.
@@ -93,9 +95,16 @@ func (s *Server) requestAuthRole(r *http.Request) (role string, ok bool) {
 func (s *Server) requestAuthContext(r *http.Request) authContext {
 	bearer := bearerFromRequest(r)
 	if bearer != "" {
-		uid, email, role, err := parseUserJWT(s.Cfg, bearer)
+		uid, email, role, issuedAt, err := parseUserJWT(s.Cfg, bearer)
 		if err == nil && uid != uuid.Nil {
-			pid, slug, perms := s.resolveUserPermissions(r.Context(), uid, role)
+			pid, slug, perms, sessionsInvalidatedAt := s.resolveUserPermissions(r.Context(), uid, role)
+			// Força-desconexão (Configurações → Usuários): um admin marcou
+			// users.sessions_invalidated_at "agora" — qualquer token emitido ANTES disso deixa
+			// de ser aceite, mesmo que ainda não tenha expirado naturalmente (48h). O frontend
+			// trata o 401 resultante como sessão encerrada (ver apiFetch em lib/api.ts).
+			if sessionsInvalidatedAt != nil && !issuedAt.IsZero() && issuedAt.Before(*sessionsInvalidatedAt) {
+				return authContext{}
+			}
 			effectiveRole := role
 			if permissionGranted(perms, "*") {
 				effectiveRole = "admin"

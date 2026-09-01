@@ -1104,3 +1104,30 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 	s.appendAuditLog(r.Context(), "user", id.String(), "delete", s.actorFromRequest(r), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// forceLogoutUser — "Forçar desconexão": marca users.sessions_invalidated_at="agora" para o
+// usuário-alvo. A autenticação é por JWT sem estado (sem tabela de sessões guardada); o próximo
+// pedido autenticado do alvo, com um token emitido antes deste instante, é rejeitado em
+// requestAuthContext (authz.go) mesmo que o token ainda não tenha expirado naturalmente (48h).
+// Restrito a admins (não apenas quem tem settings.users) por ser uma acção sobre a conta de
+// outra pessoa, não sobre a própria configuração de usuários.
+func (s *Server) forceLogoutUser(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "UUID inválido", nil)
+		return
+	}
+	var email string
+	ct, err := s.DB().Exec(r.Context(), `UPDATE users SET sessions_invalidated_at = now() WHERE id=$1`, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "usuário não encontrado", nil)
+		return
+	}
+	_ = s.DB().QueryRow(r.Context(), `SELECT email FROM users WHERE id=$1`, id).Scan(&email)
+	s.appendAuditLog(r.Context(), "user", id.String(), "force_logout", s.actorFromRequest(r), nil, map[string]any{"email": email})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

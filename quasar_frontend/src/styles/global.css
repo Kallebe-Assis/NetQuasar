@@ -3959,7 +3959,7 @@ h3 .info-hint {
   width: 100%;
   max-width: 100%;
   table-layout: fixed;
-  font-size: 13px;
+  font-size: 11.5px;
   border-collapse: collapse;
 }
 .integration-support-table__grid th {
@@ -3967,8 +3967,8 @@ h3 .info-hint {
   top: 0;
   z-index: 1;
   background: var(--panel2);
-  padding: 10px 12px;
-  font-size: 11px;
+  padding: 6px 8px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3979,16 +3979,16 @@ h3 .info-hint {
   vertical-align: bottom;
 }
 .integration-support-table__grid td.integration-support-table__cell {
-  padding: 12px;
+  padding: 6px 8px;
   vertical-align: top;
   border-bottom: 1px solid var(--border);
-  line-height: 1.45;
+  line-height: 1.35;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 .integration-support-table__grid td.mono {
-  font-size: 12px;
+  font-size: 11px;
   word-break: break-all;
 }
 .integration-support-table__grid tbody tr:hover td {
@@ -4061,7 +4061,7 @@ h3 .info-hint {
   word-break: break-word;
 }
 .integration-os-plan__meta {
-  font-size: 12px;
+  font-size: 10.5px;
   color: var(--muted);
   margin-top: 2px;
   word-break: break-word;
@@ -4281,6 +4281,12 @@ h3 .info-hint {
 }
 .integration-support-detail-modal {
   max-width: min(92vw, 800px);
+}
+/* Modal de detalhe da HubSoft (atendimento/O.S. com "ver mais") — mais largo e mais alto que o
+   genérico partilhado com o IXC, cabe o resumo completo + a conversa sem apertar. */
+.integration-support-detail-modal--lg {
+  max-width: min(96vw, 1100px);
+  max-height: 92vh;
 }
 .integration-support-detail-modal__body {
   flex: 1;
@@ -8302,6 +8308,20 @@ details.collapsible-section .collapsible-section__body {
   margin: 0 0 6px;
   font-size: 15px;
   color: var(--err, #c44);
+}
+.fleet-import-danger--compact {
+  margin-top: 10px;
+  padding: 8px 10px;
+}
+.fleet-import-danger--compact h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.fleet-import-danger--compact p {
+  font-size: 12px;
 }
 .fleet-filter-panel {
   margin-bottom: 12px;

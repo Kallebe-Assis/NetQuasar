@@ -3,7 +3,8 @@ import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { AttendanceTabContent } from "../../integrations/HubsoftClientResults";
-import { SupportItemDetailModal, type SupportDetailTarget } from "../../integrations/SupportItemDetailModal";
+import type { SupportDetailTarget } from "../../integrations/SupportItemDetailModal";
+import { HubsoftSupportDetailModal, type HubsoftDetailTarget } from "../../integrations/HubsoftSupportDetailModal";
 import type { RecentActivityResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -19,7 +20,16 @@ import { queryKeys } from "../../lib/queryKeys";
  */
 export function HubsoftAttendancePage() {
   const qc = useQueryClient();
-  const [detailTarget, setDetailTarget] = useState<SupportDetailTarget | null>(null);
+  const [detailTarget, setDetailTarget] = useState<HubsoftDetailTarget | null>(null);
+
+  // AttendanceTabContent (partilhado com o IXC) chama onShowDetail com o item completo já
+  // carregado na lista — aqui só precisamos do protocolo, o resto é buscado sob demanda pelo
+  // HubsoftSupportDetailModal (ver mais rico do que o que a lista traz).
+  function handleShowDetail(t: SupportDetailTarget) {
+    if (t.kind === "attendance" && t.item.protocol) {
+      setDetailTarget({ kind: "attendance", protocol: t.item.protocol });
+    }
+  }
 
   const q = useQuery({
     queryKey: queryKeys.hubsoftRecentActivity,
@@ -38,7 +48,7 @@ export function HubsoftAttendancePage() {
           <div>
             <h2 style={{ margin: 0 }}>Atendimentos recentes</h2>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
-              {d ? `Amostra de ${d.sample_clients.toLocaleString("pt-BR")} clientes consultados — mostrando os 20 atendimentos mais recentes.` : "Varre uma amostra de clientes e mostra os atendimentos mais recentes encontrados."}
+              {d ? `${d.total_attendance_found.toLocaleString("pt-BR")} atendimento(s) nos últimos 30 dias — mostrando os 20 mais recentes.` : "Consulta todos os atendimentos dos últimos 30 dias e mostra os mais recentes."}
             </p>
           </div>
           <button
@@ -61,10 +71,10 @@ export function HubsoftAttendancePage() {
         ) : !d?.ok ? (
           <div className="msg msg--err">{d?.message || "Falha ao coletar atendimentos."}</div>
         ) : (
-          <AttendanceTabContent loading={false} ok message={d.message} items={d.attendance} onShowDetail={setDetailTarget} />
+          <AttendanceTabContent loading={false} ok message={d.message} items={d.attendance} onShowDetail={handleShowDetail} />
         )}
       </div>
-      {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
+      {detailTarget ? <HubsoftSupportDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
     </div>
   );
 }

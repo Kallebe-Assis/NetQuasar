@@ -1,14 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { BanknoteArrowDown, Filter, Fuel, Plus, Trash2 } from "lucide-react";
+import { BanknoteArrowDown, Filter, Fuel, Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastInfo, toastOk } from "../../lib/operationToast";
 import { invalidateFleetOperationalQueries, queryKeys } from "../../lib/queryKeys";
-import { formatFleetPlate, fleetMoney, fleetNum, formatISODateBR, isFleetVehicleLaunchBlocked, monthStartISO, todayISO } from "./fleetUtils";
+import {
+  formatFleetPlateOrUnknown,
+  fleetMoney,
+  fleetNum,
+  formatISODateBR,
+  isFleetVehicleLaunchBlocked,
+  monthStartISO,
+  toDatetimeLocalInput,
+  todayISO,
+} from "./fleetUtils";
 
 type FleetVehicleOpt = { id: string; plate: string; description: string; status?: string };
 
@@ -59,6 +68,8 @@ type Row = {
   total: number;
   km: number | null;
   notes?: string | null;
+  /** Só preenchido para kind==="expense" — referência ao registo completo, usada por Editar/Remover. */
+  expense?: Expense;
 };
 
 const emptyFueling = () => ({
@@ -103,6 +114,8 @@ export function FleetFuelingsPage() {
   const [preview, setPreview] = useState<{ total: number; km: number | null; kpl: number | null; cpk: number | null } | null>(null);
   const [odoConfirmOpen, setOdoConfirmOpen] = useState(false);
   const [odoBaseline, setOdoBaseline] = useState("");
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [deleteExpenseTarget, setDeleteExpenseTarget] = useState<Expense | null>(null);
 
   const listQs = useMemo(() => {
     const qs = new URLSearchParams({ limit: "10000" });
@@ -154,7 +167,7 @@ export function FleetFuelingsPage() {
       id: `fueling-${f.id}`,
       kind: "fueling",
       at: f.fueled_at,
-      plate: formatFleetPlate(f.plate ?? ""),
+      plate: formatFleetPlateOrUnknown(f.plate ?? ""),
       typeLabel: "Abastecimento",
       description: f.fuel_name ?? "Combustível",
       quantity: f.liters,
@@ -167,7 +180,7 @@ export function FleetFuelingsPage() {
       id: `expense-${e.id}`,
       kind: "expense",
       at: e.occurred_at,
-      plate: formatFleetPlate(e.plate ?? ""),
+      plate: formatFleetPlateOrUnknown(e.plate ?? ""),
       typeLabel: e.type_label || e.expense_type,
       description: (e.items?.length ?? 0) > 1
         ? `${e.items![0].description} +${e.items!.length - 1}`
@@ -177,6 +190,7 @@ export function FleetFuelingsPage() {
       total: e.total_amount,
       km: e.odometer ?? null,
       notes: e.notes,
+      expense: e,
     }));
     return [...(showFuelings ? fuelRows : []), ...(showExpenses ? expRows : [])].sort(
       (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
@@ -290,6 +304,26 @@ export function FleetFuelingsPage() {
     setPreview(null);
     setOdoConfirmOpen(false);
     setOdoBaseline("");
+    setEditingExpenseId(null);
+    setExpForm(emptyExpense());
+  }
+
+  function startEditExpense(e: Expense) {
+    setEditingExpenseId(e.id);
+    setOdoBaseline(e.odometer != null ? String(e.odometer) : "");
+    setExpForm({
+      vehicle_id: e.vehicle_id,
+      expense_type_id: e.expense_type_id ?? "",
+      description: e.description ?? "",
+      occurred_at: toDatetimeLocalInput(e.occurred_at),
+      odometer: e.odometer != null ? String(e.odometer) : "",
+      notes: e.notes ?? "",
+      items:
+        e.items && e.items.length > 0
+          ? e.items.map((it) => ({ description: it.description, quantity: String(it.quantity), unit_price: String(it.unit_price) }))
+          : [{ description: e.description ?? "", quantity: String(e.quantity), unit_price: String(e.unit_price) }],
+    });
+    setModal("expense");
   }
 
   function vehicleById(id: string) {
@@ -353,16 +387,32 @@ export function FleetFuelingsPage() {
         description: expForm.description.trim() || items.map((it) => it.description).join(", "),
         items,
         odometer: expForm.odometer ? Number(String(expForm.odometer).replace(",", ".")) : null,
-        update_odometer: updateOdometer,
+        // Editar não arrasta o hodômetro actual do veículo (só lançar uma despesa nova faz isso)
+        // — ver comentário em patchFleetExpense, handlers_fleet_expenses.go.
+        update_odometer: editingExpenseId ? false : updateOdometer,
         notes: expForm.notes.trim() || null,
       };
+      if (editingExpenseId) {
+        return apiFetch(`/api/v1/fleet/expenses/${editingExpenseId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      }
       return apiFetch("/api/v1/fleet/expenses", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: async () => {
-      toastOk(push, "Despesa registada");
+      toastOk(push, editingExpenseId ? "Despesa atualizada" : "Despesa registada");
       setOdoConfirmOpen(false);
+      setEditingExpenseId(null);
       setExpForm(emptyExpense());
       setModal(null);
+      await invalidateFleetOperationalQueries(qc);
+    },
+    onError: (e) => toastErr(push, e),
+  });
+
+  const deleteExpenseM = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/fleet/expenses/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      toastOk(push, "Despesa removida");
+      setDeleteExpenseTarget(null);
       await invalidateFleetOperationalQueries(qc);
     },
     onError: (e) => toastErr(push, e),
@@ -375,7 +425,7 @@ export function FleetFuelingsPage() {
       toastErr(push, e);
       return;
     }
-    if (expForm.odometer.trim() && expForm.odometer.trim() !== odoBaseline.trim()) {
+    if (!editingExpenseId && expForm.odometer.trim() && expForm.odometer.trim() !== odoBaseline.trim()) {
       setOdoConfirmOpen(true);
       return;
     }
@@ -434,6 +484,7 @@ export function FleetFuelingsPage() {
                 onClick={() => {
                   setExpForm(emptyExpense());
                   setOdoBaseline("");
+                  setEditingExpenseId(null);
                   setModal("expense");
                 }}
               >
@@ -475,7 +526,7 @@ export function FleetFuelingsPage() {
                 <option value="">Todos</option>
                 {(vehicles.data?.items ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
-                    {formatFleetPlate(v.plate)} — {v.description}
+                    {formatFleetPlateOrUnknown(v.plate)} — {v.description}
                   </option>
                 ))}
               </select>
@@ -529,6 +580,7 @@ export function FleetFuelingsPage() {
               <th>Total</th>
               <th>KM</th>
               <th>Obs.</th>
+              {canMutate ? <th style={{ width: 76 }} /> : null}
             </tr>
           </thead>
           <tbody>
@@ -543,15 +595,29 @@ export function FleetFuelingsPage() {
                 <td>{fleetMoney(r.total)}</td>
                 <td>{fleetNum(r.km, 1)}</td>
                 <td>{r.notes || "—"}</td>
+                {canMutate ? (
+                  <td>
+                    {r.kind === "expense" && r.expense ? (
+                      <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
+                        <button type="button" className="btn btn--icon" title="Editar despesa" onClick={() => startEditExpense(r.expense!)}>
+                          <Pencil size={13} />
+                        </button>
+                        <button type="button" className="btn btn--icon" title="Remover despesa" onClick={() => setDeleteExpenseTarget(r.expense!)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
             ))}
             {fuelings.isLoading || expenses.isLoading ? (
-              <tr><td colSpan={9} className="muted">A carregar…</td></tr>
+              <tr><td colSpan={10} className="muted">A carregar…</td></tr>
             ) : fuelings.isError || expenses.isError ? (
-              <tr><td colSpan={9} className="err">Falha ao carregar lançamentos.</td></tr>
+              <tr><td colSpan={10} className="err">Falha ao carregar lançamentos.</td></tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="muted">Sem lançamentos no período selecionado.</td>
+                <td colSpan={10} className="muted">Sem lançamentos no período selecionado.</td>
               </tr>
             ) : null}
           </tbody>
@@ -585,7 +651,7 @@ export function FleetFuelingsPage() {
         ? createPortal(
             <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
               <div className="modal modal--wide" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-                <h3>Nova despesa</h3>
+                <h3>{editingExpenseId ? "Editar despesa" : "Nova despesa"}</h3>
                 <div className="fleet-form-grid">
                   <label>
                     Veículo*
@@ -593,7 +659,7 @@ export function FleetFuelingsPage() {
                       <option value="">Selecione…</option>
                       {launchVehicles.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {formatFleetPlate(v.plate)} — {v.description}
+                          {formatFleetPlateOrUnknown(v.plate)} — {v.description}
                         </option>
                       ))}
                     </select>
@@ -702,7 +768,7 @@ export function FleetFuelingsPage() {
                     disabled={saveExpense.isPending || !expForm.vehicle_id || !expForm.expense_type_id || !itemsValid || isFleetVehicleLaunchBlocked(vehicleById(expForm.vehicle_id)?.status)}
                     onClick={requestSaveExpense}
                   >
-                    {saveExpense.isPending ? "A guardar…" : "Registar despesa"}
+                    {saveExpense.isPending ? "A guardar…" : editingExpenseId ? "Salvar alterações" : "Registar despesa"}
                   </button>
                 </div>
               </div>
@@ -728,7 +794,7 @@ export function FleetFuelingsPage() {
                       <option value="">Selecione…</option>
                       {launchVehicles.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {formatFleetPlate(v.plate)} — {v.description}
+                          {formatFleetPlateOrUnknown(v.plate)} — {v.description}
                         </option>
                       ))}
                     </select>
@@ -892,6 +958,21 @@ export function FleetFuelingsPage() {
           setOdoConfirmOpen(false);
           saveExpense.mutate(true);
         }}
+      />
+
+      <ConfirmModal
+        open={!!deleteExpenseTarget}
+        title="Remover despesa"
+        message={
+          deleteExpenseTarget
+            ? `Remover a despesa "${deleteExpenseTarget.type_label || deleteExpenseTarget.expense_type}" de ${formatFleetPlateOrUnknown(deleteExpenseTarget.plate ?? "")} (${fleetMoney(deleteExpenseTarget.total_amount)})? Esta ação não pode ser desfeita.`
+            : ""
+        }
+        danger
+        confirmLabel="Remover"
+        busy={deleteExpenseM.isPending}
+        onCancel={() => setDeleteExpenseTarget(null)}
+        onConfirm={() => deleteExpenseTarget && deleteExpenseM.mutate(deleteExpenseTarget.id)}
       />
     </div>
   );

@@ -7,10 +7,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
 	"github.com/netquasar/netquasar/quasar_backend/internal/embedui"
@@ -64,6 +66,48 @@ func (s *Server) ensureBackgroundSchedulers() {
 	s.ensureMonitoringWorker()
 	s.ensureAutomationONUScheduler()
 	s.ensureReportSchedulers()
+	s.ensureIntegrationPreload()
+}
+
+// ensureIntegrationPreload — "Carregar ao iniciar o sistema" (Configurações → Integrações →
+// HubSoft): para cada integração HubSoft com preload_on_startup=true, aquece o cache de
+// recent-activity/financial-summary (fetchHubsoftRecentActivityCached/
+// fetchHubsoftFinancialSummaryCached, handlers_hubsoft.go) uma vez no arranque do servidor, em
+// background — quem entrar na tela de Integrações a seguir já encontra os dados prontos (cache
+// Redis, TTL hubsoftCacheTTL) em vez de esperar a coleta. Sem isso ligado (omissão), continua
+// exactamente como era: só carrega ao abrir a tela, sem custo nenhum no arranque.
+func (s *Server) ensureIntegrationPreload() {
+	if s.WorkerCtx == nil || s.DB() == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(s.WorkerCtx, 5*time.Minute)
+		defer cancel()
+		rows, err := s.DB().Query(ctx, `SELECT id FROM integrations WHERE slug='hubsoft' AND preload_on_startup=true`)
+		if err != nil {
+			return
+		}
+		var ids []uuid.UUID
+		for rows.Next() {
+			var id uuid.UUID
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		for _, integID := range ids {
+			cfg, err := s.loadHubsoftConfig(ctx, integID)
+			if err != nil {
+				continue
+			}
+			token, err := s.hubsoftToken(ctx, integID, cfg)
+			if err != nil {
+				continue
+			}
+			s.fetchHubsoftRecentActivityCached(ctx, integID, cfg, token)
+			s.fetchHubsoftFinancialSummaryCached(ctx, integID, cfg, token)
+		}
+	}()
 }
 
 func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[pgxpool.Pool], workerCtx context.Context) http.Handler {
@@ -166,6 +210,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/users/{id}", s.getUser)
 				r.Patch("/users/{id}", s.patchUser)
 				r.Delete("/users/{id}", s.deleteUser)
+				r.With(s.requireAdminMiddleware).Post("/users/{id}/force-logout", s.forceLogoutUser)
 				r.Get("/permissions", s.listPermissionCatalog)
 				r.Get("/permission-profiles", s.listPermissionProfiles)
 				r.Post("/permission-profiles", s.createPermissionProfile)
@@ -230,6 +275,11 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/backup/b2/test", s.testSettingsB2Backup)
 				r.Get("/automation/history", s.getAutomationExecutionHistory)
 				r.Get("/automation", s.getAutomationOverview)
+				r.Get("/automation/schedules", s.listAutomationSchedules)
+				r.Post("/automation/schedules", s.createAutomationSchedule)
+				r.Patch("/automation/schedules/{scheduleId}", s.updateAutomationSchedule)
+				r.Delete("/automation/schedules/{scheduleId}", s.deleteAutomationSchedule)
+				r.Post("/automation/schedules/{scheduleId}/run", s.runAutomationScheduleNow)
 				r.Get("/notifications/smtp", s.getSMTPSettings)
 				r.Patch("/notifications/smtp", s.patchSMTPSettings)
 				r.Post("/notifications/smtp/test", s.testSMTPSettings)
@@ -403,6 +453,19 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}/hubsoft/dashboard", s.hubsoftDashboard)
 			r.Get("/{id}/hubsoft/recent-activity", s.hubsoftRecentActivity)
 			r.Get("/{id}/hubsoft/financial-summary", s.hubsoftFinancialSummary)
+			r.Get("/{id}/hubsoft/report/clients", s.hubsoftReportClients)
+			r.Get("/{id}/hubsoft/report/attendance", s.hubsoftReportAttendance)
+			r.Get("/{id}/hubsoft/report/work-orders", s.hubsoftReportWorkOrders)
+			r.Get("/{id}/hubsoft/report/financial", s.hubsoftReportFinancial)
+			r.Get("/{id}/hubsoft/attendance/detail", s.hubsoftAttendanceDetail)
+			r.Get("/{id}/hubsoft/work-orders/detail", s.hubsoftWorkOrderDetail)
+			r.Get("/{id}/hubsoft/financial/list", s.hubsoftFinancialList)
+			r.Get("/{id}/hubsoft/preload", s.hubsoftGetPreload)
+			r.Put("/{id}/hubsoft/preload", s.hubsoftSetPreload)
+			r.Post("/{id}/hubsoft/report/attendance/telegram", s.hubsoftReportAttendanceTelegram)
+			r.Post("/{id}/hubsoft/report/work-orders/telegram", s.hubsoftReportWorkOrdersTelegram)
+			r.Post("/{id}/hubsoft/report/financial/telegram", s.hubsoftReportFinancialTelegram)
+			r.Post("/{id}/hubsoft/financial/invoice/{invoiceId}/resend", s.hubsoftResendInvoiceEmail)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("integrations.manage", "*"))
 				r.Post("/", s.createIntegration)
@@ -555,15 +618,17 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}/report", s.bgpDeviceReport)
 			r.Get("/devices/{id}/history", s.bgpDeviceHistory)
 			r.Get("/devices/{id}/uplinks", s.listBgpUplinks)
-			r.Get("/devices/{id}/carrier-limits", s.listBgpCarrierLimits)
 			r.Get("/devices/{id}/carrier-traffic-history", s.bgpCarrierTrafficHistory)
+			r.Get("/carriers", s.listBgpCarriers)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("bgp.collect", "devices.collect", "*"))
 				r.Post("/devices/{id}/collect", s.bgpDeviceCollect)
 				r.Post("/devices/{id}/uplinks", s.createBgpUplink)
 				r.Patch("/devices/{id}/uplinks/{uplinkId}", s.updateBgpUplink)
 				r.Delete("/devices/{id}/uplinks/{uplinkId}", s.deleteBgpUplink)
-				r.Put("/devices/{id}/carrier-limits/{label}", s.upsertBgpCarrierLimit)
+				r.Post("/carriers", s.createBgpCarrier)
+				r.Patch("/carriers/{carrierId}", s.updateBgpCarrier)
+				r.Delete("/carriers/{carrierId}", s.deleteBgpCarrier)
 			})
 		})
 
@@ -678,6 +743,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/fuelings", s.createFleetFueling)
 				r.Post("/fuelings/quick", s.createFleetFueling)
 				r.Post("/expenses", s.createFleetExpense)
+				r.Patch("/expenses/{id}", s.patchFleetExpense)
+				r.Delete("/expenses/{id}", s.deleteFleetExpense)
 				r.Post("/expenses/import/csv", s.importFleetExpensesCSV)
 				r.Post("/expenses/purge", s.purgeFleetExpenses)
 				r.Post("/expense-types", s.createFleetExpenseType)
@@ -709,7 +776,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		s.ensureBackgroundSchedulers()
 	}
 
-	return chain(cfg, log, r)
+	return chain(cfg, log, s, r)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

@@ -101,6 +101,18 @@ export const SYSTEM_REPORT_INFO: Record<SystemReportId, SystemReportInfo> = {
     formats: "Resumido (totais por mês) ou detalhado (localidade/mês). CSV/PDF/Telegram.",
     columns: "Mês, Localidade, UF, Clientes",
   },
+  "bgp-overview": {
+    delivers: "Sessões BGP (established/caídas) e prefixos recebidos por equipamento, mais operadoras cadastradas (CNPJ, AS, limite de banda, interfaces ligadas).",
+    formats: "Tabela por equipamento + lista de operadoras; CSV/PDF/Telegram.",
+    columns: "Equipamento, IP, Última coleta, Peers established, Peers caídos, Prefixos recebidos",
+    notes: "Usa a última amostra BGP já coletada — não dispara nova coleta SNMP.",
+  },
+  "hubsoft-overview": {
+    delivers: "Totais de atendimentos, ordens de serviço e faturas dos últimos 30 dias, direto da integração HubSoft (mesmos dados da aba Relatório da integração).",
+    formats: "Tabela de indicadores; CSV/PDF/Telegram.",
+    columns: "Indicador, Valor",
+    notes: "Requer a integração HubSoft configurada e activa.",
+  },
 };
 
 export function SystemReportInfoContent({ id }: { id: SystemReportId }) {

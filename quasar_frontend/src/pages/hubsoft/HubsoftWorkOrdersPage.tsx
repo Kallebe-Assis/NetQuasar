@@ -3,7 +3,8 @@ import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { WorkOrdersTabContent } from "../../integrations/HubsoftClientResults";
-import { SupportItemDetailModal, type SupportDetailTarget } from "../../integrations/SupportItemDetailModal";
+import type { SupportDetailTarget } from "../../integrations/SupportItemDetailModal";
+import { HubsoftSupportDetailModal, type HubsoftDetailTarget } from "../../integrations/HubsoftSupportDetailModal";
 import type { RecentActivityResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -16,7 +17,14 @@ import { queryKeys } from "../../lib/queryKeys";
  */
 export function HubsoftWorkOrdersPage() {
   const qc = useQueryClient();
-  const [detailTarget, setDetailTarget] = useState<SupportDetailTarget | null>(null);
+  const [detailTarget, setDetailTarget] = useState<HubsoftDetailTarget | null>(null);
+
+  // Ver comentário equivalente em HubsoftAttendancePage.tsx.
+  function handleShowDetail(t: SupportDetailTarget) {
+    if (t.kind === "work_order" && t.item.number) {
+      setDetailTarget({ kind: "work_order", number: t.item.number });
+    }
+  }
 
   const q = useQuery({
     queryKey: queryKeys.hubsoftRecentActivity,
@@ -36,8 +44,8 @@ export function HubsoftWorkOrdersPage() {
             <h2 style={{ margin: 0 }}>Ordens de serviço recentes</h2>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
               {d
-                ? `Amostra de ${d.sample_clients.toLocaleString("pt-BR")} clientes consultados — mostrando as 20 ordens de serviço mais recentes.`
-                : "Varre uma amostra de clientes e mostra as ordens de serviço mais recentes encontradas."}
+                ? `${d.total_work_orders_found.toLocaleString("pt-BR")} ordem(ns) de serviço nos últimos 30 dias — mostrando as 20 mais recentes.`
+                : "Consulta todas as ordens de serviço dos últimos 30 dias e mostra as mais recentes."}
             </p>
           </div>
           <button
@@ -60,10 +68,10 @@ export function HubsoftWorkOrdersPage() {
         ) : !d?.ok ? (
           <div className="msg msg--err">{d?.message || "Falha ao coletar ordens de serviço."}</div>
         ) : (
-          <WorkOrdersTabContent loading={false} ok message={d.message} items={d.work_orders} onShowDetail={setDetailTarget} />
+          <WorkOrdersTabContent loading={false} ok message={d.message} items={d.work_orders} onShowDetail={handleShowDetail} />
         )}
       </div>
-      {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
+      {detailTarget ? <HubsoftSupportDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
     </div>
   );
 }

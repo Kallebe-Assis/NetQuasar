@@ -8,13 +8,14 @@ Frontend web do NetQuasar (React), focado em operação NOC com telas de monitor
 - Vite
 - TanStack Query
 - React Router
+- React Flow (`@xyflow/react`) — canvas da tela Topologia
 
 ## Áreas principais da interface
 
-- Monitoramento (Overview, Equipamentos, OLT, MikroTik/Interfaces, tempo real)
+- Monitoramento (Overview, Equipamentos, OLT, MikroTik/Switch/BGP/BNG, Interfaces, tempo real)
 - Alertas
 - Configurações
-- Mapa
+- Mapa e Topologia (diagrama de rede manual)
 - Relatórios/Base comercial
 - Ferramentas operacionais
 

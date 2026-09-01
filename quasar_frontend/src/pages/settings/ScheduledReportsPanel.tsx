@@ -20,6 +20,7 @@ import { AutomationHistoryModal } from "./AutomationHistoryModal";
 import { AutomationsHistoryTable, AutomationsLogDetail, type AutomationHistoryRow } from "./AutomationsHistoryTable";
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
 import { DatabaseBackupAutomationCard } from "./DatabaseBackupAutomationCard";
+import { CustomAutomationsPanel } from "./CustomAutomationsPanel";
 
 const TZ_DEFAULT = "America/Sao_Paulo";
 
@@ -735,6 +736,8 @@ export function ScheduledReportsPanel() {
           </ul>
         )}
       </div>
+
+      <CustomAutomationsPanel />
 
       {selectedJob ? (
         <div className="automations-detail card">

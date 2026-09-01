@@ -40,7 +40,7 @@ func (s *Server) listFleetVehicles(w http.ResponseWriter, r *http.Request) {
 	q := fleetQ(r)
 	st := fleetStatusFilter(r)
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT v.id, v.description, v.plate, v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
+		SELECT v.id, v.description, COALESCE(v.plate, ''), v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
 			v.primary_fuel_id, f.description, v.tank_capacity_liters, v.expected_km_per_liter, v.min_km_per_liter, v.max_km_per_liter,
 			v.odometer_current, v.hourmeter_current, v.cost_center_id, cc.description, v.status, v.notes
 		FROM fleet_vehicles v
@@ -79,7 +79,7 @@ func (s *Server) getFleetVehicle(w http.ResponseWriter, r *http.Request) {
 	}
 	var it fleetVehicle
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT v.id, v.description, v.plate, v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
+		SELECT v.id, v.description, COALESCE(v.plate, ''), v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
 			v.primary_fuel_id, f.description, v.tank_capacity_liters, v.expected_km_per_liter, v.min_km_per_liter, v.max_km_per_liter,
 			v.odometer_current, v.hourmeter_current, v.cost_center_id, cc.description, v.status, v.notes
 		FROM fleet_vehicles v
@@ -104,20 +104,26 @@ func (s *Server) getFleetVehicle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createFleetVehicle(w http.ResponseWriter, r *http.Request) {
 	var body fleetVehicle
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Description) == "" || strings.TrimSpace(body.Plate) == "" {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "description e plate obrigatórios", nil)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Description) == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "description obrigatória", nil)
 		return
 	}
-	plate, err := fleetNormalizePlate(body.Plate)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
-		return
+	// Placa é opcional (ex.: veículo aguardando emplacamento) — sem ela, o veículo aparece
+	// como "Veículo não identificado" nos relatórios.
+	var plate *string
+	if raw := strings.TrimSpace(body.Plate); raw != "" {
+		p, err := fleetNormalizePlate(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
+			return
+		}
+		plate = &p
 	}
 	if body.Status == "" {
 		body.Status = "active"
 	}
 	var id uuid.UUID
-	err = s.DB().QueryRow(r.Context(), `
+	err := s.DB().QueryRow(r.Context(), `
 		INSERT INTO fleet_vehicles (
 			description, plate, year, model, color, city, uf, vehicle_type, category, primary_fuel_id,
 			tank_capacity_liters, expected_km_per_liter, min_km_per_liter, max_km_per_liter,
@@ -194,7 +200,7 @@ func (s *Server) fleetVehicleAutofill(w http.ResponseWriter, r *http.Request) {
 	}
 	var it fleetVehicle
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT v.id, v.description, v.plate, v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
+		SELECT v.id, v.description, COALESCE(v.plate, ''), v.year, v.model, v.color, v.city, v.uf, v.vehicle_type, v.category,
 			v.primary_fuel_id, f.description, v.tank_capacity_liters, v.expected_km_per_liter, v.min_km_per_liter, v.max_km_per_liter,
 			v.odometer_current, v.hourmeter_current, v.cost_center_id, cc.description, v.status, v.notes
 		FROM fleet_vehicles v
@@ -213,6 +219,7 @@ func (s *Server) fleetVehicleAutofill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
+	it.Plate = fleetDisplayPlate(it.Plate)
 	var primaryDriverID *uuid.UUID
 	var primaryDriverName *string
 	_ = s.DB().QueryRow(r.Context(), `
@@ -401,7 +408,7 @@ func (s *Server) listFleetDriverVehicles(w http.ResponseWriter, r *http.Request)
 	vid := strings.TrimSpace(r.URL.Query().Get("vehicle_id"))
 	did := strings.TrimSpace(r.URL.Query().Get("driver_id"))
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT dv.id, dv.driver_id, d.name, dv.vehicle_id, v.plate,
+		SELECT dv.id, dv.driver_id, d.name, dv.vehicle_id, COALESCE(v.plate, ''),
 			to_char(dv.starts_on,'YYYY-MM-DD'), to_char(dv.ends_on,'YYYY-MM-DD'), dv.is_primary, dv.notes
 		FROM fleet_driver_vehicles dv
 		JOIN fleet_drivers d ON d.id = dv.driver_id

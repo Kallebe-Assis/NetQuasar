@@ -78,6 +78,16 @@ export function fleetDateOnly(iso?: string | null) {
   return String(iso).slice(0, 10);
 }
 
+/** ISO (com ou sem fuso) → valor aceite por <input type="datetime-local"> (YYYY-MM-DDTHH:mm),
+ * já no fuso local do navegador — usado ao abrir um lançamento existente para edição. */
+export function toDatetimeLocalInput(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function fleetLicenseExpired(iso?: string | null) {
   const d = fleetDateOnly(iso);
   return !!d && d < todayISO();
@@ -107,6 +117,13 @@ export function formatFleetPlate(raw: string): string {
 
 export function isValidFleetPlate(raw: string): boolean {
   return /^[A-Z]{3}-[0-9][A-Z0-9][0-9]{2}$/.test(formatFleetPlate(raw));
+}
+
+/** Placa é opcional (ex.: veículo aguardando emplacamento) — usar para exibição em vez de formatFleetPlate
+ * sempre que a placa puder estar vazia (tabelas, seletores, relatórios). */
+export function formatFleetPlateOrUnknown(raw: string | null | undefined): string {
+  const p = formatFleetPlate(raw ?? "");
+  return p || "Veículo não identificado";
 }
 
 export const DRIVER_STATUS = [

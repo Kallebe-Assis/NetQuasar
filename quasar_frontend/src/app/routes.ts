@@ -13,6 +13,7 @@ export const APP_ROUTES = {
   hubsoftWorkOrders: "/integrations/hubsoft/ordens-servico",
   hubsoftFinancial: "/integrations/hubsoft/financeiro",
   hubsoftDashboard: "/integrations/hubsoft/dashboard",
+  hubsoftReport: "/integrations/hubsoft/relatorio",
   pops: "/pops",
   devices: "/devices",
   commercial: "/commercial",

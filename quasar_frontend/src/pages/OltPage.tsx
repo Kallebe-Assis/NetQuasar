@@ -395,8 +395,12 @@ export function OltPage() {
       }>(`/api/v1/olt/devices/${sel}`),
   });
 
-  const OLT_REFRESH_ONU_MS = 110 * 1000;
-  const OLT_REFRESH_FULL_MS = 15 * 60 * 1000;
+  const OLT_REFRESH_ONU_MS = 6 * 60 * 1000;
+  // Acompanha o pior caso do lado do servidor: até 1h de coleta SNMP de PON/ONU (Configurações →
+  // Monitoramento → "OLT PON / ONUs") + até 1h de fase telnet (perfis que usam telnet), mais
+  // margem — sem isto o browser desiste antes do servidor terminar uma coleta grande (centenas/
+  // milhares de ONUs em várias PONs), mesmo já corrigido o tecto interno do servidor.
+  const OLT_REFRESH_FULL_MS = 130 * 60 * 1000;
   const OLT_TELEMETRY_MS = 15 * 60 * 1000;
 
   const refresh = useMutation({

@@ -85,6 +85,25 @@ export function HubsoftConfigPage() {
     },
   });
 
+  const preloadQ = useQuery({
+    queryKey: ["hubsoft-preload", slug],
+    queryFn: () => apiFetch<{ preload_on_startup: boolean }>(`/api/v1/integrations/${slug}/hubsoft/preload`),
+  });
+  const [preloadOnStartup, setPreloadOnStartup] = useState(false);
+  useEffect(() => {
+    if (preloadQ.data) setPreloadOnStartup(preloadQ.data.preload_on_startup);
+  }, [preloadQ.data]);
+
+  const preloadM = useMutation({
+    mutationFn: (v: boolean) =>
+      apiFetch(`/api/v1/integrations/${slug}/hubsoft/preload`, { method: "PUT", json: { preload_on_startup: v } }),
+    onSuccess: () => showToast("ok", "Preferência gravada."),
+    onError: (e) => {
+      showToast("err", e instanceof Error ? e.message : "Falha ao gravar.");
+      if (preloadQ.data) setPreloadOnStartup(preloadQ.data.preload_on_startup);
+    },
+  });
+
   function handleLogoFile(file: File | null) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -198,6 +217,30 @@ export function HubsoftConfigPage() {
         <div className="field">
           <label>Password {passwordConfigured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — deixe em branco para manter)</span> : null}</label>
           <input className="input mono" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={passwordConfigured ? "••••••••" : ""} />
+        </div>
+
+        <div style={{ marginTop: 14, marginBottom: "0.65rem" }}>
+          <label className="toggle" style={{ display: "inline-flex" }}>
+            <span className="toggle__track">
+              <input
+                type="checkbox"
+                role="switch"
+                className="toggle__input"
+                checked={preloadOnStartup}
+                onChange={(e) => {
+                  setPreloadOnStartup(e.target.checked);
+                  preloadM.mutate(e.target.checked);
+                }}
+              />
+              <span className="toggle__thumb" aria-hidden />
+            </span>
+            <span className="toggle__label" style={{ display: "inline" }}>Carregar dados ao iniciar o sistema</span>
+          </label>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0 52px" }}>
+            Ligado: o servidor coleta atendimentos/O.S./financeiro recentes assim que arranca, em segundo plano — quem
+            abrir a tela de Integrações já encontra os dados prontos. Desligado (padrão): só carrega quando alguém
+            entra na tela.
+          </p>
         </div>
 
         <div className="row" style={{ gap: 8, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>

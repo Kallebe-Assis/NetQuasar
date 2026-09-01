@@ -18,15 +18,15 @@ import (
 )
 
 // handlers_bgp_uplinks.go — rotula interfaces de um equipamento BGP como pertencentes a uma
-// operadora (bgp_uplink_interfaces), mirror directo de handlers_bng_uplinks.go (CRUD only —
-// sem endpoint de histórico próprio: /api/v1/bgp/devices/{id}/history já devolve
-// interfaces[].in_bit_rate/out_bit_rate por amostra, calculado pelo próprio Huawei
-// (hwIFExtInputBitRate/hwIFExtOutputBitRate), então o frontend filtra por essas etiquetas
-// directamente em cima desse endpoint já existente).
+// operadora (bgp_uplink_interfaces.carrier_id → bgp_carriers, ver handlers_bgp_carriers.go),
+// mirror directo de handlers_bng_uplinks.go (CRUD only — sem endpoint de histórico próprio:
+// /api/v1/bgp/devices/{id}/history já devolve interfaces[].in_bit_rate/out_bit_rate por amostra,
+// calculado pelo próprio Huawei — hwIFExtInputBitRate/hwIFExtOutputBitRate).
 
 type bgpUplinkInterface struct {
 	ID               string `json:"id"`
 	DeviceID         string `json:"device_id"`
+	CarrierID        string `json:"carrier_id"`
 	CarrierLabel     string `json:"carrier_label"`
 	InterfaceLabel   string `json:"interface_label"`
 	IfDescr          string `json:"if_descr"`
@@ -38,11 +38,12 @@ type bgpUplinkInterface struct {
 
 func loadBgpUplinks(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) ([]bgpUplinkInterface, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, device_id, carrier_label, interface_label, if_descr, if_name, if_index_hint,
-			is_primary_traffic, sort_order
-		FROM bgp_uplink_interfaces
-		WHERE device_id = $1
-		ORDER BY sort_order, carrier_label, interface_label
+		SELECT u.id, u.device_id, u.carrier_id, c.name, u.interface_label, u.if_descr, u.if_name,
+			u.if_index_hint, u.is_primary_traffic, u.sort_order
+		FROM bgp_uplink_interfaces u
+		JOIN bgp_carriers c ON c.id = u.carrier_id
+		WHERE u.device_id = $1
+		ORDER BY u.sort_order, c.name, u.interface_label
 	`, deviceID)
 	if err != nil {
 		return nil, err
@@ -51,13 +52,14 @@ func loadBgpUplinks(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID)
 	out := make([]bgpUplinkInterface, 0, 4)
 	for rows.Next() {
 		var u bgpUplinkInterface
-		var id, devID uuid.UUID
-		if err := rows.Scan(&id, &devID, &u.CarrierLabel, &u.InterfaceLabel, &u.IfDescr, &u.IfName,
+		var id, devID, carrierID uuid.UUID
+		if err := rows.Scan(&id, &devID, &carrierID, &u.CarrierLabel, &u.InterfaceLabel, &u.IfDescr, &u.IfName,
 			&u.IfIndexHint, &u.IsPrimaryTraffic, &u.SortOrder); err != nil {
 			return nil, err
 		}
 		u.ID = id.String()
 		u.DeviceID = devID.String()
+		u.CarrierID = carrierID.String()
 		out = append(out, u)
 	}
 	return out, rows.Err()
@@ -78,7 +80,7 @@ func (s *Server) listBgpUplinks(w http.ResponseWriter, r *http.Request) {
 }
 
 type bgpUplinkUpsertBody struct {
-	CarrierLabel     string `json:"carrier_label"`
+	CarrierID        string `json:"carrier_id"`
 	InterfaceLabel   string `json:"interface_label"`
 	IfDescr          string `json:"if_descr"`
 	IfName           string `json:"if_name"`
@@ -98,12 +100,12 @@ func (s *Server) createBgpUplink(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
-	body.CarrierLabel = strings.TrimSpace(body.CarrierLabel)
+	carrierID, cerr := uuid.Parse(strings.TrimSpace(body.CarrierID))
 	body.InterfaceLabel = strings.TrimSpace(body.InterfaceLabel)
 	body.IfDescr = strings.TrimSpace(body.IfDescr)
 	body.IfName = strings.TrimSpace(body.IfName)
-	if body.CarrierLabel == "" || body.InterfaceLabel == "" || (body.IfDescr == "" && body.IfName == "") {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "carrier_label, interface_label e if_descr/if_name são obrigatórios", nil)
+	if cerr != nil || body.InterfaceLabel == "" || (body.IfDescr == "" && body.IfName == "") {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "carrier_id, interface_label e if_descr/if_name são obrigatórios", nil)
 		return
 	}
 	isPrimary := true
@@ -113,10 +115,10 @@ func (s *Server) createBgpUplink(w http.ResponseWriter, r *http.Request) {
 	var newID uuid.UUID
 	err = s.DB().QueryRow(r.Context(), `
 		INSERT INTO bgp_uplink_interfaces
-			(device_id, carrier_label, interface_label, if_descr, if_name, if_index_hint, is_primary_traffic, sort_order)
+			(device_id, carrier_id, interface_label, if_descr, if_name, if_index_hint, is_primary_traffic, sort_order)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id
-	`, id, body.CarrierLabel, body.InterfaceLabel, body.IfDescr, body.IfName, body.IfIndexHint, isPrimary, body.SortOrder).Scan(&newID)
+	`, id, carrierID, body.InterfaceLabel, body.IfDescr, body.IfName, body.IfIndexHint, isPrimary, body.SortOrder).Scan(&newID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -140,16 +142,21 @@ func (s *Server) updateBgpUplink(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
 		return
 	}
+	carrierID, cerr := uuid.Parse(strings.TrimSpace(body.CarrierID))
+	if cerr != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "carrier_id inválido", nil)
+		return
+	}
 	isPrimary := true
 	if body.IsPrimaryTraffic != nil {
 		isPrimary = *body.IsPrimaryTraffic
 	}
 	ct, err := s.DB().Exec(r.Context(), `
 		UPDATE bgp_uplink_interfaces SET
-			carrier_label=$1, interface_label=$2, if_descr=$3, if_name=$4, if_index_hint=$5,
+			carrier_id=$1, interface_label=$2, if_descr=$3, if_name=$4, if_index_hint=$5,
 			is_primary_traffic=$6, sort_order=$7, updated_at=now()
 		WHERE id=$8 AND device_id=$9
-	`, strings.TrimSpace(body.CarrierLabel), strings.TrimSpace(body.InterfaceLabel), strings.TrimSpace(body.IfDescr),
+	`, carrierID, strings.TrimSpace(body.InterfaceLabel), strings.TrimSpace(body.IfDescr),
 		strings.TrimSpace(body.IfName), body.IfIndexHint, isPrimary, body.SortOrder, uplinkID, deviceID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -162,84 +169,17 @@ func (s *Server) updateBgpUplink(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// --- limite de banda por operadora -----------------------------------------------------------
-// bgp_uplink_carrier_limits (124_bgp_uplink_carrier_limits.sql) — o limite pertence à operadora
-// como um todo (carrier_label), não a uma interface específica de bgp_uplink_interfaces, já que
-// uma operadora pode ter várias interfaces somadas. Usado pelo frontend para definir o teto do
-// eixo Y do gráfico de tráfego por operadora.
-
-type bgpCarrierLimit struct {
-	CarrierLabel       string   `json:"carrier_label"`
-	BandwidthLimitMbps *float64 `json:"bandwidth_limit_mbps,omitempty"`
-}
-
-func (s *Server) listBgpCarrierLimits(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "id inválido", nil)
-		return
-	}
-	rows, err := s.DB().Query(r.Context(), `
-		SELECT carrier_label, bandwidth_limit_mbps FROM bgp_uplink_carrier_limits WHERE device_id=$1
-	`, id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	defer rows.Close()
-	out := make([]bgpCarrierLimit, 0, 4)
-	for rows.Next() {
-		var l bgpCarrierLimit
-		if err := rows.Scan(&l.CarrierLabel, &l.BandwidthLimitMbps); err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-			return
-		}
-		out = append(out, l)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"device_id": id, "limits": out})
-}
-
-type bgpCarrierLimitBody struct {
-	BandwidthLimitMbps *float64 `json:"bandwidth_limit_mbps"`
-}
-
-func (s *Server) upsertBgpCarrierLimit(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "id inválido", nil)
-		return
-	}
-	label := strings.TrimSpace(chi.URLParam(r, "label"))
-	if label == "" {
-		writeErr(w, http.StatusBadRequest, "VALIDATION", "operadora inválida", nil)
-		return
-	}
-	var body bgpCarrierLimitBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
-		return
-	}
-	_, err = s.DB().Exec(r.Context(), `
-		INSERT INTO bgp_uplink_carrier_limits (device_id, carrier_label, bandwidth_limit_mbps, updated_at)
-		VALUES ($1,$2,$3, now())
-		ON CONFLICT (device_id, carrier_label) DO UPDATE SET bandwidth_limit_mbps=$3, updated_at=now()
-	`, id, label, body.BandwidthLimitMbps)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 // --- tráfego por operadora (histórico) --------------------------------------------------------
 // bgpCarrierTrafficHistory — mirror directo de bngUplinksHistory (mesmo ficheiro, acima), mas a
 // partir de telemetry_samples/bgpcollect.BuildReportFromStoredMetrics (já pivota
 // hw_if_in_bit_rate/hw_if_out_bit_rate por interface, taxa instantânea já calculada pelo próprio
-// Huawei) em vez de interface_snapshots/snmpifparse. Soma por operadora (carrier_label) as
-// interfaces is_primary_traffic=true de cada bucket, e devolve estatísticas (min/max/média)
-// calculadas sobre esses mesmos pontos "bucketed" — não uma segunda varredura das amostras
-// brutas (troca de performance confirmada com o utilizador, mesma já feita por
-// getOLTReportsHistory/bngUplinksHistory para períodos longos).
+// Huawei) em vez de interface_snapshots/snmpifparse. Devolve: (1) "total" — soma de TODAS as
+// interfaces is_primary_traffic=true de TODAS as operadoras, ponto a ponto (gráfico principal);
+// (2) "carriers[]" — 1 entrada por operadora, com os pontos já somados das suas interfaces
+// (gráfico "Somado" dela) E a repartição por interface individual em "interfaces[]" (gráfico
+// "Separado" dela, só relevante quando a operadora tem 2+ interfaces). Estatísticas (min/max/
+// média) calculadas sobre esses mesmos pontos "bucketed" — não uma segunda varredura das
+// amostras brutas (troca de performance já feita por getOLTReportsHistory/bngUplinksHistory).
 
 type bgpTrafficPoint struct {
 	T      string  `json:"t"`
@@ -256,11 +196,19 @@ type bgpCarrierStats struct {
 	OutAvg float64 `json:"out_avg"`
 }
 
+type bgpInterfaceTraffic struct {
+	InterfaceLabel string            `json:"interface_label"`
+	Points         []bgpTrafficPoint `json:"points"`
+	Stats          bgpCarrierStats   `json:"stats"`
+}
+
 type bgpCarrierTraffic struct {
-	CarrierLabel       string            `json:"carrier_label"`
-	BandwidthLimitMbps *float64          `json:"bandwidth_limit_mbps,omitempty"`
-	Points             []bgpTrafficPoint `json:"points"`
-	Stats              bgpCarrierStats   `json:"stats"`
+	CarrierID          string                `json:"carrier_id"`
+	CarrierLabel       string                `json:"carrier_label"`
+	BandwidthLimitMbps *float64              `json:"bandwidth_limit_mbps,omitempty"`
+	Points             []bgpTrafficPoint     `json:"points"`
+	Stats              bgpCarrierStats       `json:"stats"`
+	Interfaces         []bgpInterfaceTraffic `json:"interfaces"`
 }
 
 // findBgpIfRowForUplink localiza a interface de um uplink dentro de um Report já pivotado —
@@ -334,7 +282,7 @@ func (s *Server) bgpCarrierTrafficHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if len(uplinks) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"device_id": deviceID, "carriers": []any{}})
+		writeJSON(w, http.StatusOK, map[string]any{"device_id": deviceID, "total": nil, "carriers": []any{}})
 		return
 	}
 
@@ -409,71 +357,108 @@ func (s *Server) bgpCarrierTrafficHistory(w http.ResponseWriter, r *http.Request
 	sort.Slice(snaps, func(i, j int) bool { return snaps[i].at.Before(snaps[j].at) })
 
 	limits := map[string]*float64{}
-	limRows, err := s.DB().Query(r.Context(), `
-		SELECT carrier_label, bandwidth_limit_mbps FROM bgp_uplink_carrier_limits WHERE device_id=$1
-	`, deviceID)
+	limRows, err := s.DB().Query(r.Context(), `SELECT id, bandwidth_limit_mbps FROM bgp_carriers`)
 	if err == nil {
 		for limRows.Next() {
-			var label string
+			var id uuid.UUID
 			var v *float64
-			if scanErr := limRows.Scan(&label, &v); scanErr == nil {
-				limits[label] = v
+			if scanErr := limRows.Scan(&id, &v); scanErr == nil {
+				limits[id.String()] = v
 			}
 		}
 		limRows.Close()
 	}
 
 	// Lista estável de operadoras (só as que têm ao menos uma interface is_primary_traffic=true)
-	// — cada uma ganha exactamente len(snaps) pontos, alinhados por timestamp/índice, para o
-	// frontend poder somar várias operadoras ponto-a-ponto no modo "Somado" sem re-alinhar séries.
-	seen := map[string]bool{}
-	var carrierLabels []string
+	// e, dentro de cada uma, a lista estável das suas interfaces primárias — cada série ganha
+	// exactamente len(snaps) pontos, alinhados por índice, para o frontend poder somar sem
+	// re-alinhar por timestamp.
+	type carrierMeta struct {
+		label      string
+		interfaces []bgpUplinkInterface
+	}
+	carriersByID := map[string]*carrierMeta{}
+	var carrierIDs []string
 	for _, u := range uplinks {
-		if !u.IsPrimaryTraffic || seen[u.CarrierLabel] {
+		if !u.IsPrimaryTraffic {
 			continue
 		}
-		seen[u.CarrierLabel] = true
-		carrierLabels = append(carrierLabels, u.CarrierLabel)
+		cm, ok := carriersByID[u.CarrierID]
+		if !ok {
+			cm = &carrierMeta{label: u.CarrierLabel}
+			carriersByID[u.CarrierID] = cm
+			carrierIDs = append(carrierIDs, u.CarrierID)
+		}
+		cm.interfaces = append(cm.interfaces, u)
 	}
-	sort.Strings(carrierLabels)
+	sort.Slice(carrierIDs, func(i, j int) bool { return carriersByID[carrierIDs[i]].label < carriersByID[carrierIDs[j]].label })
 
-	pointsByCarrier := make(map[string][]bgpTrafficPoint, len(carrierLabels))
-	for _, label := range carrierLabels {
-		pointsByCarrier[label] = make([]bgpTrafficPoint, 0, len(snaps))
+	totalPoints := make([]bgpTrafficPoint, 0, len(snaps))
+	carrierPoints := map[string][]bgpTrafficPoint{}
+	ifacePoints := map[string]map[string][]bgpTrafficPoint{} // carrierID -> uplinkID -> points
+	for _, id := range carrierIDs {
+		carrierPoints[id] = make([]bgpTrafficPoint, 0, len(snaps))
+		ifacePoints[id] = map[string][]bgpTrafficPoint{}
+		for _, u := range carriersByID[id].interfaces {
+			ifacePoints[id][u.ID] = make([]bgpTrafficPoint, 0, len(snaps))
+		}
 	}
+
 	for _, sn := range snaps {
-		sums := map[string][2]float64{}
-		for _, u := range uplinks {
-			if !u.IsPrimaryTraffic {
-				continue
-			}
-			ifc, ok := findBgpIfRowForUplink(sn.rep.Interfaces, u)
-			if !ok {
-				continue
-			}
-			inBps, _ := strconv.ParseFloat(strings.TrimSpace(ifc.InBitRate), 64)
-			outBps, _ := strconv.ParseFloat(strings.TrimSpace(ifc.OutBitRate), 64)
-			cur := sums[u.CarrierLabel]
-			cur[0] += inBps
-			cur[1] += outBps
-			sums[u.CarrierLabel] = cur
-		}
 		ts := sn.at.UTC().Format(time.RFC3339)
-		for _, label := range carrierLabels {
-			v := sums[label]
-			pointsByCarrier[label] = append(pointsByCarrier[label], bgpTrafficPoint{T: ts, InBps: round2(v[0]), OutBps: round2(v[1])})
+		var totalIn, totalOut float64
+		for _, id := range carrierIDs {
+			cm := carriersByID[id]
+			var cIn, cOut float64
+			for _, u := range cm.interfaces {
+				var inBps, outBps float64
+				if ifc, ok := findBgpIfRowForUplink(sn.rep.Interfaces, u); ok {
+					inBps, _ = strconv.ParseFloat(strings.TrimSpace(ifc.InBitRate), 64)
+					outBps, _ = strconv.ParseFloat(strings.TrimSpace(ifc.OutBitRate), 64)
+				}
+				ifacePoints[id][u.ID] = append(ifacePoints[id][u.ID], bgpTrafficPoint{T: ts, InBps: round2(inBps), OutBps: round2(outBps)})
+				cIn += inBps
+				cOut += outBps
+			}
+			carrierPoints[id] = append(carrierPoints[id], bgpTrafficPoint{T: ts, InBps: round2(cIn), OutBps: round2(cOut)})
+			totalIn += cIn
+			totalOut += cOut
 		}
+		totalPoints = append(totalPoints, bgpTrafficPoint{T: ts, InBps: round2(totalIn), OutBps: round2(totalOut)})
 	}
 
-	carriers := make([]bgpCarrierTraffic, 0, len(carrierLabels))
-	for _, label := range carrierLabels {
-		pts := pointsByCarrier[label]
+	carriers := make([]bgpCarrierTraffic, 0, len(carrierIDs))
+	for _, id := range carrierIDs {
+		cm := carriersByID[id]
+		ifs := make([]bgpInterfaceTraffic, 0, len(cm.interfaces))
+		for _, u := range cm.interfaces {
+			pts := ifacePoints[id][u.ID]
+			ifs = append(ifs, bgpInterfaceTraffic{InterfaceLabel: u.InterfaceLabel, Points: pts, Stats: computeBgpCarrierStats(pts)})
+		}
+		pts := carrierPoints[id]
 		carriers = append(carriers, bgpCarrierTraffic{
-			CarrierLabel:       label,
-			BandwidthLimitMbps: limits[label],
+			CarrierID:          id,
+			CarrierLabel:       cm.label,
+			BandwidthLimitMbps: limits[id],
 			Points:             pts,
 			Stats:              computeBgpCarrierStats(pts),
+			Interfaces:         ifs,
 		})
+	}
+
+	// Teto de referência do "total geral" = soma dos limites de todas as operadoras que têm
+	// limite configurado (as sem limite não entram na soma, mas continuam a desenhar).
+	var totalLimit *float64
+	var totalLimitSum float64
+	hasTotalLimit := false
+	for _, c := range carriers {
+		if c.BandwidthLimitMbps != nil && *c.BandwidthLimitMbps > 0 {
+			totalLimitSum += *c.BandwidthLimitMbps
+			hasTotalLimit = true
+		}
+	}
+	if hasTotalLimit {
+		totalLimit = &totalLimitSum
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -481,7 +466,12 @@ func (s *Server) bgpCarrierTrafficHistory(w http.ResponseWriter, r *http.Request
 		"since":     since.Format(time.RFC3339),
 		"until":     until.Format(time.RFC3339),
 		"bucket":    bucket,
-		"carriers":  carriers,
+		"total": map[string]any{
+			"points":               totalPoints,
+			"stats":                computeBgpCarrierStats(totalPoints),
+			"bandwidth_limit_mbps": totalLimit,
+		},
+		"carriers": carriers,
 	})
 }
 

@@ -19,7 +19,9 @@ export type SystemReportId =
   | "automations"
   | "monitoring-health"
   | "commercial-base"
-  | "device-alert-analysis";
+  | "device-alert-analysis"
+  | "bgp-overview"
+  | "hubsoft-overview";
 
 export type SystemReportCatalogItem = {
   id: SystemReportId;
@@ -143,6 +145,8 @@ export const SYSTEM_REPORT_IDS: SystemReportId[] = [
   "monitoring-health",
   "commercial-base",
   "device-alert-analysis",
+  "bgp-overview",
+  "hubsoft-overview",
 ];
 
 export function fetchSystemReportCatalog() {

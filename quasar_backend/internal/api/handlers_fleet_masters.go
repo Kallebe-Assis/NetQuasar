@@ -91,6 +91,17 @@ func fleetNormalizePlate(raw string) (string, error) {
 	return s[:3] + "-" + s[3:], nil
 }
 
+// fleetDisplayPlateOrUnknown é para saídas de texto finais (CSV/Telegram), onde não há mais
+// nenhum pós-processamento no cliente. fleetDisplayPlate (usado nas respostas JSON da API) permanece
+// em branco quando não há placa — o frontend aplica o próprio fallback de exibição — porque o texto
+// "Veículo não identificado" ficaria deformado se passasse pela máscara de placa do frontend.
+func fleetDisplayPlateOrUnknown(raw string) string {
+	if p := fleetDisplayPlate(raw); p != "" {
+		return p
+	}
+	return "Veículo não identificado"
+}
+
 func fleetDisplayPlate(raw string) string {
 	if p, err := fleetNormalizePlate(raw); err == nil {
 		return p

@@ -59,8 +59,8 @@ func (s *Server) importFleetCSV(w http.ResponseWriter, r *http.Request, kind str
 	colMap := fleetCSVBuildColumnMap(headers)
 	switch kind {
 	case "vehicles":
-		if !fleetCSVHas(colMap, "description") || !fleetCSVHas(colMap, "plate") {
-			writeErr(w, http.StatusBadRequest, "CSV_HEADER", "cabeçalho inválido: colunas descricao e placa obrigatórias", nil)
+		if !fleetCSVHas(colMap, "description") {
+			writeErr(w, http.StatusBadRequest, "CSV_HEADER", "cabeçalho inválido: coluna descricao obrigatória", nil)
 			return
 		}
 	case "expenses":
@@ -352,12 +352,18 @@ func fleetLookupUserID(ctx context.Context, db *pgxpool.Pool, raw string) (*uuid
 
 func (s *Server) importFleetVehicleRow(ctx context.Context, rec []string, colMap map[string]int, uid *uuid.UUID) error {
 	desc := fleetCSVGet(rec, colMap, "description")
-	plate, err := fleetNormalizePlate(fleetCSVGet(rec, colMap, "plate"))
-	if err != nil {
-		return err
-	}
 	if desc == "" {
-		return errValidation("descricao e placa obrigatórios")
+		return errValidation("descricao obrigatória")
+	}
+	// Placa é opcional na importação (ex.: veículo aguardando emplacamento) — quando ausente,
+	// o veículo entra sem placa e passa a aparecer como "Veículo não identificado" nos relatórios.
+	var plate *string
+	if raw := fleetCSVGet(rec, colMap, "plate"); raw != "" {
+		p, err := fleetNormalizePlate(raw)
+		if err != nil {
+			return err
+		}
+		plate = &p
 	}
 	year, err := fleetParseInt(fleetCSVGet(rec, colMap, "year"))
 	if err != nil {

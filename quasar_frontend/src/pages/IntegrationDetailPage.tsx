@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { Braces, Play, Plus, Save, Trash2, X, Zap } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { IntegrationNav } from "../components/IntegrationNav";
+import { IntegrationLogoField } from "../components/IntegrationLogoField";
 import { apiFetch } from "../lib/api";
 import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
@@ -637,6 +638,7 @@ export function IntegrationDetailPage() {
             <label>Descrição</label>
             <textarea className="textarea" rows={2} disabled={!admin} value={(form.description as string) ?? ""} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
           </div>
+          {slug ? <IntegrationLogoField slug={slug} /> : null}
           <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
             <label className="row" style={{ gap: 6 }}>
               <input type="checkbox" disabled={!admin} checked={!!form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} />

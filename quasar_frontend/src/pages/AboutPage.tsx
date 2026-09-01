@@ -116,9 +116,10 @@ export function AboutPage() {
                   <li>Dashboard / Monitoramento / Tempo real</li>
                   <li>Equipamentos, Localidades, Clientes, Elementos</li>
                   <li>Alertas, Relatórios, Frota</li>
-                  <li>OLT, MikroTik, Switch, BNG, Mapa</li>
+                  <li>OLT, MikroTik, Switch, BNG, BGP, Mapa</li>
                   <li>Ferramentas e Integrações</li>
-                  <li>Configurações</li>
+                  <li>Registros, Eventos da Rede</li>
+                  <li>Configurações e Automações</li>
                 </ul>
               </div>
             </section>

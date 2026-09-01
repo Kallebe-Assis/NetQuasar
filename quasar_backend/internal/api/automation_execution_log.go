@@ -108,7 +108,7 @@ func (s *Server) userIDFromRequest(r *http.Request) *uuid.UUID {
 	if bearer == "" {
 		return nil
 	}
-	uid, _, _, err := parseUserJWT(s.Cfg, bearer)
+	uid, _, _, _, err := parseUserJWT(s.Cfg, bearer)
 	if err != nil || uid == uuid.Nil {
 		return nil
 	}

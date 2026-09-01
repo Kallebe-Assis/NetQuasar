@@ -8,7 +8,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
-import { DRIVER_STATUS, fleetDateOnly, fleetLicenseExpired, formatFleetPlate, UF_OPTIONS } from "./fleetUtils";
+import { DRIVER_STATUS, fleetDateOnly, fleetLicenseExpired, formatFleetPlateOrUnknown, UF_OPTIONS } from "./fleetUtils";
 
 type Driver = {
   id: string;
@@ -207,7 +207,7 @@ export function FleetDriversPage({ embedded }: { embedded?: boolean } = {}) {
             </select>
             <select className="input" value={linkVehicle} onChange={(e) => setLinkVehicle(e.target.value)}>
               <option value="">Veículo…</option>
-              {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{formatFleetPlate(v.plate)} — {v.description}</option>)}
+              {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{formatFleetPlateOrUnknown(v.plate)} — {v.description}</option>)}
             </select>
             <label className="row"><input type="checkbox" checked={linkPrimary} onChange={(e) => setLinkPrimary(e.target.checked)} /> Principal</label>
             <button type="button" className="btn btn--primary" disabled={!linkDriver || !linkVehicle || linkMut.isPending} onClick={() => linkMut.mutate()}>Vincular</button>
@@ -215,7 +215,7 @@ export function FleetDriversPage({ embedded }: { embedded?: boolean } = {}) {
           <ul className="fleet-rank-list">
             {(links.data?.items ?? []).map((l) => (
               <li key={l.id}>
-                <div><strong>{l.driver_name}</strong><span className="muted">{formatFleetPlate(l.plate)}{l.is_primary ? " · principal" : ""}</span></div>
+                <div><strong>{l.driver_name}</strong><span className="muted">{formatFleetPlateOrUnknown(l.plate)}{l.is_primary ? " · principal" : ""}</span></div>
                 <button type="button" className="btn btn--sm" onClick={() => setUnlinkId(l.id)}>Remover</button>
               </li>
             ))}

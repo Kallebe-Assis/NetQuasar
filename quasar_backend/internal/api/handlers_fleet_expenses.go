@@ -185,32 +185,32 @@ type fleetExpenseItem struct {
 }
 
 type fleetExpense struct {
-	ID            uuid.UUID           `json:"id"`
-	Number        int64               `json:"number"`
-	OccurredAt    time.Time           `json:"occurred_at"`
-	VehicleID     uuid.UUID           `json:"vehicle_id"`
-	Plate         string              `json:"plate,omitempty"`
-	VehicleDesc   string              `json:"vehicle_description,omitempty"`
-	ExpenseTypeID uuid.UUID           `json:"expense_type_id"`
-	ExpenseType   string              `json:"expense_type"`
-	TypeLabel     string              `json:"type_label,omitempty"`
-	Description   string              `json:"description"`
-	UnitPrice     float64             `json:"unit_price"`
-	Quantity      float64             `json:"quantity"`
-	TotalAmount   float64             `json:"total_amount"`
-	Odometer      *float64            `json:"odometer"`
-	Notes         *string             `json:"notes"`
-	Items         []fleetExpenseItem  `json:"items,omitempty"`
-}
-
-type fleetExpenseBody struct {
-	OccurredAt    string             `json:"occurred_at"`
+	ID            uuid.UUID          `json:"id"`
+	Number        int64              `json:"number"`
+	OccurredAt    time.Time          `json:"occurred_at"`
 	VehicleID     uuid.UUID          `json:"vehicle_id"`
-	ExpenseTypeID *uuid.UUID         `json:"expense_type_id"`
+	Plate         string             `json:"plate,omitempty"`
+	VehicleDesc   string             `json:"vehicle_description,omitempty"`
+	ExpenseTypeID uuid.UUID          `json:"expense_type_id"`
 	ExpenseType   string             `json:"expense_type"`
+	TypeLabel     string             `json:"type_label,omitempty"`
 	Description   string             `json:"description"`
 	UnitPrice     float64            `json:"unit_price"`
 	Quantity      float64            `json:"quantity"`
+	TotalAmount   float64            `json:"total_amount"`
+	Odometer      *float64           `json:"odometer"`
+	Notes         *string            `json:"notes"`
+	Items         []fleetExpenseItem `json:"items,omitempty"`
+}
+
+type fleetExpenseBody struct {
+	OccurredAt     string             `json:"occurred_at"`
+	VehicleID      uuid.UUID          `json:"vehicle_id"`
+	ExpenseTypeID  *uuid.UUID         `json:"expense_type_id"`
+	ExpenseType    string             `json:"expense_type"`
+	Description    string             `json:"description"`
+	UnitPrice      float64            `json:"unit_price"`
+	Quantity       float64            `json:"quantity"`
 	Odometer       *float64           `json:"odometer"`
 	UpdateOdometer *bool              `json:"update_odometer"`
 	Notes          *string            `json:"notes"`
@@ -225,7 +225,7 @@ func (s *Server) listFleetExpenses(w http.ResponseWriter, r *http.Request) {
 	vehicleID := strings.TrimSpace(r.URL.Query().Get("vehicle_id"))
 	typeID := strings.TrimSpace(r.URL.Query().Get("expense_type_id"))
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT e.id, e.number, e.occurred_at, e.vehicle_id, v.plate, v.description,
+		SELECT e.id, e.number, e.occurred_at, e.vehicle_id, COALESCE(v.plate, ''), v.description,
 			e.expense_type_id, COALESCE(t.code, t.description), t.description,
 			e.description, e.unit_price, e.quantity, e.total_amount, e.odometer, e.notes
 		FROM fleet_expenses e
@@ -429,6 +429,129 @@ func normalizeFleetExpenseItems(raw []fleetExpenseItem, headerDesc string, unit,
 	return items, desc, avgUnit, totalQty, nil
 }
 
+// patchFleetExpense edita um lançamento de despesa já gravado (aba Frota → Despesas). Ao
+// contrário de createFleetExpense, NÃO mexe no hodômetro actual do veículo nem em
+// fleet_odometer_readings — editar um registo passado é uma correcção pontual, não deve
+// arrastar efeitos colaterais no estado actual do veículo (quem quiser actualizar o hodômetro
+// faz um novo lançamento). Substitui sempre os itens (apaga e recria) — mais simples e evita
+// divergência entre o cabeçalho (total_amount) e os itens.
+func (s *Server) patchFleetExpense(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "id inválido", nil)
+		return
+	}
+	var body fleetExpenseBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	rawType := body.ExpenseType
+	if body.ExpenseTypeID != nil {
+		rawType = body.ExpenseTypeID.String()
+	}
+	typeID, _, err := fleetLookupExpenseTypeID(r.Context(), s.DB(), rawType)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
+		return
+	}
+	items, headerDesc, unit, qty, err := normalizeFleetExpenseItems(body.Items, strings.TrimSpace(body.Description), body.UnitPrice, body.Quantity)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", err.Error(), nil)
+		return
+	}
+	if body.VehicleID == uuid.Nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "vehicle_id, description, unit_price e quantity obrigatórios", nil)
+		return
+	}
+	var vehStatus string
+	if err := s.DB().QueryRow(r.Context(), `SELECT status FROM fleet_vehicles WHERE id=$1`, body.VehicleID).Scan(&vehStatus); err == pgx.ErrNoRows {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "veículo não encontrado", nil)
+		return
+	} else if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	occurred := time.Now()
+	if strings.TrimSpace(body.OccurredAt) != "" {
+		t, terr := parseTimeFlexible(body.OccurredAt)
+		if terr != nil || t.IsZero() {
+			if d, derr := fleetParseDate(body.OccurredAt); derr == nil && d != nil {
+				t = *d
+			} else {
+				writeErr(w, http.StatusBadRequest, "VALIDATION", "occurred_at inválido", nil)
+				return
+			}
+		}
+		occurred = t
+	}
+	var total float64
+	for _, it := range items {
+		total += it.TotalAmount
+	}
+	userID := s.userIDFromRequest(r)
+	tx, err := s.DB().Begin(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	ct, err := tx.Exec(r.Context(), `
+		UPDATE fleet_expenses SET
+			occurred_at=$1, vehicle_id=$2, expense_type_id=$3, description=$4, unit_price=$5, quantity=$6,
+			total_amount=$7, odometer=$8, notes=$9, updated_by=$10, updated_at=now()
+		WHERE id=$11
+	`, occurred, body.VehicleID, typeID, headerDesc, unit, qty, total, body.Odometer, ptrTrim(body.Notes), userID, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "despesa não encontrada", nil)
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM fleet_expense_items WHERE expense_id=$1`, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	for i, it := range items {
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO fleet_expense_items (expense_id, description, quantity, unit_price, total_amount, sort_order)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, id, it.Description, it.Quantity, it.UnitPrice, it.TotalAmount, i); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(r.Context(), "fleet_expense", id.String(), "update", s.actorFromRequest(r), nil, map[string]any{"total_amount": total})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "total_amount": total})
+}
+
+// deleteFleetExpense elimina UM lançamento de despesa (fleet_expense_items é apagado em cascata —
+// ver 101_fleet_expense_items.sql). Não mexe no hodômetro do veículo.
+func (s *Server) deleteFleetExpense(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "id inválido", nil)
+		return
+	}
+	ct, err := s.DB().Exec(r.Context(), `DELETE FROM fleet_expenses WHERE id=$1`, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "despesa não encontrada", nil)
+		return
+	}
+	s.appendAuditLog(r.Context(), "fleet_expense", id.String(), "delete", s.actorFromRequest(r), nil, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) insertFleetExpense(ctx context.Context, in fleetExpenseInsert) (uuid.UUID, int64, float64, error) {
 	items := in.Items
 	if len(items) == 0 {
@@ -554,7 +677,7 @@ func (s *Server) exportFleetExpensesCSV(w http.ResponseWriter, r *http.Request) 
 	}
 
 	erows, err := s.DB().Query(r.Context(), `
-		SELECT t.description, v.plate, e.occurred_at, e.description, e.unit_price, e.quantity, e.total_amount, e.odometer, COALESCE(e.notes,'')
+		SELECT t.description, COALESCE(v.plate, ''), e.occurred_at, e.description, e.unit_price, e.quantity, e.total_amount, e.odometer, COALESCE(e.notes,'')
 		FROM fleet_expenses e
 		JOIN fleet_vehicles v ON v.id = e.vehicle_id
 		JOIN fleet_expense_types t ON t.id = e.expense_type_id
@@ -573,11 +696,11 @@ func (s *Server) exportFleetExpensesCSV(w http.ResponseWriter, r *http.Request) 
 		if err := erows.Scan(&typ, &plate, &at, &desc, &unit, &qty, &total, &km, &notes); err != nil {
 			continue
 		}
-		_ = cw.Write([]string{"despesa", desc, fleetDisplayPlate(plate), at.Format("02/01/2006"), typ, fmtFloat(unit), fmtFloat(qty), fmtFloat(total), fmtKM(km), notes})
+		_ = cw.Write([]string{"despesa", desc, fleetDisplayPlateOrUnknown(plate), at.Format("02/01/2006"), typ, fmtFloat(unit), fmtFloat(qty), fmtFloat(total), fmtKM(km), notes})
 	}
 
 	frows, err := s.DB().Query(r.Context(), `
-		SELECT fu.description, v.plate, f.fueled_at, f.liters, f.price_per_liter, f.total_amount, f.odometer_current, COALESCE(f.notes,'')
+		SELECT fu.description, COALESCE(v.plate, ''), f.fueled_at, f.liters, f.price_per_liter, f.total_amount, f.odometer_current, COALESCE(f.notes,'')
 		FROM fleet_fuelings f
 		JOIN fleet_vehicles v ON v.id = f.vehicle_id
 		JOIN fleet_fuels fu ON fu.id = f.fuel_id
@@ -596,7 +719,7 @@ func (s *Server) exportFleetExpensesCSV(w http.ResponseWriter, r *http.Request) 
 		if err := frows.Scan(&fuel, &plate, &at, &liters, &price, &total, &km, &notes); err != nil {
 			continue
 		}
-		_ = cw.Write([]string{"abastecimento", fuel, fleetDisplayPlate(plate), at.Format("02/01/2006"), fuel, fmtFloat(price), fmtFloat(liters), fmtFloat(total), fmtKM(km), notes})
+		_ = cw.Write([]string{"abastecimento", fuel, fleetDisplayPlateOrUnknown(plate), at.Format("02/01/2006"), fuel, fmtFloat(price), fmtFloat(liters), fmtFloat(total), fmtKM(km), notes})
 	}
 }
 

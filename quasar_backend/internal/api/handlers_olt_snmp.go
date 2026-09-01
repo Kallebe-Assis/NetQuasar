@@ -59,10 +59,10 @@ func (s *Server) listOLTDevices(w http.ResponseWriter, r *http.Request) {
 		item := map[string]any{
 			"id": id, "description": desc, "ip": ip, "brand": brand, "model": model,
 			"locality_id": locID, "locality_name": locName,
-			"max_pons": maxPons,
+			"max_pons":         maxPons,
 			"pon_descriptions": normalizePonDescriptionsJSON(json.RawMessage(ponDesc)),
 			"pon_vlans":        normalizePonVlansJSON(json.RawMessage(ponVlans)),
-			"summary": json.RawMessage(sum), "pons": json.RawMessage(pons),
+			"summary":          json.RawMessage(sum), "pons": json.RawMessage(pons),
 		}
 		item["computed"] = oltparse.SnapshotComputed([]byte(sum), []byte(pons))
 		if snapAt != nil {
@@ -205,7 +205,12 @@ func (s *Server) getOLTDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, 3*time.Minute)
+	// Acompanha o PIOR CASO da coleta OLT: até 1h de SNMP (ClampOltIfDerivedTimeoutMsPublic) + até
+	// 1h de fase telnet (ClampOltOnuTelnetTimeoutMsPublic) quando o perfil usa telnet (ver
+	// refreshOLTDeviceCore, olt_refresh_core.go) — sem isto, a ligação HTTP fecharia bem antes de
+	// uma coleta grande (centenas/milhares de ONUs em várias PONs) terminar, mesmo com o contexto
+	// interno já corrigido.
+	extendWriteDeadline(w, 130*time.Minute)
 	s.setMonitoringActivity(r.Context(), "Coletando PONs OLT")
 	defer s.setMonitoringActivity(r.Context(), "")
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

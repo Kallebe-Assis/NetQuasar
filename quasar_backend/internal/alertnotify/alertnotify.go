@@ -215,6 +215,72 @@ func monitoringHeader(level, title, message, alertType string, meta map[string]a
 	return "🟡 ALERTA TELEMETRIA"
 }
 
+// AlertTypeLabel devolve um rótulo curto e legível (sem emoji, sem a palavra "limiar") para um
+// alert_type — usado para agrupar/rotular cada linha no resumo (digest) de alertas do Telegram,
+// em vez de despejar a frase completa de `message` sem nenhuma estrutura. metricID só é
+// relevante para "telemetry_threshold" (desambigua CPU/memória/temperatura/uptime).
+func AlertTypeLabel(alertType, metricID string) string {
+	switch strings.TrimSpace(alertType) {
+	case "ping_unreachable":
+		return "Equipamento offline"
+	case "latency_high", "latency_degraded":
+		return "Latência alta"
+	case "uptime_restart_low":
+		return "Possível reinício"
+	case "interface_down_transition", "interface_down":
+		return "Interface DOWN"
+	case "mikrotik_sfp_tx":
+		return "Potência TX — SFP"
+	case "mikrotik_sfp_rx":
+		return "Potência RX — SFP"
+	case "mikrotik_sfp_temp":
+		return "Temperatura SFP"
+	case "mikrotik_cpu_temp":
+		return "Temperatura CPU"
+	case "temperature_high", "temperature_low":
+		return "Temperatura alta"
+	case "cpu_high":
+		return "CPU elevada"
+	case "memory_high":
+		return "Memória elevada"
+	case "olt_onu_drop":
+		return "Queda de ONUs"
+	case "olt_onu_rise":
+		return "Subida de ONUs"
+	case "olt_onu_rx":
+		return "ONU RX óptico"
+	case "olt_onu_tx":
+		return "ONU TX óptico"
+	case "olt_pon_tx":
+		return "PON TX óptico"
+	case "olt_pon_rx":
+		return "PON RX óptico"
+	case "olt_pon_temp":
+		return "Temperatura da PON"
+	case "pon_down":
+		return "PON DOWN"
+	case "bng_subscriber_drop":
+		return "Queda de logins BNG"
+	case "mikrotik_pppoe_drop":
+		return "Queda de PPPoE"
+	case "telemetry_threshold":
+		switch strings.ToLower(strings.TrimSpace(metricID)) {
+		case "uptime_minutes":
+			return "Possível reinício"
+		case "cpu_usage_pct":
+			return "CPU elevada"
+		case "memory_usage_pct":
+			return "Memória elevada"
+		case "temperature_c":
+			return "Temperatura alta"
+		default:
+			return "Métrica fora do normal"
+		}
+	default:
+		return "Alerta"
+	}
+}
+
 func telemetryAlertHeader(metricID, title, message string) string {
 	hay := strings.ToLower(strings.TrimSpace(metricID + " " + title + " " + message))
 	switch {
@@ -546,31 +612,22 @@ func metaString(meta map[string]any, keys ...string) string {
 	return ""
 }
 
-func appendUptimeTelegramLines(parts []string, meta map[string]any, title, inc string) []string {
-	parts = append(parts, "• Possível reinício — uptime abaixo do limiar")
-	observed := metaFloat(meta, "observed_uptime_minutes", "uptime_minutes", "value")
-	threshold := metaInt(meta, "threshold_minutes")
-	if observed <= 0 {
-		if m := regexp.MustCompile(`(-?\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?)?`).FindStringSubmatch(inc); len(m) >= 2 {
-			if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
-				observed = f
-			}
-		}
+// uptimeRestartTelegramText — mensagem de "possível reinício" pedida pelo utilizador: só o nome
+// do equipamento + o uptime observado, sem menção ao limiar configurado nem ao resto do
+// template de alerta (cabeçalho de nível, IP, rodapé). Ex.: "Mikrotik Miracema reiniciou\n
+// Uptime 5 minutos".
+func uptimeRestartTelegramText(eq string, observedMinutes float64, valueText string) string {
+	equip := strings.TrimSpace(eq)
+	if equip == "" {
+		equip = "Equipamento"
 	}
-	if observed > 0 {
-		line := fmt.Sprintf("• Uptime = %.0f min", observed)
-		if threshold > 0 {
-			line += fmt.Sprintf(" (limite %d min)", threshold)
-		}
-		parts = append(parts, line)
-		return parts
+	if observedMinutes > 0 {
+		return fmt.Sprintf("%s reiniciou\nUptime %.0f minutos", equip, observedMinutes)
 	}
-	if vt := metaString(meta, "value_text"); vt != "" {
-		parts = append(parts, "• Uptime = "+vt)
-	} else if strings.Contains(strings.ToLower(title+" "+inc), "uptime") {
-		parts = append(parts, "• Uptime abaixo do limiar configurado")
+	if vt := strings.TrimSpace(valueText); vt != "" {
+		return fmt.Sprintf("%s reiniciou\nUptime %s", equip, vt)
 	}
-	return parts
+	return fmt.Sprintf("%s reiniciou", equip)
 }
 
 func appendOltOnuDeltaTelegramLines(parts []string, alertType string, meta map[string]any, inc string) []string {
@@ -745,7 +802,7 @@ func telegramMonitoringBlocks(level, title, message string, equipFallback string
 }
 
 func telegramMonitoringBlocksWithContext(level, title, message string, equipFallback string, ipFallback string, alertType string, meta map[string]any) string {
-	header := monitoringHeader(level, title, message, alertType, meta)
+	alertType = strings.TrimSpace(alertType)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
 	if strings.TrimSpace(equipFallback) != "" {
 		eq = strings.TrimSpace(equipFallback)
@@ -753,21 +810,32 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 	if strings.TrimSpace(ipFallback) != "" {
 		ip = strings.TrimSpace(ipFallback)
 	}
+
+	// Possível reinício (uptime baixo) — mensagem minimalista pedida pelo utilizador: só o nome
+	// do equipamento + o uptime observado, sem cabeçalho de nível/emoji, sem linha de IP, sem
+	// menção ao limiar configurado (nem o rodapé "===============" partilhado pelos outros
+	// tipos). Cobre os 2 caminhos que geram este alerta: o tipo dedicado uptime_restart_low e
+	// telemetry_threshold com metric_id=uptime_minutes (via a regra "Limiar global de alertas").
+	if alertType == "uptime_restart_low" {
+		observed := metaFloat(meta, "observed_uptime_minutes", "uptime_minutes", "value")
+		if observed <= 0 {
+			if m := regexp.MustCompile(`(-?\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?)?`).FindStringSubmatch(inc); len(m) >= 2 {
+				if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
+					observed = f
+				}
+			}
+		}
+		return uptimeRestartTelegramText(eq, observed, metaString(meta, "value_text"))
+	}
+
+	header := monitoringHeader(level, title, message, alertType, meta)
 	parts := []string{header, "", "• " + eq, "• " + ip}
 
-	alertType = strings.TrimSpace(alertType)
 	switch alertType {
-	case "uptime_restart_low":
-		parts = appendUptimeTelegramLines(parts, meta, title, inc)
 	case "telemetry_threshold":
 		metricID := metaString(meta, "metric_id")
 		if metricID == "uptime_minutes" {
-			parts = append(parts, "• Uptime abaixo do limiar configurado")
-			if observed := metaFloat(meta, "value"); observed > 0 {
-				parts = append(parts, fmt.Sprintf("• Uptime = %.0f min", observed))
-			} else if vt := metaString(meta, "value_text"); vt != "" {
-				parts = append(parts, "• Uptime = "+vt)
-			}
+			return uptimeRestartTelegramText(eq, metaFloat(meta, "value"), metaString(meta, "value_text"))
 		} else {
 			if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
 				parts = append(parts, "• "+tgt)

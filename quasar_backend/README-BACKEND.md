@@ -25,6 +25,8 @@ Backend principal do NetQuasar, responsável por:
 - Telemetria
 - Interfaces
 - OLT
+- BGP (peers, tráfego por operadora, hardware) e BNG/PPPoE
+- Topologia (diagrama de rede manual)
 - Alertas e regras
 - Configurações
 - Ferramentas (DNS/SNMP/Telnet/MikroTik)

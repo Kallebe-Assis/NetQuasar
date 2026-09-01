@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { HubsoftFinancialSummaryView } from "./HubsoftFinancialSummaryView";
+import { HubsoftInvoiceListPanel } from "./HubsoftInvoiceListPanel";
 import type { HubsoftFinancialSummaryResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -34,8 +35,8 @@ export function HubsoftFinancialPage() {
             <h2 style={{ margin: 0 }}>Financeiro</h2>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
               {d
-                ? `Amostra de ${d.sample_clients.toLocaleString("pt-BR")} clientes consultados. A HubSoft só expõe contas a receber (faturas de clientes) nesta integração — não existe "contas a pagar" (despesas a fornecedores) aqui.`
-                : "Soma o financeiro de uma amostra de clientes — total a receber, vencido, pendente e pago."}
+                ? `${d.total_invoices.toLocaleString("pt-BR")} fatura(s) com vencimento nos últimos 6 meses. A HubSoft só expõe contas a receber (faturas de clientes) nesta integração — não existe "contas a pagar" (despesas a fornecedores) aqui.`
+                : "Soma as faturas dos últimos 6 meses — total a receber, vencido, pendente e pago."}
             </p>
           </div>
           <button
@@ -60,6 +61,8 @@ export function HubsoftFinancialPage() {
         ) : (
           <HubsoftFinancialSummaryView d={d} />
         )}
+
+        <HubsoftInvoiceListPanel />
       </div>
     </div>
   );

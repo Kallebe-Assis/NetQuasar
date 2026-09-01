@@ -184,7 +184,7 @@ function UsersPanel() {
   const [ePhone, setEPhone] = useState("");
   const [ePass, setEPass] = useState("");
   const [eProfileId, setEProfileId] = useState("");
-  const [confirmAction, setConfirmAction] = useState<null | { type: "delete" | "activate" | "deactivate"; user: UserRow }>(null);
+  const [confirmAction, setConfirmAction] = useState<null | { type: "delete" | "activate" | "deactivate" | "force_logout"; user: UserRow }>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const { push: pushToast } = useAppToast();
   const [userCreateErr, setUserCreateErr] = useState("");
@@ -288,6 +288,19 @@ function UsersPanel() {
       toastOk(pushToast, "Usuário removido.");
     },
     onError: (err) => toastErr(pushToast, err, "Falha ao remover usuário."),
+  });
+
+  // Marca users.sessions_invalidated_at="agora" no backend — o próximo pedido do usuário-alvo
+  // com o token actual recebe 401 e o frontend dele redireciona automaticamente para o login
+  // (ver apiFetch em lib/api.ts). Não existe "socket" para desconectar em tempo real: efectiva-se
+  // na próxima acção que essa pessoa fizer no sistema.
+  const forceLogout = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/settings/users/${id}/force-logout`, { method: "POST" }),
+    onSuccess: () => {
+      setConfirmAction(null);
+      toastOk(pushToast, "Desconexão forçada — a sessão actual deste usuário será encerrada na próxima ação dele.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao forçar desconexão."),
   });
 
   const profileLabel = (u: UserRow) =>
@@ -430,6 +443,15 @@ function UsersPanel() {
                             label: active ? "Inactivar" : "Activar",
                             onClick: () => setConfirmAction({ type: active ? "deactivate" : "activate", user: u }),
                           },
+                          ...(isAdminUser()
+                            ? [
+                                {
+                                  id: "force_logout",
+                                  label: "Forçar desconexão",
+                                  onClick: () => setConfirmAction({ type: "force_logout" as const, user: u }),
+                                },
+                              ]
+                            : []),
                           {
                             id: "delete",
                             label: "Apagar",
@@ -574,27 +596,35 @@ function UsersPanel() {
       )}
 
       {confirmAction && (
-        <div className="modal-backdrop" style={{ zIndex: 70 }} onClick={() => !(setActive.isPending || del.isPending) && setConfirmAction(null)}>
+        <div
+          className="modal-backdrop"
+          style={{ zIndex: 70 }}
+          onClick={() => !(setActive.isPending || del.isPending || forceLogout.isPending) && setConfirmAction(null)}
+        >
           <div className="card" style={{ width: "min(420px, 92vw)", margin: "12vh auto" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
               {confirmAction.type === "delete"
                 ? "Apagar usuário"
                 : confirmAction.type === "activate"
                   ? "Activar usuário"
-                  : "Inactivar usuário"}
+                  : confirmAction.type === "force_logout"
+                    ? "Forçar desconexão"
+                    : "Inactivar usuário"}
             </h3>
             <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px" }}>
               {confirmAction.type === "delete"
                 ? `Eliminar permanentemente ${confirmAction.user.email}?`
                 : confirmAction.type === "activate"
                   ? `Activar o acesso de ${confirmAction.user.email}?`
-                  : `Inactivar ${confirmAction.user.email}? O usuário não poderá iniciar sessão.`}
+                  : confirmAction.type === "force_logout"
+                    ? `Encerrar a sessão actual de ${confirmAction.user.email}? A pessoa é desconectada assim que fizer a próxima ação no sistema e precisa iniciar sessão novamente.`
+                    : `Inactivar ${confirmAction.user.email}? O usuário não poderá iniciar sessão.`}
             </p>
             <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
               <button
                 type="button"
                 className="btn"
-                disabled={setActive.isPending || del.isPending}
+                disabled={setActive.isPending || del.isPending || forceLogout.isPending}
                 onClick={() => setConfirmAction(null)}
               >
                 Cancelar
@@ -602,9 +632,10 @@ function UsersPanel() {
               <button
                 type="button"
                 className={confirmAction.type === "delete" ? "btn btn--danger" : "btn btn--primary"}
-                disabled={setActive.isPending || del.isPending}
+                disabled={setActive.isPending || del.isPending || forceLogout.isPending}
                 onClick={() => {
                   if (confirmAction.type === "delete") del.mutate(confirmAction.user.id);
+                  else if (confirmAction.type === "force_logout") forceLogout.mutate(confirmAction.user.id);
                   else setActive.mutate({ id: confirmAction.user.id, is_active: confirmAction.type === "activate" });
                 }}
               >

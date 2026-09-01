@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
+	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/mailclient"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
@@ -34,6 +35,7 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 		s.tryScheduledCommercialReport(ctx, &l)
 		s.tryScheduledBngStatsReport(ctx, &l)
 		s.tryScheduledDatabaseBackup(ctx, &l)
+		s.tryScheduledCustomAutomations(ctx, &l)
 	}
 	corr := time.NewTicker(5 * time.Minute)
 	defer corr.Stop()
@@ -226,6 +228,13 @@ func (s *Server) executeAlertsDigest(ctx context.Context, runKey string, meta au
 	return nil
 }
 
+// alertsDigestRow uma linha de alert_instances para o resumo — inclui alert_type/metric_id
+// (não só a message já formatada) para poder rotular cada linha com alertnotify.AlertTypeLabel
+// em vez de despejar a frase completa sem estrutura nenhuma.
+type alertsDigestRow struct {
+	severity, deviceName, ip, alertType, metricID, message string
+}
+
 func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string, err error) {
 	pool := s.DB()
 	if pool == nil {
@@ -241,17 +250,17 @@ func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string,
 		FROM alert_instances WHERE closed_at IS NULL
 	`).Scan(&openCrit, &openWarn, &openInfo)
 
-	var sb strings.Builder
 	subject = "Resumo de alertas"
-	sb.WriteString(fmt.Sprintf("Alertas abertos: %d\n", openTotal))
-	if openCrit+openWarn+openInfo > 0 {
-		sb.WriteString(fmt.Sprintf("(críticos %d · aviso %d · info %d)\n", openCrit, openWarn, openInfo))
+	if openTotal == 0 {
+		return subject, "✅ Nenhum alerta aberto no momento.", nil
 	}
-	sb.WriteString("\n")
 
-	listRows, err := pool.Query(ctx, `
-		SELECT COALESCE(NULLIF(trim(device_name), ''), '—'),
-			COALESCE(NULLIF(trim(ip), ''), '—'), message
+	var rows []alertsDigestRow
+	listRows, qerr := pool.Query(ctx, `
+		SELECT severity,
+			COALESCE(NULLIF(trim(device_name), ''), '—'),
+			COALESCE(NULLIF(trim(ip), ''), '—'),
+			alert_type, COALESCE(meta->>'metric_id', ''), message
 		FROM alert_instances
 		WHERE closed_at IS NULL
 		ORDER BY
@@ -259,22 +268,59 @@ func (s *Server) composeAlertsDigest(ctx context.Context) (subject, body string,
 			active_since DESC
 		LIMIT 80
 	`)
-	if err == nil {
+	if qerr == nil {
 		for listRows.Next() {
-			var name, ipAddr, msg string
-			if listRows.Scan(&name, &ipAddr, &msg) == nil {
-				detail := strings.TrimSpace(msg)
-				if detail == "" {
-					detail = "Alerta"
-				}
-				if len(detail) > 160 {
-					detail = detail[:157] + "..."
-				}
-				sb.WriteString(fmt.Sprintf("%s (%s) - %s\n", name, ipAddr, detail))
+			var r alertsDigestRow
+			if listRows.Scan(&r.severity, &r.deviceName, &r.ip, &r.alertType, &r.metricID, &r.message) == nil {
+				rows = append(rows, r)
 			}
 		}
 		listRows.Close()
 	}
+
+	// Texto simples (SendMessage abaixo não define parse_mode) — a estrutura vem só de
+	// emoji/marcadores/indentação, não de markdown (evita asteriscos literais na mensagem, ou
+	// pior, a API do Telegram rejeitar o envio por entidades malformadas em texto dinâmico).
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📋 Resumo de alertas — %d aberto(s)\n", openTotal))
+	sb.WriteString(fmt.Sprintf("🔴 %d crítico(s)  🟡 %d aviso(s)  🟢 %d info\n", openCrit, openWarn, openInfo))
+
+	writeSection := func(sev, emoji, label string) {
+		var lines []string
+		for _, r := range rows {
+			if r.severity != sev {
+				continue
+			}
+			typeLabel := alertnotify.AlertTypeLabel(r.alertType, r.metricID)
+			detail := strings.TrimSpace(r.message)
+			// A maioria das mensagens já começa por "Equipamento (IP): ..." — redundante aqui,
+			// já mostrado no cabeçalho do marcador (bullet) logo acima.
+			if p := fmt.Sprintf("%s (%s):", r.deviceName, r.ip); strings.HasPrefix(detail, p) {
+				detail = strings.TrimSpace(strings.TrimPrefix(detail, p))
+			}
+			if detail == "" {
+				detail = typeLabel
+			}
+			if len(detail) > 130 {
+				detail = detail[:127] + "..."
+			}
+			lines = append(lines, fmt.Sprintf("• %s — %s (%s)\n   %s", typeLabel, r.deviceName, r.ip, detail))
+		}
+		if len(lines) == 0 {
+			return
+		}
+		sb.WriteString(fmt.Sprintf("\n%s %s (%d)\n", emoji, label, len(lines)))
+		sb.WriteString(strings.Join(lines, "\n"))
+		sb.WriteString("\n")
+	}
+	writeSection("critical", "🔴", "Críticos")
+	writeSection("warning", "🟡", "Aviso")
+	writeSection("info", "🟢", "Info")
+
+	if openTotal > int64(len(rows)) {
+		sb.WriteString(fmt.Sprintf("\n… e mais %d alerta(s) — veja a tela Alertas para a lista completa.\n", openTotal-int64(len(rows))))
+	}
+
 	return subject, strings.TrimSpace(sb.String()), nil
 }
 

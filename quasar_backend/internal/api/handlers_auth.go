@@ -76,7 +76,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "TOKEN", err.Error(), nil)
 		return
 	}
-	profileID, profileSlug, perms := s.resolveUserPermissions(r.Context(), id, role)
+	profileID, profileSlug, perms, _ := s.resolveUserPermissions(r.Context(), id, role)
 	legacyRole := s.legacyRoleFromProfileSlug(profileSlug, perms)
 	if strings.EqualFold(role, "admin") {
 		legacyRole = "admin"

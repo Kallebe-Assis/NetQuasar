@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, downloadBlob } from "../../lib/api";
 import { apiUrl, can, getAuthToken, getStoredApiKey, isAdminUser } from "../../lib/auth";
+import { InfoHint } from "../../components/InfoHint";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastInfo, toastOk } from "../../lib/operationToast";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
@@ -365,12 +366,17 @@ export function FleetSettingsPanel() {
                 </p>
                 <div className="fleet-import-grid">
           <section className="fleet-import-block">
-            <h3>Veículos</h3>
-            <p>
-              Colunas: descrição, placa, ano, modelo, cor, cidade, UF, combustível, capacidade do tanque, consumos (KM/L),
-              hodômetro, centro de custo, status e observação. Status: ativo, inativo, manutenção, parado, vendido, baixado,
-              locado.
-            </p>
+            <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Veículos
+              <InfoHint label="Colunas da planilha de veículos">
+                <p>
+                  Colunas: descrição, placa (opcional), ano, modelo, cor, cidade, UF, combustível, capacidade do tanque,
+                  consumos (KM/L), hodômetro, centro de custo, status e observação. Status: ativo, inativo, manutenção,
+                  parado, vendido, baixado, locado.
+                </p>
+                <p>Veículos sem placa (ex.: aguardando emplacamento) aparecem como "Veículo não identificado" nos relatórios.</p>
+              </InfoHint>
+            </h3>
             <div className="fleet-import-actions">
               <button
                 type="button"
@@ -416,11 +422,15 @@ export function FleetSettingsPanel() {
           </section>
 
           <section className="fleet-import-block">
-            <h3>Motoristas</h3>
-            <p>
-              Colunas: nome, CPF, RG, telefone, e-mail, CNH, categoria, validade (AAAA-MM-DD ou DD/MM/AAAA), cidade, UF,
-              usuário (login do sistema, opcional), status e observação. Status: ativo, inativo, bloqueado.
-            </p>
+            <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Motoristas
+              <InfoHint label="Colunas da planilha de motoristas">
+                <p>
+                  Colunas: nome, CPF, RG, telefone, e-mail, CNH, categoria, validade (AAAA-MM-DD ou DD/MM/AAAA), cidade, UF,
+                  usuário (login do sistema, opcional), status e observação. Status: ativo, inativo, bloqueado.
+                </p>
+              </InfoHint>
+            </h3>
             <div className="fleet-import-actions">
               <button
                 type="button"
@@ -466,12 +476,16 @@ export function FleetSettingsPanel() {
           </section>
 
           <section className="fleet-import-block">
-            <h3>Despesas</h3>
-            <p>
-              Colunas: lançamento (despesa ou abastecimento), descrição, placa, data, tipo de despesa (ou combustível, se for
-              abastecimento), valor unitário, quantidade, valor (calculado), KM e observação. Em abastecimento, quantidade = litros e
-              valor unitário = preço/L.
-            </p>
+            <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Despesas
+              <InfoHint label="Colunas da planilha de despesas">
+                <p>
+                  Colunas: lançamento (despesa ou abastecimento), descrição, placa, data, tipo de despesa (ou combustível, se
+                  for abastecimento), valor unitário, quantidade, valor (calculado), KM e observação. Em abastecimento,
+                  quantidade = litros e valor unitário = preço/L.
+                </p>
+              </InfoHint>
+            </h3>
             <div className="fleet-import-actions">
               <button
                 type="button"
@@ -519,26 +533,26 @@ export function FleetSettingsPanel() {
             ) : null}
 
             {canMutate ? (
-              <div className="fleet-import-danger">
-                <h3>Zerar despesas</h3>
-                <p>
-                  Apaga <strong>todas</strong> as despesas e abastecimentos da base. Veículos, motoristas e cadastros não são
-                  afectados. Esta acção não tem volta.
-                </p>
-                <label className="row" style={{ gap: 8, marginTop: 10, fontSize: 13 }}>
+              <div className="fleet-import-danger fleet-import-danger--compact">
+                <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  Zerar despesas
+                  <InfoHint label="Sobre zerar despesas">
+                    <p>
+                      Apaga <strong>todas</strong> as despesas e abastecimentos da base. Veículos, motoristas e cadastros não
+                      são afetados. Esta ação não tem volta.
+                    </p>
+                  </InfoHint>
+                </h3>
+                <label className="row" style={{ gap: 6, marginTop: 6, fontSize: 12 }}>
                   <input type="checkbox" checked={wipeBackup} onChange={(e) => setWipeBackup(e.target.checked)} />
-                  Fazer backup CSV antes de apagar
+                  Backup CSV antes de apagar
                 </label>
                 {wipeStep === "idle" ? (
-                  <div className="fleet-import-actions">
+                  <div className="fleet-import-actions" style={{ marginTop: 8 }}>
                     <button
                       type="button"
-                      className="btn btn--danger"
+                      className="btn btn--danger btn--sm"
                       onClick={() => {
-                        const ok = window.confirm(
-                          "ATENÇÃO: isto vai apagar TODAS as despesas e abastecimentos da base. Esta acção não tem volta.\n\nDeseja continuar para a confirmação?",
-                        );
-                        if (!ok) return;
                         setWipeConfirm("");
                         setWipeStep("confirm");
                       }}
@@ -547,25 +561,25 @@ export function FleetSettingsPanel() {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ marginTop: 10 }}>
-                    <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--err, #c44)" }}>
-                      Confirmação: isto vai zerar o histórico de despesas e abastecimentos. Digite <strong>ZERAR</strong> para
-                      continuar.
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--err, #c44)" }}>
+                      Digite <strong>ZERAR</strong> para confirmar.
                     </p>
                     <input
                       className="input"
+                      style={{ maxWidth: 160 }}
                       value={wipeConfirm}
                       onChange={(e) => setWipeConfirm(e.target.value)}
                       placeholder="ZERAR"
                       autoComplete="off"
                     />
-                    <div className="fleet-import-actions">
-                      <button type="button" className="btn" disabled={purgeExpenses.isPending} onClick={() => { setWipeStep("idle"); setWipeConfirm(""); }}>
+                    <div className="fleet-import-actions" style={{ marginTop: 6 }}>
+                      <button type="button" className="btn btn--sm" disabled={purgeExpenses.isPending} onClick={() => { setWipeStep("idle"); setWipeConfirm(""); }}>
                         Cancelar
                       </button>
                       <button
                         type="button"
-                        className="btn btn--danger"
+                        className="btn btn--danger btn--sm"
                         disabled={wipeConfirm.trim().toUpperCase() !== "ZERAR" || purgeExpenses.isPending}
                         onClick={() => purgeExpenses.mutate()}
                       >

@@ -57,7 +57,7 @@ func (s *Server) listFleetFuelings(w http.ResponseWriter, r *http.Request) {
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	vehicleID := strings.TrimSpace(r.URL.Query().Get("vehicle_id"))
 	rows, err := s.DB().Query(r.Context(), `
-		SELECT f.id, f.number, f.fueled_at, f.vehicle_id, v.plate, v.description, f.driver_id, d.name,
+		SELECT f.id, f.number, f.fueled_at, f.vehicle_id, COALESCE(v.plate, ''), v.description, f.driver_id, d.name,
 			f.station_id, st.description, f.fuel_id, fu.description, f.cost_center_id, cc.description,
 			f.liters, f.price_per_liter, f.total_amount, f.odometer_previous, f.odometer_current, f.km_driven,
 			f.hourmeter_previous, f.hourmeter_current, f.hours_worked, f.km_per_liter, f.cost_per_km, f.liters_per_100km,
@@ -444,25 +444,26 @@ func (s *Server) fleetDashboard(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&it.VehicleID, &it.Plate, &it.Description, &it.Value, &it.Liters, &it.Amount); err != nil {
 				continue
 			}
+			it.Plate = fleetDisplayPlate(it.Plate)
 			out = append(out, it)
 		}
 		return out
 	}
 
 	eco := loadRank(`
-		SELECT v.id, v.plate, v.description, AVG(f.km_per_liter), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
+		SELECT v.id, COALESCE(v.plate, ''), v.description, AVG(f.km_per_liter), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
 		FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
 		WHERE f.km_per_liter IS NOT NULL AND f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
 		  AND ($3 = '' OR f.vehicle_id::text = $3)
 		GROUP BY v.id, v.plate, v.description ORDER BY AVG(f.km_per_liter) DESC LIMIT 10`)
 	thirsty := loadRank(`
-		SELECT v.id, v.plate, v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
+		SELECT v.id, COALESCE(v.plate, ''), v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
 		FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
 		WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
 		  AND ($3 = '' OR f.vehicle_id::text = $3)
 		GROUP BY v.id, v.plate, v.description ORDER BY SUM(f.liters) DESC LIMIT 10`)
 	costly := loadRank(`
-		SELECT v.id, v.plate, v.description,
+		SELECT v.id, COALESCE(v.plate, ''), v.description,
 			COALESCE(SUM(f.fuel_amt),0) + COALESCE(SUM(e.exp_amt),0),
 			COALESCE(SUM(f.liters),0),
 			COALESCE(SUM(f.fuel_amt),0) + COALESCE(SUM(e.exp_amt),0)
@@ -637,7 +638,7 @@ func (s *Server) fleetReportCSV(w http.ResponseWriter, r *http.Request) {
 	case "fuelings":
 		_ = cw.Write([]string{"numero", "data", "placa", "motorista", "posto", "combustivel", "litros", "preco_litro", "total", "km", "km_l", "rs_km", "centro_custo"})
 		rows, err := s.DB().Query(r.Context(), `
-			SELECT f.number, f.fueled_at, v.plate, COALESCE(d.name,''), COALESCE(st.description,''), fu.description,
+			SELECT f.number, f.fueled_at, COALESCE(v.plate, ''), COALESCE(d.name,''), COALESCE(st.description,''), fu.description,
 				f.liters, f.price_per_liter, f.total_amount, COALESCE(f.km_driven,0), COALESCE(f.km_per_liter,0), COALESCE(f.cost_per_km,0), COALESCE(cc.description,'')
 			FROM fleet_fuelings f
 			JOIN fleet_vehicles v ON v.id=f.vehicle_id
@@ -661,7 +662,7 @@ func (s *Server) fleetReportCSV(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			_ = cw.Write([]string{
-				strconv.FormatInt(n, 10), at.Format("2006-01-02 15:04"), plate, driver, station, fuel,
+				strconv.FormatInt(n, 10), at.Format("2006-01-02 15:04"), fleetDisplayPlateOrUnknown(plate), driver, station, fuel,
 				fmt.Sprintf("%.3f", liters), fmt.Sprintf("%.4f", price), fmt.Sprintf("%.2f", total),
 				fmt.Sprintf("%.1f", km), fmt.Sprintf("%.2f", kpl), fmt.Sprintf("%.4f", cpk), cc,
 			})
@@ -669,7 +670,7 @@ func (s *Server) fleetReportCSV(w http.ResponseWriter, r *http.Request) {
 	case "by-vehicle":
 		_ = cw.Write([]string{"placa", "descricao", "litros", "valor", "km", "km_l_medio", "rs_km_medio"})
 		rows, err := s.DB().Query(r.Context(), `
-			SELECT v.plate, v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0), COALESCE(SUM(f.km_driven),0),
+			SELECT COALESCE(v.plate, ''), v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0), COALESCE(SUM(f.km_driven),0),
 				AVG(f.km_per_liter) FILTER (WHERE f.km_per_liter IS NOT NULL),
 				AVG(f.cost_per_km) FILTER (WHERE f.cost_per_km IS NOT NULL)
 			FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
@@ -687,7 +688,7 @@ func (s *Server) fleetReportCSV(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&plate, &desc, &liters, &amount, &km, &kpl, &cpk); err != nil {
 				continue
 			}
-			_ = cw.Write([]string{plate, desc, fmt.Sprintf("%.3f", liters), fmt.Sprintf("%.2f", amount), fmt.Sprintf("%.1f", km),
+			_ = cw.Write([]string{fleetDisplayPlateOrUnknown(plate), desc, fmt.Sprintf("%.3f", liters), fmt.Sprintf("%.2f", amount), fmt.Sprintf("%.1f", km),
 				fmtPtr(kpl), fmtPtr(cpk)})
 		}
 	case "by-driver":
@@ -813,7 +814,7 @@ func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to 
 	switch kind {
 	case "fuelings":
 		rows, err := s.DB().Query(ctx, `
-			SELECT f.fueled_at, v.plate, fu.description, f.liters, f.total_amount
+			SELECT f.fueled_at, COALESCE(v.plate, ''), fu.description, f.liters, f.total_amount
 			FROM fleet_fuelings f
 			JOIN fleet_vehicles v ON v.id=f.vehicle_id
 			JOIN fleet_fuels fu ON fu.id=f.fuel_id
@@ -832,7 +833,7 @@ func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to 
 			if err := rows.Scan(&at, &plate, &fuel, &liters, &total); err != nil {
 				continue
 			}
-			fmt.Fprintf(&b, "%s  %s  %s  %.1f L  R$ %.2f\n", at.Format("02/01"), fleetDisplayPlate(plate), fuel, liters, total)
+			fmt.Fprintf(&b, "%s  %s  %s  %.1f L  R$ %.2f\n", at.Format("02/01"), fleetDisplayPlateOrUnknown(plate), fuel, liters, total)
 			n++
 		}
 		if n == 0 {
@@ -840,7 +841,7 @@ func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to 
 		}
 	case "by-vehicle":
 		rows, err := s.DB().Query(ctx, `
-			SELECT v.plate, v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
+			SELECT COALESCE(v.plate, ''), v.description, COALESCE(SUM(f.liters),0), COALESCE(SUM(f.total_amount),0)
 			FROM fleet_fuelings f JOIN fleet_vehicles v ON v.id=f.vehicle_id
 			WHERE f.fueled_at >= $1::date AND f.fueled_at < ($2::date + interval '1 day')
 			GROUP BY v.plate, v.description ORDER BY SUM(f.total_amount) DESC LIMIT 40
@@ -856,7 +857,7 @@ func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to 
 			if err := rows.Scan(&plate, &desc, &liters, &amount); err != nil {
 				continue
 			}
-			fmt.Fprintf(&b, "%s — %s\n%.1f L · R$ %.2f\n\n", fleetDisplayPlate(plate), desc, liters, amount)
+			fmt.Fprintf(&b, "%s — %s\n%.1f L · R$ %.2f\n\n", fleetDisplayPlateOrUnknown(plate), desc, liters, amount)
 			n++
 		}
 		if n == 0 {

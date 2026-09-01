@@ -32,10 +32,12 @@ func mintUserJWT(cfg *config.Config, userID uuid.UUID, email, role string) (stri
 	return t.SignedString(cfg.JWTSigningSecret())
 }
 
-// parseUserJWT valida assinatura e expiração; devolve dados do token.
-func parseUserJWT(cfg *config.Config, raw string) (userID uuid.UUID, email, role string, err error) {
+// parseUserJWT valida assinatura e expiração; devolve dados do token, incluindo o instante de
+// emissão (issuedAt) — usado por requestAuthContext (authz.go) para rejeitar tokens emitidos
+// antes de users.sessions_invalidated_at (força desconexão de outro usuário pelo admin).
+func parseUserJWT(cfg *config.Config, raw string) (userID uuid.UUID, email, role string, issuedAt time.Time, err error) {
 	if raw == "" {
-		return uuid.Nil, "", "", errors.New("token vazio")
+		return uuid.Nil, "", "", time.Time{}, errors.New("token vazio")
 	}
 	var claims userJWTClaims
 	_, err = jwt.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
@@ -45,14 +47,17 @@ func parseUserJWT(cfg *config.Config, raw string) (userID uuid.UUID, email, role
 		return cfg.JWTSigningSecret(), nil
 	})
 	if err != nil {
-		return uuid.Nil, "", "", err
+		return uuid.Nil, "", "", time.Time{}, err
 	}
 	if claims.UserID == "" || claims.Email == "" {
-		return uuid.Nil, "", "", errors.New("claims inválidos")
+		return uuid.Nil, "", "", time.Time{}, errors.New("claims inválidos")
 	}
 	uid, err := uuid.Parse(claims.UserID)
 	if err != nil {
-		return uuid.Nil, "", "", err
+		return uuid.Nil, "", "", time.Time{}, err
 	}
-	return uid, claims.Email, claims.Role, nil
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
+	return uid, claims.Email, claims.Role, issuedAt, nil
 }

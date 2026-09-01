@@ -87,6 +87,9 @@ const HubsoftFinancialPage = lazy(() =>
 const HubsoftDashboardPage = lazy(() =>
   import("../pages/hubsoft/HubsoftDashboardPage").then((m) => ({ default: m.HubsoftDashboardPage })),
 );
+const HubsoftReportPage = lazy(() =>
+  import("../pages/hubsoft/HubsoftReportPage").then((m) => ({ default: m.HubsoftReportPage })),
+);
 const RealtimePage = lazy(() =>
   import("../pages/RealtimePage").then((m) => ({ default: m.RealtimePage })),
 );
@@ -151,6 +154,7 @@ export function AppRouter() {
           <Route path="integrations/hubsoft/ordens-servico" element={withSuspense(<HubsoftWorkOrdersPage />)} />
           <Route path="integrations/hubsoft/financeiro" element={withSuspense(<HubsoftFinancialPage />)} />
           <Route path="integrations/hubsoft/dashboard" element={withSuspense(<HubsoftDashboardPage />)} />
+          <Route path="integrations/hubsoft/relatorio" element={withSuspense(<HubsoftReportPage />)} />
           <Route
             path="integrations/hubsoft/config"
             element={

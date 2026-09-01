@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, BarChart3, ClipboardList, LifeBuoy, Receipt, Search, Settings } from "lucide-react";
+import { ArrowLeft, BarChart3, ClipboardList, FileBarChart2, LifeBuoy, Receipt, Search, Settings } from "lucide-react";
 import { isAdminUser } from "../../lib/auth";
 import { APP_ROUTES } from "../../app/routes";
 import { useHubsoftLogo } from "../../lib/hubsoftLogo";
@@ -21,6 +21,7 @@ export function HubsoftHeader() {
     { to: APP_ROUTES.hubsoftWorkOrders, label: "Ordens de serviço", icon: <ClipboardList size={14} /> },
     { to: APP_ROUTES.hubsoftFinancial, label: "Financeiro", icon: <Receipt size={14} /> },
     { to: APP_ROUTES.hubsoftDashboard, label: "Dashboard", icon: <BarChart3 size={14} /> },
+    { to: APP_ROUTES.hubsoftReport, label: "Relatório", icon: <FileBarChart2 size={14} /> },
   ];
 
   return (

@@ -887,7 +887,7 @@ export function WorkOrdersTabContent({
                 <th>N.º O.S.</th>
                 <th>Estado O.S.</th>
                 <th>Plano / serviço</th>
-                <th>Atendimento</th>
+                <th>Tipo de O.S.</th>
                 <th>Cadastro</th>
                 <th>Agendamento</th>
                 <th className="integration-support-table__col-actions" />
@@ -913,7 +913,7 @@ export function WorkOrdersTabContent({
                     {o.service_status ? <div className="integration-os-plan__meta">Estado do serviço: {o.service_status}</div> : null}
                     {o.value ? <div className="integration-os-plan__meta">Valor: {o.value}</div> : null}
                   </td>
-                  <td className="mono integration-support-table__cell">{o.attendance_protocol || "—"}</td>
+                  <td className="integration-support-table__cell">{o.type || "—"}</td>
                   <td className="integration-support-table__cell integration-support-table__cell--date">
                     {formatIntegrationDateTime(o.created_at) || "—"}
                   </td>
@@ -1000,7 +1000,9 @@ export function LoginsTabContent({
   );
 }
 
-function ClientDetailModal({
+// Exportado para reuso na aba Relatório (HubsoftReportPage.tsx) — mesma modal de "dados
+// completos" já usada pela Consulta, sem duplicar a UI.
+export function ClientDetailModal({
   client,
   loading,
   onClose,

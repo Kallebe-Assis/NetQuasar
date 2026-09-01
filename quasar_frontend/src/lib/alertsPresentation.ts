@@ -109,9 +109,15 @@ export function alertProblemTitle(type: string | null | undefined): string {
 export function alertEquipmentPrimary(type: string | null | undefined, deviceName: string | null | undefined, message: string | null | undefined, meta: unknown): string {
   const t = String(type ?? "").trim();
   const m = metaObj(meta);
-  if (t === "olt_onu_drop" || t === "olt_onu_rise") {
+  // Qualquer alerta de categoria "olt" com PON identificada (olt_onu_drop/rise, olt_onu_rx/tx,
+  // olt_pon_tx/rx/temp, pon_down — todos gravam meta.pon no backend) — generalizado pela
+  // categoria em vez de listar tipo a tipo, para não voltar a faltar um tipo novo no futuro.
+  if (alertCategoryFromType(t) === "olt") {
     const msgRaw = String(message ?? "");
-    const oltFromMsg = msgRaw.match(/da\s+OLT\s+(.+)\s+\([^)]+\)\s*\.?\s*$/im)?.[1]?.trim() ?? "";
+    const oltFromMsg =
+      msgRaw.match(/da\s+OLT\s+(.+)\s+\([^)]+\)\s*\.?\s*$/im)?.[1]?.trim() ??
+      msgRaw.match(/[—-]\s*OLT\s+(.+)\s+\([^)]+\)\s*\.?\s*$/im)?.[1]?.trim() ??
+      "";
     const olt = String(deviceName ?? "").trim() || oltFromMsg;
     let ponKey = "";
     const ponMeta = m?.pon;

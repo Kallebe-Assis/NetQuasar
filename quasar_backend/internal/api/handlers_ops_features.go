@@ -75,7 +75,7 @@ func (s *Server) actorFromRequest(r *http.Request) string {
 	}
 	bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if bearer != "" && s.Cfg != nil {
-		uid, email, _, err := parseUserJWT(s.Cfg, bearer)
+		uid, email, _, _, err := parseUserJWT(s.Cfg, bearer)
 		if err == nil && s.DB() != nil {
 			var displayName string
 			qerr := s.DB().QueryRow(r.Context(), `

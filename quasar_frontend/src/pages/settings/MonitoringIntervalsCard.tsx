@@ -57,7 +57,17 @@ export function MonitoringAdvancedFields({
               onChange={(e) => set("interface_snapshot_timeout_ms", Number(e.target.value))}
             />
           </SettingsField>
-          <SettingsField label="OLT PON / ONUs (ms)" hintLabel="Timeout OLT" hint={<p>Tempo máximo da coleta ONU/PON SNMP. Intervalo: 5000–600000 ms.</p>}>
+          <SettingsField
+            label="OLT PON / ONUs (ms)"
+            hintLabel="Timeout OLT"
+            hint={
+              <p>
+                Tempo máximo da coleta ONU/PON SNMP. Intervalo: 5000–3600000 ms (60 min). OLTs com centenas/milhares de
+                ONUs em várias PONs precisam de um valor alto — um tecto baixo corta a varredura a meio (PONs no fim da
+                lista ficam sem dados), sem erro visível.
+              </p>
+            }
+          >
             <input
               className="input mono"
               value={String(draft.olt_if_derived_pon_timeout_ms ?? 180000)}

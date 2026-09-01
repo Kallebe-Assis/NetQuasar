@@ -1,4 +1,5 @@
-import { apiUrl, getAuthToken, getStoredApiKey } from "./auth";
+import { apiUrl, clearSession, getAuthToken, getStoredApiKey } from "./auth";
+import { APP_ROUTES } from "../app/routes";
 
 export class ApiError extends Error {
   status: number;
@@ -73,6 +74,13 @@ export async function apiFetch<T = unknown>(path: string, opts: Opt = {}): Promi
   if (!res.ok) {
     const errObj = data as { error?: string; code?: string };
     const msg = errObj?.error ?? res.statusText;
+    // Sessão rejeitada pelo servidor (token expirado, ou um admin forçou a desconexão desta
+    // conta — ver forceLogoutUser no backend) — "AUTH_FAILED" é só uma tentativa de login
+    // errada, não desconecta ninguém. Evita loop se já estivermos no ecrã de login.
+    if (res.status === 401 && errObj?.code === "UNAUTHORIZED" && window.location.pathname !== APP_ROUTES.login) {
+      clearSession();
+      window.location.href = APP_ROUTES.login;
+    }
     throw new ApiError(msg, res.status, errObj?.code, data);
   }
   return data as T;
