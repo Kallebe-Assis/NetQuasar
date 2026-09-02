@@ -59,6 +59,11 @@ export type TopologyDocument = {
     id: string;
     source: string;
     target: string;
+    // Lado do equipamento (top/bottom/left/right — ver SIDES em DeviceNode.tsx) de onde a
+    // ligação sai/chega. Sem isto, toda ligação "esquecia" o lado escolhido ao recarregar a
+    // página e o React Flow desenhava tudo a sair do topo por omissão.
+    source_handle?: string;
+    target_handle?: string;
     type: TopologyConnectionType;
     label?: string;
     icon_size?: number;

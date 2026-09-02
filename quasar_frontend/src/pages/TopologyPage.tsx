@@ -8,6 +8,7 @@ import {
   ConnectionMode,
   Controls,
   MiniMap,
+  reconnectEdge,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -17,6 +18,7 @@ import {
   type Node,
   type NodeChange,
   type OnConnect,
+  type OnReconnect,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./topology/topology.css";
@@ -80,6 +82,8 @@ function docToFlow(doc: TopologyDocument, devices: Map<string, TopologyDevice>) 
     id: e.id,
     source: e.source,
     target: e.target,
+    sourceHandle: e.source_handle,
+    targetHandle: e.target_handle,
     type: "typed",
     data: { connType: e.type, iconSize: e.icon_size ?? DEFAULT_EDGE_ICON_SIZE, customLabel: e.label } satisfies ConnectionEdgeData,
   }));
@@ -118,6 +122,8 @@ function flowToDoc(nodes: Node[], edges: Edge[]): TopologyDocument {
       id: e.id,
       source: e.source,
       target: e.target,
+      source_handle: e.sourceHandle ?? undefined,
+      target_handle: e.targetHandle ?? undefined,
       type: data.connType ?? DEFAULT_CONNECTION_TYPE,
       label: data.customLabel,
       icon_size: data.iconSize,
@@ -354,6 +360,17 @@ function TopologyCanvas() {
     [markDirty],
   );
 
+  // Reconectar uma ligação já existente (arrastar a ponta dela para outro lado/equipamento) —
+  // sem isto, a única forma de mudar onde uma ligação chega era apagar e refazer. Exige
+  // `onReconnect` explícito (edgesReconnectable sozinho só mostra a alça de arrastar).
+  const onReconnect: OnReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+      markDirty();
+    },
+    [markDirty],
+  );
+
   // Reparenting: ao largar um equipamento, verifica se ficou dentro de algum grupo "pop" e
   // ajusta parentId + posição relativa (ou volta a absoluta se saiu de todos os grupos).
   const onNodeDragStop = useCallback(
@@ -559,6 +576,8 @@ function TopologyCanvas() {
             onNodesChange={canMutate ? onNodesChange : undefined}
             onEdgesChange={canMutate ? onEdgesChange : undefined}
             onConnect={canMutate ? onConnect : undefined}
+            onReconnect={canMutate ? onReconnect : undefined}
+            edgesReconnectable={canMutate}
             onNodeDragStop={canMutate ? onNodeDragStop : undefined}
             onDrop={canMutate ? onDrop : undefined}
             onDragOver={canMutate ? (e) => e.preventDefault() : undefined}

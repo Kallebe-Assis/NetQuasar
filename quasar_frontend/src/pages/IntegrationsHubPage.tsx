@@ -187,12 +187,15 @@ export function IntegrationsHubPage() {
   }
 
   async function testAll() {
-    if (allItems.length === 0) return;
+    // Só integrações ativas — testar uma inativa não faz sentido (o próprio card já não mostra
+    // "Consultar" habilitado para ela) e só gerava falso "falhou" no resumo.
+    const active = allItems.filter((it) => it.enabled);
+    if (active.length === 0) return;
     setTestingAll(true);
     let ok = 0;
     let failed = 0;
     const results = await Promise.allSettled(
-      allItems.map((it) => apiFetch<{ ok: boolean }>(integrationTestPath(it), { method: "POST" })),
+      active.map((it) => apiFetch<{ ok: boolean }>(integrationTestPath(it), { method: "POST" })),
     );
     for (const r of results) {
       if (r.status === "fulfilled" && r.value?.ok) ok++;
@@ -201,18 +204,20 @@ export function IntegrationsHubPage() {
     setTestingAll(false);
     void qc.invalidateQueries({ queryKey: queryKeys.integrations });
     if (failed === 0) {
-      toastOk(pushToast, `Todas as ${ok} integração(ões) testadas com sucesso.`);
+      toastOk(pushToast, `Todas as ${ok} integração(ões) ativas testadas com sucesso.`);
     } else {
-      toastErr(pushToast, new Error(`${ok} OK, ${failed} falharam.`), "Teste de todas as APIs concluído com falhas");
+      toastErr(pushToast, new Error(`${ok} OK, ${failed} falharam.`), "Teste de todas as APIs ativas concluído com falhas");
     }
   }
+
+  const activeCount = useMemo(() => allItems.filter((it) => it.enabled).length, [allItems]);
 
   const menuItems: ActionMenuItem[] = [
     {
       id: "test-all",
-      label: testingAll ? "A testar todas…" : "Testar todas as API",
+      label: testingAll ? "A testar todas…" : "Testar todas as API ativas",
       onClick: () => void testAll(),
-      disabled: testingAll || allItems.length === 0,
+      disabled: testingAll || activeCount === 0,
     },
     {
       id: "toggle-inactive",
