@@ -6,6 +6,8 @@
 
 *Atualizado em 26/08/2026 (2): investigado e corrigido o bug relatado na tela de Mapa (CTOs e foguetes não apareciam, exceto os 3 mais próximos via GPS). Causa raiz e correção na seção "Tela de Mapa: CTOs e foguetes não aparecem" mais abaixo.*
 
+*Atualizado em 01/09/2026: nova passagem focada especificamente em "larga escala" (não só "mais rápido com a base atual") — verifiquei se os itens 1–4 continuam aplicados (continuam) e investiguei o que ainda falta para o sistema aguentar crescer bem além da escala atual: arquitetura de nó único (o lock por equipamento e o worker são só em memória — não dá para rodar 2 réplicas do backend sem duplicar sondas), observabilidade real (o endpoint `/metrics` existe mas só devolve `netquasar_up 1` — nenhum número do próprio worker), e a retenção automática (item 3) não cobre todas as tabelas de série temporal que crescem sem parar. Ver "Atualização — análise para larga escala" mais abaixo.*
+
 ## Resumo executivo
 
 O projeto está bem estruturado onde mais importa: o worker de monitoramento (`internal/monitorworker`) é decomposto em ~50 arquivos pequenos e focados, usa `errgroup` com limite de concorrência configurável e serializa por equipamento via lock (`snmpdevicelock`), o que é o padrão certo para esse tipo de carga. Os índices nas tabelas de série temporal (`ping_history`, `telemetry_samples`, `interface_snapshots`) também estão corretos (`device_id, tempo DESC`).
@@ -143,6 +145,42 @@ Esta era a causa raiz real do sintoma "só equipamentos aparecem, CTOs/foguetes 
 
 **Se ainda faltar algo depois desta correção**, o próximo suspeito mais provável não é mais de código — é de dados: CTOs ligadas a um `project_id` cujo projeto está marcado como `status = 'inativo'` ficam ocultas tanto na busca normal quanto na busca por GPS (`infraMapHideInactiveSQL`/mesma cláusula em `mapNearestCtos` — isso é intencional, "projeto inativo não aparece no mapa"). Vale conferir em Comercial → Projetos de rede se algum projeto com CTOs de produção não está sinalizado como inativo por engano.
 
+## Atualização — análise para larga escala (01/09/2026)
+
+O diagnóstico original (itens 1–4) resolveu o problema de **"não travar/não perder equipamento com a base atual crescendo"**. Esta passagem é diferente: pensando especificamente em **larga escala** — milhares de equipamentos, múltiplos NOCs, anos de histórico — quais são os tetos estruturais que hoje não aparecem no dia a dia mas vão aparecer quando o volume for bem maior. Confirmei que os itens 1–4 continuam aplicados no código (`maxMonitorDevicesPerSweep = 20000`, `DefaultSweepConcurrency = 12`, retenção diária em lotes, paginação client-side agora replicada também em Conexões — `usePagedRows` — além de Equipamentos e Mapa). Não consegui rodar contra dados reais desta vez porque a stack Docker está parada neste momento (`docker ps` mostra os 4 contêineres `Exited (0)`, parada limpa) — os achados abaixo são por leitura de código, mas aponto exatamente o que verificar quando a stack estiver de pé.
+
+### 9. Arquitetura é de nó único — o teto real de "larga escala" (Alto)
+
+`internal/snmpdevicelock/lock.go` serializa a sondagem por equipamento com um `sync.Map` de `*sync.Mutex` — **em memória do processo**, não em Postgres/Redis. O `docker-compose.yml` sobe um único serviço `netquasar` (sem `deploy.replicas`, sem load balancer). Isso significa que hoje **não dá para escalar horizontalmente** o worker de monitoramento: subir uma segunda réplica do backend não distribui a carga de sondagem, duplica-a — cada réplica sondaria os mesmos equipamentos de forma independente, gerando alertas duplicados, SNMP em dobro no equipamento monitorado e dados conflitantes gravados por duas instâncias ao mesmo tempo. O próprio `ROADMAP-ARQUITETURAL-DEPLOY.md` já reconhece isso como direção futura ("pollers distribuídos... core + poller nodes, estilo Zabbix Proxy") — não é uma surpresa, mas vale deixar explícito que essa é a fronteira real: os itens 1–4 fazem **um nó aguentar muito mais equipamentos**; para ir além de um nó (ex.: milhares de equipamentos espalhados por regiões/latências muito diferentes, ou redundância ativa-ativa), é preciso um mecanismo de coordenação distribuído (lock via `advisory lock` do Postgres seria o caminho mais barato de implementar — já dá acesso à mesma base — antes de partir para algo tipo fila/Redis-lock ou nós de coleta dedicados).
+
+Isso não é urgente para a escala atual (~75–500 equipamentos num único servidor aguenta folgado, pelos benchmarks do diagnóstico original), mas é o item que decide se o próximo salto de escala é "servidor maior" (funciona até um ponto) ou exige redesenho. Vale ter isso mapeado antes de prometer HA/redundância para um cliente maior.
+
+### 10. Observabilidade do próprio sistema de monitoramento é praticamente nula (Alto)
+
+Existe um endpoint `/metrics` já registado (`prometheusMetrics` em `handlers_alerts_rules_bng.go`, servido em `server.go:144`) — mas hoje ele só devolve:
+
+```
+# HELP netquasar_up Backend liveness
+netquasar_up 1
+```
+
+Ou seja, dá para saber que o processo está de pé e nada mais. Não há: duração real de cada ciclo do worker vs. o intervalo configurado (o diagnóstico original já apontava isso no achado 2 — "não há alerta se o ciclo está atrasando" — continua exatamente assim), número de conexões em uso no pool do Postgres (`pgxpool.Pool.Stat()` já existe na lib, só falta expor), contagem de goroutines, taxa de sucesso/falha por tipo de sonda (ping/SNMP/telnet), profundidade de fila se algum dia existir uma. Para uma ferramenta que É o sistema de monitoramento de outra coisa, não ter métricas sobre si mesma é o ponto cego mais importante numa operação de larga escala — é o tipo de coisa que só dói quando já é tarde (o worker começou a atrasar silenciosamente há semanas e ninguém percebeu porque não tinha onde olhar). Prioridade sugerida: enriquecer `prometheusMetrics` com pelo menos `netquasar_worker_cycle_seconds{cycle="ping|telemetry|olt|bng"}`, `netquasar_worker_cycle_lag_seconds`, `netquasar_db_pool_{used,idle,max}`, `netquasar_devices_total`, `netquasar_probe_failures_total{kind}` — todos dados que o worker e o pool já têm internamente, só não são exportados.
+
+### 11. Retenção automática (item 3) não cobre todas as tabelas que crescem sem parar (Médio-Alto, fica mais urgente com a escala)
+
+`runHistoryRetentionBatches` (`internal/monitorworker/retention.go`) só purga `ping_history`, `telemetry_samples` e `interface_snapshots`. Mapeando todas as tabelas de série temporal/log do sistema, ficaram de fora da retenção automática:
+
+- **`olt_snapshots`** e **`bng_session_snapshots`** — gravadas a cada ciclo de coleta OLT/BNG (confirmado: escritas em `olt_collect_all.go`, `olt_vendor_periodic.go`, `bngcollect/collect.go`), ou seja, crescem no mesmo ritmo (ou mais rápido, depois da paralelização OLT do diagnóstico original) que as 3 tabelas já cobertas.
+- **`network_events`**, **`events`** — indexadas por data, mas nunca purgadas.
+- **`integration_run_logs`**, **`automation_execution_log`** — log de execução de integrações/automações, cresce com o tempo e com o número de integrações ativas.
+- **`alert_instances`** / **`alert_incidents`** / **`alert_incident_alerts`** — histórico de alertas fechados; normalmente é o tipo de dado que se quer manter mais tempo que métricas brutas, mas hoje não tem *nenhum* limite, nem manual nem automático.
+
+Numa base pequena isso é invisível. Em larga escala (mais equipamentos → mais ciclos → mais linhas por dia, e histórico acumulando por anos) essas tabelas sem teto vão inflar o tamanho do banco, o tempo de `pg_dump` (backup automático já existe como automação, mas fica mais lento e mais pesado a cada mês sem retenção) e o `autovacuum`. É uma extensão barata do que já existe — bastaria adicionar `olt_snapshots`/`bng_session_snapshots` (mesmo padrão dos 3 já cobertos) ao array `tables` de `retention.go`, e decidir uma política separada (provavelmente uma retenção mais longa, configurável à parte) para `network_events`/`events`/`integration_run_logs`/`alert_instances`, que são registos de auditoria/histórico, não métricas brutas.
+
+### 12. Dívida de arquitetura (itens 5–8 do diagnóstico original) não encolheu — cresceu
+
+Conferi os números de novo: `internal/api` foi de 38.593 linhas (26/08) para **43.626 linhas** hoje — cresceu ~5.000 linhas em ~1 semana de features novas, no mesmo padrão monolítico (o maior arquivo agora é `handlers_network_infrastructure.go` com 2.042 linhas). No frontend, `BngPage.tsx` está em 2.361 linhas (era 2.517 — teve alguma extração, mas ainda é o maior). Testes automatizados no frontend continuam em **zero** (`0` arquivos `*.test.*`/`*.spec.*`, sem Vitest/Jest no `package.json`). Isso não é um problema de performance — é o tipo de dívida que, em larga escala (mais desenvolvedores, mais features por semana, mais risco de regressão silenciosa numa tela de alertas), determina se dá para continuar adicionando funcionalidade no mesmo ritmo sem acumular bugs. Mantenho a mesma recomendação do diagnóstico original: refatoração incremental a cada arquivo tocado, não uma reescrita.
+
 ## Priorização sugerida
 
 | # | Achado | Categoria | Severidade | Status |
@@ -153,10 +191,13 @@ Esta era a causa raiz real do sintoma "só equipamentos aparecem, CTOs/foguetes 
 | 4 | Sem virtualização de listas grandes no frontend | Performance (UI) | Médio | ✅ Implementado em Equipamentos (paginação); Conexões/Mapa pendentes |
 | — | Coleta OLT sequencial + só no pipeline lento (detecção de queda de ONUs) | Performance | Alto | ✅ Implementado (pedido à parte) |
 | — | Mapa: infraestrutura (CTOs/foguetes/cabos/postes/POPs) só carregava com projeto selecionado | Bug de visualização | Crítico | ✅ Implementado (pedido à parte) |
-| 5 | `internal/api` monolítico, handlers de 1000–2000 linhas | Arquitetura | Médio | Pendente |
+| 5 | `internal/api` monolítico, handlers de 1000–2000 linhas | Arquitetura | Médio | Pendente (cresceu: 38,6k → 43,6k linhas) |
 | 6 | Páginas React gigantes sem separação dados/UI | Arquitetura | Médio | Pendente |
 | 7 | Zero testes automatizados no frontend | Qualidade | Alto (risco) | Pendente |
 | 8 | Erros de escrita no banco ignorados sem log | Qualidade | Baixo–Médio | Pendente |
+| 9 | Lock de sondagem só em memória + 1 réplica só — não escala horizontalmente | Escalabilidade (nó único) | Alto (fronteira de escala) | Pendente — mapeado, sem esforço ainda |
+| 10 | `/metrics` só devolve liveness — zero observabilidade real do worker/pool | Operação/Observabilidade | Alto | Pendente |
+| 11 | Retenção automática não cobre `olt_snapshots`, `bng_session_snapshots`, `network_events`, `events`, `integration_run_logs`, `alert_instances` | Escalabilidade/operação | Médio–Alto | Pendente (extensão barata do item 3) |
 
 ## Próximos passos
 
@@ -168,3 +209,13 @@ Esta era a causa raiz real do sintoma "só equipamentos aparecem, CTOs/foguetes 
 6. Itens 5, 6 e 7 (arquitetura/testes) continuam como trabalho de fundo contínuo — sugiro tratá-los como refatoração incremental (a cada handler/página nova ou alterada, já sair do padrão monolítico) em vez de uma reescrita grande de uma vez. A extração de hooks do `MapPage.tsx` (mencionada acima) é um bom próximo candidato.
 
 Posso detalhar qualquer um dos pontos pendentes — por exemplo, propor a extração de um `useBngSessions`/service layer como exemplo para replicar nas demais telas/handlers, ou levar a paginação de Equipamentos para Conexões e Mapa.
+
+## Próximos passos (larga escala, 01/09/2026)
+
+Por ordem de custo/benefício, do mais barato ao mais estrutural:
+
+1. **Estender `runHistoryRetentionBatches`** (item 11) para incluir `olt_snapshots`/`bng_session_snapshots` no mesmo padrão já existente, e decidir uma política de retenção separada (mais longa) para `network_events`/`events`/`integration_run_logs`/`alert_instances`. É o item mais barato desta lista — reaproveita 100% do código já escrito.
+2. **Enriquecer `/metrics`** (item 10) com números reais do worker (duração/atraso de ciclo por tipo) e do pool de conexões — dá visibilidade operacional sem depender de olhar `docker logs` manualmente. Pode ser feito incrementalmente (começar só com duração de ciclo, que é o dado mais crítico para saber se o sistema está "acompanhando" a escala atual).
+3. **Expor `sweep_concurrency`, `history_retention_days` e `olt_baseline_parallel_seconds` na UI** (já pendente do diagnóstico anterior) — sem isso, ajustar a escala exige SQL direto ou variável de ambiente + restart.
+4. **Mapear (não necessariamente implementar já) o caminho para lock distribuído** (item 9) — por exemplo, trocar `snmpdevicelock` por `pg_advisory_lock`/`pg_try_advisory_lock` por `device_id` (hash do UUID) na mesma transação/pool já existente, o que destrava rodar 2+ réplicas do backend sem duplicar sondagem. Não é urgente na escala atual, mas é a peça que falta antes de prometer HA horizontal para um cliente maior.
+5. Itens 5–8 (arquitetura/testes) continuam como recomendado antes: refatoração incremental, não pausa para reescrever.

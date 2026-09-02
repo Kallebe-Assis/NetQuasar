@@ -173,6 +173,19 @@ func looksLikeSerial(s string) bool {
 		strings.HasPrefix(up, "VSOL") || strings.HasPrefix(up, "GPON")
 }
 
+// isPlausibleOnuSerial evita gravar como serial um valor SNMP que veio de uma coluna errada do
+// walk — visto em produção na firmware V1600G0B (o layout de colunas do MIB diverge do V1600G1,
+// que o comentário acima em parseSuffix/FromSNMPWalk assume): a coluna que deveria ser o serial
+// devolvia um código de estado numérico pequeno ("3", "4", "6"...), e por vir "não vazio" ficava
+// gravada como se fosse o serial real, bloqueando o valor correto vindo do telnet (ver
+// mergeTelnetFieldsIntoOnuRow/setIfEmpty em internal/oltcollect/onu_report_parse.go — só
+// preenche se o campo ainda estiver vazio). Todo serial de ONU real observado (VSOL/ZTE/Huawei/
+// outros) tem pelo menos 8 caracteres (prefixo de fabricante + sufixo hex); um valor mais curto
+// quase certamente não é um serial.
+func isPlausibleOnuSerial(s string) bool {
+	return len(normalizeVSOLString(s)) >= 8
+}
+
 func normalizeVSOLString(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, "\x00")
@@ -292,7 +305,7 @@ func FromSNMPWalk(vars []probing.SNMPVar, walkTruncated bool) (summary map[strin
 			case 4:
 				row.authMode = intFromVal(val)
 			case 5:
-				if strings.TrimSpace(val) != "" {
+				if isPlausibleOnuSerial(val) {
 					row.sn = val
 				}
 			case 6:
@@ -320,7 +333,9 @@ func FromSNMPWalk(vars []probing.SNMPVar, walkTruncated bool) (summary map[strin
 			case 4:
 				row.version = val
 			case 5:
-				row.sn = val
+				if isPlausibleOnuSerial(val) {
+					row.sn = val
+				}
 			case 6:
 				row.detailAdmin = intFromVal(val)
 			case 13:
