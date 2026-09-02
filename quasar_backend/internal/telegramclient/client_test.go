@@ -1,9 +1,45 @@
 package telegramclient
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+// TestBuildSendMessagePayload_TopicIDIsInteger cobre o bug real em produção: mensagens de
+// "relatórios" (tópico configurado) caíam no tópico "Geral" do grupo do Telegram em vez do
+// tópico certo, porque message_thread_id ia como string no JSON — a API do Telegram exige
+// Integer e ignora o campo quando o tipo não bate, sem erro nenhum.
+func TestBuildSendMessagePayload_TopicIDIsInteger(t *testing.T) {
+	cfg := Config{BotToken: "x", ChatID: "-100123", TopicID: "4680"}
+	payload := buildSendMessagePayload(cfg, "olá", SendOpts{})
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := decoded["message_thread_id"]
+	if !ok {
+		t.Fatalf("message_thread_id ausente no payload: %s", raw)
+	}
+	if _, isNumber := v.(float64); !isNumber {
+		t.Fatalf("message_thread_id devia ser Integer no JSON, veio %T (%v) — payload: %s", v, v, raw)
+	}
+	if !strings.Contains(string(raw), `"message_thread_id":4680`) {
+		t.Fatalf("esperava message_thread_id sem aspas no JSON, veio: %s", raw)
+	}
+}
+
+func TestBuildSendMessagePayload_NoTopicIDOmitsField(t *testing.T) {
+	cfg := Config{BotToken: "x", ChatID: "-100123"}
+	payload := buildSendMessagePayload(cfg, "olá", SendOpts{})
+	if _, ok := payload["message_thread_id"]; ok {
+		t.Fatalf("message_thread_id não devia aparecer sem TopicID: %+v", payload)
+	}
+}
 
 func TestParseTelegramMessageResult(t *testing.T) {
 	body := []byte(`{"ok":true,"result":{"message_id":8421,"chat":{"id":-1001234567890}}}`)

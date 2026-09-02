@@ -366,7 +366,17 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 				val := normalizeSnmpDisplayValue(v.Value)
 				switch key {
 				case MetricSerial:
-					row["serial"] = val
+					// Rede de segurança contra um OID de "serial" mal configurado no perfil da
+					// OLT (Definições → Perfis OLT) apontando por engano para outra tabela SNMP
+					// (ex.: visto em produção — perfil VSOL V1600G0B com "serial" a apontar para
+					// a mesma base do "status", devolvendo o código de fase (3=working) em vez do
+					// serial). Todo serial de ONU real tem pelo menos 8 caracteres; um valor mais
+					// curto quase certamente veio da tabela errada — não regista, para não
+					// bloquear (via merge "não sobrescreve campo já preenchido") uma correção
+					// posterior do próprio serial.
+					if len(strings.TrimSpace(val)) >= 8 {
+						row["serial"] = val
+					}
 				case MetricModel:
 					row["model"] = val
 				case MetricRxPower:

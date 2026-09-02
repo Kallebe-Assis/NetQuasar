@@ -290,7 +290,9 @@ func rowsFromVars(vars []probing.SNMPVar) []map[string]any {
 		case 2:
 			switch col {
 			case 5:
-				row.sn = val
+				if isPlausibleOnuSerial(val) {
+					row.sn = val
+				}
 			case 6:
 				row.model = val
 			}

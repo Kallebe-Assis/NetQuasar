@@ -113,6 +113,12 @@ func SendMessageWithResult(ctx context.Context, cfg Config, text string, opts Se
 	if !cfg.Ready() {
 		return SendResult{}, fmt.Errorf("configuração incompleta (token/chat_id)")
 	}
+	return postTelegram(ctx, cfg, "sendMessage", buildSendMessagePayload(cfg, text, opts))
+}
+
+// buildSendMessagePayload monta o corpo JSON de sendMessage. Isolada de postTelegram para dar
+// para testar sem chamada HTTP real.
+func buildSendMessagePayload(cfg Config, text string, opts SendOpts) map[string]any {
 	payload := map[string]any{
 		"chat_id": cfg.ChatID,
 		"text":    text,
@@ -121,12 +127,19 @@ func SendMessageWithResult(ctx context.Context, cfg Config, text string, opts Se
 		payload["parse_mode"] = opts.ParseMode
 	}
 	if cfg.TopicID != "" {
-		payload["message_thread_id"] = cfg.TopicID
+		// A API do Telegram exige message_thread_id como Integer — enviá-lo como string
+		// (o tipo de Config.TopicID, vindo direto da coluna text) faz a API do Telegram
+		// ignorar o campo silenciosamente: a mensagem é entregue com sucesso, mas cai no
+		// tópico "Geral" do grupo em vez do tópico configurado (ex.: "reports"), sem erro
+		// nenhum no lado do NetQuasar — daí o relatório "sumir" no chat principal.
+		if tid, err := strconv.ParseInt(cfg.TopicID, 10, 64); err == nil && tid > 0 {
+			payload["message_thread_id"] = tid
+		}
 	}
 	if opts.ReplyToMessageID > 0 {
 		payload["reply_to_message_id"] = opts.ReplyToMessageID
 	}
-	return postTelegram(ctx, cfg, "sendMessage", payload)
+	return payload
 }
 
 // EditMessageText actualiza o texto de uma mensagem já enviada.

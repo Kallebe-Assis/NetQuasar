@@ -9,6 +9,13 @@ export function LoginCircuitBackdrop() {
 
   return (
     <div className="login-circuit-backdrop" aria-hidden>
+      <div className="login-aurora">
+        <div className="login-aurora__blob login-aurora__blob--1" />
+        <div className="login-aurora__blob login-aurora__blob--2" />
+        <div className="login-aurora__blob login-aurora__blob--3" />
+        <div className="login-aurora__blob login-aurora__blob--4" />
+        <div className="login-aurora__vignette" />
+      </div>
       <div className="login-circuit-backdrop__grid" />
       <div className="login-circuit-backdrop__grid login-circuit-backdrop__grid--slow" />
       <div className="login-circuit-backdrop__glow" />
@@ -17,10 +24,10 @@ export function LoginCircuitBackdrop() {
       <svg className="login-circuit-backdrop__svg" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
         <defs>
           <linearGradient id={lineGrad} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="rgba(100, 190, 255, 0)" />
-            <stop offset="45%" stopColor="rgba(120, 200, 255, 0.35)" />
-            <stop offset="55%" stopColor="rgba(120, 200, 255, 0.35)" />
-            <stop offset="100%" stopColor="rgba(100, 190, 255, 0)" />
+            <stop offset="0%" stopColor="rgba(167, 139, 250, 0)" />
+            <stop offset="45%" stopColor="rgba(167, 139, 250, 0.4)" />
+            <stop offset="55%" stopColor="rgba(167, 139, 250, 0.4)" />
+            <stop offset="100%" stopColor="rgba(167, 139, 250, 0)" />
           </linearGradient>
         </defs>
         <g fill="none" stroke={`url(#${lineGrad})`} strokeWidth="0.6" opacity="0.45">

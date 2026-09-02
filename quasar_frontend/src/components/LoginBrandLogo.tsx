@@ -4,7 +4,7 @@ export function LoginBrandLogo({ showTitle = true }: { showTitle?: boolean }) {
     <div className="login-brand" aria-hidden={false}>
       <img
         className="login-brand__logo"
-        src="/Logo-NetQuasar%20II.png"
+        src="/Logo-NetQuasar.png"
         alt="NetQuasar"
         width={160}
         height={160}
