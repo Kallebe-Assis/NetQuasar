@@ -370,11 +370,11 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 					// OLT (Definições → Perfis OLT) apontando por engano para outra tabela SNMP
 					// (ex.: visto em produção — perfil VSOL V1600G0B com "serial" a apontar para
 					// a mesma base do "status", devolvendo o código de fase (3=working) em vez do
-					// serial). Todo serial de ONU real tem pelo menos 8 caracteres; um valor mais
-					// curto quase certamente veio da tabela errada — não regista, para não
-					// bloquear (via merge "não sobrescreve campo já preenchido") uma correção
-					// posterior do próprio serial.
-					if len(strings.TrimSpace(val)) >= 8 {
+					// serial). Não é a única camada — ver SanitizeOnuSerialsMap/JSON em
+					// onu_serial_guard.go, chamada de novo já perto da gravação em
+					// olt_snapshots, para o caso de algum outro coletor (actual ou futuro) ter o
+					// mesmo tipo de bug e não passar por aqui.
+					if IsPlausibleOnuSerial(val) {
 						row["serial"] = val
 					}
 				case MetricModel:

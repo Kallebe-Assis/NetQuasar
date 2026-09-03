@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltsamples"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
@@ -678,6 +679,7 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 	if err != nil {
 		return err
 	}
+	newSum = oltcollect.SanitizeOnuSerialsJSON(newSum)
 	pb, err := json.Marshal(mergedPons)
 	if err != nil {
 		return err
