@@ -9024,6 +9024,21 @@ details.collapsible-section .collapsible-section__body {
   margin-top: 10px;
   font-size: 12px;
 }
+/* Variante "ver conteúdo" (registos de texto) — o modal base não define width, só max-width, e
+   sem isso a <textarea class="input"> ficava com a largura mínima de um <textarea> (~20 colunas)
+   em vez de ocupar o modal, esmagando o texto numa coluna estreitíssima. */
+.vault-reveal--content {
+  max-width: min(760px, 94vw);
+  width: 100%;
+}
+.vault-reveal__textarea {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 
 /* Modal "Detalhes da ONU" — cartões visuais em vez de tabela crua de rótulo/valor. */
 .btn-link {

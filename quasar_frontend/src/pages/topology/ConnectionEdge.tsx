@@ -45,6 +45,8 @@ function ConnectionEdgeInner({
   const meta = connectionTypeMeta(data?.connType);
   const Icon = TYPE_ICON[meta.id] ?? Minus;
   const iconSize = data?.iconSize ?? 18;
+  const color = data?.colorOverrides?.[meta.id] ?? meta.color;
+  const label = (data?.customLabel ?? "").trim();
 
   function patchData(patch: Partial<ConnectionEdgeData>) {
     data?.onPatch?.(id, patch);
@@ -55,11 +57,7 @@ function ConnectionEdgeInner({
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        style={{ stroke: meta.color, strokeWidth: selected ? 3 : 2, strokeDasharray: meta.dash }}
-      />
+      <BaseEdge id={id} path={edgePath} style={{ stroke: color, strokeWidth: selected ? 3 : 2, strokeDasharray: meta.dash }} />
       <EdgeLabelRenderer>
         <div
           className="topo-edge-icon"
@@ -67,47 +65,65 @@ function ConnectionEdgeInner({
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             width: iconSize,
             height: iconSize,
-            color: meta.color,
+            color,
           }}
         >
           <Icon size={iconSize} strokeWidth={2} />
         </div>
+        {label && !selected && (
+          <div
+            className="topo-edge-label"
+            style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + iconSize / 2 + 3}px)`, color }}
+          >
+            {label}
+          </div>
+        )}
         {selected && (
           <div
             className="topo-edge-toolbar"
             style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + iconSize / 2 + 10}px)` }}
           >
-            <select
-              className="input"
+            <div className="topo-edge-toolbar__row">
+              <select
+                className="input"
+                style={{ fontSize: 11, padding: "2px 6px" }}
+                value={meta.id}
+                onChange={(e) => patchData({ connType: e.target.value as ConnectionEdgeData["connType"] })}
+              >
+                {TOPOLOGY_CONNECTION_TYPES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn--icon"
+                title="Diminuir ícone"
+                onClick={() => patchData({ iconSize: Math.max(MIN_EDGE_ICON_SIZE, iconSize - 4) })}
+              >
+                <Minus size={12} />
+              </button>
+              <button
+                type="button"
+                className="btn btn--icon"
+                title="Aumentar ícone"
+                onClick={() => patchData({ iconSize: Math.min(MAX_EDGE_ICON_SIZE, iconSize + 4) })}
+              >
+                <Plus size={12} />
+              </button>
+              <button type="button" className="btn btn--icon" title="Remover conexão" onClick={removeEdge}>
+                <Trash2 size={12} />
+              </button>
+            </div>
+            <input
+              className="input topo-edge-toolbar__name"
               style={{ fontSize: 11, padding: "2px 6px" }}
-              value={meta.id}
-              onChange={(e) => patchData({ connType: e.target.value as ConnectionEdgeData["connType"] })}
-            >
-              {TOPOLOGY_CONNECTION_TYPES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn--icon"
-              title="Diminuir ícone"
-              onClick={() => patchData({ iconSize: Math.max(MIN_EDGE_ICON_SIZE, iconSize - 4) })}
-            >
-              <Minus size={12} />
-            </button>
-            <button
-              type="button"
-              className="btn btn--icon"
-              title="Aumentar ícone"
-              onClick={() => patchData({ iconSize: Math.min(MAX_EDGE_ICON_SIZE, iconSize + 4) })}
-            >
-              <Plus size={12} />
-            </button>
-            <button type="button" className="btn btn--icon" title="Remover conexão" onClick={removeEdge}>
-              <Trash2 size={12} />
-            </button>
+              value={data?.customLabel ?? ""}
+              onChange={(e) => patchData({ customLabel: e.target.value })}
+              placeholder="Nomear esta conexão…"
+              onMouseDown={(e) => e.stopPropagation()}
+            />
           </div>
         )}
       </EdgeLabelRenderer>

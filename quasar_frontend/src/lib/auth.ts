@@ -43,6 +43,24 @@ export function saveAuthToken(token: string) {
   emitAuthChanged();
 }
 
+/** ID (uuid) do usuário autenticado, extraído do claim "uid" do JWT guardado — só decodifica o
+ * payload localmente (sem verificar assinatura; o token já é confiável por vir do próprio
+ * armazenamento local desta app), útil para pré-seleccionar "o usuário atual" em formulários/
+ * filtros sem precisar de um pedido extra à API. Devolve "" se não houver sessão ou o token não
+ * tiver o formato esperado. */
+export function getStoredUserId(): string {
+  const token = getAuthToken();
+  const parts = token.split(".");
+  if (parts.length < 2) return "";
+  try {
+    const json = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(json) as { uid?: string };
+    return typeof payload.uid === "string" ? payload.uid : "";
+  } catch {
+    return "";
+  }
+}
+
 export function saveSession(apiBase: string, apiKey: string) {
   localStorage.setItem(K_BASE, apiBase.replace(/\/$/, ""));
   localStorage.setItem(K_KEY, apiKey);

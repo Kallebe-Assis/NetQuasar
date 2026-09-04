@@ -1,7 +1,11 @@
+/* 100vh menos o que fica acima do canvas dentro de <main class="main"> (App.css): padding
+   vertical do .main (16px + 16px) + a linha do título "Topologia" (h1 20px/1.45 ≈ 29px) + a
+   margem de 4px que TopologyPage.tsx aplica ao .page-heading — o valor antigo (140px) sobrava
+   ~65px de espaço morto abaixo do canvas. */
 .topo-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 140px);
+  height: calc(100vh - 76px);
   min-height: 480px;
 }
 
@@ -108,6 +112,20 @@
   flex-direction: column;
   gap: 4px;
 }
+/* Catálogo fixo de equipamentos avulsos (6 itens) — não cresce para preencher o espaço como a
+   lista de cadastrados abaixo, só rola se um dia crescer além do previsto. */
+.topo-device-list__items--manual {
+  flex: 0 0 auto;
+  max-height: 220px;
+}
+.topo-device-list__section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
 .topo-device-list__item {
   display: flex;
   align-items: center;
@@ -157,6 +175,17 @@
 .topo-device-icon--selected {
   border-color: var(--accent, #58a6ff);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #58a6ff) 30%, transparent);
+}
+/* Equipamento avulso (ManualEquipmentNode.tsx) — traço tracejado para diferenciar à primeira
+   vista de um equipamento cadastrado (traço sólido, mesmo ícone base). */
+.topo-device-icon--manual {
+  border-style: dashed;
+}
+.topo-manual-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
 }
 .topo-device-label {
   display: flex;
@@ -210,13 +239,35 @@
   z-index: 1000;
   pointer-events: auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.topo-edge-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.topo-edge-toolbar__name {
+  width: 100%;
+  min-width: 140px;
+}
+/* Nome da conexão (customLabel) — texto discreto sob o ícone, só quando a aresta não está
+   seleccionada (seleccionada mostra o campo de edição no lugar). */
+.topo-edge-label {
+  position: absolute;
+  pointer-events: none;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--panel);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
 }
 
 /* Botão de remover no NodeToolbar de equipamento/POP (DeviceNode.tsx/GroupNode.tsx) */
@@ -232,4 +283,82 @@
 .topo-canvas-wrap .react-flow__handle {
   width: 10px;
   height: 10px;
+}
+
+/* Modal "Configurações da Topologia" (botão de engrenagem na barra de ferramentas) */
+.topo-settings-modal__tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.topo-settings-modal__tabs .btn--sm.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+.topo-settings-modal__section {
+  min-height: 220px;
+}
+.topo-settings-modal__colors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+.topo-settings-modal__color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.topo-settings-modal__color-row input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.topo-settings-modal__projects {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.topo-settings-modal__project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.topo-settings-modal__project-row.is-active {
+  border-color: var(--accent, #58a6ff);
+  background: color-mix(in srgb, var(--accent, #58a6ff) 10%, transparent);
+}
+.topo-settings-modal__project-name {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.topo-settings-modal__project-row.is-active .topo-settings-modal__project-name {
+  font-weight: 600;
+}
+.topo-settings-modal__danger-inline {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--err, #c44) 45%, var(--border));
+  background: color-mix(in srgb, var(--err, #c44) 8%, transparent);
 }

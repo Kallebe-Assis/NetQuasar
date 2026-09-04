@@ -409,6 +409,12 @@ func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {
 	)
 
 	first := oltcollect.FirstSerialSearchMatch(searchRes)
+	if first.Pon > 0 && first.Onu > 0 && strings.TrimSpace(first.Serial) != "" {
+		// A pesquisa telnet acabou de confirmar, ao vivo, que esta ONU existe nesta OLT — funde
+		// no snapshot para não deixar "encontrei pela pesquisa, mas o vínculo de cliente diz que
+		// não conhece este serial" (allOltOnuSerials só olha o snapshot gravado).
+		s.mergeSerialSearchIntoSnapshot(ctx, id, first)
+	}
 	parsed := oltcollect.ExtractTelnetKVFieldsPublic(searchRes.Output)
 	if first.Serial != "" {
 		parsed["SN"] = first.Serial
@@ -449,6 +455,37 @@ func (s *Server) searchOLTOnuBySerial(w http.ResponseWriter, r *http.Request) {
 		out["error"] = searchRes.Error
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// mergeSerialSearchIntoSnapshot grava no snapshot da OLT uma correspondência já confirmada por
+// telnet (ver comentário em MergeSerialSearchMatch) — melhor esforço: qualquer falha aqui não
+// deve derrubar a resposta da pesquisa em si, só fica sem o benefício de "agora já vinculável".
+func (s *Server) mergeSerialSearchIntoSnapshot(ctx context.Context, deviceID uuid.UUID, entry oltcollect.SerialSearchOnuEntry) {
+	var sumText string
+	err := s.DB().QueryRow(ctx, `SELECT COALESCE(summary::text, '{}') FROM olt_snapshots WHERE device_id=$1`, deviceID).Scan(&sumText)
+	if err != nil && err != pgx.ErrNoRows {
+		return
+	}
+	summary := map[string]any{}
+	if sumText != "" {
+		_ = json.Unmarshal([]byte(sumText), &summary)
+	}
+	if summary == nil {
+		summary = map[string]any{}
+	}
+	if !oltcollect.MergeSerialSearchMatch(summary, entry.Pon, entry.Onu, entry.Serial, entry.Model) {
+		return
+	}
+	sb, err := json.Marshal(summary)
+	if err != nil {
+		return
+	}
+	_, _ = s.DB().Exec(ctx, `
+		INSERT INTO olt_snapshots (device_id, summary, pons) VALUES ($1, $2::jsonb, '[]'::jsonb)
+		ON CONFLICT (device_id) DO UPDATE SET
+			summary = COALESCE(olt_snapshots.summary, '{}'::jsonb) || $2::jsonb,
+			updated_at = now()
+	`, deviceID, sb)
 }
 
 func (s *Server) lookupGponOnuBySerial(ctx context.Context, sess oltTelnetSession, target oltcollect.OnuReportTarget, secrets oltcollect.TelnetSecrets) string {

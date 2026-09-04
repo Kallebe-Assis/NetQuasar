@@ -53,6 +53,84 @@ func TestSanitizeOnuSerialsMap(t *testing.T) {
 	}
 }
 
+// TestMergeSerialSearchMatch cobre o bug real reportado: uma ONU encontrada por pesquisa telnet
+// ao vivo (searchOLTOnuBySerial) mas ausente do snapshot SNMP não entrava no conjunto de
+// "seriais conhecidos" que valida o vínculo de cliente — "encontrei pela pesquisa, mas não
+// consigo vincular". MergeSerialSearchMatch deve fazer essa ONU aparecer em vsol_onu_rows.
+func TestMergeSerialSearchMatch_NewRow(t *testing.T) {
+	summary := map[string]any{
+		"vsol_onu_rows": []any{
+			map[string]any{"pon": 1, "onu": 1, "serial": "ITBSCF8F197A"},
+		},
+	}
+	changed := MergeSerialSearchMatch(summary, 3, 12, "ZTEGD2557B46", "F670L")
+	if !changed {
+		t.Fatal("esperava changed=true ao acrescentar linha nova")
+	}
+	rows := OnuRowsFromSummary(summary)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	found := false
+	for _, r := range rows {
+		if r["serial"] == "ZTEGD2557B46" {
+			found = true
+			if r["pon"] != 3 || r["onu"] != 12 {
+				t.Fatalf("linha nova com pon/onu errados: %+v", r)
+			}
+			if r["model"] != "F670L" {
+				t.Fatalf("linha nova devia ter o modelo: %+v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("serial da pesquisa telnet não apareceu em vsol_onu_rows: %+v", rows)
+	}
+}
+
+func TestMergeSerialSearchMatch_UpdatesExistingRow(t *testing.T) {
+	summary := map[string]any{
+		"vsol_onu_rows": []any{
+			map[string]any{"pon": 1, "onu": 1, "model": "HG8010H"}, // sem serial (walk incompleto)
+		},
+	}
+	if !MergeSerialSearchMatch(summary, 1, 1, "itbscf8f197a", "") {
+		t.Fatal("esperava changed=true ao preencher serial em falta")
+	}
+	rows := OnuRowsFromSummary(summary)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1 (deve actualizar, não duplicar)", len(rows))
+	}
+	if rows[0]["serial"] != "ITBSCF8F197A" {
+		t.Fatalf("serial devia ter sido preenchido em maiúsculas: %+v", rows[0])
+	}
+	if rows[0]["model"] != "HG8010H" {
+		t.Fatalf("não devia perder o modelo já existente: %+v", rows[0])
+	}
+}
+
+func TestMergeSerialSearchMatch_RejectsImplausibleOrIncomplete(t *testing.T) {
+	summary := map[string]any{"vsol_onu_rows": []any{}}
+	cases := []struct {
+		pon, onu int
+		serial   string
+		name     string
+	}{
+		{0, 1, "ITBSCF8F197A", "pon zero"},
+		{1, 0, "ITBSCF8F197A", "onu zero"},
+		{1, 1, "3", "serial implausível"},
+		{1, 1, "", "serial vazio"},
+	}
+	for _, c := range cases {
+		if MergeSerialSearchMatch(summary, c.pon, c.onu, c.serial, "") {
+			t.Fatalf("%s: esperava changed=false, mas mudou algo", c.name)
+		}
+	}
+	if len(OnuRowsFromSummary(summary)) != 0 {
+		t.Fatal("nenhum dos casos inválidos devia ter acrescentado linha")
+	}
+}
+
 func TestSanitizeOnuSerialsMap_NoOnuRows(t *testing.T) {
 	summary := map[string]any{"olt_profile": map[string]any{"brand": "VSOL"}}
 	if n := SanitizeOnuSerialsMap(summary); n != 0 {

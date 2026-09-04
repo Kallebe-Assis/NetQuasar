@@ -1,5 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { TopologyConnectionType } from "../../lib/topologyConnectionTypes";
+import type { ManualEquipmentKind } from "../../lib/topologyManualKinds";
 
 /** Equipamento cadastrado (subconjunto de GET /api/v1/devices usado pela lista/canvas). */
 export type TopologyDevice = {
@@ -26,10 +27,27 @@ export type GroupNodeData = {
   onRemove?: (id: string) => void;
 } & Record<string, unknown>;
 
+/** Equipamento "avulso" — elemento de rede (switch/roteador/rádio/conversor de mídia/ONU/OLT)
+ * colocado directamente no canvas, sem estar ligado a nenhum registro em GET /api/v1/devices.
+ * Descrição e IP vivem só aqui (não há cadastro por trás) e são sempre opcionais. */
+export type ManualNodeData = {
+  kind: ManualEquipmentKind;
+  description: string;
+  ip: string | null;
+  // Mesmo padrão de callback-via-data de DeviceNodeData/ConnectionEdgeData — injectado por
+  // TopologyPage.tsx, necessário porque <ReactFlow nodes=…> é controlado pelo estado do pai.
+  onPatch?: (id: string, patch: Partial<ManualNodeData>) => void;
+  onRemove?: (id: string) => void;
+} & Record<string, unknown>;
+
 export type ConnectionEdgeData = {
   connType: TopologyConnectionType;
   iconSize: number;
   customLabel?: string;
+  // Injectado por TopologyPage.tsx a partir de doc.settings.connection_colors — cor
+  // personalizada por tipo de conexão (Configurações → Cores das conexões), substitui a cor fixa
+  // do catálogo (lib/topologyConnectionTypes.ts) quando definida.
+  colorOverrides?: Partial<Record<TopologyConnectionType, string>>;
   // Callbacks injectados por TopologyPage.tsx (não fazem parte do documento gravado — ver
   // flowToDoc, que só lê connType/customLabel/iconSize). Necessários porque <ReactFlow edges=…>
   // é controlado pelo estado do pai: um ConnectionEdge não pode chamar useReactFlow().setEdges
@@ -40,7 +58,10 @@ export type ConnectionEdgeData = {
   onRemove?: (id: string) => void;
 } & Record<string, unknown>;
 
-export type TopologyNode = Node<DeviceNodeData, "device"> | Node<GroupNodeData, "pop">;
+export type TopologyNode =
+  | Node<DeviceNodeData, "device">
+  | Node<GroupNodeData, "pop">
+  | Node<ManualNodeData, "manual">;
 export type TopologyEdge = Edge<ConnectionEdgeData, "typed">;
 
 /** Formato gravado em GET/PUT /api/v1/topology — só nodes/edges/groups são úteis para nós;
@@ -54,6 +75,13 @@ export type TopologyDocument = {
     width?: number;
     height?: number;
     parent_id?: string;
+    // Presente só em nós avulsos (ver ManualNodeData) — quando ausente, o nó é um equipamento
+    // cadastrado e `id` acima é o device_id (comportamento anterior, inalterado).
+    manual?: {
+      kind: string;
+      description?: string;
+      ip?: string | null;
+    };
   }>;
   edges: Array<{
     id: string;
@@ -78,6 +106,11 @@ export type TopologyDocument = {
     label: string;
     color?: string;
   }>;
+  settings?: {
+    // Cor personalizada por tipo de conexão (Configurações → Cores) — chave ausente/tipo ausente
+    // usa a cor padrão do catálogo (lib/topologyConnectionTypes.ts).
+    connection_colors?: Partial<Record<TopologyConnectionType, string>>;
+  };
 };
 
 export function emptyTopologyDocument(): TopologyDocument {

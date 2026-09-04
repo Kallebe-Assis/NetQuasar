@@ -8,7 +8,7 @@ import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
-import { isAdminUser } from "../lib/auth";
+import { getStoredUserId, isAdminUser } from "../lib/auth";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { queryKeys } from "../lib/queryKeys";
 
@@ -123,9 +123,11 @@ export function RecordsPage() {
   const qc = useQueryClient();
   const admin = isAdminUser();
 
+  const currentUserId = useMemo(() => getStoredUserId(), []);
+
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("");
-  const [ownerId, setOwnerId] = useState("");
+  const [ownerId, setOwnerId] = useState(currentUserId);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
@@ -181,7 +183,7 @@ export function RecordsPage() {
 
   function openCreate() {
     const f = emptyForm();
-    if (users.length === 1) f.owner_user_id = users[0].id;
+    f.owner_user_id = currentUserId || (users.length === 1 ? users[0].id : "");
     setEditing(null);
     setForm(f);
     setDeviceSearch("");
@@ -269,6 +271,28 @@ export function RecordsPage() {
       }
       setShowPass(true);
       setReveal({ id, kind, username: data.username ?? null, password: data.password ?? "" });
+    },
+    onError: (e) => toastErr(push, e),
+  });
+
+  // "Copiar credenciais" — busca a senha (mesmo endpoint de revelar) e copia direto para a
+  // área de transferência já formatado, sem precisar abrir o modal de "Ver senha" primeiro.
+  const copyCredentialsMut = useMutation({
+    mutationFn: async (it: RecordItem) => {
+      const data = await apiFetch<{ username?: string | null; password?: string }>(
+        `/api/v1/credential-records/${it.id}/reveal`,
+        { method: "POST" },
+      );
+      const label = it.title || targetOf(it);
+      const lines = [`Credenciais ${label}`, ""];
+      if (data.username) lines.push(`Usuario: ${data.username}`);
+      lines.push(`Senha: ${data.password ?? ""}`);
+      return lines.join("\n");
+    },
+    onSuccess: async (text) => {
+      const ok = await copyText(text);
+      if (ok) toastOk(push, "Credenciais copiadas.");
+      else toastErr(push, new Error("Não foi possível aceder à área de transferência."));
     },
     onError: (e) => toastErr(push, e),
   });
@@ -383,6 +407,9 @@ export function RecordsPage() {
                         isTextKind(it.kind)
                           ? { id: "reveal", label: "Ver conteúdo", onClick: () => revealMut.mutate(it.id) }
                           : { id: "reveal", label: "Ver senha", onClick: () => revealMut.mutate(it.id) },
+                        ...(!isTextKind(it.kind)
+                          ? [{ id: "copy-creds", label: "Copiar credenciais", onClick: () => copyCredentialsMut.mutate(it) }]
+                          : []),
                         { id: "edit", label: "Editar", onClick: () => openEdit(it) },
                         { id: "del", label: "Excluir", danger: true, onClick: () => setDeleteTarget(it) },
                       ]}
@@ -414,10 +441,7 @@ export function RecordsPage() {
                       </button>
                     ))}
                   </div>
-                  <p className="vault-kinds__label" style={{ marginTop: 10 }}>
-                    Texto livre
-                  </p>
-                  <div className="vault-kinds__row">
+                  <div className="vault-kinds__row" style={{ marginTop: 10 }}>
                     {TEXT_KINDS.map((k) => (
                       <button
                         key={k}
@@ -579,11 +603,16 @@ export function RecordsPage() {
       {reveal
         ? createPortal(
             <div className="modal-backdrop" role="presentation" onMouseDown={() => setReveal(null)}>
-              <div className="modal vault-reveal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+              <div
+                className={`modal vault-reveal${"content" in reveal ? " vault-reveal--content" : ""}`}
+                role="dialog"
+                aria-modal="true"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 {"content" in reveal ? (
                   <>
                     <h3>Conteúdo — {KIND_LABEL[reveal.kind]}</h3>
-                    <textarea className="input" readOnly rows={12} value={reveal.content} />
+                    <textarea className="input vault-reveal__textarea" readOnly rows={16} value={reveal.content} />
                     <div className="row" style={{ justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
                       <button
                         type="button"

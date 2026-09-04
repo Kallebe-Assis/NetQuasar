@@ -47,6 +47,59 @@ func SanitizeOnuSerialsMap(summary map[string]any) int {
 	return cleaned
 }
 
+// MergeSerialSearchMatch funde na lista de ONUs do summary uma correspondência confirmada por
+// pesquisa telnet ao vivo (searchOLTOnuBySerial) — sem isto, uma ONU que a própria pesquisa
+// acabou de provar que existe na OLT (PON/ONU/serial devolvidos pelo comando telnet) podia ficar
+// de fora do snapshot SNMP (walk incompleto, ONU ainda não vista por SNMP, etc.), e por
+// consequência de fora do conjunto de "seriais conhecidos" que valida o vínculo de cliente
+// (allOltOnuSerials, handlers_olt_onu_client_links.go) — "encontrei pela pesquisa, mas não
+// consigo vincular cliente porque não está na lista" era exactamente essa inconsistência.
+//
+// Actualiza a linha existente (por pon+onu) se já houver uma, ou acrescenta uma linha nova
+// mínima caso contrário — o próximo ciclo de coleta completa o resto (potência, temperatura...).
+// Devolve true se o summary foi alterado (o chamador decide se vale gravar).
+func MergeSerialSearchMatch(summary map[string]any, pon, onu int, serial, model string) bool {
+	serial = strings.ToUpper(strings.TrimSpace(serial))
+	if summary == nil || pon <= 0 || onu <= 0 || !IsPlausibleOnuSerial(serial) {
+		return false
+	}
+	rows := OnuRowsFromSummary(summary)
+	changed := false
+	found := false
+	for _, row := range rows {
+		if intFromRow(row, "pon") != pon || intFromRow(row, "onu") != onu {
+			continue
+		}
+		found = true
+		if cur, ok := row["serial"].(string); !ok || !strings.EqualFold(strings.TrimSpace(cur), serial) {
+			row["serial"] = serial
+			changed = true
+		}
+		if strings.TrimSpace(model) != "" {
+			if cur, ok := row["model"].(string); !ok || strings.TrimSpace(cur) == "" {
+				row["model"] = model
+			}
+		}
+		break
+	}
+	if !found {
+		newRow := map[string]any{"pon": pon, "onu": onu, "serial": serial}
+		if strings.TrimSpace(model) != "" {
+			newRow["model"] = model
+		}
+		rows = append(rows, newRow)
+		changed = true
+	}
+	if changed {
+		arr := make([]any, len(rows))
+		for i, r := range rows {
+			arr[i] = r
+		}
+		summary["vsol_onu_rows"] = arr
+	}
+	return changed
+}
+
 // SanitizeOnuSerialsJSON é a mesma limpeza que SanitizeOnuSerialsMap, mas para quando só se tem
 // o JSON já serializado (alguns pontos de gravação em olt_snapshots recebem/produzem []byte, não
 // o map[string]any vivo). Devolve o `raw` original sem alterações se não houver nada para limpar

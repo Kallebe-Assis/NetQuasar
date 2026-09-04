@@ -632,11 +632,15 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			})
 		})
 
-		r.Route("/topology", func(r chi.Router) {
-			r.Get("/", s.getTopologyCanvas)
+		r.Route("/topology/projects", func(r chi.Router) {
+			r.Get("/", s.listTopologyProjects)
+			r.Get("/{id}", s.getTopologyProjectCanvas)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("map.manage", "*"))
-				r.Put("/", s.putTopologyCanvas)
+				r.Post("/", s.createTopologyProject)
+				r.Put("/{id}", s.putTopologyProjectCanvas)
+				r.Patch("/{id}", s.renameTopologyProject)
+				r.Delete("/{id}", s.deleteTopologyProject)
 			})
 		})
 

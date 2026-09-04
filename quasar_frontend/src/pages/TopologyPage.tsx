@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addEdge,
   applyEdgeChanges,
@@ -22,7 +22,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./topology/topology.css";
-import { Circle, Redo2, Save, Square, Trash2, Undo2 } from "lucide-react";
+import { Circle, Redo2, Save, Settings, Square, Undo2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
@@ -34,26 +34,50 @@ import {
   DEFAULT_GROUP_SIZE,
   DEFAULT_NODE_SIZE,
   TOPOLOGY_CONNECTION_TYPES,
+  type TopologyConnectionType,
 } from "../lib/topologyConnectionTypes";
 import { ConnectionEdge } from "./topology/ConnectionEdge";
-import { DeviceListPanel, TOPOLOGY_DRAG_MIME } from "./topology/DeviceListPanel";
+import { DeviceListPanel, TOPOLOGY_DRAG_MIME, TOPOLOGY_MANUAL_DRAG_MIME } from "./topology/DeviceListPanel";
 import { DeviceNode } from "./topology/DeviceNode";
 import { GroupNode } from "./topology/GroupNode";
+import { ManualEquipmentNode } from "./topology/ManualEquipmentNode";
+import { TopologySettingsModal, type TopologyProjectSummary } from "./topology/TopologySettingsModal";
 import type {
   ConnectionEdgeData,
   DeviceNodeData,
   GroupNodeData,
+  ManualNodeData,
   TopologyDevice,
   TopologyDocument,
 } from "./topology/types";
 import { emptyTopologyDocument } from "./topology/types";
+import type { ManualEquipmentKind } from "../lib/topologyManualKinds";
 
-const nodeTypes = { device: DeviceNode, pop: GroupNode };
+const LAST_PROJECT_KEY = "netquasar.topology.lastProjectId";
+
+const nodeTypes = { device: DeviceNode, pop: GroupNode, manual: ManualEquipmentNode };
 const edgeTypes = { typed: ConnectionEdge };
 
 function docToFlow(doc: TopologyDocument, devices: Map<string, TopologyDevice>) {
   const nodes: Node[] = [];
   for (const n of doc.nodes) {
+    if (n.manual) {
+      nodes.push({
+        id: n.id,
+        type: "manual",
+        position: { x: n.x, y: n.y },
+        width: n.width ?? DEFAULT_NODE_SIZE,
+        height: n.height ?? DEFAULT_NODE_SIZE,
+        parentId: n.parent_id,
+        extent: n.parent_id ? "parent" : undefined,
+        data: {
+          kind: n.manual.kind as ManualEquipmentKind,
+          description: n.manual.description ?? "",
+          ip: n.manual.ip ?? null,
+        } satisfies ManualNodeData,
+      });
+      continue;
+    }
     const dev = devices.get(n.id);
     if (!dev) continue; // equipamento apagado entretanto — não desenha nó fantasma
     nodes.push({
@@ -107,6 +131,19 @@ function flowToDoc(nodes: Node[], edges: Edge[]): TopologyDocument {
       });
       continue;
     }
+    if (n.type === "manual") {
+      const data = n.data as ManualNodeData;
+      doc.nodes.push({
+        id: n.id,
+        x: n.position.x,
+        y: n.position.y,
+        width: n.width as number | undefined,
+        height: n.height as number | undefined,
+        parent_id: n.parentId,
+        manual: { kind: data.kind, description: data.description || undefined, ip: data.ip || undefined },
+      });
+      continue;
+    }
     doc.nodes.push({
       id: n.id,
       x: n.position.x,
@@ -142,24 +179,64 @@ function reorderForParenting(nodes: Node[]): Node[] {
 
 function TopologyCanvas() {
   const { push: pushToast } = useAppToast();
+  const qc = useQueryClient();
   const canMutate = isAdminUser() || can("map.manage");
   const reactFlow = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const addCounterRef = useRef(0);
-  const hydratedRef = useRef(false);
+  // Guarda o id do projecto já hidratado no canvas — diferente de um simples booleano porque
+  // trocar de projecto precisa de re-hidratar (o "só uma vez" de antes assumia 1 documento só).
+  const hydratedProjectIdRef = useRef<string | null>(null);
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [dirty, setDirty] = useState(false);
-  const [clearOpen, setClearOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [colorOverrides, setColorOverrides] = useState<Partial<Record<TopologyConnectionType, string>>>({});
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_PROJECT_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
 
   const devicesQ = useQuery({
     queryKey: ["topology-devices"],
     queryFn: () => apiFetch<{ devices: Array<{ id: string; description: string; category: string; ip: string | null }> }>("/api/v1/devices"),
   });
+  const projectsQ = useQuery({
+    queryKey: ["topology-projects"],
+    queryFn: () => apiFetch<{ items: TopologyProjectSummary[] }>("/api/v1/topology/projects"),
+  });
+  const projects = useMemo(() => projectsQ.data?.items ?? [], [projectsQ.data]);
+
+  // Assim que a lista de projectos chega, garante um projecto activo: o último usado (guardado
+  // no navegador) se ainda existir, senão o primeiro da lista.
+  useEffect(() => {
+    if (projects.length === 0) return;
+    if (activeProjectId && projects.some((p) => p.id === activeProjectId)) return;
+    setActiveProjectId(projects[0].id);
+  }, [projects, activeProjectId]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
+      localStorage.setItem(LAST_PROJECT_KEY, activeProjectId);
+    } catch {
+      /* localStorage indisponível — só perde a conveniência de lembrar o último projecto */
+    }
+  }, [activeProjectId]);
+
+  // Só activa depois de confirmar que activeProjectId é um projecto que existe de facto na
+  // lista actual — evita disparar com um id obsoleto vindo do localStorage (ex.: projecto
+  // apagado noutra sessão) antes do efeito acima ter tido a chance de o corrigir, o que
+  // devolveria 404 e travava a tela inteira no ecrã de erro.
   const canvasQ = useQuery({
-    queryKey: ["topology-canvas"],
-    queryFn: () => apiFetch<TopologyDocument>("/api/v1/topology"),
+    queryKey: ["topology-canvas", activeProjectId],
+    queryFn: () => apiFetch<TopologyDocument>(`/api/v1/topology/projects/${activeProjectId}`),
+    enabled: !!activeProjectId && projects.some((p) => p.id === activeProjectId),
   });
 
   const devices: TopologyDevice[] = useMemo(
@@ -168,20 +245,24 @@ function TopologyCanvas() {
   );
   const devicesById = useMemo(() => new Map(devices.map((d) => [d.id, d])), [devices]);
 
-  // Hidrata o canvas assim que os dois pedidos (devices + topology) chegarem — só uma vez.
+  // Hidrata o canvas assim que devices + o projecto activo chegarem — repete sempre que
+  // activeProjectId mudar (troca de projecto), não só na primeira vez.
   useEffect(() => {
-    if (hydratedRef.current) return;
+    if (!activeProjectId) return;
+    if (hydratedProjectIdRef.current === activeProjectId) return;
     if (!devicesQ.data || !canvasQ.data) return;
     const { nodes: n, edges: e } = docToFlow(canvasQ.data, devicesById);
     setNodes(n);
     setEdges(e);
-    hydratedRef.current = true;
-  }, [devicesQ.data, canvasQ.data, devicesById]);
+    setColorOverrides(canvasQ.data.settings?.connection_colors ?? {});
+    setDirty(false);
+    hydratedProjectIdRef.current = activeProjectId;
+  }, [activeProjectId, devicesQ.data, canvasQ.data, devicesById]);
 
   // Mantém descrição/categoria/IP dos nós já colocados em sincronia se o cadastro mudar
   // (sem mexer em posição/tamanho), depois da hidratação inicial.
   useEffect(() => {
-    if (!hydratedRef.current) return;
+    if (!hydratedProjectIdRef.current) return;
     setNodes((nds) =>
       nds.map((n) => {
         if (n.type !== "device") return n;
@@ -197,7 +278,7 @@ function TopologyCanvas() {
   const placedIds = useMemo(() => new Set(nodes.filter((n) => n.type === "device").map((n) => n.id)), [nodes]);
 
   const markDirty = useCallback(() => {
-    if (hydratedRef.current) setDirty(true);
+    if (hydratedProjectIdRef.current) setDirty(true);
   }, []);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
@@ -222,8 +303,12 @@ function TopologyCanvas() {
     markDirty();
   }, [markDirty]);
   const edgesForFlow = useMemo(
-    () => edges.map((e) => ({ ...e, data: { ...(e.data as ConnectionEdgeData), onPatch: patchEdgeData, onRemove: removeEdgeById } })),
-    [edges, patchEdgeData, removeEdgeById],
+    () =>
+      edges.map((e) => ({
+        ...e,
+        data: { ...(e.data as ConnectionEdgeData), colorOverrides, onPatch: patchEdgeData, onRemove: removeEdgeById },
+      })),
+    [edges, colorOverrides, patchEdgeData, removeEdgeById],
   );
 
   // removeNode — remove um único equipamento (+ as ligações dele) ou um único POP (desagrupa os
@@ -259,9 +344,20 @@ function TopologyCanvas() {
     },
     [reactFlow, markDirty],
   );
+  // Mesmo padrão de patchEdgeData acima, mas para nós — hoje só ManualEquipmentNode.tsx usa isto
+  // (editar descrição/IP inline, já que não há cadastro por trás para ler esses campos); os
+  // outros tipos de nó simplesmente ignoram o onPatch injectado.
+  const patchNodeData = useCallback((id: string, patch: Record<string, unknown>) => {
+    setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...(n.data as Record<string, unknown>), ...patch } } : n)));
+    markDirty();
+  }, [markDirty]);
   const nodesForFlow = useMemo(
-    () => nodes.map((n) => ({ ...n, data: { ...(n.data as Record<string, unknown>), onRemove: removeNode } })),
-    [nodes, removeNode],
+    () =>
+      nodes.map((n) => ({
+        ...n,
+        data: { ...(n.data as Record<string, unknown>), onRemove: removeNode, onPatch: patchNodeData },
+      })),
+    [nodes, removeNode, patchNodeData],
   );
 
   // --- desfazer/refazer -------------------------------------------------------------------
@@ -280,7 +376,7 @@ function TopologyCanvas() {
   const debounceRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    if (!hydratedRef.current) return;
+    if (!hydratedProjectIdRef.current) return;
     if (skipRef.current) {
       skipRef.current = false;
       baselineRef.current = { nodes, edges };
@@ -464,9 +560,52 @@ function TopologyCanvas() {
     [nextGridPosition, markDirty],
   );
 
+  const addManualNode = useCallback(
+    (kind: ManualEquipmentKind) => {
+      const id = `manual-${crypto.randomUUID()}`;
+      const pos = nextGridPosition();
+      setNodes((nds) =>
+        reorderForParenting([
+          ...nds,
+          {
+            id,
+            type: "manual",
+            position: pos,
+            width: DEFAULT_NODE_SIZE,
+            height: DEFAULT_NODE_SIZE,
+            data: { kind, description: "", ip: null } satisfies ManualNodeData,
+          },
+        ]),
+      );
+      markDirty();
+    },
+    [nextGridPosition, markDirty],
+  );
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      const rawManual = event.dataTransfer.getData(TOPOLOGY_MANUAL_DRAG_MIME);
+      if (rawManual) {
+        const kind = rawManual as ManualEquipmentKind;
+        const flowPos = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const id = `manual-${crypto.randomUUID()}`;
+        setNodes((nds) =>
+          reorderForParenting([
+            ...nds,
+            {
+              id,
+              type: "manual",
+              position: flowPos,
+              width: DEFAULT_NODE_SIZE,
+              height: DEFAULT_NODE_SIZE,
+              data: { kind, description: "", ip: null } satisfies ManualNodeData,
+            },
+          ]),
+        );
+        markDirty();
+        return;
+      }
       const raw = event.dataTransfer.getData(TOPOLOGY_DRAG_MIME);
       if (!raw) return;
       const device = JSON.parse(raw) as TopologyDevice;
@@ -494,25 +633,86 @@ function TopologyCanvas() {
   );
 
   const saveMut = useCallback(async () => {
+    if (!activeProjectId) return;
     const doc = flowToDoc(nodes, edges);
+    doc.settings = { ...(doc.settings ?? {}), connection_colors: colorOverrides };
     try {
-      await apiFetch("/api/v1/topology", { method: "PUT", json: doc });
+      await apiFetch(`/api/v1/topology/projects/${activeProjectId}`, { method: "PUT", json: doc });
       setDirty(false);
       toastOk(pushToast, "Topologia salva.");
+      void qc.invalidateQueries({ queryKey: ["topology-projects"] });
     } catch (e) {
       toastErr(pushToast, e, "Falha ao salvar a topologia.");
     }
-  }, [nodes, edges, pushToast]);
+  }, [activeProjectId, nodes, edges, colorOverrides, pushToast, qc]);
 
   function clearAll() {
     setNodes([]);
     setEdges([]);
-    setClearOpen(false);
+    setColorOverrides({});
     markDirty();
   }
 
-  if (devicesQ.isLoading || canvasQ.isLoading) return <p>A carregar topologia…</p>;
+  function buildExportDoc(): TopologyDocument {
+    return flowToDoc(nodes, edges);
+  }
+
+  function applyImportedDoc(doc: TopologyDocument) {
+    const { nodes: n, edges: e } = docToFlow(doc, devicesById);
+    setNodes(n);
+    setEdges(e);
+    if (doc.settings?.connection_colors) setColorOverrides(doc.settings.connection_colors);
+    markDirty();
+    toastOk(pushToast, "Diagrama importado — clique em «Salvar» para gravar no projeto atual.");
+  }
+
+  function requestSwitchProject(id: string) {
+    if (id === activeProjectId) return;
+    if (dirty) {
+      setPendingProjectId(id);
+      return;
+    }
+    setActiveProjectId(id);
+  }
+
+  async function handleCreateProject(name: string) {
+    try {
+      const res = await apiFetch<{ id: string; name: string }>("/api/v1/topology/projects", { method: "POST", json: { name } });
+      await qc.invalidateQueries({ queryKey: ["topology-projects"] });
+      toastOk(pushToast, `Projeto «${name}» criado.`);
+      requestSwitchProject(res.id);
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao criar projeto.");
+    }
+  }
+
+  async function handleRenameProject(id: string, name: string) {
+    try {
+      await apiFetch(`/api/v1/topology/projects/${id}`, { method: "PATCH", json: { name } });
+      await qc.invalidateQueries({ queryKey: ["topology-projects"] });
+      toastOk(pushToast, "Projeto renomeado.");
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao renomear projeto.");
+    }
+  }
+
+  async function handleDeleteProject(id: string) {
+    try {
+      await apiFetch(`/api/v1/topology/projects/${id}`, { method: "DELETE" });
+      if (id === activeProjectId) {
+        hydratedProjectIdRef.current = null;
+        setActiveProjectId(null);
+      }
+      await qc.invalidateQueries({ queryKey: ["topology-projects"] });
+      toastOk(pushToast, "Projeto removido.");
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao remover projeto.");
+    }
+  }
+
+  if (devicesQ.isLoading || projectsQ.isLoading || canvasQ.isLoading) return <p>A carregar topologia…</p>;
   if (devicesQ.isError) return <div className="msg msg--err">{(devicesQ.error as Error).message}</div>;
+  if (projectsQ.isError) return <div className="msg msg--err">{(projectsQ.error as Error).message}</div>;
   if (canvasQ.isError) return <div className="msg msg--err">{(canvasQ.error as Error).message}</div>;
 
   return (
@@ -522,6 +722,21 @@ function TopologyCanvas() {
       </div>
 
       <div className="topo-toolbar">
+        {projects.length > 1 ? (
+          <select
+            className="input"
+            style={{ maxWidth: 220 }}
+            value={activeProjectId ?? ""}
+            onChange={(e) => requestSwitchProject(e.target.value)}
+            aria-label="Projeto de topologia"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         {canMutate && (
           <button type="button" className="btn btn--primary" disabled={!dirty} onClick={() => void saveMut()}>
             <Save size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
@@ -550,16 +765,13 @@ function TopologyCanvas() {
             Adicionar POP (círculo)
           </button>
         )}
-        {canMutate && (
-          <button type="button" className="btn" onClick={() => setClearOpen(true)}>
-            <Trash2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            Limpar tudo
-          </button>
-        )}
+        <button type="button" className="btn btn--icon" title="Configurações da topologia" onClick={() => setSettingsOpen(true)}>
+          <Settings size={14} />
+        </button>
         <div className="topo-toolbar__legend">
           {TOPOLOGY_CONNECTION_TYPES.map((t) => (
             <span key={t.id} className="topo-toolbar__legend-item">
-              <span className="topo-toolbar__legend-dot" style={{ background: t.color }} />
+              <span className="topo-toolbar__legend-dot" style={{ background: colorOverrides[t.id] ?? t.color }} />
               {t.label}
             </span>
           ))}
@@ -597,17 +809,43 @@ function TopologyCanvas() {
           </ReactFlow>
         </div>
 
-        {canMutate && <DeviceListPanel devices={devices} placedIds={placedIds} onAddDevice={addDeviceNode} />}
+        {canMutate && (
+          <DeviceListPanel devices={devices} placedIds={placedIds} onAddDevice={addDeviceNode} onAddManual={addManualNode} />
+        )}
       </div>
 
+      <TopologySettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        canMutate={canMutate}
+        colorOverrides={colorOverrides}
+        onColorsChange={(next) => {
+          setColorOverrides(next);
+          markDirty();
+        }}
+        projects={projects}
+        projectsLoading={projectsQ.isLoading}
+        activeProjectId={activeProjectId}
+        onSwitchProject={requestSwitchProject}
+        onCreateProject={handleCreateProject}
+        onRenameProject={handleRenameProject}
+        onDeleteProject={handleDeleteProject}
+        buildExportDoc={buildExportDoc}
+        onImportDoc={applyImportedDoc}
+        onClearAll={clearAll}
+      />
+
       <ConfirmModal
-        open={clearOpen}
-        title="Limpar topologia"
-        message="Remove todos os equipamentos, conexões e POPs deste diagrama. Isto só é permanente depois de clicar em Salvar."
-        confirmLabel="Limpar"
+        open={!!pendingProjectId}
+        title="Trocar de projeto"
+        message="Há alterações não salvas neste projeto — trocar de projeto agora descarta-as (o que já está salvo no servidor não é afetado). Continuar?"
+        confirmLabel="Trocar mesmo assim"
         danger
-        onCancel={() => setClearOpen(false)}
-        onConfirm={clearAll}
+        onCancel={() => setPendingProjectId(null)}
+        onConfirm={() => {
+          if (pendingProjectId) setActiveProjectId(pendingProjectId);
+          setPendingProjectId(null);
+        }}
       />
     </div>
   );
