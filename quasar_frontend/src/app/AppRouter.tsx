@@ -38,6 +38,9 @@ const RecordsPage = lazy(() =>
 );
 const MapPage = lazy(() => import("../pages/MapPage").then((m) => ({ default: m.MapPage })));
 const TopologyPage = lazy(() => import("../pages/TopologyPage").then((m) => ({ default: m.TopologyPage })));
+const PopRackTopologyPage = lazy(() =>
+  import("../pages/PopRackTopologyPage").then((m) => ({ default: m.PopRackTopologyPage })),
+);
 const ToolsPage = lazy(() =>
   import("../pages/ToolsPage").then((m) => ({ default: m.ToolsPage })),
 );
@@ -173,6 +176,7 @@ export function AppRouter() {
             }
           />
           <Route path="pops" element={withSuspense(<PopsPage />)} />
+          <Route path="pops/:popId/rack" element={withSuspense(<PopRackTopologyPage />)} />
           <Route path="devices" element={withSuspense(<DevicesPage />)} />
           <Route path="commercial" element={withSuspense(<CommercialPage />)} />
           <Route path="connections" element={withSuspense(<ClientConnectionsPage />)} />

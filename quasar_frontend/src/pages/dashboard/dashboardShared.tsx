@@ -54,6 +54,22 @@ export type DashboardAnalytics = {
   alerts_open?: number;
   olt_onu_by_device?: OltOnu[];
   olt_onu_fleet_totals?: { onu_count?: number; onu_online?: number; onu_offline?: number };
+  cto_ports?: CtoPortsSummary;
+};
+export type CtoPortsSummary = {
+  total_ctos?: number;
+  ctos_with_ports?: number;
+  ports_total?: number;
+  ports_used?: number;
+  ports_free?: number;
+  top_occupied?: Array<{
+    id?: string;
+    display_number?: number;
+    description?: string;
+    ports_total?: number;
+    ports_used?: number;
+    ports_free?: number;
+  }>;
 };
 export type OltCapacityPON = {
   olt_id: string;

@@ -242,7 +242,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	if kindSet["ctos"] {
 		capN := take("cto")
 		if capN > 0 {
-			q := `SELECT id, description, display_number, latitude, longitude, splitter, fiber_color
+			q := `SELECT id, description, display_number, latitude, longitude, splitter, fiber_color, splitter_ports
 				FROM network_ctos
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
 			args := []any{}
@@ -266,7 +266,8 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				var displayNum int
 				var lat, lon float64
 				var splitter, fiberColor *string
-				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &splitter, &fiberColor); err != nil {
+				var splitterPorts []byte
+				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &splitter, &fiberColor, &splitterPorts); err != nil {
 					rows.Close()
 					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 					return
@@ -285,6 +286,15 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				}
 				if fiberColor != nil && strings.TrimSpace(*fiberColor) != "" {
 					pt["fiber_color"] = strings.TrimSpace(*fiberColor)
+				}
+				ratio := ""
+				if splitter != nil {
+					ratio = *splitter
+				}
+				if pTot, pUsed, pFree := ctoPortCounts(splitterPorts, ratio); pTot > 0 {
+					pt["ports_total"] = pTot
+					pt["ports_used"] = pUsed
+					pt["ports_free"] = pFree
 				}
 				pts = append(pts, pt)
 				fetched++

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { APP_ROUTES } from "../app/routes";
 import { apiFetch, ApiError } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
 import { can, isAdminUser } from "../lib/auth";
@@ -122,6 +124,7 @@ function popFormToPayload(f: PopForm) {
 
 export function PopsPage() {
   const canMutate = isAdminUser() || can("pops.manage") || can("commercial.manage");
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [tab, setTab] = useState<Tab>("localidades");
@@ -825,6 +828,11 @@ export function PopsPage() {
                       <td>
                         <ActionMenu
                           items={[
+                            {
+                              id: "rack",
+                              label: "Topologia 2D",
+                              onClick: () => navigate(APP_ROUTES.popRack(p.id)),
+                            },
                             {
                               id: "copy",
                               label: "Copiar coordenadas",

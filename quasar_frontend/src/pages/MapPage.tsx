@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, Pencil, Search } from "lucide-react";
+import { LocateFixed, Pencil, Radar, Search } from "lucide-react";
 import { EquipmentMap, DEFAULT_MAP_COLORS, expandMapBounds, quantizeMapBounds, sameMapBounds, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
 import { MapFilterButton, MapFilterModal, type SpliceModelFilter } from "../components/MapFilterModal";
@@ -12,6 +12,7 @@ import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { CTO_MAP_PIN_COLOR, DEFAULT_MAP_ICON_STYLES, INFRA_MAP_KIND_LABELS, isInfraMapKind, type InfraMapKind, type MapIconStyles } from "../lib/mapInfrastructureIcons";
 import { fiberSpecByName } from "../lib/fiberSplitter";
+import { ctoOccupancyColor } from "../lib/ctoPorts";
 import { normalizeCableFuncao, type CableFuncao } from "../lib/networkInfrastructure";
 import { formatDistanceMeters } from "../lib/nearestCtoMatch";
 import { apiFetch } from "../lib/api";
@@ -78,6 +79,10 @@ type Point = {
   path?: MapLatLng[] | null;
   funcao?: string | null;
   boxModel?: string | null;
+  /** Só point_type="cto" — ver lib/ctoPorts.ts. */
+  portsTotal?: number | null;
+  portsUsed?: number | null;
+  portsFree?: number | null;
 };
 
 type ConnectionPoint = {
@@ -111,6 +116,40 @@ type InfrastructurePoint = {
   funcao?: string | null;
   /** Só point_type="splice_box" — "emenda" ou "distribuicao". */
   box_model?: string | null;
+  /** Só point_type="cto" — ver backend ctoPortCounts / lib/ctoPorts.ts. */
+  ports_total?: number | null;
+  ports_used?: number | null;
+  ports_free?: number | null;
+};
+
+/** Um elemento encontrado pela ferramenta "Raio de Atendimento" (ver backend mapRadiusSearch). */
+type RadiusPoint = {
+  point_type: "cto" | "splice_box" | "pole" | "equipment";
+  id: string;
+  map_id: string;
+  description: string;
+  display_number?: number;
+  lat: number;
+  lng: number;
+  distance_m: number;
+  splitter?: string;
+  ports_total?: number;
+  ports_used?: number;
+  ports_free?: number;
+  box_model?: string;
+  pole_type?: string;
+  height_m?: number;
+  material?: string;
+  has_transformer?: boolean;
+  category?: string;
+  ip?: string;
+};
+
+const RADIUS_POINT_TYPE_LABELS: Record<RadiusPoint["point_type"], string> = {
+  cto: "CTO",
+  splice_box: "Caixa de emenda",
+  pole: "Poste",
+  equipment: "Equipamento",
 };
 
 type NearestCtoApi = {
@@ -217,7 +256,9 @@ export function MapPage() {
    * cobre equipamentos/infra). connectionClusterForced (abaixo) ainda pode forçar agrupado por
    * desempenho mesmo com "individual" escolhido. */
   const [connectionDisplayMode, setConnectionDisplayMode] = useState<"cluster" | "individual">("cluster");
-  const [ctoColorByFeed, setCtoColorByFeed] = useState(false);
+  /** "default" = cor fixa das configurações; "feed" = cor da fibra de alimentação; "occupancy" =
+   * escala de cores por ocupação de portas (ver lib/ctoPorts.ts). */
+  const [ctoColorMode, setCtoColorMode] = useState<"default" | "feed" | "occupancy">("default");
   const [fitBoundsVersion, setFitBoundsVersion] = useState(0);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
   const [flyKey, setFlyKey] = useState(0);
@@ -274,6 +315,12 @@ export function MapPage() {
   const canEditMap = isAdminUser() || can("connections.manage") || can("map.manage");
   const [mapEditMode, setMapEditMode] = useState(false);
   const [kmlImportOpen, setKmlImportOpen] = useState(false);
+  // "Raio de Atendimento" — clicar num ponto qualquer do mapa e ver elementos próximos (ver
+  // backend mapRadiusSearch). radiusToolActive só controla se o clique no mapa define o centro;
+  // radiusCenter null = ainda não clicou em lugar nenhum (painel de resultados fica escondido).
+  const [radiusToolActive, setRadiusToolActive] = useState(false);
+  const [radiusCenter, setRadiusCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [radiusMeters, setRadiusMeters] = useState(250);
   const [hiddenMapIds, setHiddenMapIds] = useState<Set<string>>(() => new Set());
   const [repositionTarget, setRepositionTarget] = useState<{
     mapId: string;
@@ -299,11 +346,13 @@ export function MapPage() {
     ? "edit-cable"
     : repositionTarget
       ? "reposition"
-      : addKind === "cable"
-        ? "cable"
-        : addKind
-          ? "place"
-          : null;
+      : radiusToolActive
+        ? "radius"
+        : addKind === "cable"
+          ? "cable"
+          : addKind
+            ? "place"
+            : null;
 
   const uiAppearance = useQuery({
     queryKey: queryKeys.uiAppearance,
@@ -675,7 +724,12 @@ export function MapPage() {
       .map((p) => {
         infraIds.add(`${p.point_type}:${p.id}`);
         const splitterLabel = p.point_type === "cto" && p.splitter ? String(p.splitter).trim() : "";
-        const ctoColor = ctoColorByFeed ? fiberSpecByName(p.fiber_color).hex : mapPrefsDraft.cto;
+        const ctoColor =
+          ctoColorMode === "feed"
+            ? fiberSpecByName(p.fiber_color).hex
+            : ctoColorMode === "occupancy"
+              ? ctoOccupancyColor({ ports_total: p.ports_total, ports_used: p.ports_used, ports_free: p.ports_free })
+              : mapPrefsDraft.cto;
         return {
           id: `infra-${p.point_type}-${p.id}`,
           description:
@@ -701,6 +755,9 @@ export function MapPage() {
           path: Array.isArray(p.path) ? p.path : null,
           funcao: p.point_type === "cable" ? p.funcao ?? null : undefined,
           boxModel: p.point_type === "splice_box" ? p.box_model ?? null : undefined,
+          portsTotal: p.point_type === "cto" ? p.ports_total ?? null : undefined,
+          portsUsed: p.point_type === "cto" ? p.ports_used ?? null : undefined,
+          portsFree: p.point_type === "cto" ? p.ports_free ?? null : undefined,
         };
       });
     // Garante que as CTOs próximas do GPS aparecem mesmo fora do viewport actual / sem projecto.
@@ -709,7 +766,10 @@ export function MapPage() {
         const key = `cto:${c.id}`;
         if (infraIds.has(key)) continue;
         infraIds.add(key);
-        const ctoColor = ctoColorByFeed ? fiberSpecByName(c.fiber_color).hex : mapPrefsDraft.cto;
+        // CTOs próximas do GPS (endpoint separado) ainda não trazem contagem de portas — modo
+        // "occupancy" cai no cinza "sem dados" (ctoOccupancyColor com total=0) em vez de errar a cor.
+        const ctoColor =
+          ctoColorMode === "feed" ? fiberSpecByName(c.fiber_color).hex : ctoColorMode === "occupancy" ? ctoOccupancyColor({}) : mapPrefsDraft.cto;
         infra.push({
           id: c.map_id,
           description: c.description,
@@ -740,7 +800,7 @@ export function MapPage() {
     nearestCtos,
     projectFilterId,
     localityFlyId,
-    ctoColorByFeed,
+    ctoColorMode,
     mapPrefsDraft.cto,
     mapPrefsDraft.splice_box,
     spliceModelFilter,
@@ -806,14 +866,25 @@ export function MapPage() {
     });
   }, [displayedPoints, selId, nearestCtos, mapBounds?.zoom, repositionTarget]);
 
+  const radiusSearchQ = useQuery({
+    queryKey: ["map-radius-search", radiusCenter?.lat, radiusCenter?.lng, radiusMeters],
+    queryFn: () =>
+      apiFetch<{ points: RadiusPoint[]; count: number }>(
+        `/api/v1/map/radius-search?lat=${radiusCenter!.lat}&lng=${radiusCenter!.lng}&radius_m=${radiusMeters}`,
+      ),
+    enabled: radiusCenter != null,
+    placeholderData: keepPreviousData,
+  });
+  const radiusPoints = radiusSearchQ.data?.points ?? [];
+
   const mapHighlightIds = useMemo(() => {
-    const ids = nearestCtos.map((c) => c.map_id);
+    const ids = [...nearestCtos.map((c) => c.map_id), ...radiusPoints.map((p) => p.map_id)];
     if (selId && !ids.includes(selId)) ids.unshift(selId);
     else if (selId) {
       // keep selId first for emphasis order isn't needed
     }
     return ids.length > 0 ? ids : selId;
-  }, [nearestCtos, selId]);
+  }, [nearestCtos, radiusPoints, selId]);
 
   const stopGeoTracking = useCallback(() => {
     if (geoWatchRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
@@ -1086,6 +1157,10 @@ export function MapPage() {
         setDraftPath((prev) => [...prev, { lat, lng }]);
         return;
       }
+      if (radiusToolActive) {
+        setRadiusCenter({ lat, lng });
+        return;
+      }
       if (!addKind) return;
       if (addKind === "cable") {
         setDraftPath((prev) => [...prev, { lat, lng }]);
@@ -1094,7 +1169,7 @@ export function MapPage() {
       setPlaceSession({ mode: "create", kind: addKind, lat, lng });
       setAddKind(null);
     },
-    [addKind, repositionTarget, editingCable, commitReposition],
+    [addKind, repositionTarget, editingCable, radiusToolActive, commitReposition],
   );
 
   const saveCablePath = useCallback(() => {
@@ -1660,6 +1735,25 @@ export function MapPage() {
           >
             <LocateFixed size={18} strokeWidth={2} aria-hidden />
           </button>
+          <button
+            type="button"
+            className={`btn btn--icon btn--icon-menu${radiusToolActive ? " btn--primary" : ""}`}
+            title={radiusToolActive ? "Sair do Raio de Atendimento" : "Raio de Atendimento — clique num ponto do mapa"}
+            aria-label={radiusToolActive ? "Sair do Raio de Atendimento" : "Raio de Atendimento"}
+            aria-pressed={radiusToolActive}
+            onClick={() => {
+              if (radiusToolActive) {
+                setRadiusToolActive(false);
+                setRadiusCenter(null);
+              } else {
+                setAddKind(null);
+                setAddMenuOpen(false);
+                setRadiusToolActive(true);
+              }
+            }}
+          >
+            <Radar size={18} strokeWidth={2} aria-hidden />
+          </button>
           <MapSettingsButton onClick={() => setSettingsModalOpen(true)} />
           <button
             type="button"
@@ -1726,8 +1820,8 @@ export function MapPage() {
         onShowProjects={setShowProjects}
         showPops={showPops}
         onShowPops={setShowPops}
-        ctoColorByFeed={ctoColorByFeed}
-        onCtoColorByFeed={setCtoColorByFeed}
+        ctoColorMode={ctoColorMode}
+        onCtoColorMode={setCtoColorMode}
         localities={localities.data?.localities ?? []}
         localityFlyId={localityFlyId}
         onLocalityFlyId={setLocalityFlyId}
@@ -2031,6 +2125,7 @@ export function MapPage() {
                     mapIconStyles={mapIconStyles}
                     connectionClusterForced={connectionClusterForced}
                     connectionDisplayMode={connectionDisplayMode}
+                    radiusOverlay={radiusCenter ? { lat: radiusCenter.lat, lng: radiusCenter.lng, radiusM: radiusMeters } : null}
                     highlightedId={mapHighlightIds}
                     userLocation={userLocation}
                     locationPin={locationPin}
@@ -2153,6 +2248,83 @@ export function MapPage() {
                       ) : geoTracking && userLocation ? (
                         <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Nenhuma CTO com coordenadas encontrada.</p>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {radiusToolActive ? (
+                    <div className="map-nearest-panel" role="region" aria-label="Raio de Atendimento">
+                      <div className="map-nearest-panel__title">
+                        <span>Raio de Atendimento</span>
+                        <button
+                          type="button"
+                          className="btn btn--icon"
+                          title="Fechar"
+                          aria-label="Fechar"
+                          onClick={() => {
+                            setRadiusToolActive(false);
+                            setRadiusCenter(null);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      {!radiusCenter ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Clique num ponto do mapa para definir o centro.</p>
+                      ) : (
+                        <>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 10 }}>
+                            Raio (m)
+                            <input
+                              className="input mono"
+                              type="number"
+                              min={10}
+                              max={5000}
+                              step={10}
+                              style={{ width: 90 }}
+                              value={radiusMeters}
+                              onChange={(e) => {
+                                const v = Number(e.target.value);
+                                if (Number.isFinite(v) && v >= 10 && v <= 5000) setRadiusMeters(v);
+                              }}
+                            />
+                          </label>
+                          {radiusSearchQ.isFetching ? (
+                            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>A procurar…</p>
+                          ) : radiusPoints.length === 0 ? (
+                            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Nenhum elemento nesse raio.</p>
+                          ) : (
+                            <>
+                              <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--muted)" }}>
+                                {radiusPoints.length} elemento(s) — clique num ponto para reposicionar o centro.
+                              </p>
+                              <ul className="map-nearest-panel__list">
+                                {radiusPoints.map((p) => (
+                                  <li key={`${p.point_type}-${p.id}`}>
+                                    <button
+                                      type="button"
+                                      className={`map-nearest-panel__item${selId === p.map_id ? " map-nearest-panel__item--active" : ""}`}
+                                      onClick={() => openPointDetail(p.map_id)}
+                                    >
+                                      <span className="map-nearest-panel__rank">{RADIUS_POINT_TYPE_LABELS[p.point_type][0]}</span>
+                                      <span className="map-nearest-panel__meta">
+                                        <span className="map-nearest-panel__name">
+                                          {p.description || `${RADIUS_POINT_TYPE_LABELS[p.point_type]} ${p.display_number ?? ""}`}
+                                        </span>
+                                        <span className="map-nearest-panel__dist">
+                                          {formatDistanceMeters(p.distance_m)} · {RADIUS_POINT_TYPE_LABELS[p.point_type]}
+                                          {p.point_type === "cto" && p.ports_total != null
+                                            ? ` · ${p.ports_free ?? 0} porta(s) livre(s) de ${p.ports_total}`
+                                            : ""}
+                                          {p.point_type === "pole" && p.height_m != null ? ` · ${p.height_m} m` : ""}
+                                        </span>
+                                      </span>
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   ) : null}
                 </div>

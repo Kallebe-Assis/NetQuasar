@@ -573,6 +573,40 @@ func (in *networkCtoInput) validate() error {
 	return validateCoords(in.Latitude, in.Longitude)
 }
 
+// ctoPortCounts calcula total/ocupadas/livres a partir do JSONB splitter_ports ([{status,...}]).
+// "ocupada" = porta em uso por um cliente; "livre" = disponível para um novo cliente; o resto
+// (reserva/defeito) conta só no total (não é ocupada nem está disponível). Se splitter_ports
+// estiver vazio (CTO ainda sem porta configurada), total cai para a razão do splitter (ex.:
+// "1x8" → 8) para pelo menos mostrar a capacidade nominal — used/free ficam 0 nesse caso, já que
+// não há registo de quais portas estão ocupadas.
+func ctoPortCounts(splitterPortsJSON []byte, splitterRatio string) (total, used, free int) {
+	if len(splitterPortsJSON) > 0 && string(splitterPortsJSON) != "null" {
+		var ports []struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(splitterPortsJSON, &ports) == nil {
+			total = len(ports)
+			for _, p := range ports {
+				switch strings.ToLower(strings.TrimSpace(p.Status)) {
+				case "ocupada":
+					used++
+				case "livre":
+					free++
+				}
+			}
+			return total, used, free
+		}
+	}
+	if r := strings.TrimSpace(splitterRatio); r != "" {
+		if i := strings.IndexByte(r, 'x'); i >= 0 && i+1 < len(r) {
+			if n, err := strconv.Atoi(strings.TrimSpace(r[i+1:])); err == nil && n > 0 {
+				return n, 0, 0
+			}
+		}
+	}
+	return 0, 0, 0
+}
+
 func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
 	var displayNumber int
@@ -618,6 +652,15 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 		if json.Unmarshal(splitterPorts, &ports) == nil {
 			m["splitter_ports"] = ports
 		}
+	}
+	ratio := ""
+	if splitter != nil {
+		ratio = *splitter
+	}
+	if pt, pu, pf := ctoPortCounts(splitterPorts, ratio); pt > 0 {
+		m["ports_total"] = pt
+		m["ports_used"] = pu
+		m["ports_free"] = pf
 	}
 	if projectID != nil {
 		m["project_id"] = *projectID
@@ -1846,14 +1889,33 @@ func (s *Server) deleteNetworkCable(w http.ResponseWriter, r *http.Request) {
 // --- Poles ---
 
 type networkPoleInput struct {
-	Description   string   `json:"description"`
-	PoleType      *string  `json:"pole_type"`
-	ProjectID     *string  `json:"project_id"`
-	ProjectNumber *int     `json:"project_number"`
-	LocalityID    *string  `json:"locality_id"`
-	LocalityName  *string  `json:"locality_name"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	Description    string   `json:"description"`
+	PoleType       *string  `json:"pole_type"`
+	ProjectID      *string  `json:"project_id"`
+	ProjectNumber  *int     `json:"project_number"`
+	LocalityID     *string  `json:"locality_id"`
+	LocalityName   *string  `json:"locality_name"`
+	Latitude       *float64 `json:"latitude"`
+	Longitude      *float64 `json:"longitude"`
+	HeightM        *float64 `json:"height_m"`
+	HasTransformer *bool    `json:"has_transformer"`
+	Material       *string  `json:"material"`
+}
+
+// normalizePoleMaterial valida "madeira"/"concreto" (ou vazio/nil = não informado) — mesmo
+// vocabulário do CHECK network_poles_material_chk (migração 138).
+func normalizePoleMaterial(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	v := strings.ToLower(strings.TrimSpace(*raw))
+	if v == "" {
+		return nil, nil
+	}
+	if v != "madeira" && v != "concreto" {
+		return nil, errors.New("material deve ser 'madeira' ou 'concreto'")
+	}
+	return &v, nil
 }
 
 func (in *networkPoleInput) validate() error {
@@ -1863,25 +1925,40 @@ func (in *networkPoleInput) validate() error {
 	if err := requireNetworkProjectID(in.ProjectID); err != nil {
 		return err
 	}
+	if in.HeightM != nil && (*in.HeightM <= 0 || *in.HeightM >= 100) {
+		return errors.New("height_m deve ser entre 0 e 100 metros")
+	}
+	if _, err := normalizePoleMaterial(in.Material); err != nil {
+		return err
+	}
 	return validateCoords(in.Latitude, in.Longitude)
 }
 
-const networkPoleSelect = `id, display_number, description, pole_type, project_id, locality_id, latitude, longitude, created_at, updated_at`
+const networkPoleSelect = `id, display_number, description, pole_type, project_id, locality_id, latitude, longitude, height_m, has_transformer, material, created_at, updated_at`
 
 func scanNetworkPole(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
 	var displayNumber int
 	var description string
-	var poleType *string
+	var poleType, material *string
 	var projectID, localityID *uuid.UUID
-	var lat, lon *float64
+	var lat, lon, heightM *float64
+	var hasTransformer bool
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &poleType, &projectID, &localityID, &lat, &lon, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &poleType, &projectID, &localityID, &lat, &lon,
+		&heightM, &hasTransformer, &material, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
-	m := map[string]any{"id": id, "display_number": displayNumber, "description": description, "created_at": created, "updated_at": updated}
+	m := map[string]any{
+		"id": id, "display_number": displayNumber, "description": description,
+		"has_transformer": hasTransformer, "created_at": created, "updated_at": updated,
+	}
 	setOptionalStr(m, "pole_type", poleType)
+	setOptionalStr(m, "material", material)
+	if heightM != nil {
+		m["height_m"] = *heightM
+	}
 	if lat != nil {
 		m["latitude"] = *lat
 	}
@@ -1993,12 +2070,22 @@ func (s *Server) createNetworkPole(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
 		return
 	}
+	material, err := normalizePoleMaterial(body.Material)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
+		return
+	}
+	hasTransformer := false
+	if body.HasTransformer != nil {
+		hasTransformer = *body.HasTransformer
+	}
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_poles (description, pole_type, project_id, locality_id, latitude, longitude)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, display_number`,
+		INSERT INTO network_poles (description, pole_type, project_id, locality_id, latitude, longitude, height_m, has_transformer, material)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, display_number`,
 		strings.TrimSpace(body.Description), trimPtr(body.PoleType), projectID, localityID, body.Latitude, body.Longitude,
+		body.HeightM, hasTransformer, material,
 	).Scan(&id, &displayNumber)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -2065,6 +2152,34 @@ func networkPolePatch(body map[string]json.RawMessage) ([]string, []any, int, er
 		sets = append(sets, "latitude = $"+strconv.Itoa(n), "longitude = $"+strconv.Itoa(n+1))
 		args = append(args, lat, lon)
 		n += 2
+	}
+	if raw, ok := body["height_m"]; ok {
+		var v *float64
+		_ = json.Unmarshal(raw, &v)
+		if v != nil && (*v <= 0 || *v >= 100) {
+			return nil, nil, 0, errors.New("height_m deve ser entre 0 e 100 metros")
+		}
+		sets = append(sets, "height_m = $"+strconv.Itoa(n))
+		args = append(args, v)
+		n++
+	}
+	if raw, ok := body["has_transformer"]; ok {
+		var v bool
+		_ = json.Unmarshal(raw, &v)
+		sets = append(sets, "has_transformer = $"+strconv.Itoa(n))
+		args = append(args, v)
+		n++
+	}
+	if raw, ok := body["material"]; ok {
+		var v *string
+		_ = json.Unmarshal(raw, &v)
+		material, err := normalizePoleMaterial(v)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		sets = append(sets, "material = $"+strconv.Itoa(n))
+		args = append(args, material)
+		n++
 	}
 	return sets, args, n, nil
 }

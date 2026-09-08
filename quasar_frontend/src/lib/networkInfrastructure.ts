@@ -100,6 +100,10 @@ export type NetworkCto = {
     note?: string;
     destination?: string;
   }> | null;
+  /** Ver backend ctoPortCounts / lib/ctoPorts.ts. */
+  ports_total?: number | null;
+  ports_used?: number | null;
+  ports_free?: number | null;
 };
 
 export type NetworkSpliceBox = {
@@ -174,7 +178,15 @@ export type NetworkPole = {
   locality_name?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  height_m?: number | null;
+  has_transformer?: boolean;
+  material?: "madeira" | "concreto" | null;
 };
+
+export const POLE_MATERIALS: Array<{ value: "madeira" | "concreto"; label: string }> = [
+  { value: "madeira", label: "Madeira" },
+  { value: "concreto", label: "Concreto" },
+];
 
 export function fmtCoord(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "—";

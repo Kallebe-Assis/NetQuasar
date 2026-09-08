@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import type { MapDisplayMode } from "./EquipmentMap";
 import { MAP_PROJECT_ALL, MAP_PROJECT_NONE } from "../lib/mapProjectFilter";
 import { CABLE_FUNCOES, type CableFuncao } from "../lib/networkInfrastructure";
+import { CTO_OCCUPANCY_LEGEND } from "../lib/ctoPorts";
 
 export type SpliceModelFilter = "all" | "emenda" | "distribuicao";
 export type ConnectionDisplayMode = "cluster" | "individual";
+export type CtoColorMode = "default" | "feed" | "occupancy";
 
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
@@ -50,8 +52,8 @@ type Props = {
   onShowProjects: (v: boolean) => void;
   showPops: boolean;
   onShowPops: (v: boolean) => void;
-  ctoColorByFeed: boolean;
-  onCtoColorByFeed: (v: boolean) => void;
+  ctoColorMode: CtoColorMode;
+  onCtoColorMode: (v: CtoColorMode) => void;
   localities: Locality[];
   localityFlyId: string;
   onLocalityFlyId: (v: string) => void;
@@ -66,7 +68,7 @@ type Props = {
 type Draft = {
   displayMode: MapDisplayMode;
   connectionDisplayMode: ConnectionDisplayMode;
-  ctoColorByFeed: boolean;
+  ctoColorMode: CtoColorMode;
   projectId: string;
   popId: string;
   category: string;
@@ -86,7 +88,7 @@ function draftFromProps(p: Props): Draft {
   return {
     displayMode: p.displayMode,
     connectionDisplayMode: p.connectionDisplayMode,
-    ctoColorByFeed: p.ctoColorByFeed,
+    ctoColorMode: p.ctoColorMode,
     projectId: p.projectId,
     popId: p.popId,
     category: p.category,
@@ -150,7 +152,7 @@ export function MapFilterModal(props: Props) {
   function apply() {
     props.onDisplayMode(draft.displayMode);
     props.onConnectionDisplayMode(draft.connectionDisplayMode);
-    props.onCtoColorByFeed(draft.ctoColorByFeed);
+    props.onCtoColorMode(draft.ctoColorMode);
     props.onProjectId(draft.projectId);
     props.onPopId(draft.popId);
     props.onCategory(draft.category);
@@ -250,21 +252,24 @@ export function MapFilterModal(props: Props) {
             </select>
           </label>
 
-          <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <label className="toggle">
-              <span className="toggle__track">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  className="toggle__input"
-                  checked={draft.ctoColorByFeed}
-                  onChange={(e) => patch({ ctoColorByFeed: e.target.checked })}
-                />
-                <span className="toggle__thumb" aria-hidden />
-              </span>
-              <span className="toggle__label">CTOs com cor da fibra de alimentação</span>
-            </label>
-          </div>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Cor da CTO</span>
+            <select className="select" value={draft.ctoColorMode} onChange={(e) => patch({ ctoColorMode: e.target.value as CtoColorMode })}>
+              <option value="default">Padrão</option>
+              <option value="feed">Cor da fibra de alimentação</option>
+              <option value="occupancy">Ocupação de portas (escala de cores)</option>
+            </select>
+            {draft.ctoColorMode === "occupancy" ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+                {CTO_OCCUPANCY_LEGEND.map((l) => (
+                  <span key={l.label} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--muted)" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: l.color, display: "inline-block" }} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </label>
 
           {draft.projectId === MAP_PROJECT_NONE ? (
             <span className="map-filter-modal__full" style={{ fontSize: 11, color: "var(--muted)" }}>

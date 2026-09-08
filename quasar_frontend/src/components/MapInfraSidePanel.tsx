@@ -31,6 +31,7 @@ import { APP_ROUTES } from "../app/routes";
 import { OltInterfaceSelects } from "./OltInterfaceSelects";
 import { formatOltPonLabel, type OltPonCatalog } from "../lib/oltPonInterfaces";
 import { queryKeys } from "../lib/queryKeys";
+import { ctoOccupancyColor, ctoOccupancyLabel } from "../lib/ctoPorts";
 import type { InfraMapKind } from "../lib/mapInfrastructureIcons";
 import { INFRA_MAP_KIND_LABELS } from "../lib/mapInfrastructureIcons";
 
@@ -512,6 +513,29 @@ export function MapInfraSidePanel({
               <dd>{formatSplitterDisplay(ctoQ.data?.splitter)}</dd>
             </div>
             <div>
+              <dt>Portas</dt>
+              <dd>
+                {ctoQ.data ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: "50%",
+                        background: ctoOccupancyColor(ctoQ.data),
+                        display: "inline-block",
+                        flexShrink: 0,
+                      }}
+                    />
+                    {ctoOccupancyLabel(ctoQ.data)}
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </dd>
+            </div>
+            <div>
               <dt>Transmissor</dt>
               <dd>{ctoQ.data?.transmitter || "—"}</dd>
             </div>
@@ -797,10 +821,24 @@ export function MapInfraSidePanel({
               </dd>
             </div>
             {parsed.kind === "pole" ? (
-              <div>
-                <dt>Tipo</dt>
-                <dd>{poleQ.data?.pole_type || fallback?.category || "Poste"}</dd>
-              </div>
+              <>
+                <div>
+                  <dt>Tipo</dt>
+                  <dd>{poleQ.data?.pole_type || fallback?.category || "Poste"}</dd>
+                </div>
+                <div>
+                  <dt>Altura</dt>
+                  <dd>{poleQ.data?.height_m != null ? `${poleQ.data.height_m} m` : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Material</dt>
+                  <dd>{poleQ.data?.material === "madeira" ? "Madeira" : poleQ.data?.material === "concreto" ? "Concreto" : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Transformador</dt>
+                  <dd>{poleQ.data?.has_transformer ? "Sim" : "Não"}</dd>
+                </div>
+              </>
             ) : null}
             {parsed.kind === "pop" ? (
               <>

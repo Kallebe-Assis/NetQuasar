@@ -1,0 +1,130 @@
+/* Diagrama 2D da topologia do POP (PopRackTopologyPage.tsx) — rectângulo por caixa (OLT/
+   mikrotik/switch/DIO/manual), uma célula por porta/interface, ligações de fibra coloridas
+   porta-a-porta (ver RackNode.tsx / FiberEdge.tsx). */
+
+/* React Flow desenha a camada de edges ANTES da de nodes no DOM (Viewport: EdgeRenderer depois
+   NodeRenderer) — sem z-index explícito, o rectângulo opaco da caixa (.rack-node) pinta por
+   cima do troço da fibra que passa "por baixo" dela perto de cada porta, escondendo a ligação.
+   Como as portas ficam dentro do próprio rectângulo (não nas bordas, como na Topologia geral),
+   isto é sempre visível aqui — subir a camada de edges resolve para todas as ligações de uma vez
+   (mesmo z-index que a própria xyflow já usa para a linha de conexão em curso, 1001). */
+.topo-canvas-wrap .react-flow__edges {
+  z-index: 1001;
+}
+
+.rack-node {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--panel);
+  min-width: 140px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.rack-node--selected {
+  border-color: var(--accent, #58a6ff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #58a6ff) 30%, transparent);
+}
+.rack-node--olt {
+  border-top: 3px solid #7c3aed;
+}
+.rack-node--mikrotik {
+  border-top: 3px solid #dc2626;
+}
+.rack-node--switch {
+  border-top: 3px solid #2563eb;
+}
+.rack-node--dio {
+  border-top: 3px solid #16a34a;
+}
+.rack-node--manual {
+  border-top: 3px solid #64748b;
+}
+
+.rack-node__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rack-node__kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.rack-node__label-input {
+  flex: 1 1 auto;
+  min-width: 60px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  color: var(--text);
+  padding: 1px 2px;
+}
+.rack-node__label-input:hover,
+.rack-node__label-input:focus {
+  border-bottom-color: var(--border);
+  outline: none;
+}
+
+.rack-node__ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 260px;
+}
+.rack-node__port {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.rack-node__port-handle {
+  width: 12px !important;
+  height: 12px !important;
+  border-radius: 3px !important;
+  background: var(--panel2) !important;
+  border: 1px solid var(--border) !important;
+}
+.rack-node__port-handle:hover {
+  background: var(--accent, #58a6ff) !important;
+  border-color: var(--accent, #58a6ff) !important;
+}
+.rack-node__port-type-icon {
+  color: var(--muted);
+}
+.rack-node__port-num {
+  font-size: 8px;
+  color: var(--muted);
+  line-height: 1;
+}
+.rack-node__no-ports {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rack-edge-toolbar__swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.rack-edge-toolbar__swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.rack-edge-toolbar__swatch--active {
+  outline: 2px solid var(--accent, #58a6ff);
+  outline-offset: 1px;
+}

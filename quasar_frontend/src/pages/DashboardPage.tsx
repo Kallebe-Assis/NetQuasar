@@ -310,6 +310,7 @@ export function DashboardPage() {
               oltFleetTotals={oltFleetTotals}
               capacity={cap.data}
               capacityError={cap.isError ? (cap.error as Error).message : null}
+              ctoPorts={dash.data?.cto_ports}
             />
           ) : null}
           {view === "servidor" ? <DashboardServidorView /> : null}

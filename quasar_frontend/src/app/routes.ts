@@ -15,6 +15,7 @@ export const APP_ROUTES = {
   hubsoftDashboard: "/integrations/hubsoft/dashboard",
   hubsoftReport: "/integrations/hubsoft/relatorio",
   pops: "/pops",
+  popRack: (popId: string) => `/pops/${popId}/rack`,
   devices: "/devices",
   commercial: "/commercial",
   connections: "/connections",

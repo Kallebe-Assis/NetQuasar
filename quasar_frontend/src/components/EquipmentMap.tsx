@@ -1,6 +1,6 @@
 import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { infrastructurePinIcon, isInfraMapKind, INFRA_MAP_KIND_LABELS, type InfraMapKind, type MapIconStyles, DEFAULT_MAP_ICON_STYLES } from "../lib/mapInfrastructureIcons";
 import { buildImagePinHtml, buildPinSvg, pinLayout } from "../lib/mapPinStyles";
@@ -9,7 +9,7 @@ export type MapPointKind = "equipment" | "connection" | InfraMapKind;
 
 export type MapLatLng = { lat: number; lng: number };
 
-export type MapPlaceMode = "place" | "cable" | "reposition" | "edit-cable" | null;
+export type MapPlaceMode = "place" | "cable" | "reposition" | "edit-cable" | "radius" | null;
 
 export type MapPoint = {
   id: string;
@@ -1631,6 +1631,7 @@ export function EquipmentMap({
   repositionPreview = null,
   editingCableMapId = null,
   mapEditMode = false,
+  radiusOverlay = null,
 }: {
   points: MapPoint[];
   displayMode: MapDisplayMode;
@@ -1678,6 +1679,8 @@ export function EquipmentMap({
   editingCableMapId?: string | null;
   /** Destaque visual do modo edição. */
   mapEditMode?: boolean;
+  /** Círculo do "Raio de Atendimento" (MapPage.tsx) — centro + raio em metros. */
+  radiusOverlay?: { lat: number; lng: number; radiusM: number } | null;
 }) {
   const colors = mapColors ?? DEFAULT_MAP_COLORS;
   const iconStyles = mapIconStyles ?? DEFAULT_MAP_ICON_STYLES;
@@ -1687,7 +1690,11 @@ export function EquipmentMap({
   const connValid = useMemo(() => markerPoints.filter(isConnectionPoint), [markerPoints]);
   const center: [number, number] = valid.length ? [valid[0].lat, valid[0].lng] : [-14.235, -51.9253];
   const placing =
-    placeMode === "place" || placeMode === "cable" || placeMode === "reposition" || placeMode === "edit-cable";
+    placeMode === "place" ||
+    placeMode === "cable" ||
+    placeMode === "reposition" ||
+    placeMode === "edit-cable" ||
+    placeMode === "radius";
   const selectHandler = placing ? undefined : onSelectDevice;
   const splitterHandler = placing ? undefined : onOpenSplitter;
   const cableFibersHandler = placing ? undefined : onOpenCableFibers;
@@ -1759,7 +1766,9 @@ export function EquipmentMap({
             ? "map-place-mode map-place-mode--cable"
             : placeMode === "reposition"
               ? "map-place-mode map-place-mode--reposition"
-              : "map-place-mode map-place-mode--place"
+              : placeMode === "radius"
+                ? "map-place-mode map-place-mode--radius"
+                : "map-place-mode map-place-mode--place"
           : undefined,
         mapEditMode ? "map-edit-mode" : undefined,
       ]
@@ -1808,6 +1817,13 @@ export function EquipmentMap({
         />
         <UserLocationMarker location={userLocation} />
         <LocationSearchMarker pin={locationPin} onRemove={onClearLocationPin} />
+        {radiusOverlay ? (
+          <Circle
+            center={[radiusOverlay.lat, radiusOverlay.lng]}
+            radius={radiusOverlay.radiusM}
+            pathOptions={{ color: "#3b82f6", weight: 2, fillColor: "#3b82f6", fillOpacity: 0.08 }}
+          />
+        ) : null}
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView

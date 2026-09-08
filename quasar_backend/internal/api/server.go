@@ -290,6 +290,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/", s.listPops)
 			r.Get("/{id}/contacts", s.listPopContacts)
 			r.Get("/{id}", s.getPop)
+			r.Get("/{id}/rack-diagram", s.getPopRackDiagram)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("pops.manage", "*"))
 				r.Post("/", s.createPop)
@@ -298,6 +299,10 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/{id}/devices/bulk", s.bulkAttachDevices)
 				r.Post("/{id}/contacts", s.createPopContact)
 				r.Delete("/contacts/{contactId}", s.deletePopContact)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePermissionMiddleware("map.manage", "*"))
+				r.Put("/{id}/rack-diagram", s.putPopRackDiagram)
 			})
 		})
 
@@ -692,6 +697,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/map/locality-center", s.mapLocalityCenter)
 		r.Get("/map/project-center", s.mapProjectCenter)
 		r.Get("/map/nearest-ctos", s.mapNearestCtos)
+		r.Get("/map/radius-search", s.mapRadiusSearch)
 
 		r.Get("/search/global", s.globalSearch)
 

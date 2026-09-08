@@ -210,6 +210,56 @@ func (s *Server) buildDashboardAnalytics(ctx context.Context, pool *pgxpool.Pool
 	})
 
 	g.Go(func() error {
+		// Ocupação de portas das CTOs (splitter_ports JSONB — ver ctoPortCounts em
+		// handlers_network_infrastructure.go, mesma definição de "ocupada"/"livre"). Card
+		// "Portas de CTO" no dashboard + escala de cores no mapa usam este mesmo critério.
+		var totalCtos, ctosWithPorts, portsTotal, portsUsed, portsFree int64
+		_ = pool.QueryRow(gctx, `SELECT COUNT(*) FROM network_ctos`).Scan(&totalCtos)
+		_ = pool.QueryRow(gctx, `
+			SELECT
+				COUNT(*),
+				COALESCE(SUM(jsonb_array_length(splitter_ports)), 0),
+				COALESCE(SUM((SELECT COUNT(*) FROM jsonb_array_elements(splitter_ports) e WHERE e->>'status' = 'ocupada')), 0),
+				COALESCE(SUM((SELECT COUNT(*) FROM jsonb_array_elements(splitter_ports) e WHERE e->>'status' = 'livre')), 0)
+			FROM network_ctos
+			WHERE splitter_ports IS NOT NULL AND jsonb_typeof(splitter_ports) = 'array' AND jsonb_array_length(splitter_ports) > 0
+		`).Scan(&ctosWithPorts, &portsTotal, &portsUsed, &portsFree)
+
+		var topFull []map[string]any
+		rows, err := pool.Query(gctx, `
+			SELECT id::text, display_number, description,
+				jsonb_array_length(splitter_ports) AS total,
+				(SELECT COUNT(*) FROM jsonb_array_elements(splitter_ports) e WHERE e->>'status' = 'ocupada') AS used
+			FROM network_ctos
+			WHERE splitter_ports IS NOT NULL AND jsonb_typeof(splitter_ports) = 'array' AND jsonb_array_length(splitter_ports) > 0
+			ORDER BY used::float8 / jsonb_array_length(splitter_ports) DESC, total DESC
+			LIMIT 10
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var id, desc string
+				var dispN, total, used int
+				if rows.Scan(&id, &dispN, &desc, &total, &used) == nil {
+					topFull = append(topFull, map[string]any{
+						"id": id, "display_number": dispN, "description": desc,
+						"ports_total": total, "ports_used": used, "ports_free": total - used,
+					})
+				}
+			}
+		}
+		set("cto_ports", map[string]any{
+			"total_ctos":      totalCtos,
+			"ctos_with_ports": ctosWithPorts,
+			"ports_total":     portsTotal,
+			"ports_used":      portsUsed,
+			"ports_free":      portsFree,
+			"top_occupied":    topFull,
+		})
+		return nil
+	})
+
+	g.Go(func() error {
 		rows, err := pool.Query(gctx, `
 			SELECT p.id::text, p.description, COUNT(d.id)::bigint
 			FROM pops p

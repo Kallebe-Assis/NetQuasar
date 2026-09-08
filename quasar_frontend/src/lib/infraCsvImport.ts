@@ -49,6 +49,9 @@ export type InfraPolePayload = {
   latitude: number | null;
   longitude: number | null;
   project_number: number | null;
+  height_m: number | null;
+  has_transformer: boolean;
+  material: "madeira" | "concreto" | null;
 };
 
 export const INFRA_IMPORT_BATCH_SIZE = 500;
@@ -96,8 +99,8 @@ export const INFRA_CSV_TEMPLATES: Record<
   },
   pole: {
     fileName: "modelo_postes.csv",
-    headers: ["descricao", "tipo", "localidade", "latitude", "longitude", "numero_projeto"],
-    sample: ["Poste 45", "concreto", "Centro", "-23,55020", "-46,63350", "1"],
+    headers: ["descricao", "tipo", "localidade", "latitude", "longitude", "numero_projeto", "altura_m", "material", "transformador"],
+    sample: ["Poste 45", "concreto", "Centro", "-23,55020", "-46,63350", "1", "9", "concreto", "nao"],
   },
 };
 
@@ -358,16 +361,37 @@ export function parseInfraCableCsv(file: File) {
   });
 }
 
+// Mesmo vocabulário do CHECK network_poles_material_chk (backend, migração 138).
+function normPoleMaterial(v: string): "madeira" | "concreto" | null {
+  const s = v.toLowerCase().trim();
+  if (s === "madeira") return "madeira";
+  if (s === "concreto") return "concreto";
+  return null;
+}
+
 export function parseInfraPoleCsv(file: File) {
   return parseInfraCsv<InfraPolePayload>(file, {
     ...COMMON_ALIASES,
     pole_type: ["pole_type", "tipo"],
     locality_name: ["locality_name", "localidade"],
+    height_m: ["height_m", "altura_m", "altura"],
+    material: ["material"],
+    has_transformer: ["has_transformer", "transformador", "com_transformador"],
   }, (rec, col) => {
     const description = getCell(rec, col, "description");
     if (!description) return "descricao obrigatória";
     const coords = parseCoords(rec, col);
     if (coords.err) return coords.err;
+    const heightRaw = getCell(rec, col, "height_m");
+    let height_m: number | null = null;
+    if (heightRaw) {
+      const n = Number(heightRaw.replace(",", "."));
+      if (!Number.isFinite(n) || n <= 0 || n >= 100) return "altura_m inválida (deve ser entre 0 e 100)";
+      height_m = n;
+    }
+    const materialRaw = getCell(rec, col, "material");
+    const material = materialRaw ? normPoleMaterial(materialRaw) : null;
+    if (materialRaw && !material) return `material inválido (${materialRaw}) — use madeira ou concreto`;
     return {
       description,
       pole_type: getCell(rec, col, "pole_type") || null,
@@ -375,6 +399,9 @@ export function parseInfraPoleCsv(file: File) {
       latitude: coords.lat,
       longitude: coords.lon,
       project_number: parseOptInt(getCell(rec, col, "project_number")),
+      height_m,
+      material,
+      has_transformer: parseBool(getCell(rec, col, "has_transformer")),
     };
   });
 }

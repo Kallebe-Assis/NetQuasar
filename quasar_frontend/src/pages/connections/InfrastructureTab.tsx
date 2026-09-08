@@ -36,6 +36,7 @@ import {
   formatSplitterDisplay,
   normalizeSplitterInput,
   parseCoordInput,
+  POLE_MATERIALS,
   type NetworkCable,
   type NetworkCto,
   type NetworkPole,
@@ -220,6 +221,9 @@ function rowToCsvRow(variant: Variant, row: Row): string[] {
     lat,
     lon,
     proj,
+    r.height_m != null ? String(r.height_m) : "",
+    String(r.material ?? ""),
+    boolLabel(Boolean(r.has_transformer)),
   ];
 }
 
@@ -324,7 +328,7 @@ export function InfrastructureTab({
     if (variant === "cable") {
       return { ...base, cable_type: "", fiber_count: "", status: "ativo", funcao: "outro" };
     }
-    return { ...base, pole_type: "", locality_id: "" };
+    return { ...base, pole_type: "", locality_id: "", height_m: "", has_transformer: false, material: "" };
   }
 
   function rowToForm(row: Row): Record<string, string | boolean> {
@@ -357,6 +361,9 @@ export function InfrastructureTab({
     if (variant === "pole") {
       f.pole_type = r.pole_type ? String(r.pole_type) : "";
       f.locality_id = r.locality_id ? String(r.locality_id) : "";
+      f.height_m = r.height_m != null ? String(r.height_m) : "";
+      f.has_transformer = Boolean(r.has_transformer);
+      f.material = r.material ? String(r.material) : "";
     }
     return f;
   }
@@ -418,6 +425,10 @@ export function InfrastructureTab({
     if (variant === "pole") {
       payload.pole_type = String(form.pole_type).trim() || null;
       payload.locality_id = String(form.locality_id).trim() || null;
+      const heightN = Number(String(form.height_m).trim().replace(",", "."));
+      payload.height_m = Number.isFinite(heightN) && heightN > 0 ? heightN : null;
+      payload.has_transformer = Boolean(form.has_transformer);
+      payload.material = String(form.material).trim() || null;
     }
     return payload;
   }
@@ -746,6 +757,9 @@ export function InfrastructureTab({
                 <>
                   <th>Tipo</th>
                   <th>Localidade</th>
+                  <th>Altura</th>
+                  <th>Material</th>
+                  <th>Transformador</th>
                 </>
               ) : null}
               <th>Projeto</th>
@@ -818,6 +832,9 @@ export function InfrastructureTab({
                     <>
                       <td>{(r.pole_type as string) ?? "—"}</td>
                       <td>{(r.locality_name as string) ?? "—"}</td>
+                      <td className="mono">{r.height_m != null ? `${r.height_m} m` : "—"}</td>
+                      <td>{r.material === "madeira" ? "Madeira" : r.material === "concreto" ? "Concreto" : "—"}</td>
+                      <td>{r.has_transformer ? <span className="badge badge--ok">Sim</span> : "—"}</td>
                     </>
                   ) : null}
                   <td>{(r.project_label as string) ?? "—"}</td>
@@ -1140,6 +1157,35 @@ export function InfrastructureTab({
                       localities={localities}
                       onChange={(id) => setForm({ ...form, locality_id: id })}
                     />
+                    <div className="conn-form-modal__field">
+                      <span className="conn-form-modal__field-label">Altura (m)</span>
+                      <input
+                        className="input mono"
+                        inputMode="decimal"
+                        placeholder="9"
+                        value={String(form.height_m)}
+                        onChange={(e) => setForm({ ...form, height_m: e.target.value })}
+                      />
+                    </div>
+                    <div className="conn-form-modal__field">
+                      <span className="conn-form-modal__field-label">Material</span>
+                      <select className="select" value={String(form.material)} onChange={(e) => setForm({ ...form, material: e.target.value })}>
+                        <option value="">—</option>
+                        {POLE_MATERIALS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <label className="conn-form-modal__field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(form.has_transformer)}
+                        onChange={(e) => setForm({ ...form, has_transformer: e.target.checked })}
+                      />
+                      <span className="conn-form-modal__field-label" style={{ margin: 0 }}>Com transformador</span>
+                    </label>
                   </div>
                 </section>
               ) : null}

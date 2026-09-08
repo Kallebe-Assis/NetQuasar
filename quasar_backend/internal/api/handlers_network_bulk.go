@@ -329,6 +329,15 @@ func (s *Server) bulkNetworkPoles(w http.ResponseWriter, r *http.Request) {
 			failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
 			continue
 		}
+		material, err := normalizePoleMaterial(item.Material)
+		if err != nil {
+			failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
+			continue
+		}
+		hasTransformer := false
+		if item.HasTransformer != nil {
+			hasTransformer = *item.HasTransformer
+		}
 		existingID, err := networkFindByDescription(ctx, s, "network_poles", desc)
 		if err != nil {
 			failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
@@ -342,9 +351,10 @@ func (s *Server) bulkNetworkPoles(w http.ResponseWriter, r *http.Request) {
 			_, err = s.DB().Exec(ctx, `
 				UPDATE network_poles SET
 					description=$2, pole_type=$3, project_id=$4, locality_id=$5,
-					latitude=$6, longitude=$7, updated_at=now()
+					latitude=$6, longitude=$7, height_m=$8, has_transformer=$9, material=$10, updated_at=now()
 				WHERE id=$1`,
 				*existingID, desc, trimPtr(item.PoleType), projID, locID, item.Latitude, item.Longitude,
+				item.HeightM, hasTransformer, material,
 			)
 			if err != nil {
 				failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
@@ -354,9 +364,10 @@ func (s *Server) bulkNetworkPoles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_, err = s.DB().Exec(ctx, `
-			INSERT INTO network_poles (description, pole_type, project_id, locality_id, latitude, longitude)
-			VALUES ($1,$2,$3,$4,$5,$6)`,
+			INSERT INTO network_poles (description, pole_type, project_id, locality_id, latitude, longitude, height_m, has_transformer, material)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 			desc, trimPtr(item.PoleType), projID, locID, item.Latitude, item.Longitude,
+			item.HeightM, hasTransformer, material,
 		)
 		if err != nil {
 			failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})

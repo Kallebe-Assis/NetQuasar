@@ -642,7 +642,11 @@ h2 {
 }
 
 .map-place-modal {
-  max-width: 440px;
+  /* !important necessário: a regra base ".modal { max-width: 640px }" (mais abaixo neste
+     ficheiro) tem a mesma especificidade e vinha depois na cascata, ganhando por ordem — mesmo
+     problema corrigido em .modal.map-settings-modal acima, aqui na direcção oposta (este modal
+     ficava mais LARGO que o previsto, 640px em vez de 440px). */
+  max-width: 440px !important;
 }
 
 .map-popup-actions {
@@ -699,7 +703,12 @@ h2 {
   margin: 10px 12px !important;
 }
 
-.map-settings-modal {
+/* Selector composto (.modal.map-settings-modal, especificidade 0,2,0) em vez de só
+   .map-settings-modal (0,1,0) — a regra base ".modal { max-width: 640px }" (mais abaixo neste
+   ficheiro) tem a MESMA especificidade que ".map-settings-modal" sozinho, e por vir depois na
+   cascata ganhava (mesma especificidade = a última regra no ficheiro vence), prendendo este
+   modal em 640px apesar desta largura própria. Selector composto evita depender da ordem. */
+.modal.map-settings-modal {
   /* 1.5x da largura anterior (1440px) */
   max-width: min(98vw, 2160px);
   width: 100%;
