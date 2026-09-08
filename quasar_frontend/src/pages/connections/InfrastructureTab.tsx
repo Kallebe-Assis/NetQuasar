@@ -63,7 +63,7 @@ import { ConnectionsPager } from "./ConnectionsPager";
 import { ConnectionsTabToolbar } from "./ConnectionsTabToolbar";
 import type { ConnectionsTabProps } from "./shared";
 import { useConnectionsLookups } from "./useConnectionsLookups";
-import { usePagedRows } from "./usePagedRows";
+import { usePagedRows } from "../../hooks/usePagedRows";
 
 type Variant = InfraVariant;
 

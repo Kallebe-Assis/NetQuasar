@@ -31,7 +31,7 @@ import { ConnectionsTabToolbar } from "./ConnectionsTabToolbar";
 import { KmlImportReviewModal } from "./KmlImportReviewModal";
 import type { ConnectionsTabProps } from "./shared";
 import { useConnectionsLookups } from "./useConnectionsLookups";
-import { usePagedRows } from "./usePagedRows";
+import { usePagedRows } from "../../hooks/usePagedRows";
 
 const EMPTY = {
   description: "",

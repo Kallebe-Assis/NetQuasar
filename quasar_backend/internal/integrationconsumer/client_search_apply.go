@@ -24,7 +24,7 @@ func ApplyClientSearchContext(rc integrationhttp.RequestConfig, profile, busca, 
 			return PrepareIXCClientListRequest(rc, busca, termo, detailed, cfg)
 		}
 		overrides := HubsoftSearchQueryOverrides(detailed)
-		overrides["busca"] = busca
+		overrides["busca"] = HubsoftBuscaValue(busca)
 		overrides["termo_busca"] = termo
 		return ApplyQueryOverrides(rc, overrides)
 

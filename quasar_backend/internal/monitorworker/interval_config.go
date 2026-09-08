@@ -44,6 +44,9 @@ type intervalConfig struct {
 	// (walk completo de logins), independente do ciclo leve de totais BNG. Ver
 	// TryStartParallelBngSessionsCycle.
 	BngSessionsParallelSeconds int
+	// BngLoginWatchSeconds — intervalo do ciclo rápido de presença online/offline (só walk de
+	// access_login, sem detalhe de sessão) — ver TryStartParallelBngLoginWatchCycle.
+	BngLoginWatchSeconds int
 }
 
 // ResolveTelemetrySeconds devolve segundos de telemetria a usar (evita COALESCE em SQL por compatibilidade).
@@ -81,7 +84,8 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			COALESCE(sweep_concurrency, 0),
 			COALESCE(history_retention_days, 90),
 			COALESCE(olt_baseline_parallel_seconds, 30),
-			COALESCE(bng_sessions_parallel_seconds, 1800)
+			COALESCE(bng_sessions_parallel_seconds, 1800),
+			COALESCE(bng_login_watch_seconds, 90)
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
@@ -89,7 +93,8 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		&c.OltOnuTelnetTimeoutMs,
 		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel,
 		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule,
-		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds, &c.BngSessionsParallelSeconds); err != nil {
+		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds, &c.BngSessionsParallelSeconds,
+		&c.BngLoginWatchSeconds); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)
@@ -159,6 +164,11 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		// Piso de segurança: um walk completo de sessões PPPoE é pesado — evita repeti-lo
 		// com mais frequência que a cada 5 minutos mesmo que alguém digite um valor menor.
 		c.BngSessionsParallelSeconds = 300
+	}
+	if c.BngLoginWatchSeconds < 30 {
+		// Piso de segurança: mesmo sendo só um walk de logins (sem detalhe), evita martelar
+		// o BNG com mais frequência que a cada 30s por um valor digitado por engano.
+		c.BngLoginWatchSeconds = 30
 	}
 	return c, nil
 }

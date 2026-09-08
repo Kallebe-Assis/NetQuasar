@@ -229,11 +229,10 @@ func (s *Server) refreshOLTDevice(w http.ResponseWriter, r *http.Request) {
 		FullTelemetry: fullTelemetry,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "community SNMP") || strings.Contains(err.Error(), "modelo OLT") {
-			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
-			return
-		}
-		if strings.Contains(err.Error(), "perfil OLT não encontrado") {
+		if strings.Contains(err.Error(), "community SNMP") ||
+			strings.Contains(err.Error(), "modelo OLT") ||
+			strings.Contains(err.Error(), "perfil OLT não encontrado") ||
+			strings.Contains(err.Error(), "Telemetria desabilitada") {
 			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error(), nil)
 			return
 		}

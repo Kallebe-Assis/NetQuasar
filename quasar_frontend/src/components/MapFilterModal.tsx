@@ -1,9 +1,11 @@
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MapDisplayMode } from "./EquipmentMap";
 import { MAP_PROJECT_ALL, MAP_PROJECT_NONE } from "../lib/mapProjectFilter";
 import { CABLE_FUNCOES, type CableFuncao } from "../lib/networkInfrastructure";
 
 export type SpliceModelFilter = "all" | "emenda" | "distribuicao";
+export type ConnectionDisplayMode = "cluster" | "individual";
 
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
@@ -15,6 +17,8 @@ type Props = {
   onClose: () => void;
   displayMode: MapDisplayMode;
   onDisplayMode: (m: MapDisplayMode) => void;
+  connectionDisplayMode: ConnectionDisplayMode;
+  onConnectionDisplayMode: (m: ConnectionDisplayMode) => void;
   popId: string;
   onPopId: (v: string) => void;
   popsOptions: { id: string; description: string }[];
@@ -56,6 +60,49 @@ type Props = {
   localityFlyNote: string | null;
 };
 
+/** Estado dos filtros "aplicáveis" (tudo exceto a filtragem por localidade, que já tem o próprio
+ * botão "Ir e filtrar" — essa continua imediata). Só é gravado nos estados reais do MapPage
+ * (via os onXxx de Props) quando o utilizador clica "Aplicar filtro". */
+type Draft = {
+  displayMode: MapDisplayMode;
+  connectionDisplayMode: ConnectionDisplayMode;
+  ctoColorByFeed: boolean;
+  projectId: string;
+  popId: string;
+  category: string;
+  showEquipment: boolean;
+  showCtos: boolean;
+  showCables: boolean;
+  cableFuncaoFilter: Set<CableFuncao> | null;
+  showSpliceBoxes: boolean;
+  spliceModelFilter: SpliceModelFilter;
+  showPoles: boolean;
+  showPops: boolean;
+  showProjects: boolean;
+  showConnections: boolean;
+};
+
+function draftFromProps(p: Props): Draft {
+  return {
+    displayMode: p.displayMode,
+    connectionDisplayMode: p.connectionDisplayMode,
+    ctoColorByFeed: p.ctoColorByFeed,
+    projectId: p.projectId,
+    popId: p.popId,
+    category: p.category,
+    showEquipment: p.showEquipment,
+    showCtos: p.showCtos,
+    showCables: p.showCables,
+    cableFuncaoFilter: p.cableFuncaoFilter,
+    showSpliceBoxes: p.showSpliceBoxes,
+    spliceModelFilter: p.spliceModelFilter,
+    showPoles: p.showPoles,
+    showPops: p.showPops,
+    showProjects: p.showProjects,
+    showConnections: p.showConnections,
+  };
+}
+
 function IconFilter() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -85,54 +132,89 @@ function LayerToggle({
 }
 
 export function MapFilterModal(props: Props) {
+  const [draft, setDraft] = useState<Draft>(() => draftFromProps(props));
+
+  // Reabrir sempre parte do valor actualmente aplicado (não do que ficou de uma edição anterior
+  // cancelada/fechada sem aplicar).
+  useEffect(() => {
+    if (props.open) setDraft(draftFromProps(props));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.open]);
+
   if (!props.open) return null;
 
+  function patch(p: Partial<Draft>) {
+    setDraft((d) => ({ ...d, ...p }));
+  }
+
+  function apply() {
+    props.onDisplayMode(draft.displayMode);
+    props.onConnectionDisplayMode(draft.connectionDisplayMode);
+    props.onCtoColorByFeed(draft.ctoColorByFeed);
+    props.onProjectId(draft.projectId);
+    props.onPopId(draft.popId);
+    props.onCategory(draft.category);
+    props.onShowEquipment(draft.showEquipment);
+    props.onShowCtos(draft.showCtos);
+    props.onShowCables(draft.showCables);
+    props.onCableFuncaoFilter(draft.cableFuncaoFilter);
+    props.onShowSpliceBoxes(draft.showSpliceBoxes);
+    props.onSpliceModelFilter(draft.spliceModelFilter);
+    props.onShowPoles(draft.showPoles);
+    props.onShowPops(draft.showPops);
+    props.onShowProjects(draft.showProjects);
+    props.onShowConnections(draft.showConnections);
+    props.onClose();
+  }
+
+  function cancel() {
+    setDraft(draftFromProps(props));
+    props.onClose();
+  }
+
   return createPortal(
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onClose}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={cancel}>
       <div
-        className="modal"
+        className="modal map-filter-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="map-filter-title"
-        style={{ maxWidth: 560, width: "min(96vw, 560px)" }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 id="map-filter-title" style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
             <IconFilter /> Filtros do mapa
           </h3>
-          <button type="button" className="btn btn--icon" aria-label="Fechar" onClick={props.onClose}>
+          <button type="button" className="btn btn--icon" aria-label="Fechar" onClick={cancel}>
             ×
           </button>
         </div>
 
-        <div style={{ display: "grid", gap: 12 }}>
+        <div className="map-filter-modal__grid">
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>Vista</span>
-            <select className="select" value={props.displayMode} onChange={(e) => props.onDisplayMode(e.target.value as MapDisplayMode)}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Vista (equipamentos / infra)</span>
+            <select className="select" value={draft.displayMode} onChange={(e) => patch({ displayMode: e.target.value as MapDisplayMode })}>
               <option value="cluster">Agrupado (padrão)</option>
               <option value="scatter">Desagrupado</option>
               <option value="status">Online / Offline</option>
             </select>
           </label>
 
-          <label className="toggle">
-            <span className="toggle__track">
-              <input
-                type="checkbox"
-                role="switch"
-                className="toggle__input"
-                checked={props.ctoColorByFeed}
-                onChange={(e) => props.onCtoColorByFeed(e.target.checked)}
-              />
-              <span className="toggle__thumb" aria-hidden />
-            </span>
-            <span className="toggle__label">CTOs com cor da fibra de alimentação</span>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Vista dos logins</span>
+            <select
+              className="select"
+              value={draft.connectionDisplayMode}
+              onChange={(e) => patch({ connectionDisplayMode: e.target.value as ConnectionDisplayMode })}
+            >
+              <option value="cluster">Agrupado (padrão)</option>
+              <option value="individual">Individual</option>
+            </select>
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Projeto</span>
-            <select className="select" value={props.projectId} onChange={(e) => props.onProjectId(e.target.value)}>
+            <select className="select" value={draft.projectId} onChange={(e) => patch({ projectId: e.target.value })}>
               <option value={MAP_PROJECT_NONE}>Nenhum</option>
               <option value={MAP_PROJECT_ALL}>Todos os projetos</option>
               {props.projectsOptions.map((p) => (
@@ -141,24 +223,11 @@ export function MapFilterModal(props: Props) {
                 </option>
               ))}
             </select>
-            {props.projectId === MAP_PROJECT_NONE ? (
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                Mostra a infraestrutura das camadas activas abaixo, sem restringir a nenhum projeto, na área visível do mapa.
-              </span>
-            ) : props.projectId === MAP_PROJECT_ALL ? (
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                Carrega CTOs e restante infraestrutura de todos os projetos activos na área visível (pode ser mais lento).
-              </span>
-            ) : props.projectId ? (
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                O mapa aproxima-se do projeto e mostra apenas a sua infraestrutura (sem equipamentos/logins).
-              </span>
-            ) : null}
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>POP</span>
-            <select className="select" value={props.popId} onChange={(e) => props.onPopId(e.target.value)} disabled={props.popsPending}>
+            <select className="select" value={draft.popId} onChange={(e) => patch({ popId: e.target.value })} disabled={props.popsPending}>
               <option value="">Todos os POPs</option>
               {props.popsOptions.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -171,7 +240,7 @@ export function MapFilterModal(props: Props) {
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Categoria</span>
-            <select className="select" value={props.category} onChange={(e) => props.onCategory(e.target.value)}>
+            <select className="select" value={draft.category} onChange={(e) => patch({ category: e.target.value })}>
               <option value="">Todas</option>
               {MAP_DEVICE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
@@ -181,34 +250,61 @@ export function MapFilterModal(props: Props) {
             </select>
           </label>
 
-          <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "flex-end" }}>
+            <label className="toggle">
+              <span className="toggle__track">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="toggle__input"
+                  checked={draft.ctoColorByFeed}
+                  onChange={(e) => patch({ ctoColorByFeed: e.target.checked })}
+                />
+                <span className="toggle__thumb" aria-hidden />
+              </span>
+              <span className="toggle__label">CTOs com cor da fibra de alimentação</span>
+            </label>
+          </div>
+
+          {draft.projectId === MAP_PROJECT_NONE ? (
+            <span className="map-filter-modal__full" style={{ fontSize: 11, color: "var(--muted)" }}>
+              Mostra a infraestrutura das camadas activas abaixo, sem restringir a nenhum projeto, na área visível do mapa.
+            </span>
+          ) : draft.projectId === MAP_PROJECT_ALL ? (
+            <span className="map-filter-modal__full" style={{ fontSize: 11, color: "var(--muted)" }}>
+              Carrega CTOs e restante infraestrutura de todos os projetos activos na área visível (pode ser mais lento).
+            </span>
+          ) : draft.projectId ? (
+            <span className="map-filter-modal__full" style={{ fontSize: 11, color: "var(--muted)" }}>
+              O mapa aproxima-se do projeto e mostra apenas a sua infraestrutura (sem equipamentos/logins).
+            </span>
+          ) : null}
+
+          <div className="map-filter-modal__full" style={{ display: "grid", gap: 8 }}>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Camadas</span>
-            <LayerToggle checked={props.showEquipment} onChange={props.onShowEquipment} label="Equipamentos" />
-            <LayerToggle checked={props.showCtos} onChange={props.onShowCtos} label="CTOs (viewport)" />
-            <LayerToggle checked={props.showCables} onChange={props.onShowCables} label="Cabos (viewport)" />
-            {props.showCables ? (
-              <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 4 }}>
+            <LayerToggle checked={draft.showEquipment} onChange={(v) => patch({ showEquipment: v })} label="Equipamentos" />
+            <LayerToggle checked={draft.showCtos} onChange={(v) => patch({ showCtos: v })} label="CTOs (viewport)" />
+            <LayerToggle checked={draft.showCables} onChange={(v) => patch({ showCables: v })} label="Cabos (viewport)" />
+            {draft.showCables ? (
+              <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Função do cabo (marque uma ou mais)</span>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <div className="map-filter-chip-group">
                   {CABLE_FUNCOES.map((f) => {
-                    const checked = props.cableFuncaoFilter == null || props.cableFuncaoFilter.has(f.value);
+                    const checked = draft.cableFuncaoFilter == null || draft.cableFuncaoFilter.has(f.value);
                     return (
-                      <label
-                        key={f.value}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}
-                      >
+                      <label key={f.value} className="map-filter-chip">
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => {
                             const all = new Set(CABLE_FUNCOES.map((x) => x.value));
-                            const base = props.cableFuncaoFilter ?? all;
+                            const base = draft.cableFuncaoFilter ?? all;
                             const next = new Set(base);
                             if (e.target.checked) next.add(f.value);
                             else next.delete(f.value);
                             // Tudo marcado (ou nada desmarcado) volta a "sem filtro" (null) — evita
                             // gravar/comparar um Set igual a "todas as funções" para sempre.
-                            props.onCableFuncaoFilter(next.size === 0 || next.size === all.size ? null : next);
+                            patch({ cableFuncaoFilter: next.size === 0 || next.size === all.size ? null : next });
                           }}
                         />
                         {f.label}
@@ -218,14 +314,14 @@ export function MapFilterModal(props: Props) {
                 </div>
               </div>
             ) : null}
-            <LayerToggle checked={props.showSpliceBoxes} onChange={props.onShowSpliceBoxes} label="Caixas de emenda / foguete" />
-            {props.showSpliceBoxes ? (
-              <label style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 4, maxWidth: 220 }}>
+            <LayerToggle checked={draft.showSpliceBoxes} onChange={(v) => patch({ showSpliceBoxes: v })} label="Caixas de emenda / foguete" />
+            {draft.showSpliceBoxes ? (
+              <label style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 4, maxWidth: 260 }}>
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Tipo de foguete</span>
                 <select
                   className="select"
-                  value={props.spliceModelFilter}
-                  onChange={(e) => props.onSpliceModelFilter(e.target.value as SpliceModelFilter)}
+                  value={draft.spliceModelFilter}
+                  onChange={(e) => patch({ spliceModelFilter: e.target.value as SpliceModelFilter })}
                 >
                   <option value="all">Todos</option>
                   <option value="emenda">Só emenda</option>
@@ -233,13 +329,13 @@ export function MapFilterModal(props: Props) {
                 </select>
               </label>
             ) : null}
-            <LayerToggle checked={props.showPoles} onChange={props.onShowPoles} label="Postes" />
-            <LayerToggle checked={props.showPops} onChange={props.onShowPops} label="POPs" />
-            <LayerToggle checked={props.showProjects} onChange={props.onShowProjects} label="Projetos" />
-            <LayerToggle checked={props.showConnections} onChange={props.onShowConnections} label="Logins no mapa" />
+            <LayerToggle checked={draft.showPoles} onChange={(v) => patch({ showPoles: v })} label="Postes" />
+            <LayerToggle checked={draft.showPops} onChange={(v) => patch({ showPops: v })} label="POPs" />
+            <LayerToggle checked={draft.showProjects} onChange={(v) => patch({ showProjects: v })} label="Projetos" />
+            <LayerToggle checked={draft.showConnections} onChange={(v) => patch({ showConnections: v })} label="Logins no mapa" />
           </div>
 
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+          <div className="map-filter-modal__full" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
             <span style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 6 }}>
               Filtrar por localidade
             </span>
@@ -261,10 +357,19 @@ export function MapFilterModal(props: Props) {
             ) : (
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
                 Com localidade seleccionada, o mapa só pede CTOs/cabos/postes dessa localidade (ou dos seus projectos) e
-                centra a vista nela.
+                centra a vista nela. Esta acção é imediata — não depende do botão "Aplicar filtro" abaixo.
               </p>
             )}
           </div>
+        </div>
+
+        <div className="map-filter-modal__foot">
+          <button type="button" className="btn" onClick={cancel}>
+            Cancelar
+          </button>
+          <button type="button" className="btn btn--primary" onClick={apply}>
+            Aplicar filtro
+          </button>
         </div>
       </div>
     </div>,

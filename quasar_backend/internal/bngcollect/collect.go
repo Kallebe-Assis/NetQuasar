@@ -436,6 +436,30 @@ func CollectAndMergeSessionsPeriodic(ctx context.Context, pool *pgxpool.Pool, de
 	return n, false, nil
 }
 
+// CollectAndSyncOnlineLoginsFast é a versão "rápida" de CollectAndMergeSessionsPeriodic: faz só
+// o walk de access_login (collectOnlineLoginsFast — sem GET de IPv4/IPv6/MAC/VLAN/etc. por
+// índice) e sincroniza directamente o inventário online/offline (SyncKnownLoginsFast,
+// known_logins.go). NÃO alimenta bng_session_snapshots — a tela "Sessões PPPoE" continua a
+// depender do ciclo completo (TryStartParallelBngSessionsCycle) ou do botão manual para
+// IP/MAC/VLAN/etc. — e SyncKnownLoginsFast nunca apaga detalhe já conhecido de um login que
+// já estava online, só actualiza is_online/last_seen_at (ver comentário em SyncKnownLoginsFast).
+func CollectAndSyncOnlineLoginsFast(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, timeout time.Duration) (n int, err error) {
+	profile := LoadGlobalProfile(ctx, pool)
+	profile = profileWithSessionWalksEnabled(profile)
+	logins, complete, wErr := collectOnlineLoginsFast(ctx, host, community, profile, timeout)
+	if wErr != nil {
+		return 0, wErr
+	}
+	if !complete {
+		return 0, fmt.Errorf("walk de logins truncado — ciclo rápido ignorado nesta volta")
+	}
+	stripSuffix := profile.Options.PPPoELoginStripSuffix
+	if sErr := SyncKnownLoginsFast(ctx, pool, deviceID, logins, stripSuffix); sErr != nil {
+		return 0, sErr
+	}
+	return len(logins), nil
+}
+
 // UpsertSessionInLatestSnapshot actualiza ou insere uma sessão no snapshot mais recente do BNG.
 func UpsertSessionInLatestSnapshot(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, row SessionRow, stripSuffix string) error {
 	if pool == nil {

@@ -55,13 +55,18 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	var comm *string
 	var brand, model, devDesc string
 	var maxPons *int
+	var telemetryEnabled bool
 	if err := pool.QueryRow(ctx, `
 		SELECT host(d.ip)::text, d.snmp_community,
 			coalesce(trim(d.brand), ''), coalesce(trim(d.model), ''),
-			coalesce(trim(d.description), ''), d.max_pons
+			coalesce(trim(d.description), ''), d.max_pons, d.telemetry_enabled
 		FROM devices d WHERE d.id=$1
-	`, id).Scan(&ip, &comm, &brand, &model, &devDesc, &maxPons); err != nil {
+	`, id).Scan(&ip, &comm, &brand, &model, &devDesc, &maxPons, &telemetryEnabled); err != nil {
 		return out, err
+	}
+	if !telemetryEnabled {
+		out.Reason = "Telemetria desabilitada neste equipamento"
+		return out, fmt.Errorf("%s", out.Reason)
 	}
 	host := ""
 	if ip != nil {

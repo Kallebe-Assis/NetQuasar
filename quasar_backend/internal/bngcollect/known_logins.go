@@ -74,6 +74,113 @@ func SyncKnownLogins(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	return tx.Commit(ctx)
 }
 
+// SyncKnownLoginsFast é a versão "leve" de SyncKnownLogins usada pelo ciclo rápido
+// (CollectAndSyncOnlineLoginsFast): recebe só os logins vistos online, sem nenhum detalhe de
+// sessão (IPv4/IPv6/MAC/VLAN/etc. — esses vêm só do walk completo, que este ciclo pula por
+// velocidade). Por não ter detalhe para gravar, NUNCA sobrescreve o que já está guardado:
+//   - login já online → só actualiza last_seen_at/updated_at (touchKnownLoginSeen).
+//   - login conhecido mas estava offline (reconectou) → marca online e abre um novo evento em
+//     bng_login_events, mas preserva o detalhe anterior em bng_known_logins em vez de o apagar
+//     (reopenKnownLoginMinimal) — pode ficar temporariamente desactualizado (ex.: IP mudou), o
+//     próximo ciclo completo corrige assim que correr.
+//   - login nunca visto → abre normalmente (openOrRefreshKnownLogin), sem detalhe para perder.
+//
+// Ausentes que estavam online → offline, exactamente como SyncKnownLogins (markKnownLoginOfflineTx
+// já não mexe em detalhe nenhum, por isso é reaproveitada sem alterações).
+func SyncKnownLoginsFast(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, logins []string, stripSuffix string) error {
+	if pool == nil {
+		return nil
+	}
+	online := make(map[string]string, len(logins))
+	for _, raw := range logins {
+		login := strings.TrimSpace(NormalizeSNMPLoginValue(raw, stripSuffix))
+		if login == "" {
+			continue
+		}
+		online[strings.ToLower(login)] = login
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	existing, err := loadKnownLoginsTx(ctx, tx, deviceID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	for key, login := range online {
+		prev, ok := existing[key]
+		switch {
+		case !ok:
+			if err := openOrRefreshKnownLogin(ctx, tx, deviceID, SessionRow{Login: login}, now, prev); err != nil {
+				return err
+			}
+		case !prev.IsOnline:
+			if err := reopenKnownLoginMinimal(ctx, tx, deviceID, login, now, prev); err != nil {
+				return err
+			}
+		default:
+			if err := touchKnownLoginSeen(ctx, tx, deviceID, prev, now); err != nil {
+				return err
+			}
+		}
+	}
+
+	for key, prev := range existing {
+		if !prev.IsOnline {
+			continue
+		}
+		if _, still := online[key]; still {
+			continue
+		}
+		if err := markKnownLoginOfflineTx(ctx, tx, deviceID, prev, now); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// touchKnownLoginSeen actualiza só last_seen_at/updated_at de um login já online — usado pelo
+// ciclo rápido (SyncKnownLoginsFast), que não tem detalhe de sessão para gravar e por isso não
+// deve tocar nas colunas de IP/MAC/VLAN/etc. já preenchidas por um ciclo completo anterior.
+func touchKnownLoginSeen(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, prev knownLoginRow, now time.Time) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE bng_known_logins SET last_seen_at = $3, updated_at = $3
+		WHERE device_id=$1 AND id=$2
+	`, deviceID, prev.ID, now)
+	return err
+}
+
+// reopenKnownLoginMinimal reabre (marca online) um login já conhecido que estava offline, sem
+// detalhe de sessão disponível — usado pelo ciclo rápido. Abre um novo evento em
+// bng_login_events (só connected_at; IP/MAC/VLAN ficam por preencher até o próximo ciclo
+// completo) mas preserva o detalhe anterior já gravado em bng_known_logins em vez de o apagar.
+func reopenKnownLoginMinimal(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, login string, now time.Time, prev knownLoginRow) error {
+	var eventID int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO bng_login_events (device_id, login, connected_at)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, deviceID, login, now).Scan(&eventID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE bng_known_logins SET
+			is_online = true,
+			last_seen_at = $3,
+			current_event_id = $4,
+			updated_at = $3
+		WHERE device_id=$1 AND id=$2
+	`, deviceID, prev.ID, now, eventID)
+	return err
+}
+
 // TouchKnownLoginOnline actualiza um login encontrado em lookup pontual (não marca outros offline).
 func TouchKnownLoginOnline(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, row SessionRow, stripSuffix string) error {
 	if pool == nil {

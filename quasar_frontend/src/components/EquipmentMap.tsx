@@ -772,12 +772,25 @@ function isInfrastructurePoint(p: MapPoint): boolean {
   return !!p.mapKind && isInfraMapKind(p.mapKind);
 }
 
+/** Cor de status de login — verde/vermelho quando já cruzado com o BNG ("online"/"offline", ver
+ * MapPage.tsx), senão a cor geral de conexões. */
+function connectionStatusColorFor(status: string | undefined, colors: MapColors): string {
+  if (status === "online") return "#22c55e";
+  if (status === "offline") return "#ef4444";
+  return colors.connection;
+}
+
+/** Cor de um ponto "connection" individual — ver connectionStatusColorFor. */
+function connectionStatusColor(p: MapPoint, colors: MapColors): string {
+  return connectionStatusColorFor(p.status, colors);
+}
+
 function highlightAccent(p: MapPoint, colors: MapColors): string {
   if (p.markerColor?.trim()) return p.markerColor.trim();
   if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
     return p.mapKind === "cto" ? "#7c3aed" : "#2563eb";
   }
-  if (isConnectionPoint(p)) return colors.connection;
+  if (isConnectionPoint(p)) return connectionStatusColor(p, colors);
   return colors.equipment;
 }
 
@@ -844,7 +857,7 @@ function markerIconOpts(
       infraImageFor(p.mapKind, iconStyles, p.boxModel),
     );
   } else if (isConnectionPoint(p)) {
-    icon = connectionPinIcon(colors.connection, iconStyles.connection, iconStyles.imageUrls?.connection);
+    icon = connectionPinIcon(connectionStatusColor(p, colors), iconStyles.connection, iconStyles.imageUrls?.connection);
   } else if (displayMode !== "status") {
     const eq = equipmentIconFor(p, colors, iconStyles);
     icon = equipmentPinIcon(colors.equipment, eq.styleId, eq.imageUrl);
@@ -873,7 +886,11 @@ function markerIconOptsGroup(
         icon: clusterBadgeInfraIcon(members.length, infraKind, color, infraStyleFor(infraKind, iconStyles, members[0].boxModel)),
       };
     }
-    const color = isConn ? colors.connection : colors.equipment;
+    // Cluster de logins com status uniforme (todos online, ou todos offline) herda a cor de
+    // status — misto/desconhecido cai na cor geral de conexões, para não sugerir um estado
+    // errado por maioria.
+    const connStatus = isConn && members.every((m) => m.status === members[0].status) ? members[0].status : undefined;
+    const color = isConn ? connectionStatusColorFor(connStatus, colors) : colors.equipment;
     // Ícone por categoria só quando o grupo inteiro é da mesma categoria — garantido em modo
     // "Agrupado" (gridClusters agrupa por categoria, ver pointClusterKind), mas um "stack" por
     // proximidade (modo Desagrupado) pode juntar categorias diferentes; nesse caso cai no ícone
@@ -899,8 +916,9 @@ function markerIconOptsGroup(
     return { icon: withMapPinHighlight(icon, highlighted, highlightAccent(single, colors)) };
   }
   if (isConn) {
-    const icon = connectionPinIcon(colors.connection, iconStyles.connection, iconStyles.imageUrls?.connection);
-    return { icon: withMapPinHighlight(icon, highlighted, colors.connection) };
+    const color = connectionStatusColor(single, colors);
+    const icon = connectionPinIcon(color, iconStyles.connection, iconStyles.imageUrls?.connection);
+    return { icon: withMapPinHighlight(icon, highlighted, color) };
   }
   if (displayMode !== "status") {
     const eq = equipmentIconFor(single, colors, iconStyles);
@@ -1600,6 +1618,7 @@ export function EquipmentMap({
   mapColors,
   mapIconStyles,
   connectionClusterForced = false,
+  connectionDisplayMode = "cluster",
   mapHeight = 480,
   highlightedId = null,
   userLocation = null,
@@ -1634,6 +1653,10 @@ export function EquipmentMap({
   mapIconStyles?: MapIconStyles;
   /** Mantém conexões agrupadas mesmo em vista desagrupada (desempenho com milhares de logins). */
   connectionClusterForced?: boolean;
+  /** Agrupado/Individual para logins — independente do displayMode geral (equipamentos/infra).
+   * Ver MapFilterModal ("Logins" na secção Visualização). connectionClusterForced ainda pode
+   * forçar agrupado por desempenho mesmo com "individual" seleccionado. */
+  connectionDisplayMode?: "cluster" | "individual";
   mapHeight?: number | string;
   /** Pin seleccionado e/ou CTOs próximas (destaque visual). */
   highlightedId?: string | string[] | null;
@@ -1716,9 +1739,13 @@ export function EquipmentMap({
     () => (displayMode === "cluster" ? [] : mergeProximityStacks(equipValid, STACK_MERGE_M)),
     [equipValid, displayMode],
   );
+  // Logins têm o próprio modo de visualização (connectionDisplayMode), independente do
+  // displayMode geral de equipamentos/infra — connectionClusterForced ainda pode forçar
+  // agrupado por desempenho (zoom afastado / muitos logins) mesmo com "individual" escolhido.
+  const connCluster = connectionDisplayMode !== "individual" || connectionClusterForced;
   const stacksScatterConn = useMemo(
-    () => (displayMode === "cluster" || connectionClusterForced ? [] : mergeProximityStacks(connValid, STACK_MERGE_M)),
-    [connValid, displayMode, connectionClusterForced],
+    () => (connCluster ? [] : mergeProximityStacks(connValid, STACK_MERGE_M)),
+    [connValid, connCluster],
   );
 
   const fitPointsRef = useRef<{ lat: number; lng: number }[]>([]);
@@ -1784,7 +1811,7 @@ export function EquipmentMap({
 
         {displayMode === "cluster" && (
           <ClusterMarkersByView
-            points={markerPoints}
+            points={equipValid}
             displayMode={displayMode}
             onSelectDevice={selectHandler}
             onOpenSplitter={splitterHandler}
@@ -1803,9 +1830,51 @@ export function EquipmentMap({
         )}
 
         {(displayMode === "scatter" || displayMode === "status") && (
-          <>
+          <ScatterMarkersLayer
+            stacks={stacksScatterEquip}
+            displayMode={displayMode}
+            spider={spider}
+            setSpider={setSpider}
+            spiderRef={spiderRef}
+            runSpiderOpen={runSpiderOpen}
+            stopSpiderAnim={stopSpiderAnim}
+            onSelectDevice={selectHandler}
+            onOpenSplitter={splitterHandler}
+            onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+            onEditPosition={editHandler}
+            onCopyCoords={copyCoordsHandler}
+            colors={colors}
+            iconStyles={iconStyles}
+            keyPrefix="eq"
+            highlightedId={highlightedId}
+          />
+        )}
+
+        {/* Logins — camada própria, sempre presente independente do displayMode geral de
+            equipamentos/infra acima; connCluster decide Agrupado (connectionDisplayMode +
+            connectionClusterForced) vs Individual. */}
+        {connValid.length > 0 &&
+          (connCluster ? (
+            <ClusterMarkersByView
+              points={connValid}
+              displayMode={displayMode}
+              onSelectDevice={selectHandler}
+              onOpenSplitter={splitterHandler}
+              onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
+              onEditPosition={editHandler}
+              onCopyCoords={copyCoordsHandler}
+              spider={spider}
+              setSpider={setSpider}
+              spiderRef={spiderRef}
+              runSpiderOpen={runSpiderOpen}
+              stopSpiderAnim={stopSpiderAnim}
+              colors={colors}
+              iconStyles={iconStyles}
+              highlightedId={highlightedId}
+            />
+          ) : (
             <ScatterMarkersLayer
-              stacks={stacksScatterEquip}
+              stacks={stacksScatterConn}
               displayMode={displayMode}
               spider={spider}
               setSpider={setSpider}
@@ -1815,53 +1884,14 @@ export function EquipmentMap({
               onSelectDevice={selectHandler}
               onOpenSplitter={splitterHandler}
               onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
-            onEditPosition={editHandler}
-            onCopyCoords={copyCoordsHandler}
+              onEditPosition={editHandler}
+              onCopyCoords={copyCoordsHandler}
               colors={colors}
               iconStyles={iconStyles}
-              keyPrefix="eq"
+              keyPrefix="conn"
               highlightedId={highlightedId}
             />
-            {connectionClusterForced && connValid.length > 0 ? (
-              <ClusterMarkersByView
-                points={connValid}
-                displayMode={displayMode}
-                onSelectDevice={selectHandler}
-                onOpenSplitter={splitterHandler}
-                onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
-            onEditPosition={editHandler}
-            onCopyCoords={copyCoordsHandler}
-                spider={spider}
-                setSpider={setSpider}
-                spiderRef={spiderRef}
-                runSpiderOpen={runSpiderOpen}
-                stopSpiderAnim={stopSpiderAnim}
-                colors={colors}
-                iconStyles={iconStyles}
-                highlightedId={highlightedId}
-              />
-            ) : (
-              <ScatterMarkersLayer
-                stacks={stacksScatterConn}
-                displayMode={displayMode}
-                spider={spider}
-                setSpider={setSpider}
-                spiderRef={spiderRef}
-                runSpiderOpen={runSpiderOpen}
-                stopSpiderAnim={stopSpiderAnim}
-                onSelectDevice={selectHandler}
-                onOpenSplitter={splitterHandler}
-                onOpenCableFibers={cableFibersHandler} onOpenSplice={spliceHandler}
-            onEditPosition={editHandler}
-            onCopyCoords={copyCoordsHandler}
-                colors={colors}
-                iconStyles={iconStyles}
-                keyPrefix="conn"
-                highlightedId={highlightedId}
-              />
-            )}
-          </>
-        )}
+          ))}
       </MapContainer>
     </div>
   );

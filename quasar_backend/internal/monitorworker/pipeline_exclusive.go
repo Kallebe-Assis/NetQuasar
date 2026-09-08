@@ -110,6 +110,21 @@ func UnlockBngSessionsCycle() {
 	bngSessionsCycleMu.Unlock()
 }
 
+// bngLoginWatchCycleMu — ciclo rápido de presença online/offline dos logins PPPoE (só walk de
+// access_login, sem detalhe de sessão), separado do ciclo completo de sessões (bngSessionsCycleMu)
+// por ser bem mais leve e correr com cadência bem menor. Ver TryStartParallelBngLoginWatchCycle.
+var bngLoginWatchCycleMu sync.Mutex
+
+// TryLockBngLoginWatchCycle tenta adquirir o ciclo rápido de presença online/offline sem bloquear.
+func TryLockBngLoginWatchCycle() bool {
+	return bngLoginWatchCycleMu.TryLock()
+}
+
+// UnlockBngLoginWatchCycle liberta o ciclo rápido de presença online/offline.
+func UnlockBngLoginWatchCycle() {
+	bngLoginWatchCycleMu.Unlock()
+}
+
 // bngInterfacesCycleMu — ciclo dedicado de snapshot IF-MIB para equipamentos BNG (ver
 // TryStartParallelBngInterfaceCycle), separado do ciclo de totais e do de sessões PPPoE.
 var bngInterfacesCycleMu sync.Mutex

@@ -93,6 +93,22 @@
   background: var(--panel);
   padding: 10px;
   overflow: hidden;
+  transition: width 0.16s ease, padding 0.16s ease;
+}
+/* Retrátil, tal como a barra lateral esquerda (ShellLayout.tsx) — encolhe para uma faixa fina só
+   com o botão de expandir, devolvendo o espaço ao canvas (flex:1 em .topo-canvas-wrap cresce
+   automaticamente). */
+.topo-device-list--collapsed {
+  width: 40px;
+  padding: 10px 6px;
+  align-items: center;
+}
+.topo-device-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 .topo-device-list__search {
   display: flex;
@@ -112,12 +128,6 @@
   flex-direction: column;
   gap: 4px;
 }
-/* Catálogo fixo de equipamentos avulsos (6 itens) — não cresce para preencher o espaço como a
-   lista de cadastrados abaixo, só rola se um dia crescer além do previsto. */
-.topo-device-list__items--manual {
-  flex: 0 0 auto;
-  max-height: 220px;
-}
 .topo-device-list__section-title {
   font-size: 11px;
   font-weight: 700;
@@ -125,6 +135,13 @@
   letter-spacing: 0.03em;
   color: var(--muted);
   margin: 0 0 4px;
+}
+/* Título "Equipamentos avulsos" dentro da MESMA lista rolável, depois dos cadastrados — só a
+   vista (scroll até ao fim, ou pesquisa a filtrar para eles) muda, não é uma secção à parte. */
+.topo-device-list__section-title--divider {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
 }
 .topo-device-list__item {
   display: flex;

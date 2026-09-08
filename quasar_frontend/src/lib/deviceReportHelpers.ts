@@ -194,6 +194,13 @@ export function collectProfileOidExclusions(profile: Record<string, unknown>): S
   add(profile.uptime_oid);
   add(profile.sysname_oid);
   add(profile.sysdescr_oid);
+  // Fallback padrão RFC1213 usado por extractSystemInfo quando o perfil não define um OID
+  // próprio — excluir sempre, senão sem uptime_oid configurado o valor aparecia duas vezes
+  // (uma vez com o rótulo/formato certo, outra como "Tempo ativo do sistema" cru na lista de
+  // extras).
+  add("1.3.6.1.2.1.1.1.0");
+  add("1.3.6.1.2.1.1.3.0");
+  add("1.3.6.1.2.1.1.5.0");
   add(profile.cpu_primary_oid);
   add(profile.cpu_available_oid);
   add(profile.memory_used_oid);
@@ -249,6 +256,50 @@ export function oidFriendlyDescription(oid: string): string | null {
   );
 }
 
+/** sysUpTime (TimeTicks, centésimos de segundo) → "N dia(s), HH:MM:SS" — mesmo formato do
+ * cabeçalho de referência do relatório. O backend guarda o valor bruto da PDU (probing/snmp.go
+ * snmpValueToString cai no `default: fmt.Sprint(x)` para TimeTicks, ou seja, só o número de
+ * ticks) — a conversão para texto legível tem de ser feita aqui. */
+export function formatUptimeTicks(raw: string | undefined | null): string | null {
+  const ticks = Number(raw);
+  if (!raw || !Number.isFinite(ticks) || ticks < 0) return null;
+  const totalSeconds = Math.floor(ticks / 100);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return days > 0 ? `${days} dia${days === 1 ? "" : "s"}, ${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}`;
+}
+
+/** sysName/sysDescr/sysUpTime da última telemetria — nenhum destes tinha uma linha própria no
+ * relatório antes (uptime_oid/sysname_oid/sysdescr_oid só entravam na lista de exclusão de
+ * collectProfileOidExclusions, para não duplicar como "extra", mas nunca ganhavam um rótulo
+ * próprio). Usa o OID do perfil do equipamento quando definido, senão cai nos OIDs padrão
+ * RFC1213 (system group), que qualquer equipamento SNMP responde. */
+export function extractSystemInfo(metrics: Record<string, unknown> | undefined): {
+  sysName: string | null;
+  sysDescr: string | null;
+  uptime: string | null;
+} {
+  if (!metrics) return { sysName: null, sysDescr: null, uptime: null };
+  const profile = (metrics.profile as Record<string, unknown> | undefined) ?? {};
+  const vars = snmpVarsFromMetrics(metrics);
+  const pick = (profileKey: string, fallbackOid: string): string | null => {
+    const configured = String(profile[profileKey] ?? "").trim().replace(/^\./, "");
+    const v = (configured && vars[configured]) || vars[fallbackOid];
+    const t = String(v ?? "").trim();
+    return t === "" ? null : t;
+  };
+  return {
+    sysName: pick("sysname_oid", "1.3.6.1.2.1.1.5.0"),
+    sysDescr: pick("sysdescr_oid", "1.3.6.1.2.1.1.1.0"),
+    uptime: formatUptimeTicks(pick("uptime_oid", "1.3.6.1.2.1.1.3.0")),
+  };
+}
+
 export type ReportMainTableRow = { description: string; value: string };
 
 /** Linhas da tabela principal do relatório: estado + leituras SNMP extra (sem mostrar OID ao usuário). */
@@ -286,6 +337,10 @@ export function buildDeviceReportMainTable(args: {
     value: kpis.temp != null ? kpis.temp.toFixed(1) : "—",
   });
   if (!m || typeof m !== "object") return rows;
+  const sysInfo = extractSystemInfo(m as Record<string, unknown>);
+  if (sysInfo.sysName) rows.push({ description: "Nome do sistema (board)", value: sysInfo.sysName });
+  if (sysInfo.uptime) rows.push({ description: "Uptime", value: sysInfo.uptime });
+  if (sysInfo.sysDescr) rows.push({ description: "Descrição do sistema", value: sysInfo.sysDescr });
   const profile = (m.profile as Record<string, unknown> | undefined) ?? {};
   const excluded = collectProfileOidExclusions(profile);
   const vars = snmpVarsFromMetrics(m as Record<string, unknown>);
@@ -391,6 +446,18 @@ export function interfaceSnapshotTableRows(interfaces: unknown): ReportMainTable
     rows.push({ description: desc, value: value === "" ? "—" : value });
   }
   return rows;
+}
+
+/** Min/Média/Máx de uma série de pontos {iso, value} — usado na legenda acima de cada gráfico do
+ * relatório (mesmo padrão da imagem de referência: "Min — Avg — Max"). */
+export function chartPointStats(points: { value: number | null }[]): { min: number | null; avg: number | null; max: number | null } {
+  const vals = points.map((p) => p.value).filter((v): v is number => v != null && Number.isFinite(v));
+  if (!vals.length) return { min: null, avg: null, max: null };
+  return {
+    min: Math.min(...vals),
+    max: Math.max(...vals),
+    avg: vals.reduce((a, b) => a + b, 0) / vals.length,
+  };
 }
 
 export function aggregateTelemetryFromSamples(samples: TelemetryHistorySample[]) {

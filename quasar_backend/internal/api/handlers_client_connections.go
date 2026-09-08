@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationconsumer"
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
 )
@@ -341,6 +342,55 @@ func (s *Server) checkClientConnectionDuplicates(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, out)
 }
 
+// loadKnownLoginStatusSet devolve, para cada login PPPoE já visto em QUALQUER BNG conhecido
+// (bng_known_logins — alimentado pelo ciclo rápido TryStartParallelBngLoginWatchCycle e pelo
+// ciclo completo de sessões), se está online agora (true) ou offline (false); um login ausente
+// do mapa nunca foi visto em nenhum BNG (ex.: ainda não conectou, ou é uma conexão DHCP sem
+// PPPoE). Usado para cruzar com client_connections.login (tela Elementos -> Logins, e os pontos
+// "connection" do mapa). Uma única query com todos os BNGs de uma vez, em vez de uma subquery
+// correlacionada por login — mais barato quando há muitas conexões cadastradas. Quando o mesmo
+// login aparece em mais de um BNG, online-em-qualquer-um vence (bool_or).
+func loadKnownLoginStatusSet(ctx context.Context, db *pgxpool.Pool) (map[string]bool, error) {
+	rows, err := db.Query(ctx, `
+		SELECT lower(trim(login)), bool_or(is_online)
+		FROM bng_known_logins
+		GROUP BY lower(trim(login))
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var login string
+		var online bool
+		if err := rows.Scan(&login, &online); err != nil {
+			return nil, err
+		}
+		if login != "" {
+			out[login] = online
+		}
+	}
+	return out, rows.Err()
+}
+
+// bngLoginStatusLabel: "online"/"offline" quando o login já foi visto em algum BNG, "" (nunca
+// visto — status desconhecido) caso contrário. Ver loadKnownLoginStatusSet.
+func bngLoginStatusLabel(statusSet map[string]bool, login string) string {
+	key := strings.ToLower(strings.TrimSpace(login))
+	if key == "" {
+		return ""
+	}
+	online, known := statusSet[key]
+	if !known {
+		return ""
+	}
+	if online {
+		return "online"
+	}
+	return "offline"
+}
+
 func (s *Server) listClientConnections(w http.ResponseWriter, r *http.Request) {
 	q := `SELECT ` + clientConnSelectCols + ` FROM client_connections WHERE 1=1`
 	args := []any{}
@@ -378,6 +428,21 @@ func (s *Server) listClientConnections(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		list = append(list, m)
+	}
+	rows.Close()
+	// Status online/offline PPPoE (cruzado com o BNG) — só faz sentido para logins pppoe;
+	// conexões dhcp não têm sessão PPPoE para cruzar. Uma falha aqui (ex.: nenhum BNG
+	// cadastrado ainda) não deve impedir a lista de carregar — status fica "" (desconhecido).
+	if statusSet, sErr := loadKnownLoginStatusSet(r.Context(), s.DB()); sErr == nil {
+		for _, m := range list {
+			if m["connection_kind"] != "pppoe" {
+				continue
+			}
+			login, _ := m["login"].(string)
+			if status := bngLoginStatusLabel(statusSet, login); status != "" {
+				m["bng_status"] = status
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connections": list})
 }
@@ -982,6 +1047,9 @@ func (s *Server) mapConnectionPoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	// Status online/offline PPPoE cruzado com o BNG (ver loadKnownLoginStatusSet) — falha aqui
+	// (ex.: nenhum BNG cadastrado ainda) não deve impedir o mapa de carregar os pontos.
+	statusSet, _ := loadKnownLoginStatusSet(r.Context(), s.DB())
 	var pts []map[string]any
 	for rows.Next() {
 		var id uuid.UUID
@@ -1001,6 +1069,11 @@ func (s *Server) mapConnectionPoints(w http.ResponseWriter, r *http.Request) {
 		}
 		if bairro != nil {
 			pt["neighborhood"] = *bairro
+		}
+		if kind == "pppoe" {
+			if status := bngLoginStatusLabel(statusSet, login); status != "" {
+				pt["bng_status"] = status
+			}
 		}
 		pts = append(pts, pt)
 	}

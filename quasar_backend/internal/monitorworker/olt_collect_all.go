@@ -61,6 +61,10 @@ func validateOltCollectReady(ctx context.Context, pool *pgxpool.Pool, row pingab
 		r.Reason = "IP em falta"
 		return r
 	}
+	if !row.telemetryEnabled {
+		r.Reason = "Telemetria desabilitada neste equipamento"
+		return r
+	}
 	if resolveSNMPCommunity(row, defCommunity) == "" {
 		r.Reason = "community SNMP em falta (equipamento e Definições → Rede)"
 		return r

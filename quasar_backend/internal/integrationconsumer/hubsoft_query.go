@@ -1,5 +1,21 @@
 package integrationconsumer
 
+import "strings"
+
+// HubsoftBuscaValue traduz o «busca» genérico da UI (ver DefaultClientSearchBusca e
+// IsLoginBusca) para o vocabulário documentado da Hubsoft (GET /integracao/cliente, ver
+// BuscaOptions em config.go). Hoje só «login» (usado por omissão nas consultas de login — o
+// mesmo valor genérico que o ramo IXC reconhece via IsLoginBusca) precisa de tradução: a Hubsoft
+// não aceita "login" (devolve "O tipo de busca (login) não é válido"), só "login_radius". Os
+// restantes valores (nome_razaosocial, cpf_cnpj, …) já vêm directamente do vocabulário Hubsoft e
+// passam inalterados.
+func HubsoftBuscaValue(busca string) string {
+	if strings.ToLower(strings.TrimSpace(busca)) == "login" {
+		return "login_radius"
+	}
+	return busca
+}
+
 // HubsoftSearchQueryOverrides parâmetros GET /integracao/cliente para modo resumido ou detalhado.
 func HubsoftSearchQueryOverrides(detailed bool) map[string]string {
 	if detailed {

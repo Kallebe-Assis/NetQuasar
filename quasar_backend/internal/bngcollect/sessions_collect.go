@@ -355,6 +355,51 @@ func collectSessionsByIndex(ctx context.Context, host, community string, profile
 	return out, sessions
 }
 
+// collectOnlineLoginsFast faz SÓ o walk de access_login (sem o GET de detalhe por índice que
+// collectSessionsByIndex faz a seguir — IPv4/IPv6/MAC/VLAN/etc.) — usado pelo ciclo rápido de
+// presença online/offline (CollectAndSyncOnlineLoginsFast, collect.go), que troca detalhe de
+// sessão por velocidade. `complete` só é true quando o walk não truncou (mesma cautela de
+// SessionsCollectionComplete — uma leitura truncada não deve alimentar SyncKnownLoginsFast, sob
+// pena de marcar como offline logins que só não couberam nesta volta).
+func collectOnlineLoginsFast(ctx context.Context, host, community string, profile Profile, timeout time.Duration) (logins []string, complete bool, err error) {
+	host = strings.TrimSpace(host)
+	community = strings.TrimSpace(community)
+	if host == "" || community == "" {
+		return nil, false, fmt.Errorf("host ou community SNMP em falta")
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	loginBase := metricBaseOID(profile, "access_login")
+	loginVars, truncated, walkErr := probing.SNMPWalk(ctx, probing.SNMPWalkParams{
+		Host: host, Community: community, RootOID: loginBase, Version: "2c",
+		Timeout: timeout, MaxRows: maxSessionWalkRows,
+	})
+	if walkErr != "" {
+		return nil, false, fmt.Errorf("%s", walkErr)
+	}
+	stripSuffix := profile.Options.PPPoELoginStripSuffix
+	seen := make(map[string]struct{}, len(loginVars))
+	out := make([]string, 0, len(loginVars))
+	for _, v := range loginVars {
+		raw := strings.TrimSpace(v.Value)
+		if raw == "" {
+			continue
+		}
+		login := NormalizeSNMPLoginValue(raw, stripSuffix)
+		if login == "" {
+			login = raw
+		}
+		key := strings.ToLower(login)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, login)
+	}
+	return out, !truncated, nil
+}
+
 func mergeSessionColumnWalk(
 	columnMaps map[string]map[string]string,
 	key, base string,

@@ -9,7 +9,9 @@ import {
   buildDeviceReportMainTable,
   buildFullDeviceReportCsv,
   cadastroPlainTextForClipboard,
+  chartPointStats,
   deviceShowsInterfaceMonitorSection,
+  extractSystemInfo,
   formatNum,
   groupOltInterfaceRows,
   interfaceMonitorRowsFromApi,
@@ -78,17 +80,43 @@ export type DeviceReportTarget = {
   brand?: string | null;
 };
 
+/** Uma série do gráfico (linha + preenchimento). `thresholdValue` desenha uma linha tracejada de
+ * referência (ex.: limiar de alerta), rotulada com `thresholdLabel`. */
+type ChartSeries = {
+  points: { iso: string; value: number | null }[];
+  color: string;
+  label: string;
+};
+
+function seriesPath(valid: { t: number; value: number }[], xAt: (t: number) => number, yAt: (v: number) => number): string {
+  if (valid.length === 1) {
+    const cx = xAt(valid[0].t);
+    const cy = yAt(valid[0].value);
+    return `M ${cx - 0.01} ${cy} L ${cx + 0.01} ${cy}`;
+  }
+  return valid.map((p, i) => `${i === 0 ? "M" : "L"} ${xAt(p.t)} ${yAt(p.value)}`).join(" ");
+}
+
+/** Gráfico de série temporal com área preenchida (gradiente) — suporta 1-2 séries sobrepostas
+ * (ex.: CPU + RAM no mesmo eixo, como no relatório de referência) e uma linha tracejada opcional
+ * de limiar. */
 function TimeSeriesChart({
-  points,
+  series,
   yUnit,
   ariaLabel,
+  thresholdValue,
+  thresholdLabel,
+  gid,
 }: {
-  points: { iso: string; value: number | null }[];
+  series: ChartSeries[];
   yUnit: string;
   ariaLabel: string;
+  thresholdValue?: number | null;
+  thresholdLabel?: string;
+  gid: string;
 }) {
   const vbW = 420;
-  const vbH = 150;
+  const vbH = 160;
   const padL = 44;
   const padR = 10;
   const padT = 14;
@@ -96,22 +124,28 @@ function TimeSeriesChart({
   const plotW = vbW - padL - padR;
   const plotH = vbH - padT - padB;
 
-  const valid = useMemo(
-    () => points.filter((p): p is { iso: string; value: number } => p.value != null && Number.isFinite(p.value)),
-    [points],
+  const validBySeries = useMemo(
+    () =>
+      series.map((s) =>
+        s.points
+          .filter((p): p is { iso: string; value: number } => p.value != null && Number.isFinite(p.value))
+          .map((p) => ({ t: new Date(p.iso).getTime(), value: p.value })),
+      ),
+    [series],
   );
+  const allValid = validBySeries.flat();
 
-  if (valid.length === 0) {
+  if (allValid.length === 0) {
     return <p style={{ color: "var(--muted)", fontSize: 12 }}>Sem pontos numéricos no período seleccionado.</p>;
   }
 
-  const ts = valid.map((p) => new Date(p.iso).getTime());
-  const t0 = Math.min(...ts);
-  const t1 = Math.max(...ts);
-  const vals = valid.map((p) => p.value);
-  const vMin = Math.min(...vals);
-  const vMax = Math.max(...vals);
-  const vSpan = Math.max(Number.EPSILON * 1000, vMax - vMin);
+  const t0 = Math.min(...allValid.map((p) => p.t));
+  const t1 = Math.max(...allValid.map((p) => p.t));
+  let vMin = Math.min(...allValid.map((p) => p.value), 0);
+  let vMax = Math.max(...allValid.map((p) => p.value));
+  if (thresholdValue != null && Number.isFinite(thresholdValue)) vMax = Math.max(vMax, thresholdValue);
+  const vSpan = Math.max(Number.EPSILON * 1000, vMax - vMin) * 1.08;
+  vMax = vMin + vSpan;
   const tSpan = Math.max(1, t1 - t0);
   const xAt = (t: number) => padL + ((t - t0) / tSpan) * plotW;
   const yAt = (v: number) => padT + plotH - ((v - vMin) / vSpan) * plotH;
@@ -120,17 +154,10 @@ function TimeSeriesChart({
     y: yAt(v),
     label: vMax >= 100 || Math.abs(vMax - vMin) > 50 ? v.toFixed(0) : v.toFixed(1),
   }));
-  const xLabelStart = shortFmtIso(valid[0].iso);
-  const xLabelEnd = shortFmtIso(valid[valid.length - 1].iso);
-
-  let pathD: string;
-  if (valid.length === 1) {
-    const cx = padL + plotW / 2;
-    const cy = yAt(valid[0].value);
-    pathD = `M ${cx - 0.01} ${cy} L ${cx + 0.01} ${cy}`;
-  } else {
-    pathD = valid.map((p, i) => `${i === 0 ? "M" : "L"} ${xAt(new Date(p.iso).getTime())} ${yAt(p.value)}`).join(" ");
-  }
+  const firstIso = series.find((s) => s.points.length > 0)?.points[0]?.iso;
+  const lastPoints = [...series].reverse().find((s) => s.points.length > 0)?.points;
+  const xLabelStart = firstIso ? shortFmtIso(firstIso) : "";
+  const xLabelEnd = lastPoints?.length ? shortFmtIso(lastPoints[lastPoints.length - 1].iso) : "";
 
   return (
     <svg
@@ -141,6 +168,14 @@ function TimeSeriesChart({
       role="img"
       aria-label={ariaLabel}
     >
+      <defs>
+        {series.map((s, i) => (
+          <linearGradient key={s.label} id={`${gid}-grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={s.color} stopOpacity="0.38" />
+            <stop offset="100%" stopColor={s.color} stopOpacity="0.02" />
+          </linearGradient>
+        ))}
+      </defs>
       <text x={padL} y={11} fill="var(--muted)" fontSize="10">
         {yUnit ? `Eixo Y: ${yUnit}` : "Eixo Y"}
       </text>
@@ -156,17 +191,69 @@ function TimeSeriesChart({
         </g>
       ))}
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="transparent" stroke="var(--border)" strokeWidth="1" />
-      <path d={pathD} fill="none" stroke="currentColor" strokeWidth="1.75" vectorEffect="non-scaling-stroke" />
-      {valid.length === 1 && (
-        <circle cx={padL + plotW / 2} cy={yAt(valid[0].value)} r="4" fill="currentColor" />
+      {thresholdValue != null && Number.isFinite(thresholdValue) && thresholdValue >= vMin && thresholdValue <= vMax && (
+        <g>
+          <line
+            x1={padL}
+            x2={padL + plotW}
+            y1={yAt(thresholdValue)}
+            y2={yAt(thresholdValue)}
+            stroke="var(--err, #dc2626)"
+            strokeWidth="1"
+            strokeDasharray="4 3"
+          />
+          <text x={padL + plotW} y={yAt(thresholdValue) - 3} fill="var(--err, #dc2626)" fontSize="8" textAnchor="end">
+            {thresholdLabel ?? `Limiar (${thresholdValue})`}
+          </text>
+        </g>
       )}
+      {series.map((s, i) => {
+        const valid = validBySeries[i];
+        if (valid.length === 0) return null;
+        const linePath = seriesPath(valid, xAt, yAt);
+        const baseY = padT + plotH;
+        const areaPath =
+          valid.length > 1
+            ? `${linePath} L ${xAt(valid[valid.length - 1].t)} ${baseY} L ${xAt(valid[0].t)} ${baseY} Z`
+            : "";
+        return (
+          <g key={s.label}>
+            {areaPath && <path d={areaPath} fill={`url(#${gid}-grad-${i})`} stroke="none" />}
+            <path d={linePath} fill="none" stroke={s.color} strokeWidth="1.75" vectorEffect="non-scaling-stroke" />
+            {valid.length === 1 && <circle cx={xAt(valid[0].t)} cy={yAt(valid[0].value)} r="4" fill={s.color} />}
+          </g>
+        );
+      })}
       <text x={padL} y={vbH - 18} fill="var(--muted)" fontSize="9">
         {xLabelStart}
       </text>
       <text x={padL + plotW} y={vbH - 18} fill="var(--muted)" fontSize="9" textAnchor="end">
         {xLabelEnd}
       </text>
+      {series.length > 1 && (
+        <g transform={`translate(${padL}, ${padT})`}>
+          {series.map((s, i) => (
+            <g key={s.label} transform={`translate(${i * 90}, 0)`}>
+              <rect width="8" height="8" fill={s.color} rx="2" />
+              <text x={12} y={7} fontSize="9" fill="var(--muted)">
+                {s.label}
+              </text>
+            </g>
+          ))}
+        </g>
+      )}
     </svg>
+  );
+}
+
+function ChartStatsLegend({ stats, unit }: { stats: { min: number | null; avg: number | null; max: number | null }; unit: string }) {
+  const fmt = (v: number | null) => (v == null ? "—" : `${v.toFixed(v >= 100 ? 0 : 1)}${unit}`);
+  return (
+    <div style={{ display: "flex", gap: 14, fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
+      <span>Mín: <strong style={{ color: "var(--text)" }}>{fmt(stats.min)}</strong></span>
+      <span>Média: <strong style={{ color: "var(--text)" }}>{fmt(stats.avg)}</strong></span>
+      <span>Máx: <strong style={{ color: "var(--text)" }}>{fmt(stats.max)}</strong></span>
+    </div>
   );
 }
 
@@ -373,6 +460,21 @@ export function DeviceReportModal({ device, onClose }: Props) {
     });
   }, [reportPingLatest.data, reportTelemetryLatest.data, latestTelemetryKPI]);
 
+  // Cabeçalho do relatório (status/IP/modelo/POP/uptime) — sysName/uptime vêm da telemetria mais
+  // recente (extractSystemInfo), o resto do cadastro (GET /devices/:id).
+  const sysInfo = useMemo(() => {
+    const tel = reportTelemetryLatest.data as Record<string, unknown> | undefined;
+    const m = tel?.metrics;
+    return extractSystemInfo(m && typeof m === "object" ? (m as Record<string, unknown>) : undefined);
+  }, [reportTelemetryLatest.data]);
+  const pingOk = reportPingLatest.data?.ok;
+  const cadastro = deviceCadastro.data;
+  const popName = cadastro && typeof cadastro === "object" ? String((cadastro as Record<string, unknown>).pop_name ?? "").trim() : "";
+  const cpuStats = useMemo(() => chartPointStats(cpuChartPoints), [cpuChartPoints]);
+  const memStats = useMemo(() => chartPointStats(memChartPoints), [memChartPoints]);
+  const tempStats = useMemo(() => chartPointStats(tempChartPoints), [tempChartPoints]);
+  const pingStats = useMemo(() => chartPointStats(pingChartPoints), [pingChartPoints]);
+
   const ifaceTableRows = useMemo(
     () => interfaceMonitorRowsFromApi(reportInterfacesLatest.data),
     [reportInterfacesLatest.data],
@@ -429,13 +531,37 @@ export function DeviceReportModal({ device, onClose }: Props) {
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal modal--wide device-report-print" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 6 }}>Relatório do equipamento</h3>
-        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0, lineHeight: 1.5 }}>
-          <strong style={{ color: "var(--text)" }}>{device.description}</strong>
-          {device.ip ? <> · {device.ip}</> : null}
-          {device.category ? <> · {device.category}</> : null}
-          {device.brand ? <> · {device.brand}</> : null}
-        </p>
+        <h3 style={{ marginBottom: 6 }}>
+          Relatório do equipamento: <span className="mono">{device.description}</span>
+        </h3>
+        <div className="device-report-summary-bar">
+          {typeof pingOk === "boolean" ? (
+            <span className={`badge ${pingOk ? "badge--ok" : "badge--err"}`}>● {pingOk ? "ONLINE" : "OFFLINE"}</span>
+          ) : (
+            <span className="badge badge--off">● —</span>
+          )}
+          {device.ip ? (
+            <span>
+              IP: <strong>{device.ip}</strong>
+            </span>
+          ) : null}
+          {cadastro?.model || device.brand ? (
+            <span>
+              Modelo: <strong>{String(cadastro?.model ?? "—")}</strong>
+              {device.brand ? ` (${device.brand})` : ""}
+            </span>
+          ) : null}
+          {popName ? (
+            <span>
+              POP: <strong>{popName}</strong>
+            </span>
+          ) : null}
+          {sysInfo.uptime ? (
+            <span>
+              Uptime: <strong className="mono">{sysInfo.uptime}</strong>
+            </span>
+          ) : null}
+        </div>
         <div className="row no-print" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
           <button type="button" className="btn btn--primary" disabled={fullReport.isPending} onClick={() => fullReport.mutate(device.id)}>
             Atualizar relatório agora
@@ -865,34 +991,58 @@ export function DeviceReportModal({ device, onClose }: Props) {
         {reportTab === "graficos" && (
         <div className="report-chart-grid" style={{ marginTop: 10 }}>
           <div className="card report-chart-cell">
-            <h4 style={{ marginTop: 0 }}>Histórico de latência (ping)</h4>
-            <div style={{ color: "var(--text)" }}>
-              <TimeSeriesChart points={pingChartPoints} yUnit="ms" ariaLabel="Latência de ping ao longo do tempo" />
+            <h4 style={{ marginTop: 0 }}>Latência de ping (histórico)</h4>
+            <ChartStatsLegend stats={pingStats} unit=" ms" />
+            <div style={{ color: "var(--accent, #58a6ff)" }}>
+              <TimeSeriesChart
+                gid="ping"
+                series={[{ points: pingChartPoints, color: "#58a6ff", label: "Latência" }]}
+                yUnit="ms"
+                ariaLabel="Latência de ping ao longo do tempo"
+              />
             </div>
             <p style={{ fontSize: 12, color: "var(--muted)" }}>
-              {reportPingHistory.data?.samples?.length ?? 0} amostras no período · eixo X: tempo da amostra · eixo Y: latência em milissegundos.
+              {reportPingHistory.data?.samples?.length ?? 0} amostras no período.
             </p>
           </div>
           <div className="card report-chart-cell">
-            <h4 style={{ marginTop: 0 }}>CPU (histórico)</h4>
-            <div style={{ color: "var(--text)" }}>
-              <TimeSeriesChart points={cpuChartPoints} yUnit="%" ariaLabel="Percentagem de CPU ao longo do tempo" />
+            <h4 style={{ marginTop: 0 }}>Telemetria (CPU / RAM)</h4>
+            <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                CPU actual: <strong style={{ color: "var(--text)" }}>{formatNum(latestTelemetryKPI.cpu, 0, "%")}</strong>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                RAM actual: <strong style={{ color: "var(--text)" }}>{formatNum(latestTelemetryKPI.memory, 0, "%")}</strong>
+              </div>
             </div>
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>{telemetrySorted.length} amostras · eixo Y: percentagem.</p>
+            <div>
+              <TimeSeriesChart
+                gid="cpumem"
+                series={[
+                  { points: cpuChartPoints, color: "#22c55e", label: "CPU" },
+                  { points: memChartPoints, color: "#eab308", label: "RAM" },
+                ]}
+                yUnit="%"
+                ariaLabel="Percentagem de CPU e memória ao longo do tempo"
+              />
+            </div>
+            <p style={{ fontSize: 12, color: "var(--muted)" }}>
+              CPU — mín {formatNum(cpuStats.min, 0, "%")} · média {formatNum(cpuStats.avg, 0, "%")} · máx {formatNum(cpuStats.max, 0, "%")}
+              {" · "}RAM — mín {formatNum(memStats.min, 0, "%")} · média {formatNum(memStats.avg, 0, "%")} · máx {formatNum(memStats.max, 0, "%")}
+            </p>
           </div>
           <div className="card report-chart-cell">
-            <h4 style={{ marginTop: 0 }}>Memória (histórico)</h4>
-            <div style={{ color: "var(--text)" }}>
-              <TimeSeriesChart points={memChartPoints} yUnit="%" ariaLabel="Percentagem de memória ao longo do tempo" />
+            <h4 style={{ marginTop: 0 }}>Temperatura do sistema (histórico)</h4>
+            <ChartStatsLegend stats={tempStats} unit="°C" />
+            <div style={{ color: "#f97316" }}>
+              <TimeSeriesChart
+                gid="temp"
+                series={[{ points: tempChartPoints, color: "#f97316", label: "Temperatura" }]}
+                yUnit="°C"
+                ariaLabel="Temperatura ao longo do tempo"
+              />
             </div>
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>{telemetrySorted.length} amostras · eixo Y: percentagem.</p>
-          </div>
-          <div className="card report-chart-cell">
-            <h4 style={{ marginTop: 0 }}>Temperatura (histórico)</h4>
-            <div style={{ color: "var(--text)" }}>
-              <TimeSeriesChart points={tempChartPoints} yUnit="°C" ariaLabel="Temperatura ao longo do tempo" />
-            </div>
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>{telemetrySorted.length} amostras · eixo Y: graus Celsius.</p>
+            <p style={{ fontSize: 12, color: "var(--muted)" }}>{telemetrySorted.length} amostras no período.</p>
           </div>
         </div>
         )}

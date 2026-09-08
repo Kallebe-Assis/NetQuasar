@@ -40,6 +40,7 @@ function tabFromSearch(raw: string | null): ConnectionsTabId | null {
 const LOGIN_COLUMNS = [
   { id: "client_name", label: "Cliente" },
   { id: "login", label: "Login" },
+  { id: "bng_status", label: "Status" },
   { id: "connection_kind", label: "Tipo" },
   { id: "medium_type", label: "Meio" },
   { id: "sales_plan", label: "Plano" },

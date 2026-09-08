@@ -89,6 +89,10 @@ type ConnectionPoint = {
   lng: number;
   address?: string;
   neighborhood?: string;
+  /** Só connection_kind="pppoe" — login online/offline agora, cruzado com o BNG (ciclo rápido
+   * de presença, ver backend loadKnownLoginStatusSet). Ausente = login nunca visto em nenhum
+   * BNG conhecido (ainda não conectou, ou é uma conexão dhcp sem sessão PPPoE). */
+  bng_status?: "online" | "offline";
 };
 
 type InfrastructurePoint = {
@@ -209,6 +213,10 @@ export function MapPage() {
   const [category, setCategory] = useState("");
   const [selId, setSelId] = useState<string | null>(null);
   const [displayMode, setDisplayMode] = useState<MapDisplayMode>("cluster");
+  /** Agrupado/Individual só para os pontos de login — independente do displayMode acima (que
+   * cobre equipamentos/infra). connectionClusterForced (abaixo) ainda pode forçar agrupado por
+   * desempenho mesmo com "individual" escolhido. */
+  const [connectionDisplayMode, setConnectionDisplayMode] = useState<"cluster" | "individual">("cluster");
   const [ctoColorByFeed, setCtoColorByFeed] = useState(false);
   const [fitBoundsVersion, setFitBoundsVersion] = useState(0);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
@@ -457,6 +465,9 @@ export function MapPage() {
     placeholderData: keepPreviousData,
     staleTime: 20_000,
     refetchOnWindowFocus: false,
+    // Status online/offline (bng_status) muda com o ciclo rápido do BNG (default 90s) — refaz a
+    // consulta periodicamente para o mapa acompanhar quedas/conexões sem precisar recarregar.
+    refetchInterval: showConnections ? 60_000 : false,
   });
 
   const infraKinds = useMemo(() => {
@@ -636,7 +647,10 @@ export function MapPage() {
       category: c.connection_kind === "dhcp" ? "Conexão DHCP" : "Conexão PPPoE",
       lat: Number(c.lat),
       lng: Number(c.lng),
-      status: "connection",
+      // "connection" (sentinel, sem status real) quando ainda não cruzado com nenhum BNG —
+      // isConnectionPoint (EquipmentMap.tsx) também checa mapKind, por isso status pode carregar
+      // online/offline reais sem quebrar a detecção "isto é um ponto de login".
+      status: c.bng_status ?? "connection",
       point_type: "connection" as const,
       mapKind: "connection" as const,
       login: c.login,
@@ -739,13 +753,13 @@ export function MapPage() {
   const connLimit = connPts.data?.limit;
 
   const connectionClusterForced = useMemo(() => {
-    if (!showConnections || displayMode === "cluster") return false;
+    if (!showConnections || connectionDisplayMode === "cluster") return false;
     const zoom = mapBounds?.zoom ?? 6;
     const connCount = connPts.data?.points?.length ?? 0;
     if (zoom < 13) return true;
     if (connCount > 500 || (connTotal ?? 0) > 800) return true;
     return false;
-  }, [showConnections, displayMode, mapBounds?.zoom, connPts.data?.points?.length, connTotal]);
+  }, [showConnections, connectionDisplayMode, mapBounds?.zoom, connPts.data?.points?.length, connTotal]);
 
   const selPoint = useMemo(
     () => displayedPoints.find((p) => p.id === selId) ?? (detailFallback?.id === selId ? detailFallback : null),
@@ -1333,6 +1347,7 @@ export function MapPage() {
     if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || !showSpliceBoxes || showPoles || showProjects) n++;
     if (spliceModelFilter !== "all" || cableFuncaoFilter != null) n++;
     if (displayMode !== "cluster") n++;
+    if (connectionDisplayMode !== "cluster") n++;
     return n;
   }, [
     popId,
@@ -1350,6 +1365,7 @@ export function MapPage() {
     spliceModelFilter,
     cableFuncaoFilter,
     displayMode,
+    connectionDisplayMode,
   ]);
 
   const listPageCount = Math.max(1, Math.ceil(displayedPoints.length / MAP_LIST_PAGE_SIZE));
@@ -1480,7 +1496,7 @@ export function MapPage() {
             {connTotal > 0 ? ` / ${connTotal} com coordenadas` : ""}
             {connLimit != null && connLimit > 0 ? ` (limite ${connLimit} neste zoom)` : ""}
             {connTruncated ? " — aproxime o mapa para ver mais" : ""}
-            {connectionClusterForced && displayMode !== "cluster" ? " · logins agrupados por desempenho" : ""}
+            {connectionClusterForced && connectionDisplayMode !== "cluster" ? " · logins agrupados por desempenho" : ""}
           </span>
         ) : null}
       </div>
@@ -1678,6 +1694,8 @@ export function MapPage() {
         onClose={() => setFilterModalOpen(false)}
         displayMode={displayMode}
         onDisplayMode={setDisplayMode}
+        connectionDisplayMode={connectionDisplayMode}
+        onConnectionDisplayMode={setConnectionDisplayMode}
         popId={popId}
         onPopId={setPopId}
         popsOptions={popsOptions}
@@ -2012,6 +2030,7 @@ export function MapPage() {
                     mapColors={mapColors}
                     mapIconStyles={mapIconStyles}
                     connectionClusterForced={connectionClusterForced}
+                    connectionDisplayMode={connectionDisplayMode}
                     highlightedId={mapHighlightIds}
                     userLocation={userLocation}
                     locationPin={locationPin}

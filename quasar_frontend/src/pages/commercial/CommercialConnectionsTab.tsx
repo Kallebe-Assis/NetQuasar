@@ -40,6 +40,10 @@ export type ClientConnection = {
   port?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Só connection_kind="pppoe" — login online/offline agora, cruzado com o BNG (ciclo rápido
+   * de presença, ver backend loadKnownLoginStatusSet). Ausente = nunca visto em nenhum BNG
+   * conhecido (ainda não conectou, ou é uma conexão dhcp sem sessão PPPoE). */
+  bng_status?: "online" | "offline";
 };
 
 type ConnConflict = {
@@ -164,6 +168,7 @@ type SortKey =
   | "display_number"
   | "client_name"
   | "login"
+  | "bng_status"
   | "connection_kind"
   | "medium_type"
   | "sales_plan"
@@ -213,6 +218,13 @@ function connToCsvRow(c: ClientConnection): string[] {
   ];
 }
 
+function statusRank(c: ClientConnection): number {
+  if (c.connection_kind !== "pppoe") return 3;
+  if (c.bng_status === "online") return 0;
+  if (c.bng_status === "offline") return 1;
+  return 2;
+}
+
 function sortConnections(rows: ClientConnection[], key: SortKey, dir: "asc" | "desc"): ClientConnection[] {
   const mul = dir === "asc" ? 1 : -1;
   const cmpStr = (a: string | null | undefined, b: string | null | undefined) =>
@@ -226,6 +238,9 @@ function sortConnections(rows: ClientConnection[], key: SortKey, dir: "asc" | "d
         return cmpStr(a.client_name, b.client_name);
       case "login":
         return cmpStr(a.login, b.login);
+      case "bng_status":
+        // Online primeiro, depois offline, depois nunca visto — dentro do mesmo grupo, por login.
+        return (statusRank(a) - statusRank(b)) * mul || cmpStr(a.login, b.login);
       case "connection_kind":
         return cmpStr(a.connection_kind, b.connection_kind);
       case "medium_type":
@@ -742,6 +757,15 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
                   Login{sortMark("login")}
                 </th>
               ) : null}
+              {!hiddenCols.has("bng_status") ? (
+                <th
+                  className="conn-table__sortable"
+                  title="Cruzado com as sessões PPPoE do BNG (aba Sessões PPPoE)"
+                  onClick={() => toggleSort("bng_status")}
+                >
+                  Status{sortMark("bng_status")}
+                </th>
+              ) : null}
               {!hiddenCols.has("connection_kind") ? (
                 <th className="conn-table__sortable" onClick={() => toggleSort("connection_kind")}>
                   Tipo{sortMark("connection_kind")}
@@ -785,6 +809,20 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
                   </td>
                 ) : null}
                 {!hiddenCols.has("login") ? <td className="mono">{c.login}</td> : null}
+                {!hiddenCols.has("bng_status") ? (
+                  <td>
+                    {c.connection_kind !== "pppoe" ? (
+                      "—"
+                    ) : (
+                      <span
+                        className={`badge ${c.bng_status === "online" ? "badge--ok" : c.bng_status === "offline" ? "badge--err" : "badge--off"}`}
+                        title={c.bng_status ? undefined : "Nunca visto em nenhum BNG cadastrado"}
+                      >
+                        {c.bng_status === "online" ? "Online" : c.bng_status === "offline" ? "Offline" : "—"}
+                      </span>
+                    )}
+                  </td>
+                ) : null}
                 {!hiddenCols.has("connection_kind") ? (
                   <td>{c.connection_kind === "dhcp" ? "DHCP" : "PPPoE"}</td>
                 ) : null}

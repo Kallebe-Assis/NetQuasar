@@ -54,6 +54,7 @@ import { emptyTopologyDocument } from "./topology/types";
 import type { ManualEquipmentKind } from "../lib/topologyManualKinds";
 
 const LAST_PROJECT_KEY = "netquasar.topology.lastProjectId";
+const DEVICE_PANEL_COLLAPSED_KEY = "netquasar.topology.devicePanelCollapsed";
 
 const nodeTypes = { device: DeviceNode, pop: GroupNode, manual: ManualEquipmentNode };
 const edgeTypes = { typed: ConnectionEdge };
@@ -201,6 +202,22 @@ function TopologyCanvas() {
     }
   });
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  // Painel de equipamentos retrátil — mesmo padrão do menu lateral esquerdo (ShellLayout.tsx,
+  // SIDEBAR_COLLAPSED_KEY): estado lembrado no navegador.
+  const [devicePanelCollapsed, setDevicePanelCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(DEVICE_PANEL_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(DEVICE_PANEL_COLLAPSED_KEY, devicePanelCollapsed ? "1" : "0");
+    } catch {
+      /* localStorage indisponível — só perde a conveniência de lembrar a escolha */
+    }
+  }, [devicePanelCollapsed]);
 
   const devicesQ = useQuery({
     queryKey: ["topology-devices"],
@@ -812,7 +829,14 @@ function TopologyCanvas() {
         </div>
 
         {canMutate && (
-          <DeviceListPanel devices={devices} placedIds={placedIds} onAddDevice={addDeviceNode} onAddManual={addManualNode} />
+          <DeviceListPanel
+            devices={devices}
+            placedIds={placedIds}
+            onAddDevice={addDeviceNode}
+            onAddManual={addManualNode}
+            collapsed={devicePanelCollapsed}
+            onToggleCollapsed={() => setDevicePanelCollapsed((v) => !v)}
+          />
         )}
       </div>
 

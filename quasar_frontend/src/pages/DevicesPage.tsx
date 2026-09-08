@@ -81,8 +81,20 @@ type Device = {
 
 // Limita quantas linhas a tabela de Equipamentos renderiza de uma vez (ver paginação
 // client-side mais abaixo, no componente) — mantém a UI responsiva independentemente
-// do tamanho do inventário.
-const DEVICES_PAGE_SIZE = 200;
+// do tamanho do inventário. O utilizador pode trocar entre estas opções (selector junto à
+// paginação); a escolha fica guardada no navegador.
+const DEVICES_PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500, 1000] as const;
+const DEVICES_DEFAULT_PAGE_SIZE = 100;
+const DEVICES_PAGE_SIZE_KEY = "netquasar.devices.pageSize";
+
+function loadDevicesPageSize(): number {
+  try {
+    const raw = Number(localStorage.getItem(DEVICES_PAGE_SIZE_KEY));
+    return (DEVICES_PAGE_SIZE_OPTIONS as readonly number[]).includes(raw) ? raw : DEVICES_DEFAULT_PAGE_SIZE;
+  } catch {
+    return DEVICES_DEFAULT_PAGE_SIZE;
+  }
+}
 
 const CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 const OPS = ["Ativo", "Inativo", "Manutenção", "Reserva"] as const;
@@ -720,18 +732,28 @@ export function DevicesPage() {
 
   // Paginação client-side da tabela: sem isto, um inventário grande (centenas/milhares
   // de equipamentos) renderiza uma <tr> por linha de uma vez só, o que fica visivelmente
-  // lento para rolar e re-renderizar. DEVICES_PAGE_SIZE mantém o DOM da tabela limitado
-  // independentemente do tamanho do inventário. Ver DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md
-  // (achado "sem virtualização de listas grandes").
+  // lento para rolar e re-renderizar. devicesPageSize mantém o DOM da tabela limitado
+  // independentemente do tamanho do inventário — o utilizador escolhe o tamanho (selector
+  // junto à paginação, opções em DEVICES_PAGE_SIZE_OPTIONS). Ver
+  // DIAGNOSTICO-PERFORMANCE-ARQUITETURA.md (achado "sem virtualização de listas grandes").
   const [devicesPage, setDevicesPage] = useState(0);
+  const [devicesPageSize, setDevicesPageSize] = useState(loadDevicesPageSize);
   useEffect(() => {
     setDevicesPage(0);
-  }, [filteredDevices]);
-  const devicesTotalPages = Math.max(1, Math.ceil(sortedDevices.length / DEVICES_PAGE_SIZE));
+  }, [filteredDevices, devicesPageSize]);
+  function changeDevicesPageSize(n: number) {
+    setDevicesPageSize(n);
+    try {
+      localStorage.setItem(DEVICES_PAGE_SIZE_KEY, String(n));
+    } catch {
+      /* localStorage indisponível — só perde a conveniência de lembrar a escolha */
+    }
+  }
+  const devicesTotalPages = Math.max(1, Math.ceil(sortedDevices.length / devicesPageSize));
   const devicesPageClamped = Math.min(devicesPage, devicesTotalPages - 1);
   const pagedDevices = useMemo(
-    () => sortedDevices.slice(devicesPageClamped * DEVICES_PAGE_SIZE, (devicesPageClamped + 1) * DEVICES_PAGE_SIZE),
-    [sortedDevices, devicesPageClamped],
+    () => sortedDevices.slice(devicesPageClamped * devicesPageSize, (devicesPageClamped + 1) * devicesPageSize),
+    [sortedDevices, devicesPageClamped, devicesPageSize],
   );
 
   const sortArrow = (k: DeviceSortKey) => (sortKey !== k ? "↕" : sortDir === "asc" ? "↑" : "↓");
@@ -1398,32 +1420,51 @@ export function DevicesPage() {
         </table>
       </div>
 
-      {sortedDevices.length > DEVICES_PAGE_SIZE && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-          <button
-            type="button"
-            className="btn btn--icon-menu"
-            disabled={devicesPageClamped <= 0}
-            title="Página anterior"
-            aria-label="Página anterior"
-            onClick={() => setDevicesPage((p) => Math.max(0, p - 1))}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
-            {devicesPageClamped * DEVICES_PAGE_SIZE + 1}–
-            {Math.min((devicesPageClamped + 1) * DEVICES_PAGE_SIZE, sortedDevices.length)} de {sortedDevices.length}
-          </span>
-          <button
-            type="button"
-            className="btn btn--icon-menu"
-            disabled={devicesPageClamped >= devicesTotalPages - 1}
-            title="Página seguinte"
-            aria-label="Página seguinte"
-            onClick={() => setDevicesPage((p) => Math.min(devicesTotalPages - 1, p + 1))}
-          >
-            <ChevronRight size={18} />
-          </button>
+      {sortedDevices.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
+            Por página
+            <select
+              className="select"
+              style={{ fontSize: 12, padding: "3px 6px" }}
+              value={devicesPageSize}
+              onChange={(e) => changeDevicesPageSize(Number(e.target.value))}
+            >
+              {DEVICES_PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          {sortedDevices.length > devicesPageSize && (
+            <>
+              <button
+                type="button"
+                className="btn btn--icon-menu"
+                disabled={devicesPageClamped <= 0}
+                title="Página anterior"
+                aria-label="Página anterior"
+                onClick={() => setDevicesPage((p) => Math.max(0, p - 1))}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+                {devicesPageClamped * devicesPageSize + 1}–
+                {Math.min((devicesPageClamped + 1) * devicesPageSize, sortedDevices.length)} de {sortedDevices.length}
+              </span>
+              <button
+                type="button"
+                className="btn btn--icon-menu"
+                disabled={devicesPageClamped >= devicesTotalPages - 1}
+                title="Página seguinte"
+                aria-label="Página seguinte"
+                onClick={() => setDevicesPage((p) => Math.min(devicesTotalPages - 1, p + 1))}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1927,6 +1968,14 @@ export function DevicesPage() {
                   />
                 )}
               </div>
+              {formIsOlt && (!normalizeBrand(form.brand) || !form.model) ? (
+                <div className="field field--full">
+                  <div className="msg msg--warn">
+                    Sem marca e modelo, esta OLT fica cadastrada mas <strong>não terá coleta de PONs/ONUs</strong> —
+                    volte aqui e preencha assim que souber o equipamento.
+                  </div>
+                </div>
+              ) : null}
               <div className="field">
                 <label>MAC</label>
                 <input className="input mono" style={{ width: "100%" }} value={form.mac ?? ""} onChange={(e) => setForm({ ...form, mac: e.target.value })} />

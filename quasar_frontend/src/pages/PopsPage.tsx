@@ -10,6 +10,7 @@ import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCa
 import { queryKeys } from "../lib/queryKeys";
 import { ActionMenu } from "../components/ActionMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { DropdownMenu } from "../components/DropdownMenu";
 import { PageCountPill } from "../components/PageCountPill";
 import { PopLocationPicker } from "../components/PopLocationPicker";
 
@@ -156,6 +157,8 @@ export function PopsPage() {
   const [editLoc, setEditLoc] = useState<Locality | null>(null);
   const [locForm, setLocForm] = useState<LocForm>(emptyLocForm());
   const [deleteLocId, setDeleteLocId] = useState<string | null>(null);
+  /** VLAN digitada manualmente (não colectada do BNG) antes de "Adicionar". */
+  const [manualVlan, setManualVlan] = useState("");
   const [sharedWarn, setSharedWarn] = useState<{ shared: SharedVLAN[]; pending: "create" | "edit" } | null>(null);
 
   const [createPopOpen, setCreatePopOpen] = useState(false);
@@ -367,6 +370,15 @@ export function PopsPage() {
     }));
   };
 
+  /** Adiciona uma VLAN digitada à mão (não colectada do BNG) — o backend não exige que a VLAN
+   * exista na coleta SNMP, só normaliza/dedup (normalizeVLANList em handlers_localities.go). */
+  const addManualVlan = () => {
+    const v = manualVlan.trim();
+    if (!/^\d+$/.test(v)) return;
+    setLocForm((f) => (f.vlans.includes(v) ? f : { ...f, vlans: [...f.vlans, v].sort((a, b) => Number(a) - Number(b)) }));
+    setManualVlan("");
+  };
+
   const localityOptions = list.data?.localities ?? [];
 
   const locModal = (mode: "create" | "edit") => {
@@ -473,35 +485,90 @@ export function PopsPage() {
           </div>
 
           <div className="field">
-            <label>VLANs do BNG</label>
+            <label>VLANs</label>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>
-              Seleccione VLANs colectadas no BNG para atrelar a esta localidade.
+              Seleccione VLANs colectadas no BNG, ou adicione manualmente uma VLAN que ainda não foi colectada.
             </p>
-            {collected.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>
-                Nenhuma VLAN encontrada. Execute a consulta completa SNMP no BNG primeiro.
-              </p>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 160, overflow: "auto" }}>
-                {collected.map((v) => {
-                  const on = locForm.vlans.includes(v);
-                  return (
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <DropdownMenu
+                align="start"
+                minWidth={220}
+                trigger={({ toggle, open }) => (
+                  <button type="button" className="btn btn--sm" onClick={toggle} aria-expanded={open}>
+                    VLANs do BNG {collected.length > 0 ? `(${collected.length})` : ""} ▾
+                  </button>
+                )}
+              >
+                {() => (
+                  <div style={{ padding: 8, minWidth: 200, maxHeight: 240, overflow: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {collected.length === 0 ? (
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                        Nenhuma VLAN encontrada. Execute a consulta completa SNMP no BNG primeiro.
+                      </span>
+                    ) : (
+                      collected.map((v) => (
+                        <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                          <input type="checkbox" checked={locForm.vlans.includes(v)} onChange={() => toggleVlan(v)} />
+                          VLAN {v}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </DropdownMenu>
+
+              <div className="row" style={{ gap: 6 }}>
+                <input
+                  className="input mono"
+                  type="text"
+                  inputMode="numeric"
+                  style={{ width: 120 }}
+                  placeholder="VLAN manual"
+                  value={manualVlan}
+                  onChange={(e) => setManualVlan(e.target.value.replace(/[^0-9]/g, ""))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addManualVlan();
+                    }
+                  }}
+                />
+                <button type="button" className="btn btn--sm" disabled={!manualVlan.trim()} onClick={addManualVlan}>
+                  Adicionar
+                </button>
+              </div>
+            </div>
+
+            {locForm.vlans.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                {locForm.vlans.map((v) => (
+                  <span
+                    key={v}
+                    className="mono"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 4px 3px 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border)",
+                      background: "var(--panel2)",
+                      fontSize: 12,
+                    }}
+                  >
+                    VLAN {v}
                     <button
-                      key={v}
                       type="button"
-                      className={on ? "btn btn--primary btn--sm" : "btn btn--sm"}
+                      className="btn btn--icon"
+                      style={{ width: 18, height: 18, minHeight: 0, padding: 0 }}
+                      aria-label={`Remover VLAN ${v}`}
                       onClick={() => toggleVlan(v)}
                     >
-                      VLAN {v}
+                      ×
                     </button>
-                  );
-                })}
+                  </span>
+                ))}
               </div>
-            )}
-            {locForm.vlans.length > 0 && (
-              <p style={{ fontSize: 12, marginTop: 8 }}>
-                Seleccionadas: <span className="mono">{locForm.vlans.join(", ")}</span>
-              </p>
             )}
           </div>
 
