@@ -34,6 +34,7 @@ export function CtoSplitterModal({ open, ctoId, ctoName, splitter, feedFiberColo
   const [feedColor, setFeedColor] = useState(formatFeedFiberColor(feedFiberColor));
   const [draft, setDraft] = useState<SplitterPort[]>([]);
   const [tab, setTab] = useState<TabId>("fibra");
+  const [viewMode, setViewMode] = useState<"detalhado" | "simples">("detalhado");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -176,13 +177,32 @@ export function CtoSplitterModal({ open, ctoId, ctoName, splitter, feedFiberColo
               <FiberPortsGrid ports={draft} canEdit={canEdit} onChange={setDraft} />
             </>
           ) : (
-            <SplitterScheme2D
-              ratio={ratio}
-              ports={draft}
-              feedColor={feedSpec.name}
-              feedHex={feedSpec.hex}
-              ctoName={ctoName}
-            />
+            <>
+              <div className="splitter-scheme__viewmode">
+                <button
+                  type="button"
+                  className={`btn btn--sm${viewMode === "detalhado" ? " is-active" : ""}`}
+                  onClick={() => setViewMode("detalhado")}
+                >
+                  Detalhado
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn--sm${viewMode === "simples" ? " is-active" : ""}`}
+                  onClick={() => setViewMode("simples")}
+                >
+                  Simples
+                </button>
+              </div>
+              <SplitterScheme2D
+                ratio={ratio}
+                ports={draft}
+                feedColor={feedSpec.name}
+                feedHex={feedSpec.hex}
+                ctoName={ctoName}
+                compact={viewMode === "simples"}
+              />
+            </>
           )}
 
           {err ? <div className="msg msg--err">{err}</div> : null}

@@ -1,6 +1,6 @@
 /** Parser CSV de infraestrutura (CTOs, emendas, cabos, postes). */
 
-import { CABLE_STATUSES, FIBER_COLORS, normalizeSplitterInput } from "./networkInfrastructure";
+import { CABLE_FUNCOES, CABLE_STATUSES, FIBER_COLORS, normalizeSplitterInput } from "./networkInfrastructure";
 
 export type InfraVariant = "cto" | "splice" | "cable" | "pole";
 
@@ -36,6 +36,7 @@ export type InfraCablePayload = {
   cable_type: string | null;
   fiber_count: number | null;
   status: string;
+  funcao: string;
   latitude: number | null;
   longitude: number | null;
   project_number: number | null;
@@ -90,8 +91,8 @@ export const INFRA_CSV_TEMPLATES: Record<
   },
   cable: {
     fileName: "modelo_cabos.csv",
-    headers: ["descricao", "tipo", "fibras", "status", "latitude", "longitude", "numero_projeto"],
-    sample: ["Cabo backbone A-B", "AS-80", "12", "ativo", "-23,55000", "-46,63300", "1"],
+    headers: ["descricao", "tipo", "fibras", "status", "funcao", "latitude", "longitude", "numero_projeto"],
+    sample: ["Cabo backbone A-B", "AS-80", "12", "ativo", "backbone_ftth", "-23,55000", "-46,63300", "1"],
   },
   pole: {
     fileName: "modelo_postes.csv",
@@ -199,6 +200,16 @@ function normCableStatus(v: string): string | null {
   const s = v.toLowerCase().trim();
   if (!s) return "ativo";
   const found = CABLE_STATUSES.find((c) => c.value === s);
+  return found ? found.value : null;
+}
+
+// Diferente de normCableStatus (vazio cai em "ativo") — a função não tem um padrão razoável
+// implícito, por isso é obrigatória na importação: uma linha sem função falha em vez de virar
+// "outro" silenciosamente (ver o pedido do utilizador).
+function normCableFuncao(v: string): string | null {
+  const s = v.toLowerCase().trim();
+  if (!s) return null;
+  const found = CABLE_FUNCOES.find((f) => f.value === s);
   return found ? found.value : null;
 }
 
@@ -315,6 +326,7 @@ export function parseInfraCableCsv(file: File) {
     cable_type: ["cable_type", "tipo"],
     fiber_count: ["fiber_count", "fibras"],
     status: ["status", "estado"],
+    funcao: ["funcao", "função"],
   }, (rec, col) => {
     const description = getCell(rec, col, "description");
     if (!description) return "descricao obrigatória";
@@ -323,6 +335,9 @@ export function parseInfraCableCsv(file: File) {
     const statusRaw = getCell(rec, col, "status");
     const status = normCableStatus(statusRaw);
     if (!status) return `status inválido (${statusRaw})`;
+    const funcaoRaw = getCell(rec, col, "funcao");
+    const funcao = normCableFuncao(funcaoRaw);
+    if (!funcao) return funcaoRaw ? `função inválida (${funcaoRaw})` : "função obrigatória";
     const fcS = getCell(rec, col, "fiber_count");
     let fiber_count: number | null = null;
     if (fcS) {
@@ -335,6 +350,7 @@ export function parseInfraCableCsv(file: File) {
       cable_type: getCell(rec, col, "cable_type") || null,
       fiber_count,
       status,
+      funcao,
       latitude: coords.lat,
       longitude: coords.lon,
       project_number: parseOptInt(getCell(rec, col, "project_number")),

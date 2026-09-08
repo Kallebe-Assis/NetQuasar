@@ -1,6 +1,9 @@
 import { createPortal } from "react-dom";
 import type { MapDisplayMode } from "./EquipmentMap";
 import { MAP_PROJECT_ALL, MAP_PROJECT_NONE } from "../lib/mapProjectFilter";
+import { CABLE_FUNCOES, type CableFuncao } from "../lib/networkInfrastructure";
+
+export type SpliceModelFilter = "all" | "emenda" | "distribuicao";
 
 const MAP_DEVICE_CATEGORIES = ["Concentrador", "Energia", "Mikrotik", "Switch", "OLT", "Rádio", "Servidor", "Máquina Virtual", "Outros"] as const;
 
@@ -32,6 +35,11 @@ type Props = {
   onShowConnections: (v: boolean) => void;
   showSpliceBoxes: boolean;
   onShowSpliceBoxes: (v: boolean) => void;
+  spliceModelFilter: SpliceModelFilter;
+  onSpliceModelFilter: (v: SpliceModelFilter) => void;
+  /** null = todas as funções (sem filtro). */
+  cableFuncaoFilter: Set<CableFuncao> | null;
+  onCableFuncaoFilter: (v: Set<CableFuncao> | null) => void;
   showPoles: boolean;
   onShowPoles: (v: boolean) => void;
   showProjects: boolean;
@@ -178,7 +186,53 @@ export function MapFilterModal(props: Props) {
             <LayerToggle checked={props.showEquipment} onChange={props.onShowEquipment} label="Equipamentos" />
             <LayerToggle checked={props.showCtos} onChange={props.onShowCtos} label="CTOs (viewport)" />
             <LayerToggle checked={props.showCables} onChange={props.onShowCables} label="Cabos (viewport)" />
+            {props.showCables ? (
+              <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>Função do cabo (marque uma ou mais)</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {CABLE_FUNCOES.map((f) => {
+                    const checked = props.cableFuncaoFilter == null || props.cableFuncaoFilter.has(f.value);
+                    return (
+                      <label
+                        key={f.value}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const all = new Set(CABLE_FUNCOES.map((x) => x.value));
+                            const base = props.cableFuncaoFilter ?? all;
+                            const next = new Set(base);
+                            if (e.target.checked) next.add(f.value);
+                            else next.delete(f.value);
+                            // Tudo marcado (ou nada desmarcado) volta a "sem filtro" (null) — evita
+                            // gravar/comparar um Set igual a "todas as funções" para sempre.
+                            props.onCableFuncaoFilter(next.size === 0 || next.size === all.size ? null : next);
+                          }}
+                        />
+                        {f.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
             <LayerToggle checked={props.showSpliceBoxes} onChange={props.onShowSpliceBoxes} label="Caixas de emenda / foguete" />
+            {props.showSpliceBoxes ? (
+              <label style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 4, maxWidth: 220 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>Tipo de foguete</span>
+                <select
+                  className="select"
+                  value={props.spliceModelFilter}
+                  onChange={(e) => props.onSpliceModelFilter(e.target.value as SpliceModelFilter)}
+                >
+                  <option value="all">Todos</option>
+                  <option value="emenda">Só emenda</option>
+                  <option value="distribuicao">Só distribuição</option>
+                </select>
+              </label>
+            ) : null}
             <LayerToggle checked={props.showPoles} onChange={props.onShowPoles} label="Postes" />
             <LayerToggle checked={props.showPops} onChange={props.onShowPops} label="POPs" />
             <LayerToggle checked={props.showProjects} onChange={props.onShowProjects} label="Projetos" />

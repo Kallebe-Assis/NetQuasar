@@ -22,7 +22,10 @@ export type SplitterPort = {
   color_hex: string;
   label: string;
   hint?: string;
-  status: SplitterPortStatus;
+  // String solta (não SplitterPortStatus) porque esta mesma estrutura também representa fibras
+  // de CABO, cujo vocabulário de Estado é outro (ver CableFiberStatus abaixo) — cada tela usa o
+  // conjunto de opções certo via as props statusOptions/destinationOptions de FiberPortsGrid.
+  status: string;
   note: string;
   destination: string;
 };
@@ -56,6 +59,65 @@ export function normalizeFiberDestination(raw?: string | null): FiberDestination
 export function destinationLabel(raw?: string | null): string {
   const v = normalizeFiberDestination(raw);
   return FIBER_DESTINATIONS.find((d) => d.value === v)?.label ?? "Disponível";
+}
+
+/** Estado de uma fibra de CABO — vocabulário próprio, diferente do estado de uma porta de
+ * splitter/CTO (livre/ocupada/reserva/defeito, ver SplitterPortStatus acima). */
+export type CableFiberStatus = "livre" | "utilizando" | "transporte" | "link" | "outros";
+
+export const CABLE_FIBER_STATUSES: Array<{ value: CableFiberStatus; label: string }> = [
+  { value: "livre", label: "Livre" },
+  { value: "utilizando", label: "Utilizando" },
+  { value: "transporte", label: "Transporte" },
+  { value: "link", label: "Link" },
+  { value: "outros", label: "Outros" },
+];
+
+export function normalizeCableFiberStatus(raw?: string | null): CableFiberStatus {
+  const t = (raw ?? "").trim().toLowerCase();
+  if (!t || t === "livre" || t === "disponivel" || t === "disponível") return "livre";
+  if (t === "utilizando" || t === "ocupada" || t === "em uso") return "utilizando";
+  if (t === "transporte") return "transporte";
+  if (t === "link") return "link";
+  return "outros"; // cobre "reserva", "defeito" e qualquer valor legado desconhecido
+}
+
+export function cableFiberStatusLabel(raw?: string | null): string {
+  const v = normalizeCableFiberStatus(raw);
+  return CABLE_FIBER_STATUSES.find((s) => s.value === v)?.label ?? "Livre";
+}
+
+/** Destino de uma fibra de CABO — só faz sentido quando o Estado é diferente de "Livre"
+ * (aplicado em FiberPortsGrid via a prop destinationRequiresStatus). */
+export type CableFiberDestination = "cto" | "cliente" | "transporte" | "link" | "potencia_distribuicao" | "outros";
+
+export const CABLE_FIBER_DESTINATIONS: Array<{ value: CableFiberDestination; label: string }> = [
+  { value: "cto", label: "CTO" },
+  { value: "cliente", label: "Cliente" },
+  { value: "transporte", label: "Transporte" },
+  { value: "link", label: "Link" },
+  { value: "potencia_distribuicao", label: "Potência para Distribuição" },
+  { value: "outros", label: "Outros" },
+];
+
+/** "" = sem destino — o único valor válido quando o Estado da fibra é "Livre" (ver
+ * destinationRequiresStatus em FiberPortsGrid). Qualquer outro texto legado/desconhecido cai em
+ * "outros" em vez de ficar escondido. */
+export function normalizeCableFiberDestination(raw?: string | null): CableFiberDestination | "" {
+  const t = (raw ?? "").trim().toLowerCase();
+  if (!t || t === "disponivel" || t === "disponível" || t === "livre") return "";
+  if (t === "cto") return "cto";
+  if (t === "cliente") return "cliente";
+  if (t === "transporte") return "transporte";
+  if (t === "link") return "link";
+  if (t.includes("potência") || t.includes("potencia") || t.includes("distribui")) return "potencia_distribuicao";
+  return "outros";
+}
+
+export function cableFiberDestinationLabel(raw?: string | null): string {
+  const v = normalizeCableFiberDestination(raw);
+  if (!v) return "—";
+  return CABLE_FIBER_DESTINATIONS.find((d) => d.value === v)?.label ?? "Outros";
 }
 
 /** Extrai o número de saídas de "1x8", "1:16", "01x32", etc. */
@@ -99,7 +161,18 @@ export function formatFeedFiberColor(raw?: string | null): string {
   return t || "Desconhecido";
 }
 
-export function buildDefaultSplitterPorts(outputs: number, existing?: SplitterPort[] | null): SplitterPort[] {
+export function buildDefaultSplitterPorts(
+  outputs: number,
+  existing?: SplitterPort[] | null,
+  // Splitter/CTO usa normalizeFiberDestination (disponivel/cliente/cto); CableFibersModal passa
+  // normalizeCableFiberDestination (vocabulário próprio de cabo) — ver fiberSplitter.ts.
+  normalizeDestination: (raw?: string | null) => string = normalizeFiberDestination,
+  // Idem para o Estado — por omissão fica como está gravado (splitter/CTO sempre gravaram um dos
+  // 4 valores válidos); CableFibersModal passa normalizeCableFiberStatus para converter dados
+  // legados (ex.: "ocupada"/"reserva"/"defeito" gravados antes desta mudança) para o novo
+  // vocabulário de cabo, senão o <select> de Estado ficaria com um valor sem opção correspondente.
+  normalizeStatus: (raw?: string | null) => string = (raw) => (raw ?? "").trim() || "livre",
+): SplitterPort[] {
   const byPort = new Map((existing ?? []).map((p) => [p.port, p]));
   const out: SplitterPort[] = [];
   for (let i = 1; i <= outputs; i++) {
@@ -111,9 +184,9 @@ export function buildDefaultSplitterPorts(outputs: number, existing?: SplitterPo
       color_hex: spec.color_hex,
       label: prev?.label?.trim() || spec.label,
       hint: spec.hint,
-      status: prev?.status ?? "livre",
+      status: normalizeStatus(prev?.status),
       note: prev?.note ?? "",
-      destination: normalizeFiberDestination(prev?.destination),
+      destination: normalizeDestination(prev?.destination),
     });
   }
   return out;

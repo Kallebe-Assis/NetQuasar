@@ -7,7 +7,11 @@ import { CableFibersScheme2D, FiberPortsGrid } from "./FiberSchemeViews";
 import {
   buildDefaultSplitterPorts,
   CABLE_FIBER_COUNTS,
+  CABLE_FIBER_DESTINATIONS,
+  CABLE_FIBER_STATUSES,
   isCableFiberCount,
+  normalizeCableFiberDestination,
+  normalizeCableFiberStatus,
   type SplitterPort,
 } from "../lib/fiberSplitter";
 
@@ -30,6 +34,7 @@ export function CableFibersModal({ open, cableId, cableName, fiberCount, ports, 
   const [count, setCount] = useState(initialCount);
   const [draft, setDraft] = useState<SplitterPort[]>([]);
   const [tab, setTab] = useState<TabId>("fibra");
+  const [viewMode, setViewMode] = useState<"detalhado" | "simples">("detalhado");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,13 +42,13 @@ export function CableFibersModal({ open, cableId, cableName, fiberCount, ports, 
     const n = fiberCount && fiberCount > 0 ? fiberCount : 12;
     setCount(n);
     setTab("fibra");
-    setDraft(buildDefaultSplitterPorts(n, ports ?? null));
+    setDraft(buildDefaultSplitterPorts(n, ports ?? null, normalizeCableFiberDestination, normalizeCableFiberStatus));
     setErr(null);
   }, [open, fiberCount, ports, cableId]);
 
   useEffect(() => {
     if (!open) return;
-    setDraft((prev) => buildDefaultSplitterPorts(count, prev));
+    setDraft((prev) => buildDefaultSplitterPorts(count, prev, normalizeCableFiberDestination, normalizeCableFiberStatus));
   }, [count, open]);
 
   const countOptions = useMemo(() => {
@@ -147,10 +152,36 @@ export function CableFibersModal({ open, cableId, cableName, fiberCount, ports, 
                 </label>
               </div>
               <div className="splitter-modal__section-label">Fibras ({count})</div>
-              <FiberPortsGrid ports={draft} canEdit={canEdit} onChange={setDraft} />
+              <FiberPortsGrid
+                ports={draft}
+                canEdit={canEdit}
+                onChange={setDraft}
+                statusOptions={CABLE_FIBER_STATUSES}
+                destinationOptions={CABLE_FIBER_DESTINATIONS}
+                normalizeDestinationValue={normalizeCableFiberDestination}
+                destinationRequiresNonFreeStatus
+              />
             </>
           ) : (
-            <CableFibersScheme2D ports={draft} cableName={cableName} fiberCount={count} />
+            <>
+              <div className="splitter-scheme__viewmode">
+                <button
+                  type="button"
+                  className={`btn btn--sm${viewMode === "detalhado" ? " is-active" : ""}`}
+                  onClick={() => setViewMode("detalhado")}
+                >
+                  Detalhado
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn--sm${viewMode === "simples" ? " is-active" : ""}`}
+                  onClick={() => setViewMode("simples")}
+                >
+                  Simples
+                </button>
+              </div>
+              <CableFibersScheme2D ports={draft} cableName={cableName} fiberCount={count} compact={viewMode === "simples"} />
+            </>
           )}
 
           {err ? <div className="msg msg--err">{err}</div> : null}
@@ -162,7 +193,7 @@ export function CableFibersModal({ open, cableId, cableName, fiberCount, ports, 
           </button>
           {canEdit ? (
             <button type="button" className="btn btn--primary" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>
-              {saveMut.isPending ? "A guardar…" : "Guardar fibras"}
+              {saveMut.isPending ? "Salvando…" : "Salvar"}
             </button>
           ) : null}
         </div>

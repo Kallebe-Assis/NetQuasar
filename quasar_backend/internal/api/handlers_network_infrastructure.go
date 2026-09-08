@@ -28,6 +28,25 @@ var networkCableStatuses = []string{
 	"ativo", "planejado", "inativo", "manutencao",
 }
 
+// Função do cabo no mapa (Configurações do mapa → Cores permite uma cor por função) — ver
+// migration 133_network_cable_funcao.sql.
+var networkCableFuncoes = []string{
+	"backbone_link", "transporte", "backbone_ftth", "cto", "multipla", "outro",
+}
+
+func normalizeCableFuncao(v string) (string, bool) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	if s == "" {
+		return "outro", true
+	}
+	for _, f := range networkCableFuncoes {
+		if f == s {
+			return f, true
+		}
+	}
+	return "", false
+}
+
 func normalizeFiberColor(v string) (string, bool) {
 	s := strings.TrimSpace(v)
 	if s == "" {
@@ -1482,6 +1501,7 @@ type networkCableInput struct {
 	CableType     *string          `json:"cable_type"`
 	FiberCount    *int             `json:"fiber_count"`
 	Status        string           `json:"status"`
+	Funcao        string           `json:"funcao"`
 	ProjectID     *string          `json:"project_id"`
 	ProjectNumber *int             `json:"project_number"`
 	Latitude      *float64         `json:"latitude"`
@@ -1495,6 +1515,11 @@ func (in *networkCableInput) validate() error {
 		return errors.New("status inválido")
 	}
 	in.Status = st
+	fc, ok := normalizeCableFuncao(in.Funcao)
+	if !ok {
+		return errors.New("funcao inválida")
+	}
+	in.Funcao = fc
 	if err := requireNetworkProjectID(in.ProjectID); err != nil {
 		return err
 	}
@@ -1536,23 +1561,23 @@ func asFloat(v any) (float64, bool) {
 	}
 }
 
-const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, project_id, latitude, longitude, fiber_ports, path, created_at, updated_at`
+const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, funcao, project_id, latitude, longitude, fiber_ports, path, created_at, updated_at`
 
 func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
 	var displayNumber int
-	var description, status string
+	var description, status, funcao string
 	var cableType *string
 	var fiberCount *int
 	var projectID *uuid.UUID
 	var lat, lon *float64
 	var fiberPorts, pathRaw []byte
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &projectID, &lat, &lon, &fiberPorts, &pathRaw, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &funcao, &projectID, &lat, &lon, &fiberPorts, &pathRaw, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
-	m := map[string]any{"id": id, "display_number": displayNumber, "description": description, "status": status, "created_at": created, "updated_at": updated}
+	m := map[string]any{"id": id, "display_number": displayNumber, "description": description, "status": status, "funcao": funcao, "created_at": created, "updated_at": updated}
 	setOptionalStr(m, "cable_type", cableType)
 	if fiberCount != nil {
 		m["fiber_count"] = *fiberCount
@@ -1684,9 +1709,9 @@ func (s *Server) createNetworkCable(w http.ResponseWriter, r *http.Request) {
 	var id uuid.UUID
 	var displayNumber int
 	err = s.DB().QueryRow(r.Context(), `
-		INSERT INTO network_cables (description, cable_type, fiber_count, status, project_id, latitude, longitude, path)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, display_number`,
-		strings.TrimSpace(body.Description), trimPtr(body.CableType), body.FiberCount, body.Status, projectID, body.Latitude, body.Longitude, pathJSON,
+		INSERT INTO network_cables (description, cable_type, fiber_count, status, funcao, project_id, latitude, longitude, path)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, display_number`,
+		strings.TrimSpace(body.Description), trimPtr(body.CableType), body.FiberCount, body.Status, body.Funcao, projectID, body.Latitude, body.Longitude, pathJSON,
 	).Scan(&id, &displayNumber)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
@@ -1737,6 +1762,17 @@ func networkCablePatch(body map[string]json.RawMessage) ([]string, []any, int, e
 		}
 		sets = append(sets, "status = $"+strconv.Itoa(n))
 		args = append(args, st)
+		n++
+	}
+	if raw, ok := body["funcao"]; ok {
+		var v string
+		_ = json.Unmarshal(raw, &v)
+		fc, ok := normalizeCableFuncao(v)
+		if !ok {
+			return nil, nil, 0, errors.New("funcao inválida")
+		}
+		sets = append(sets, "funcao = $"+strconv.Itoa(n))
+		args = append(args, fc)
 		n++
 	}
 	if raw, ok := body["project_id"]; ok {

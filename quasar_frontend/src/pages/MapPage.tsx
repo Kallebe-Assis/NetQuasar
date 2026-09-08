@@ -1,9 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileUp, LocateFixed, Pencil, Search } from "lucide-react";
+import { LocateFixed, Pencil, Search } from "lucide-react";
 import { EquipmentMap, DEFAULT_MAP_COLORS, expandMapBounds, quantizeMapBounds, sameMapBounds, type MapBounds, type MapDisplayMode, type MapLatLng, type MapPlaceMode, type MapPoint } from "../components/EquipmentMap";
 import { MapDetailModal } from "../components/MapDetailModal";
-import { MapFilterButton, MapFilterModal } from "../components/MapFilterModal";
+import { MapFilterButton, MapFilterModal, type SpliceModelFilter } from "../components/MapFilterModal";
 import { MapInfraSidePanel, parseInfraMapId } from "../components/MapInfraSidePanel";
 import { MapPlaceElementModal, type MapPlaceSession, type PlaceableKind } from "../components/MapPlaceElementModal";
 import { MapProjectKmlImport } from "../components/MapProjectKmlImport";
@@ -12,12 +12,23 @@ import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { CTO_MAP_PIN_COLOR, DEFAULT_MAP_ICON_STYLES, INFRA_MAP_KIND_LABELS, isInfraMapKind, type InfraMapKind, type MapIconStyles } from "../lib/mapInfrastructureIcons";
 import { fiberSpecByName } from "../lib/fiberSplitter";
+import { normalizeCableFuncao, type CableFuncao } from "../lib/networkInfrastructure";
 import { formatDistanceMeters } from "../lib/nearestCtoMatch";
 import { apiFetch } from "../lib/api";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { can, isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
 import { MAP_PROJECT_NONE, isMapProjectAll, isMapProjectNone, mapProjectUuid, shouldLoadMapInfrastructure } from "../lib/mapProjectFilter";
-import { fetchUiAppearance, mapColorsFromAppearance, mapIconsFromAppearance, type MapAppearanceColors } from "../lib/uiAppearance";
+import {
+  fetchUiAppearance,
+  mapColorsFromAppearance,
+  mapEquipmentCategoriesFromAppearance,
+  mapIconImageUrlsFromAppearance,
+  mapIconsFromAppearance,
+  type EquipmentCategoryConfig,
+  type MapAppearanceColors,
+  type MapIconImageRole,
+} from "../lib/uiAppearance";
 import { looksLikeHTTPURL, parseLatLngPair, shouldLocateQuery, type MapLocateHit } from "../lib/mapLocationQuery";
 
 class MapSectionErrorBoundary extends React.Component<Readonly<{ children: React.ReactNode }>, { err: Error | null }> {
@@ -65,6 +76,8 @@ type Point = {
   splitter?: string | null;
   fiber_color?: string | null;
   path?: MapLatLng[] | null;
+  funcao?: string | null;
+  boxModel?: string | null;
 };
 
 type ConnectionPoint = {
@@ -90,6 +103,10 @@ type InfrastructurePoint = {
   splitter?: string | null;
   fiber_color?: string | null;
   path?: MapLatLng[] | null;
+  /** Só point_type="cable" — ver CABLE_FUNCOES em lib/networkInfrastructure.ts. */
+  funcao?: string | null;
+  /** Só point_type="splice_box" — "emenda" ou "distribuicao". */
+  box_model?: string | null;
 };
 
 type NearestCtoApi = {
@@ -201,6 +218,8 @@ export function MapPage() {
   const [showCtos, setShowCtos] = useState(true);
   const [showCables, setShowCables] = useState(true);
   const [showSpliceBoxes, setShowSpliceBoxes] = useState(true);
+  const [spliceModelFilter, setSpliceModelFilter] = useState<SpliceModelFilter>("all");
+  const [cableFuncaoFilter, setCableFuncaoFilter] = useState<Set<CableFuncao> | null>(null);
   const [showPoles, setShowPoles] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showPops, setShowPops] = useState(true);
@@ -232,8 +251,13 @@ export function MapPage() {
     connection: DEFAULT_MAP_COLORS.connection,
     cto: DEFAULT_MAP_COLORS.cto ?? CTO_MAP_PIN_COLOR,
     splice_box: DEFAULT_MAP_COLORS.splice_box ?? "#d97706",
+    splice_box_emenda: DEFAULT_MAP_COLORS.splice_box_emenda ?? "#d97706",
+    splice_box_distribuicao: DEFAULT_MAP_COLORS.splice_box_distribuicao ?? "#7c3aed",
+    cable_funcao: { ...(DEFAULT_MAP_COLORS.cable_funcao as Record<CableFuncao, string>) },
   }));
   const [mapIconsDraft, setMapIconsDraft] = useState<MapIconStyles>(() => ({ ...DEFAULT_MAP_ICON_STYLES }));
+  const [equipmentCategoriesDraft, setEquipmentCategoriesDraft] = useState<Record<string, EquipmentCategoryConfig>>({});
+  const [iconImageUrlsDraft, setIconImageUrlsDraft] = useState<Partial<Record<MapIconImageRole, string>>>({});
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addKind, setAddKind] = useState<PlaceableKind | null>(null);
   const [draftPath, setDraftPath] = useState<MapLatLng[]>([]);
@@ -281,6 +305,8 @@ export function MapPage() {
   useEffect(() => {
     setMapPrefsDraft(mapColorsFromAppearance(uiAppearance.data));
     setMapIconsDraft(mapIconsFromAppearance(uiAppearance.data));
+    setEquipmentCategoriesDraft(mapEquipmentCategoriesFromAppearance(uiAppearance.data));
+    setIconImageUrlsDraft(mapIconImageUrlsFromAppearance(uiAppearance.data));
   }, [
     uiAppearance.data?.map_equipment_color,
     uiAppearance.data?.map_connection_color,
@@ -290,6 +316,14 @@ export function MapPage() {
     uiAppearance.data?.map_connection_icon,
     uiAppearance.data?.map_cto_icon,
     uiAppearance.data?.map_splice_icon,
+    uiAppearance.data?.map_splice_emenda_color,
+    uiAppearance.data?.map_splice_distribuicao_color,
+    uiAppearance.data?.map_splice_emenda_icon,
+    uiAppearance.data?.map_splice_distribuicao_icon,
+    // Objectos — comparar por conteúdo evita reseeding em todo re-fetch idêntico.
+    JSON.stringify(uiAppearance.data?.map_cable_funcao_colors ?? {}),
+    JSON.stringify(uiAppearance.data?.map_equipment_categories ?? {}),
+    JSON.stringify(uiAppearance.data?.map_icon_image_urls ?? {}),
   ]);
 
   const saveMapPrefs = useMutation({
@@ -305,6 +339,13 @@ export function MapPage() {
           map_connection_icon: mapIconsDraft.connection,
           map_cto_icon: mapIconsDraft.cto,
           map_splice_icon: mapIconsDraft.splice_box,
+          map_splice_emenda_color: mapPrefsDraft.splice_box_emenda,
+          map_splice_distribuicao_color: mapPrefsDraft.splice_box_distribuicao,
+          map_splice_emenda_icon: mapIconsDraft.splice_box_emenda,
+          map_splice_distribuicao_icon: mapIconsDraft.splice_box_distribuicao,
+          map_cable_funcao_colors: mapPrefsDraft.cable_funcao,
+          map_equipment_categories: equipmentCategoriesDraft,
+          map_icon_image_urls: iconImageUrlsDraft,
         },
       }),
     onSuccess: () => {
@@ -321,11 +362,18 @@ export function MapPage() {
       connection: mapPrefsDraft.connection,
       cto: mapPrefsDraft.cto,
       splice_box: mapPrefsDraft.splice_box,
+      splice_box_emenda: mapPrefsDraft.splice_box_emenda,
+      splice_box_distribuicao: mapPrefsDraft.splice_box_distribuicao,
+      cable_funcao: mapPrefsDraft.cable_funcao,
+      equipment_categories: equipmentCategoriesDraft,
     }),
-    [mapPrefsDraft],
+    [mapPrefsDraft, equipmentCategoriesDraft],
   );
 
-  const mapIconStyles = mapIconsDraft;
+  const mapIconStyles = useMemo(
+    () => ({ ...mapIconsDraft, imageUrls: iconImageUrlsDraft }),
+    [mapIconsDraft, iconImageUrlsDraft],
+  );
 
   const pops = useQuery({ queryKey: ["pops"], queryFn: () => apiFetch<{ pops: { id: string; description: string }[] }>("/api/v1/pops") });
 
@@ -488,7 +536,12 @@ export function MapPage() {
     refetchOnWindowFocus: false,
   });
 
-  const equipPoints = useMemo(() => (Array.isArray(pts.data?.points) ? pts.data.points : []), [pts.data?.points]);
+  const equipPoints = useMemo(() => {
+    const raw = Array.isArray(pts.data?.points) ? pts.data.points : [];
+    const hasHidden = Object.values(equipmentCategoriesDraft).some((c) => c.hidden);
+    if (!hasHidden) return raw;
+    return raw.filter((p) => !equipmentCategoriesDraft[p.category ?? ""]?.hidden);
+  }, [pts.data?.points, equipmentCategoriesDraft]);
 
   const infraCacheRef = useRef<Map<string, InfrastructurePoint>>(new Map());
   const infraCacheScopeRef = useRef("");
@@ -593,11 +646,22 @@ export function MapPage() {
     const infraIds = new Set<string>();
     const infra: Point[] = infraRaw
       .filter((p) => isInfraMapKind(p.point_type))
+      // Filtro por tipo de foguete (emenda/distribuição) e por função de cabo (Filtros do mapa) —
+      // client-side: os pontos já vieram do bbox, só decide o que fica visível dentro dele.
+      .filter((p) => {
+        if (p.point_type === "splice_box" && spliceModelFilter !== "all") {
+          const model = (p.box_model ?? "emenda").trim() || "emenda";
+          return model === spliceModelFilter;
+        }
+        if (p.point_type === "cable" && cableFuncaoFilter) {
+          return cableFuncaoFilter.has(normalizeCableFuncao(p.funcao));
+        }
+        return true;
+      })
       .map((p) => {
         infraIds.add(`${p.point_type}:${p.id}`);
         const splitterLabel = p.point_type === "cto" && p.splitter ? String(p.splitter).trim() : "";
         const ctoColor = ctoColorByFeed ? fiberSpecByName(p.fiber_color).hex : mapPrefsDraft.cto;
-        const spliceColor = mapPrefsDraft.splice_box;
         return {
           id: `infra-${p.point_type}-${p.id}`,
           description:
@@ -612,13 +676,17 @@ export function MapPage() {
           status: p.point_type === "cto" ? splitterLabel || "—" : "infra",
           point_type: p.point_type,
           mapKind: p.point_type,
-          markerColor:
-            p.point_type === "cto" ? ctoColor : p.point_type === "splice_box" ? spliceColor : p.color ?? null,
+          // splice_box e cable resolvem a cor pelo modelo/função em EquipmentMap.tsx
+          // (resolvedInfraColor, usa colors.splice_box_* / colors.cable_funcao) — aqui só CTO
+          // continua com resolução própria (cor da fibra de alimentação).
+          markerColor: p.point_type === "cto" ? ctoColor : p.color ?? null,
           display_number: p.display_number,
           mapLabel: p.point_type === "cto" ? p.description : undefined,
           splitter: p.splitter ?? null,
           fiber_color: p.fiber_color ?? null,
           path: Array.isArray(p.path) ? p.path : null,
+          funcao: p.point_type === "cable" ? p.funcao ?? null : undefined,
+          boxModel: p.point_type === "splice_box" ? p.box_model ?? null : undefined,
         };
       });
     // Garante que as CTOs próximas do GPS aparecem mesmo fora do viewport actual / sem projecto.
@@ -661,6 +729,8 @@ export function MapPage() {
     ctoColorByFeed,
     mapPrefsDraft.cto,
     mapPrefsDraft.splice_box,
+    spliceModelFilter,
+    cableFuncaoFilter,
     hiddenMapIds,
   ]);
 
@@ -1261,6 +1331,7 @@ export function MapPage() {
     if (!isMapProjectNone(projectFilterId)) n++;
     if (localityFlyId) n++;
     if (!showEquipment || showConnections || !showCtos || !showCables || !showPops || !showSpliceBoxes || showPoles || showProjects) n++;
+    if (spliceModelFilter !== "all" || cableFuncaoFilter != null) n++;
     if (displayMode !== "cluster") n++;
     return n;
   }, [
@@ -1276,6 +1347,8 @@ export function MapPage() {
     showPoles,
     showProjects,
     showPops,
+    spliceModelFilter,
+    cableFuncaoFilter,
     displayMode,
   ]);
 
@@ -1295,7 +1368,21 @@ export function MapPage() {
   useEffect(() => {
     setFitBoundsVersion((v) => v + 1);
     setListPage(0);
-  }, [popId, category, projectFilterId, showConnections, showEquipment, showCtos, showCables, showSpliceBoxes, showPoles, showProjects, showPops]);
+  }, [
+    popId,
+    category,
+    projectFilterId,
+    showConnections,
+    showEquipment,
+    showCtos,
+    showCables,
+    showSpliceBoxes,
+    showPoles,
+    showProjects,
+    showPops,
+    spliceModelFilter,
+    cableFuncaoFilter,
+  ]);
 
   useEffect(() => {
     setListPage(0);
@@ -1611,6 +1698,10 @@ export function MapPage() {
         onShowConnections={setShowConnections}
         showSpliceBoxes={showSpliceBoxes}
         onShowSpliceBoxes={setShowSpliceBoxes}
+        spliceModelFilter={spliceModelFilter}
+        onSpliceModelFilter={setSpliceModelFilter}
+        cableFuncaoFilter={cableFuncaoFilter}
+        onCableFuncaoFilter={setCableFuncaoFilter}
         showPoles={showPoles}
         onShowPoles={setShowPoles}
         showProjects={showProjects}
@@ -1632,14 +1723,25 @@ export function MapPage() {
         onClose={() => {
           setMapPrefsDraft(mapColorsFromAppearance(uiAppearance.data));
           setMapIconsDraft(mapIconsFromAppearance(uiAppearance.data));
+          setEquipmentCategoriesDraft(mapEquipmentCategoriesFromAppearance(uiAppearance.data));
+          setIconImageUrlsDraft(mapIconImageUrlsFromAppearance(uiAppearance.data));
           setSettingsModalOpen(false);
         }}
         colors={mapPrefsDraft}
         onColorsChange={setMapPrefsDraft}
         icons={mapIconsDraft}
         onIconsChange={setMapIconsDraft}
+        equipmentCategories={equipmentCategoriesDraft}
+        onEquipmentCategoriesChange={setEquipmentCategoriesDraft}
+        iconImageUrls={iconImageUrlsDraft}
+        onIconImageUrlsChange={setIconImageUrlsDraft}
         onSave={() => saveMapPrefs.mutate()}
         savePending={saveMapPrefs.isPending}
+        canImport={canEditMap}
+        onImportClick={() => {
+          setSettingsModalOpen(false);
+          setKmlImportOpen(true);
+        }}
       />
 
       <MapDetailModal
@@ -1756,15 +1858,6 @@ export function MapPage() {
                       >
                         <Pencil size={15} strokeWidth={2.25} />
                         {mapEditMode ? "Modo edição" : "Editar"}
-                      </button>
-                      <button
-                        type="button"
-                        className="map-edit-toggle__btn"
-                        title="Importar KML/KMZ ou substituir um projeto existente"
-                        onClick={() => setKmlImportOpen(true)}
-                      >
-                        <FileUp size={15} strokeWidth={2.25} />
-                        Importar
                       </button>
                     </div>
                   ) : null}
@@ -1964,9 +2057,16 @@ export function MapPage() {
                     }
                     onCopyCoords={(lat, lng) => {
                       const text = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-                      void navigator.clipboard.writeText(text).then(
-                        () => setMapToast({ ok: true, text: `Coordenadas copiadas: ${text}` }),
-                        () => setMapToast({ ok: false, text: "Não foi possível copiar as coordenadas." }),
+                      // navigator.clipboard exige contexto seguro (HTTPS ou localhost) — em HTTP
+                      // simples (comum num acesso por IP na rede local) fica undefined/rejeita
+                      // silenciosamente. copyTextToClipboard já cai para document.execCommand
+                      // ("copy") via textarea nesse caso, que não tem essa exigência.
+                      void copyTextToClipboard(text).then((ok) =>
+                        setMapToast(
+                          ok
+                            ? { ok: true, text: `Coordenadas copiadas: ${text}` }
+                            : { ok: false, text: "Não foi possível copiar as coordenadas." },
+                        ),
                       );
                     }}
                     flyTo={flyTo}
@@ -1978,11 +2078,31 @@ export function MapPage() {
                     <div className="map-nearest-panel" role="region" aria-label="CTOs próximas">
                       <div className="map-nearest-panel__title">
                         <span>{geoTracking ? "CTOs mais próximas" : "CTOs próximas"}</span>
-                        {geoTracking ? (
-                          <button type="button" className="btn btn--sm" onClick={() => { stopGeoTracking(); setNearestCtos([]); }}>
-                            Parar
-                          </button>
-                        ) : null}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {geoTracking ? (
+                            <button type="button" className="btn btn--sm" onClick={() => { stopGeoTracking(); setNearestCtos([]); }}>
+                              Parar
+                            </button>
+                          ) : null}
+                          {/* Sem isto, um erro (ex.: geolocalização sem HTTPS/localhost) deixava o
+                              card preso na tela — geoTracking já vem false nesse caso, então o
+                              botão "Parar" acima nem chega a aparecer. */}
+                          {geoError ? (
+                            <button
+                              type="button"
+                              className="btn btn--icon"
+                              title="Fechar"
+                              aria-label="Fechar"
+                              onClick={() => {
+                                stopGeoTracking();
+                                setGeoError(null);
+                                setNearestCtos([]);
+                              }}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                       {geoError ? <p className="msg msg--err" style={{ margin: "0 0 8px", fontSize: 12 }}>{geoError}</p> : null}
                       {geoTracking && !userLocation && !geoError ? (
@@ -2056,7 +2176,16 @@ export function MapPage() {
                       setMapToast({ ok: true, text: "Elemento oculto neste mapa (sessão actual)." });
                     }}
                     onStartReposition={(mapId, kind, entityId) => startReposition(mapId, kind, entityId)}
-                    onDeleted={() => {
+                    onDeleted={(deletedMapId) => {
+                      // A invalidação da query já refaz o fetch sem o elemento excluído, mas o
+                      // cache de estabilidade do mapa (infraCacheRef/infraStablePoints, abaixo)
+                      // só remove entradas que saíram da janela "keep" — nunca as que só
+                      // desapareceram do fetch mais recente (é assim que evita o bug antigo de
+                      // "elemento some sozinho no zoom"). Sem isto, um elemento excluído ficava
+                      // preso no mapa indefinidamente. Reaproveita o mesmo mecanismo de
+                      // "ocultar do mapa" — é exactamente o comportamento certo para algo apagado
+                      // de vez, nunca deve voltar a aparecer nesta sessão.
+                      setHiddenMapIds((prev) => new Set(prev).add(deletedMapId));
                       setMapToast({ ok: true, text: "Elemento excluído." });
                       setSelId(null);
                       setInfraPanelOpen(false);

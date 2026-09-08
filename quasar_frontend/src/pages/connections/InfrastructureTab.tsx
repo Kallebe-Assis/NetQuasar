@@ -29,7 +29,9 @@ import {
   type InfraVariant,
 } from "../../lib/infraCsvImport";
 import {
+  CABLE_FUNCOES,
   CABLE_STATUSES,
+  cableFuncaoLabel,
   fmtCoord,
   formatSplitterDisplay,
   normalizeSplitterInput,
@@ -84,6 +86,10 @@ type ImportReport = {
 type Props = ConnectionsTabProps & {
   variant: Variant;
   tabId: ConnectionsTabId;
+  /** Id de um elemento para abrir o modal de edição automaticamente (vindo de ?edit= na URL —
+   * ver botão "Abrir em Conexões" em MapInfraSidePanel.tsx). */
+  autoEditId?: string | null;
+  onAutoEditConsumed?: () => void;
 };
 
 const VARIANT_META: Record<
@@ -201,6 +207,7 @@ function rowToCsvRow(variant: Variant, row: Row): string[] {
       String(r.cable_type ?? ""),
       r.fiber_count != null ? String(r.fiber_count) : "",
       String(r.status ?? "ativo"),
+      String(r.funcao ?? "outro"),
       lat,
       lon,
       proj,
@@ -226,6 +233,8 @@ export function InfrastructureTab({
   onOpenFilters,
   onOpenSettings,
   activeFilterCount,
+  autoEditId,
+  onAutoEditConsumed,
 }: Props) {
   const meta = VARIANT_META[variant];
   const qc = useQueryClient();
@@ -313,7 +322,7 @@ export function InfrastructureTab({
       return { ...base, fiber_count: "12", box_model: "emenda" };
     }
     if (variant === "cable") {
-      return { ...base, cable_type: "", fiber_count: "", status: "ativo" };
+      return { ...base, cable_type: "", fiber_count: "", status: "ativo", funcao: "outro" };
     }
     return { ...base, pole_type: "", locality_id: "" };
   }
@@ -343,6 +352,7 @@ export function InfrastructureTab({
       f.cable_type = r.cable_type ? String(r.cable_type) : "";
       f.fiber_count = r.fiber_count != null ? String(r.fiber_count) : "";
       f.status = r.status ? String(r.status) : "ativo";
+      f.funcao = r.funcao ? String(r.funcao) : "outro";
     }
     if (variant === "pole") {
       f.pole_type = r.pole_type ? String(r.pole_type) : "";
@@ -350,6 +360,25 @@ export function InfrastructureTab({
     }
     return f;
   }
+
+  function openEdit(row: Row) {
+    setEditId(String(row.id));
+    setForm(rowToForm(row));
+    setFormOpen(true);
+  }
+
+  // Abre automaticamente o modal de edição de um elemento específico vindo do mapa (botão "Abrir
+  // em Conexões" em MapInfraSidePanel.tsx passa ?edit=<id> na URL). Só actua quando a linha já
+  // está carregada; ao conseguir, avisa o pai (onAutoEditConsumed) para limpar o parâmetro da URL
+  // e não reabrir o modal se o utilizador o fechar e voltar a esta aba.
+  useEffect(() => {
+    if (!autoEditId || !canMutate) return;
+    const row = rows.find((r) => String(r.id) === autoEditId);
+    if (!row) return;
+    openEdit(row);
+    onAutoEditConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoEditId, rows, canMutate]);
 
   function formToPayload() {
     const lat = parseCoordInput(String(form.latitude));
@@ -384,6 +413,7 @@ export function InfrastructureTab({
       const fc = String(form.fiber_count).trim();
       payload.fiber_count = fc ? Number(fc) : null;
       payload.status = String(form.status).trim() || "ativo";
+      payload.funcao = String(form.funcao).trim() || "outro";
     }
     if (variant === "pole") {
       payload.pole_type = String(form.pole_type).trim() || null;
@@ -405,6 +435,10 @@ export function InfrastructureTab({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [...meta.queryKey] });
       qc.invalidateQueries({ queryKey: queryKeys.networkProjects });
+      // Sem isto, mudar cor/estado/função por aqui (ex.: função do cabo) ficava desatualizado no
+      // mapa até o próximo refetch por bbox/zoom (staleTime de 20s) — o mapa cacheia por conta
+      // própria (infraCacheRef em MapPage.tsx) para não perder pontos ao andar no mapa.
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       setFormOpen(false);
       setEditId(null);
       setForm(emptyForm());
@@ -425,6 +459,7 @@ export function InfrastructureTab({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [...meta.queryKey] });
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       setLinkOpen(false);
       setSelectedCtoIds([]);
       toastOk(pushToast, selectedCtoIds.length > 1 ? "CTOs vinculadas à interface." : "CTO vinculada à interface.");
@@ -436,6 +471,7 @@ export function InfrastructureTab({
     mutationFn: (id: string) => apiFetch(`${meta.api}/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [meta.queryKey] });
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       setDeleteId(null);
       toastOk(pushToast, `${meta.singular} removida.`);
     },
@@ -500,6 +536,7 @@ export function InfrastructureTab({
 
       await qc.invalidateQueries({ queryKey: [...meta.queryKey] });
       await qc.invalidateQueries({ queryKey: queryKeys.networkProjects });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
 
       const report: ImportReport = { imported, skipped, failed, fileName: file.name };
       setImportReport(report);
@@ -700,6 +737,7 @@ export function InfrastructureTab({
               {variant === "cable" ? (
                 <>
                   <th>Tipo</th>
+                  <th>Função</th>
                   <th>Fibras</th>
                   <th>Status</th>
                 </>
@@ -771,6 +809,7 @@ export function InfrastructureTab({
                   {variant === "cable" ? (
                     <>
                       <td>{(r.cable_type as string) ?? "—"}</td>
+                      <td>{cableFuncaoLabel(r.funcao as string | null | undefined)}</td>
                       <td>{(r.fiber_count as number) ?? "—"}</td>
                       <td>{cableStatusLabel(String(r.status ?? ""))}</td>
                     </>
@@ -831,11 +870,7 @@ export function InfrastructureTab({
                             type="button"
                             className="btn btn--icon"
                             title="Editar"
-                            onClick={() => {
-                              setEditId(String(r.id));
-                              setForm(rowToForm(row));
-                              setFormOpen(true);
-                            }}
+                            onClick={() => openEdit(row)}
                           >
                             <Pencil size={15} />
                           </button>
@@ -1053,6 +1088,16 @@ export function InfrastructureTab({
                         {CABLE_STATUSES.map((s) => (
                           <option key={s.value} value={s.value}>
                             {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="conn-form-modal__field">
+                      <span className="conn-form-modal__field-label">Função</span>
+                      <select className="input" value={String(form.funcao ?? "outro")} onChange={(e) => setForm({ ...form, funcao: e.target.value })}>
+                        {CABLE_FUNCOES.map((f) => (
+                          <option key={f.value} value={f.value}>
+                            {f.label}
                           </option>
                         ))}
                       </select>

@@ -32,6 +32,19 @@ export const CABLE_STATUSES = [
   { value: "manutencao", label: "Manutenção" },
 ] as const;
 
+/** Função do cabo no mapa — cada uma pode ter cor própria em Configurações do mapa (ver
+ * lib/uiAppearance.ts, DEFAULT_MAP_CABLE_FUNCAO_COLORS) e ser filtrada isoladamente. */
+export const CABLE_FUNCOES = [
+  { value: "backbone_link", label: "Backbone Link" },
+  { value: "transporte", label: "Transporte" },
+  { value: "backbone_ftth", label: "Backbone FTTH" },
+  { value: "cto", label: "CTO" },
+  { value: "multipla", label: "Função Múltipla" },
+  { value: "outro", label: "Outro" },
+] as const;
+
+export type CableFuncao = (typeof CABLE_FUNCOES)[number]["value"];
+
 export type CommercialLocality = {
   id: string;
   name: string;
@@ -132,6 +145,8 @@ export type NetworkCable = {
   cable_type?: string | null;
   fiber_count?: number | null;
   status: string;
+  /** backbone_link | transporte | backbone_ftth | cto | multipla | outro — ver CABLE_FUNCOES. */
+  funcao?: string | null;
   project_id?: string | null;
   project_label?: string | null;
   latitude?: number | null;
@@ -179,6 +194,15 @@ export function projectStatusLabel(status: string): string {
 
 export function cableStatusLabel(status: string): string {
   return CABLE_STATUSES.find((s) => s.value === status)?.label ?? status;
+}
+
+export function cableFuncaoLabel(funcao?: string | null): string {
+  return CABLE_FUNCOES.find((f) => f.value === funcao)?.label ?? "Outro";
+}
+
+export function normalizeCableFuncao(raw?: string | null): CableFuncao {
+  const v = (raw ?? "").trim().toLowerCase();
+  return (CABLE_FUNCOES.find((f) => f.value === v)?.value ?? "outro") as CableFuncao;
 }
 
 /** Ex.: 01:08, 1:8 → 1x8 */

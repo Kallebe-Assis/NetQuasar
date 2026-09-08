@@ -903,22 +903,18 @@ func parseMapBBoxQuery(r *http.Request) (minLat, maxLat, minLng, maxLng float64,
 	return
 }
 
+// mapConnectionLimit era escalonado por zoom (só 120 conexões abaixo do zoom 9!) — o bbox já
+// restringe a consulta ao que está visível na tela; encolher ainda mais o tecto conforme o
+// utilizador afastava o zoom fazia conexões claramente em frente dele sumirem sem aviso (o
+// SELECT nem sequer ordena por proximidade do centro — é ORDER BY client_name, ou seja, o corte
+// era alfabético e arbitrário em relação à posição na tela). O tecto aqui agora é só uma válvula
+// de segurança para não travar com uma vista muitíssimo grande (país inteiro), nunca o motivo de
+// algo desaparecer dentro do que já está em frente ao utilizador.
 func mapConnectionLimit(zoom float64, hasBBox bool) int {
 	if !hasBBox {
 		return 0
 	}
-	switch {
-	case zoom < 9:
-		return 120
-	case zoom < 11:
-		return 350
-	case zoom < 13:
-		return 800
-	case zoom < 15:
-		return 1500
-	default:
-		return 2500
-	}
+	return 20000
 }
 
 func parseMapZoomQuery(r *http.Request) float64 {

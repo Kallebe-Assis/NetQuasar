@@ -471,7 +471,9 @@ function TopologyCanvas() {
   // ajusta parentId + posição relativa (ou volta a absoluta se saiu de todos os grupos).
   const onNodeDragStop = useCallback(
     (_: unknown, node: Node) => {
-      if (node.type !== "device") return;
+      // "manual" (equipamento avulso) precisa de reparenting nos POPs tal como "device" — só
+      // "pop" (o próprio grupo) fica de fora, um grupo nunca entra dentro doutro grupo.
+      if (node.type !== "device" && node.type !== "manual") return;
       const internal = reactFlow.getInternalNode(node.id);
       const abs = internal?.internals.positionAbsolute ?? node.position;
       const w = (internal?.measured.width ?? node.width ?? DEFAULT_NODE_SIZE) as number;

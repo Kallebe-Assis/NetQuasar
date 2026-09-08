@@ -58,6 +58,9 @@ export function ConnectionsPageShell() {
   const [draftPrefs, setDraftPrefs] = useState<ConnectionsViewPrefs>(prefs);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Elemento a abrir em edição automaticamente (?edit=<id> na URL — ver "Abrir em Conexões" no
+  // painel do mapa, MapInfraSidePanel.tsx). Consumido uma vez pela aba activa, depois limpo da URL.
+  const [autoEditId, setAutoEditId] = useState<string | null>(() => searchParams.get("edit"));
 
   useConnectionsLookups(true);
 
@@ -67,7 +70,22 @@ export function ConnectionsPageShell() {
       setTab(fromUrl);
       setPrefs(loadConnectionsPrefs(fromUrl));
     }
+    const editFromUrl = searchParams.get("edit");
+    if (editFromUrl && editFromUrl !== autoEditId) setAutoEditId(editFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  function clearAutoEdit() {
+    setAutoEditId(null);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete("edit");
+        return p;
+      },
+      { replace: true },
+    );
+  }
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters, tab), [filters, tab]);
 
@@ -138,10 +156,18 @@ export function ConnectionsPageShell() {
       </nav>
 
       {tab === "logins" ? <CommercialConnectionsTab {...tabProps} /> : null}
-      {tab === "cto" ? <InfrastructureTab variant="cto" tabId="cto" {...tabProps} /> : null}
-      {tab === "splice" ? <InfrastructureTab variant="splice" tabId="splice" {...tabProps} /> : null}
-      {tab === "cables" ? <InfrastructureTab variant="cable" tabId="cables" {...tabProps} /> : null}
-      {tab === "poles" ? <InfrastructureTab variant="pole" tabId="poles" {...tabProps} /> : null}
+      {tab === "cto" ? (
+        <InfrastructureTab variant="cto" tabId="cto" {...tabProps} autoEditId={autoEditId} onAutoEditConsumed={clearAutoEdit} />
+      ) : null}
+      {tab === "splice" ? (
+        <InfrastructureTab variant="splice" tabId="splice" {...tabProps} autoEditId={autoEditId} onAutoEditConsumed={clearAutoEdit} />
+      ) : null}
+      {tab === "cables" ? (
+        <InfrastructureTab variant="cable" tabId="cables" {...tabProps} autoEditId={autoEditId} onAutoEditConsumed={clearAutoEdit} />
+      ) : null}
+      {tab === "poles" ? (
+        <InfrastructureTab variant="pole" tabId="poles" {...tabProps} autoEditId={autoEditId} onAutoEditConsumed={clearAutoEdit} />
+      ) : null}
       {tab === "projects" ? <ProjectsTab {...tabProps} /> : null}
 
       <ConnectionsFilterDrawer

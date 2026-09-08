@@ -9,9 +9,9 @@ import {
   buildDefaultSplitterPorts,
   CABLE_FIBER_COUNTS,
   fiberSpecByName,
-  fiberSpecForPort,
   formatFeedFiberColor,
   isCableFiberCount,
+  lightFiberBorder,
   parseSplitterOutputs,
   type SpliceBoxModel,
   type SplicePair,
@@ -64,6 +64,7 @@ export function SpliceBoxModal({
   const [draftPorts, setDraftPorts] = useState<SplitterPort[]>([]);
   const [draftPairs, setDraftPairs] = useState<SplicePair[]>([]);
   const [tab, setTab] = useState<TabId>("fibra");
+  const [viewMode, setViewMode] = useState<"detalhado" | "simples">("detalhado");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -198,8 +199,16 @@ export function SpliceBoxModal({
           </button>
         </div>
 
-        <div className="splitter-modal__toolbar">
-          <label className="splitter-modal__field" style={{ maxWidth: 260 }}>
+        <div className="splitter-modal__tabsrow">
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            <button type="button" className={tab === "fibra" ? "active" : undefined} onClick={() => setTab("fibra")}>
+              Fibra
+            </button>
+            <button type="button" className={tab === "esquema" ? "active" : undefined} onClick={() => setTab("esquema")}>
+              {model === "distribuicao" ? "Splitter" : "Esquema"}
+            </button>
+          </div>
+          <label className="splitter-modal__field splitter-modal__field--inline">
             <span>Modelo da caixa</span>
             <select
               className="select"
@@ -211,15 +220,6 @@ export function SpliceBoxModal({
               <option value="distribuicao">Distribuição</option>
             </select>
           </label>
-        </div>
-
-        <div className="tabs" style={{ marginBottom: 4, flexShrink: 0 }}>
-          <button type="button" className={tab === "fibra" ? "active" : undefined} onClick={() => setTab("fibra")}>
-            Fibra
-          </button>
-          <button type="button" className={tab === "esquema" ? "active" : undefined} onClick={() => setTab("esquema")}>
-            {model === "distribuicao" ? "Splitter" : "Esquema"}
-          </button>
         </div>
 
         <div className="splitter-modal__body">
@@ -288,63 +288,68 @@ export function SpliceBoxModal({
                   <div className="splice-pair-colors">
                     <label className="splitter-modal__field">
                       <span>Fibra esquerda</span>
-                      <select
-                        className="select"
-                        disabled={!canEdit}
-                        value={p.left_color}
-                        onChange={(e) => {
-                          const left_color = e.target.value;
-                          const spec = fiberSpecByName(left_color);
-                          const fallback = fiberSpecForPort(p.port);
-                          setDraftPairs((rows) =>
-                            rows.map((r, i) =>
-                              i === idx
-                                ? {
-                                    ...r,
-                                    left_color: spec.name === "Desconhecido" ? left_color : spec.name,
-                                    left_color_hex: spec.name === "Desconhecido" ? fallback.color_hex : spec.hex,
-                                  }
-                                : r,
-                            ),
-                          );
-                        }}
-                      >
-                        {colorOptions(p.left_color).map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="splitter-modal__feed-inline">
+                        <span
+                          className="splitter-port__swatch splitter-port__swatch--sm"
+                          style={{
+                            background: p.left_color_hex,
+                            borderColor: lightFiberBorder(p.left_color) ? "rgba(0,0,0,.25)" : "transparent",
+                          }}
+                          title={p.left_color}
+                        />
+                        <select
+                          className="select"
+                          disabled={!canEdit}
+                          value={p.left_color}
+                          onChange={(e) => {
+                            // Antes caía na cor do fio "de série" da porta (fiberSpecForPort) sempre
+                            // que o nome resolvido era "Desconhecido" — incluindo quando o
+                            // utilizador escolhe "Desconhecido" de propósito no <select>, mostrando
+                            // p.ex. verde na fibra 1 em vez de nenhuma cor. fiberSpecByName já
+                            // devolve o cinza certo para esse caso — usar sempre o resultado dela.
+                            const spec = fiberSpecByName(e.target.value);
+                            setDraftPairs((rows) =>
+                              rows.map((r, i) => (i === idx ? { ...r, left_color: spec.name, left_color_hex: spec.hex } : r)),
+                            );
+                          }}
+                        >
+                          {colorOptions(p.left_color).map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </label>
                     <label className="splitter-modal__field">
                       <span>Fibra direita</span>
-                      <select
-                        className="select"
-                        disabled={!canEdit}
-                        value={p.right_color}
-                        onChange={(e) => {
-                          const right_color = e.target.value;
-                          const spec = fiberSpecByName(right_color);
-                          const fallback = fiberSpecForPort(p.port);
-                          setDraftPairs((rows) =>
-                            rows.map((r, i) =>
-                              i === idx
-                                ? {
-                                    ...r,
-                                    right_color: spec.name === "Desconhecido" ? right_color : spec.name,
-                                    right_color_hex: spec.name === "Desconhecido" ? fallback.color_hex : spec.hex,
-                                  }
-                                : r,
-                            ),
-                          );
-                        }}
-                      >
-                        {colorOptions(p.right_color).map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="splitter-modal__feed-inline">
+                        <span
+                          className="splitter-port__swatch splitter-port__swatch--sm"
+                          style={{
+                            background: p.right_color_hex,
+                            borderColor: lightFiberBorder(p.right_color) ? "rgba(0,0,0,.25)" : "transparent",
+                          }}
+                          title={p.right_color}
+                        />
+                        <select
+                          className="select"
+                          disabled={!canEdit}
+                          value={p.right_color}
+                          onChange={(e) => {
+                            const spec = fiberSpecByName(e.target.value);
+                            setDraftPairs((rows) =>
+                              rows.map((r, i) => (i === idx ? { ...r, right_color: spec.name, right_color_hex: spec.hex } : r)),
+                            );
+                          }}
+                        >
+                          {colorOptions(p.right_color).map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </label>
                   </div>
                   <label className="splitter-modal__field">
@@ -378,6 +383,25 @@ export function SpliceBoxModal({
           </>
         ) : null}
 
+        {tab === "esquema" ? (
+          <div className="splitter-scheme__viewmode">
+            <button
+              type="button"
+              className={`btn btn--sm${viewMode === "detalhado" ? " is-active" : ""}`}
+              onClick={() => setViewMode("detalhado")}
+            >
+              Detalhado
+            </button>
+            <button
+              type="button"
+              className={`btn btn--sm${viewMode === "simples" ? " is-active" : ""}`}
+              onClick={() => setViewMode("simples")}
+            >
+              Simples
+            </button>
+          </div>
+        ) : null}
+
         {tab === "esquema" && model === "distribuicao" ? (
           <SplitterScheme2D
             ratio={ratio}
@@ -385,10 +409,13 @@ export function SpliceBoxModal({
             feedColor={feedSpec.name}
             feedHex={feedSpec.hex}
             ctoName={spliceName}
+            compact={viewMode === "simples"}
           />
         ) : null}
 
-        {tab === "esquema" && model === "emenda" ? <SpliceEmendaScheme2D pairs={draftPairs} boxName={spliceName} /> : null}
+        {tab === "esquema" && model === "emenda" ? (
+          <SpliceEmendaScheme2D pairs={draftPairs} boxName={spliceName} compact={viewMode === "simples"} />
+        ) : null}
 
         {err ? <div className="msg msg--err">{err}</div> : null}
         </div>

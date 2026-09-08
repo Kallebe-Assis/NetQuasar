@@ -16,6 +16,7 @@ import {
   type SplitterPort,
 } from "../lib/fiberSplitter";
 import {
+  cableFuncaoLabel,
   FIBER_COLORS,
   fmtCoord,
   formatSplitterDisplay,
@@ -558,7 +559,7 @@ export function MapInfraSidePanel({
                 Editar dados
               </button>
             ) : null}
-            <Link className="btn" to={`${APP_ROUTES.connections}?tab=cto`}>
+            <Link className="btn" to={`${APP_ROUTES.connections}?tab=cto&edit=${parsed.id}`}>
               Abrir em Conexões
             </Link>
             {lat != null && lng != null ? (
@@ -682,6 +683,10 @@ export function MapInfraSidePanel({
               <dd>{cableQ.data?.status || "—"}</dd>
             </div>
             <div>
+              <dt>Função</dt>
+              <dd>{cableFuncaoLabel(cableQ.data?.funcao)}</dd>
+            </div>
+            <div>
               <dt>Projeto</dt>
               <dd>{cableQ.data?.project_label || "—"}</dd>
             </div>
@@ -696,7 +701,7 @@ export function MapInfraSidePanel({
             <button type="button" className="btn btn--primary" onClick={() => setCableFibersOpen(true)} disabled={!cableQ.data}>
               Fibras
             </button>
-            <Link className="btn" to={`${APP_ROUTES.connections}?tab=cables`}>
+            <Link className="btn" to={`${APP_ROUTES.connections}?tab=cables&edit=${parsed.id}`}>
               Abrir em Conexões
             </Link>
           </div>
@@ -754,7 +759,7 @@ export function MapInfraSidePanel({
             <button type="button" className="btn btn--primary" onClick={() => setSpliceOpen(true)} disabled={!spliceQ.data}>
               Interior
             </button>
-            <Link className="btn" to={`${APP_ROUTES.connections}?tab=splice`}>
+            <Link className="btn" to={`${APP_ROUTES.connections}?tab=splice&edit=${parsed.id}`}>
               Abrir em Conexões
             </Link>
           </div>
@@ -833,7 +838,10 @@ export function MapInfraSidePanel({
             </div>
           </dl>
           <div className="map-infra-panel__actions">
-            <Link className="btn" to={parsed.kind === "pop" ? APP_ROUTES.pops : APP_ROUTES.connections}>
+            <Link
+              className="btn"
+              to={parsed.kind === "pop" ? APP_ROUTES.pops : `${APP_ROUTES.connections}?tab=poles&edit=${parsed.id}`}
+            >
               {parsed.kind === "pop" ? "Abrir em POPs" : "Abrir em Conexões"}
             </Link>
           </div>

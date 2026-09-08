@@ -5,121 +5,168 @@ import {
   normalizeFiberDestination,
   SPLITTER_PORT_STATUSES,
   statusLabel,
-  type FiberDestination,
+  cableFiberDestinationLabel,
+  cableFiberStatusLabel,
   type SplicePair,
   type SplitterPort,
   type SplitterPortStatus,
 } from "../lib/fiberSplitter";
 import { formatSplitterDisplay } from "../lib/networkInfrastructure";
 
+type SelectOption = { value: string; label: string };
+
 export function FiberPortsGrid({
   ports,
   canEdit,
   onChange,
+  // Splitter/CTO (omitidos) usa Livre/Ocupada/Reserva técnica/Defeito + Disponível/Cliente/CTO;
+  // CableFibersModal passa CABLE_FIBER_STATUSES/CABLE_FIBER_DESTINATIONS (vocabulário de cabo).
+  statusOptions = SPLITTER_PORT_STATUSES,
+  destinationOptions = FIBER_DESTINATIONS,
+  normalizeDestinationValue = normalizeFiberDestination,
+  // Só em CableFibersModal: destino só é editável quando o Estado é diferente de "livre" — ver
+  // fiberSplitter.ts (normalizeCableFiberDestination) e o pedido do utilizador.
+  destinationRequiresNonFreeStatus = false,
 }: {
   ports: SplitterPort[];
   canEdit: boolean;
   onChange: (next: SplitterPort[]) => void;
+  statusOptions?: readonly SelectOption[];
+  destinationOptions?: readonly SelectOption[];
+  normalizeDestinationValue?: (raw?: string | null) => string;
+  destinationRequiresNonFreeStatus?: boolean;
 }) {
   return (
     <div className="splitter-modal__grid">
-      {ports.map((p, idx) => (
-        <article key={p.port} className={`splitter-port splitter-port--compact splitter-port--${p.status}`}>
-          <header className="splitter-port__head">
-            <span
-              className="splitter-port__swatch splitter-port__swatch--sm"
-              style={{
-                background: p.color_hex,
-                borderColor: lightFiberBorder(p.color) ? "rgba(0,0,0,.25)" : "transparent",
-              }}
-              title={p.hint}
-            />
-            <strong>
-              Fibra {p.port} · {p.color}
-            </strong>
-          </header>
-          <div className="splitter-port__row2">
-            <label className="splitter-modal__field">
-              <span>Estado</span>
-              <select
-                className="select"
-                disabled={!canEdit}
-                value={p.status}
-                onChange={(e) => {
-                  const status = e.target.value as SplitterPortStatus;
-                  onChange(ports.map((r, i) => (i === idx ? { ...r, status } : r)));
+      {ports.map((p, idx) => {
+        const isFree = destinationRequiresNonFreeStatus && p.status === "livre";
+        return (
+          <article key={p.port} className={`splitter-port splitter-port--compact splitter-port--${p.status}`}>
+            <header className="splitter-port__head">
+              <span
+                className="splitter-port__swatch splitter-port__swatch--sm"
+                style={{
+                  background: p.color_hex,
+                  borderColor: lightFiberBorder(p.color) ? "rgba(0,0,0,.25)" : "transparent",
                 }}
-              >
-                {SPLITTER_PORT_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                title={p.hint}
+              />
+              <strong>
+                Fibra {p.port} · {p.color}
+              </strong>
+            </header>
+            <div className="splitter-port__row2">
+              <label className="splitter-modal__field">
+                <span>Estado</span>
+                <select
+                  className="select"
+                  disabled={!canEdit}
+                  value={p.status}
+                  onChange={(e) => {
+                    const status = e.target.value;
+                    onChange(
+                      ports.map((r, i) =>
+                        i === idx
+                          ? { ...r, status, destination: destinationRequiresNonFreeStatus && status === "livre" ? "" : r.destination }
+                          : r,
+                      ),
+                    );
+                  }}
+                >
+                  {statusOptions.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="splitter-modal__field">
+                <span>Destino</span>
+                <select
+                  className="select"
+                  disabled={!canEdit || isFree}
+                  value={isFree ? "" : normalizeDestinationValue(p.destination)}
+                  title={isFree ? "Defina um Estado diferente de Livre para escolher o destino" : undefined}
+                  onChange={(e) => {
+                    const destination = e.target.value;
+                    onChange(ports.map((r, i) => (i === idx ? { ...r, destination } : r)));
+                  }}
+                >
+                  {isFree ? <option value="">—</option> : null}
+                  {destinationOptions.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label className="splitter-modal__field">
-              <span>Destino</span>
-              <select
-                className="select"
+              <span>Observação</span>
+              <input
+                className="input"
                 disabled={!canEdit}
-                value={normalizeFiberDestination(p.destination)}
+                value={p.note}
                 onChange={(e) => {
-                  const destination = e.target.value as FiberDestination;
-                  onChange(ports.map((r, i) => (i === idx ? { ...r, destination } : r)));
+                  const note = e.target.value;
+                  onChange(ports.map((r, i) => (i === idx ? { ...r, note } : r)));
                 }}
-              >
-                {FIBER_DESTINATIONS.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
-          </div>
-          <label className="splitter-modal__field">
-            <span>Observação</span>
-            <input
-              className="input"
-              disabled={!canEdit}
-              value={p.note}
-              onChange={(e) => {
-                const note = e.target.value;
-                onChange(ports.map((r, i) => (i === idx ? { ...r, note } : r)));
-              }}
-            />
-          </label>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }
 
+/** Card de metadados de uma fibra dentro do esquema 2D — 2 visões (ver o pedido do utilizador):
+ * "detalhado" (a original: título, badge, linhas Estado/Destino, observação) e "simples"
+ * (só a cor/estado como badge + destino, mais enxuto — cabe muito mais fibra por ecrã sem
+ * amontoar). O chamador já resolve statusText/destinationText com o vocabulário certo
+ * (splitter vs cabo) — este componente só formata, não decide rótulos. */
 function FiberMetaCard({
   title,
   color,
-  status,
-  destination,
+  statusValue,
+  statusText,
+  destinationText,
   note,
   feedOnly = false,
+  compact = false,
 }: {
   title: string;
   color: string;
-  status?: string;
-  destination?: string;
+  statusValue?: string;
+  statusText?: string;
+  destinationText?: string;
   note?: string;
   /** Fibra de alimentação: só título + cor (sem destino/obs). */
   feedOnly?: boolean;
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <div className={`splitter-scheme__meta splitter-scheme__meta--compact${feedOnly ? " splitter-scheme__meta--feed" : ""}`}>
+        {statusValue ? (
+          <span className={`splitter-scheme__badge splitter-scheme__badge--${statusValue}`}>{statusText}</span>
+        ) : (
+          <span className="splitter-scheme__v">{color}</span>
+        )}
+        {!feedOnly && destinationText ? <span className="splitter-scheme__v splitter-scheme__v--muted">{destinationText}</span> : null}
+      </div>
+    );
+  }
   return (
     <div className={`splitter-scheme__meta${feedOnly ? " splitter-scheme__meta--feed" : ""}`}>
       <div className="splitter-scheme__meta-top">
         <strong>{title}</strong>
-        {status ? <span className={`splitter-scheme__badge splitter-scheme__badge--${status}`}>{statusLabel(status as SplitterPortStatus)}</span> : null}
+        {statusValue ? <span className={`splitter-scheme__badge splitter-scheme__badge--${statusValue}`}>{statusText}</span> : null}
       </div>
-      {status ? (
+      {statusValue ? (
         <div className="splitter-scheme__meta-row">
           <span className="splitter-scheme__k">Estado</span>
-          <span className="splitter-scheme__v">{statusLabel(status as SplitterPortStatus)}</span>
+          <span className="splitter-scheme__v">{statusText}</span>
         </div>
       ) : (
         <div className="splitter-scheme__meta-row">
@@ -131,14 +178,27 @@ function FiberMetaCard({
         <>
           <div className="splitter-scheme__meta-row">
             <span className="splitter-scheme__k">Destino</span>
-            <span className="splitter-scheme__v">{destinationLabel(destination)}</span>
+            <span className="splitter-scheme__v">{destinationText || "—"}</span>
           </div>
-          {note?.trim() ? <div className="splitter-scheme__note">{note.trim()}</div> : null}
+          {note?.trim() ? (
+            <div className="splitter-scheme__meta-row">
+              <span className="splitter-scheme__k">Observação</span>
+              <span className="splitter-scheme__v">{note.trim()}</span>
+            </div>
+          ) : null}
         </>
       )}
     </div>
   );
 }
+
+// Altura fixa por linha em cada modo — NÃO encolhe conforme a quantidade de fibras (era isso que
+// causava fibras amontoando-se: com 24+ fibras a altura calculada ficava menor que o conteúdo do
+// card, sobrepondo uma linha na outra). Contagens grandes agora só geram um esquema mais alto,
+// que rola dentro do modal (.splitter-modal__body já tem overflow:auto) — é para isso que serve
+// o modo "Simples", bem mais compacto por linha.
+const DETAILED_ROW_H = 80;
+const COMPACT_ROW_H = 44;
 
 /** Esquema 2D do splitter: alimentação à esquerda + triângulo + saídas coloridas. */
 export function SplitterScheme2D({
@@ -147,15 +207,17 @@ export function SplitterScheme2D({
   feedColor,
   feedHex,
   ctoName,
+  compact = false,
 }: {
   ratio: string;
   ports: SplitterPort[];
   feedColor: string;
   feedHex: string;
   ctoName: string;
+  compact?: boolean;
 }) {
   const n = Math.max(ports.length, 1);
-  const rowH = ports.length <= 8 ? 48 : Math.min(48, Math.max(34, Math.floor(480 / n)));
+  const rowH = compact ? COMPACT_ROW_H : DETAILED_ROW_H;
   const h = n * rowH;
   const w = 148;
   const cx = 22;
@@ -174,7 +236,7 @@ export function SplitterScheme2D({
     <div className="splitter-scheme" aria-label={`Diagrama 2D do splitter ${ratio}`}>
       <div className="splitter-scheme__body splitter-scheme__body--with-feed" style={{ ["--scheme-row-h" as string]: `${rowH}px` }}>
         <div className="splitter-scheme__feed">
-          <FiberMetaCard title="Fibra de Alimentação" color={feedColor} feedOnly />
+          <FiberMetaCard title="Fibra de Alimentação" color={feedColor} feedOnly compact={compact} />
           <span
             className="splitter-scheme__wire splitter-scheme__wire--feed"
             style={{
@@ -247,9 +309,11 @@ export function SplitterScheme2D({
               <FiberMetaCard
                 title={`${p.port} · ${p.color}`}
                 color={p.color}
-                status={p.status}
-                destination={p.destination}
+                statusValue={p.status}
+                statusText={statusLabel(p.status as SplitterPortStatus)}
+                destinationText={destinationLabel(p.destination)}
                 note={p.note}
+                compact={compact}
               />
             </div>
           ))}
@@ -269,13 +333,15 @@ export function CableFibersScheme2D({
   ports,
   cableName,
   fiberCount,
+  compact = false,
 }: {
   ports: SplitterPort[];
   cableName: string;
   fiberCount: number;
+  compact?: boolean;
 }) {
   const n = Math.max(ports.length, 1);
-  const rowH = Math.min(48, Math.max(36, Math.floor(520 / n)));
+  const rowH = compact ? COMPACT_ROW_H : DETAILED_ROW_H;
   const h = n * rowH;
   const boxSize = Math.min(22, rowH - 10);
   const boxX = 28;
@@ -323,9 +389,11 @@ export function CableFibersScheme2D({
               <FiberMetaCard
                 title={`${p.port} · ${p.color}`}
                 color={p.color}
-                status={p.status}
-                destination={p.destination}
+                statusValue={p.status}
+                statusText={cableFiberStatusLabel(p.status)}
+                destinationText={cableFiberDestinationLabel(p.destination)}
                 note={p.note}
+                compact={compact}
               />
             </div>
           ))}
@@ -344,9 +412,11 @@ export function CableFibersScheme2D({
 export function SpliceEmendaScheme2D({
   pairs,
   boxName,
+  compact = false,
 }: {
   pairs: SplicePair[];
   boxName: string;
+  compact?: boolean;
 }) {
   return (
     <div className="splitter-scheme" aria-label="Diagrama 2D de emenda">
@@ -357,9 +427,11 @@ export function SpliceEmendaScheme2D({
               <FiberMetaCard
                 title={`${p.port} · ${p.left_color}`}
                 color={p.left_color}
-                status={p.status}
-                destination={p.destination}
+                statusValue={p.status}
+                statusText={statusLabel(p.status as SplitterPortStatus)}
+                destinationText={p.destination?.trim() || undefined}
                 note={p.note}
+                compact={compact}
               />
               <span
                 className="splitter-scheme__wire"
@@ -381,7 +453,7 @@ export function SpliceEmendaScheme2D({
                   borderColor: lightFiberBorder(p.right_color) ? "rgba(0,0,0,.28)" : "transparent",
                 }}
               />
-              <FiberMetaCard title={`${p.port} · ${p.right_color}`} color={p.right_color} feedOnly />
+              <FiberMetaCard title={`${p.port} · ${p.right_color}`} color={p.right_color} feedOnly compact={compact} />
             </div>
           </div>
         ))}

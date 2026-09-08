@@ -1,5 +1,5 @@
 import L from "leaflet";
-import { buildPinSvg, normalizeMapPinStyle, pinLayout, type MapPinRole } from "./mapPinStyles";
+import { buildImagePinHtml, buildPinSvg, normalizeMapPinStyle, pinLayout, type MapPinRole } from "./mapPinStyles";
 
 export type InfraMapKind = "cto" | "splice_box" | "cable" | "pole" | "project" | "pop";
 
@@ -41,6 +41,12 @@ export type MapIconStyles = {
   connection: string;
   cto: string;
   splice_box: string;
+  /** Ícone do foguete por modelo — tem prioridade sobre `splice_box` quando presente. */
+  splice_box_emenda?: string;
+  splice_box_distribuicao?: string;
+  /** URL de imagem importada por tipo (substitui o ícone do catálogo) — chaves espelham
+   * lib/uiAppearance.ts MapIconImageRole. */
+  imageUrls?: Partial<Record<"equipment" | "connection" | "cto" | "splice_emenda" | "splice_distribuicao", string>>;
 };
 
 export const DEFAULT_MAP_ICON_STYLES: MapIconStyles = {
@@ -48,6 +54,8 @@ export const DEFAULT_MAP_ICON_STYLES: MapIconStyles = {
   connection: "user",
   cto: "pin",
   splice_box: "rocket",
+  splice_box_emenda: "joint",
+  splice_box_distribuicao: "rocket",
 };
 
 const infraIconCache = new Map<string, L.DivIcon>();
@@ -61,6 +69,7 @@ export function infrastructurePinIcon(
   color?: string | null,
   label?: string | null,
   styleId?: string | null,
+  imageUrl?: string | null,
 ): L.DivIcon {
   const fill = color?.trim() || DEFAULT_INFRA_MAP_COLORS[kind];
   const labelKey = label?.trim() ? label.trim().slice(0, 48) : "";
@@ -68,7 +77,7 @@ export function infrastructurePinIcon(
     kind === "cto" || kind === "splice_box"
       ? normalizeMapPinStyle(kind as MapPinRole, styleId)
       : "default";
-  const key = `infra:v6:${kind}:${fill}:${style}:${labelKey}`;
+  const key = `infra:v7:${kind}:${fill}:${style}:${labelKey}:${imageUrl ?? ""}`;
   const cached = infraIconCache.get(key);
   if (cached) return cached;
 
@@ -77,7 +86,7 @@ export function infrastructurePinIcon(
 
   if (kind === "cto" || kind === "splice_box") {
     layout = pinLayout(kind, style);
-    pin = buildPinSvg(kind, style, fill, layout.size);
+    pin = imageUrl ? buildImagePinHtml(imageUrl, layout.size) : buildPinSvg(kind, style, fill, layout.size);
   } else {
     pin = legacyInfraSvg(kind, fill, 26);
   }

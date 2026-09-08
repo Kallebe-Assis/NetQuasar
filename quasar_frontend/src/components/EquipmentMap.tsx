@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { infrastructurePinIcon, isInfraMapKind, INFRA_MAP_KIND_LABELS, type InfraMapKind, type MapIconStyles, DEFAULT_MAP_ICON_STYLES } from "../lib/mapInfrastructureIcons";
-import { buildPinSvg, pinLayout } from "../lib/mapPinStyles";
+import { buildImagePinHtml, buildPinSvg, pinLayout } from "../lib/mapPinStyles";
 
 export type MapPointKind = "equipment" | "connection" | InfraMapKind;
 
@@ -29,6 +29,10 @@ export type MapPoint = {
   splitter?: string | null;
   /** Trajeto do cabo (vários pontos). */
   path?: MapLatLng[] | null;
+  /** Só para mapKind="cable" — backbone_link/transporte/backbone_ftth/cto/multipla/outro. */
+  funcao?: string | null;
+  /** Só para mapKind="splice_box" — "emenda" ou "distribuicao"; decide cor/ícone do foguete. */
+  boxModel?: string | null;
 };
 
 /** Agrupado (grelha por tipo), Desagrupado (marcadores individuais + empilhamento), Online/Offline (pins verde / vermelho / cinza). */
@@ -39,6 +43,14 @@ export type MapColors = {
   connection: string;
   cto?: string;
   splice_box?: string;
+  /** Cor do foguete por modelo (emenda ≠ distribuição) — tem prioridade sobre `splice_box`. */
+  splice_box_emenda?: string;
+  splice_box_distribuicao?: string;
+  /** Cor do cabo por função (chave = MapPoint.funcao). Chave ausente cai no "outro". */
+  cable_funcao?: Record<string, string>;
+  /** Ícone/imagem por categoria de equipamento (chave = MapPoint.category) — ver
+   * lib/uiAppearance.ts EquipmentCategoryConfig. Categoria ausente usa iconStyles.equipment. */
+  equipment_categories?: Record<string, { icon?: string; image_url?: string }>;
 };
 
 export const DEFAULT_MAP_COLORS: MapColors = {
@@ -46,7 +58,32 @@ export const DEFAULT_MAP_COLORS: MapColors = {
   connection: "#3b82f6",
   cto: "#0D0663",
   splice_box: "#d97706",
+  splice_box_emenda: "#d97706",
+  splice_box_distribuicao: "#7c3aed",
+  cable_funcao: {
+    backbone_link: "#0891b2",
+    transporte: "#16a34a",
+    backbone_ftth: "#2563eb",
+    cto: "#eab308",
+    multipla: "#dc2626",
+    outro: "#64748b",
+  },
 };
+
+/** Cor efectiva de um ponto de infra — prioriza a cor própria da instância (markerColor, hoje só
+ * usado por CTO/projeto), depois a variante por modelo/função, e só cai no valor genérico de
+ * DEFAULT_INFRA_MAP_COLORS (dentro de infrastructurePinIcon) se nada acima resolver. */
+function resolvedInfraColor(p: MapPoint, kind: InfraMapKind, colors: MapColors): string | null | undefined {
+  if (p.markerColor?.trim()) return p.markerColor.trim();
+  if (kind === "splice_box") {
+    return p.boxModel === "distribuicao" ? colors.splice_box_distribuicao : colors.splice_box_emenda;
+  }
+  if (kind === "cable") {
+    const key = (p.funcao ?? "outro").trim() || "outro";
+    return colors.cable_funcao?.[key] ?? colors.cable_funcao?.outro;
+  }
+  return p.markerColor;
+}
 
 const STACK_MERGE_M = 22;
 const SPIDER_RADIUS_M = 34;
@@ -86,7 +123,18 @@ function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
 
+// Fusão por proximidade custa até O(n³) no pior caso (cada fusão reinicia a varredura O(n²) —
+// ver "break outer" abaixo — e pontos densos encadeiam várias fusões). Com os tectos do backend
+// antigos (até 2500 conexões/8000 infra no total) isso já era tolerável; hoje um bbox denso pode
+// devolver dezenas de milhares de pontos (ver mapInfrastructureLimit/mapConnectionLimit no
+// backend) e a mesma fusão travaria a aba por vários segundos em modo Desagrupado. Acima deste
+// tecto, mostra cada ponto como seu próprio "stack" (sem agrupar por proximidade) em vez de
+// arriscar travar o browser — só afecta a sobreposição visual de pins muito próximos, não os
+// dados em si.
+const STACK_MERGE_SAFETY_LIMIT = 3000;
+
 function mergeProximityStacks(points: MapPoint[], maxM: number): MapPoint[][] {
+  if (points.length > STACK_MERGE_SAFETY_LIMIT) return points.map((p) => [p]);
   let clusters: MapPoint[][] = points.map((p) => [p]);
   let changed = true;
   while (changed) {
@@ -613,12 +661,12 @@ function dominantStatus(members: MapPoint[]): "online" | "offline" | "unknown" {
 
 const iconCache = new Map<string, L.DivIcon>();
 
-function equipmentPinIcon(color: string, styleId = "pin"): L.DivIcon {
-  const key = `eq:v2:${styleId}:${color}`;
+function equipmentPinIcon(color: string, styleId = "pin", imageUrl?: string | null): L.DivIcon {
+  const key = `eq:v3:${styleId}:${color}:${imageUrl ?? ""}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
   const layout = pinLayout("equipment", styleId);
-  const html = buildPinSvg("equipment", styleId, color, layout.size);
+  const html = imageUrl ? buildImagePinHtml(imageUrl, layout.size) : buildPinSvg("equipment", styleId, color, layout.size);
   const icon = L.divIcon({
     className: "map-equip-pin-wrap",
     html: `<div style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.28));line-height:0">${html}</div>`,
@@ -631,12 +679,12 @@ function equipmentPinIcon(color: string, styleId = "pin"): L.DivIcon {
 }
 
 /** Marcador de login/conexão. */
-function connectionPinIcon(color: string, styleId = "user"): L.DivIcon {
-  const key = `conn:v2:${styleId}:${color}`;
+function connectionPinIcon(color: string, styleId = "user", imageUrl?: string | null): L.DivIcon {
+  const key = `conn:v3:${styleId}:${color}:${imageUrl ?? ""}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
   const layout = pinLayout("connection", styleId);
-  const html = buildPinSvg("connection", styleId, color, layout.size);
+  const html = imageUrl ? buildImagePinHtml(imageUrl, layout.size) : buildPinSvg("connection", styleId, color, layout.size);
   const icon = L.divIcon({
     className: "map-conn-pin-wrap",
     html: `<div style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.28));line-height:0">${html}</div>`,
@@ -648,9 +696,16 @@ function connectionPinIcon(color: string, styleId = "user"): L.DivIcon {
   return icon;
 }
 
-function clusterBadgeIcon(count: number, color: string, kind: string, isConnection: boolean, iconStyles: MapIconStyles): L.DivIcon {
-  const styleId = isConnection ? iconStyles.connection : iconStyles.equipment;
-  const key = `badge:v2:${count}:${color}:${kind}:${isConnection}:${styleId}`;
+function clusterBadgeIcon(
+  count: number,
+  color: string,
+  kind: string,
+  isConnection: boolean,
+  iconStyles: MapIconStyles,
+  equipmentStyleIdOverride?: string,
+): L.DivIcon {
+  const styleId = isConnection ? iconStyles.connection : equipmentStyleIdOverride || iconStyles.equipment;
+  const key = `badge:v3:${count}:${color}:${kind}:${isConnection}:${styleId}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
   const badge = count > 1 ? `<span style="position:absolute;top:-6px;right:-8px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#0f172a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)">${count > 999 ? "999+" : count}</span>` : "";
@@ -746,10 +801,29 @@ function highlightSet(highlightedId?: string | string[] | null): Set<string> {
   return new Set([highlightedId]);
 }
 
-function infraStyleFor(kind: InfraMapKind, styles: MapIconStyles): string | null {
+function infraStyleFor(kind: InfraMapKind, styles: MapIconStyles, boxModel?: string | null): string | null {
   if (kind === "cto") return styles.cto;
-  if (kind === "splice_box") return styles.splice_box;
+  if (kind === "splice_box") {
+    return boxModel === "distribuicao" ? styles.splice_box_distribuicao ?? styles.splice_box : styles.splice_box_emenda ?? styles.splice_box;
+  }
   return null;
+}
+
+/** URL de imagem importada (Configurações do mapa → Ícones → Importar) para CTO/foguete —
+ * `undefined` = sem override, usa o ícone do catálogo (infraStyleFor). */
+function infraImageFor(kind: InfraMapKind, styles: MapIconStyles, boxModel?: string | null): string | undefined {
+  if (kind === "cto") return styles.imageUrls?.cto;
+  if (kind === "splice_box") {
+    return boxModel === "distribuicao" ? styles.imageUrls?.splice_distribuicao : styles.imageUrls?.splice_emenda;
+  }
+  return undefined;
+}
+
+/** Ícone/imagem de um equipamento — categoria (colors.equipment_categories) tem prioridade sobre
+ * o padrão geral (iconStyles.equipment / iconStyles.imageUrls.equipment). */
+function equipmentIconFor(p: MapPoint, colors: MapColors, iconStyles: MapIconStyles): { styleId: string; imageUrl?: string } {
+  const cat = colors.equipment_categories?.[p.category ?? ""];
+  return { styleId: cat?.icon || iconStyles.equipment, imageUrl: cat?.image_url || iconStyles.imageUrls?.equipment };
 }
 
 function markerIconOpts(
@@ -762,11 +836,18 @@ function markerIconOpts(
   const highlighted = highlightSet(highlightedId).has(p.id);
   let icon: L.DivIcon;
   if (isInfrastructurePoint(p) && p.mapKind && isInfraMapKind(p.mapKind)) {
-    icon = infrastructurePinIcon(p.mapKind, p.markerColor, p.mapKind === "cto" ? p.mapLabel : null, infraStyleFor(p.mapKind, iconStyles));
+    icon = infrastructurePinIcon(
+      p.mapKind,
+      resolvedInfraColor(p, p.mapKind, colors),
+      p.mapKind === "cto" ? p.mapLabel : null,
+      infraStyleFor(p.mapKind, iconStyles, p.boxModel),
+      infraImageFor(p.mapKind, iconStyles, p.boxModel),
+    );
   } else if (isConnectionPoint(p)) {
-    icon = connectionPinIcon(colors.connection, iconStyles.connection);
+    icon = connectionPinIcon(colors.connection, iconStyles.connection, iconStyles.imageUrls?.connection);
   } else if (displayMode !== "status") {
-    icon = equipmentPinIcon(colors.equipment, iconStyles.equipment);
+    const eq = equipmentIconFor(p, colors, iconStyles);
+    icon = equipmentPinIcon(colors.equipment, eq.styleId, eq.imageUrl);
   } else {
     icon = statusPinIcon(p.status);
   }
@@ -787,25 +868,43 @@ function markerIconOptsGroup(
     : null;
   if (members.length > 1 && clusterKind) {
     if (infraKind && isInfraMapKind(infraKind)) {
-      const color = members[0].markerColor;
-      return { icon: clusterBadgeInfraIcon(members.length, infraKind, color, infraStyleFor(infraKind, iconStyles)) };
+      const color = resolvedInfraColor(members[0], infraKind, colors);
+      return {
+        icon: clusterBadgeInfraIcon(members.length, infraKind, color, infraStyleFor(infraKind, iconStyles, members[0].boxModel)),
+      };
     }
     const color = isConn ? colors.connection : colors.equipment;
-    return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn, iconStyles) };
+    // Ícone por categoria só quando o grupo inteiro é da mesma categoria — garantido em modo
+    // "Agrupado" (gridClusters agrupa por categoria, ver pointClusterKind), mas um "stack" por
+    // proximidade (modo Desagrupado) pode juntar categorias diferentes; nesse caso cai no ícone
+    // geral de equipamentos em vez de mostrar o ícone de só um dos tipos misturados.
+    const uniformCategory =
+      !isConn && members.every((m) => !isConnectionPoint(m) && !isInfrastructurePoint(m) && m.category === members[0].category)
+        ? members[0].category
+        : undefined;
+    const equipmentStyleId = uniformCategory ? colors.equipment_categories?.[uniformCategory]?.icon : undefined;
+    return { icon: clusterBadgeIcon(members.length, color, clusterKind, isConn, iconStyles, equipmentStyleId) };
   }
   const single = members[0];
   const highlighted = members.length === 1 && highlightSet(highlightedId).has(single.id);
   if (infraKind && isInfraMapKind(infraKind)) {
     const label = infraKind === "cto" && members.length === 1 ? members[0].mapLabel : null;
-    const icon = infrastructurePinIcon(infraKind, members[0].markerColor, label, infraStyleFor(infraKind, iconStyles));
+    const icon = infrastructurePinIcon(
+      infraKind,
+      resolvedInfraColor(members[0], infraKind, colors),
+      label,
+      infraStyleFor(infraKind, iconStyles, members[0].boxModel),
+      infraImageFor(infraKind, iconStyles, members[0].boxModel),
+    );
     return { icon: withMapPinHighlight(icon, highlighted, highlightAccent(single, colors)) };
   }
   if (isConn) {
-    const icon = connectionPinIcon(colors.connection, iconStyles.connection);
+    const icon = connectionPinIcon(colors.connection, iconStyles.connection, iconStyles.imageUrls?.connection);
     return { icon: withMapPinHighlight(icon, highlighted, colors.connection) };
   }
   if (displayMode !== "status") {
-    const icon = equipmentPinIcon(colors.equipment, iconStyles.equipment);
+    const eq = equipmentIconFor(single, colors, iconStyles);
+    const icon = equipmentPinIcon(colors.equipment, eq.styleId, eq.imageUrl);
     return { icon: withMapPinHighlight(icon, highlighted, colors.equipment) };
   }
   const icon = statusPinIcon(dominantStatus(members));
@@ -1251,6 +1350,7 @@ function CablePathsLayer({
   editingCableId,
   highlightedId,
   displayMode,
+  colors,
   onSelectDevice,
   onOpenCableFibers,
   onCopyCoords,
@@ -1259,6 +1359,7 @@ function CablePathsLayer({
   editingCableId?: string | null;
   highlightedId?: string | string[] | null;
   displayMode: MapDisplayMode;
+  colors: MapColors;
   onSelectDevice?: (id: string) => void;
   onOpenCableFibers?: (id: string) => void;
   onCopyCoords?: (lat: number, lng: number) => void;
@@ -1273,12 +1374,15 @@ function CablePathsLayer({
       {cables.map((c) => {
         if (editingCableId && c.id === editingCableId) return null;
         const active = selected.has(c.id);
+        // Cor por função do cabo (Configurações do mapa → Cores) — ativo/seleccionado sempre
+        // realça em azul forte por cima, independente da função, para continuar bem visível.
+        const funcaoColor = resolvedInfraColor(c, "cable", colors) ?? "#0f766e";
         return (
           <Polyline
             key={`cable-path-${c.id}`}
             positions={c.path!.map((pt) => [pt.lat, pt.lng] as [number, number])}
             pathOptions={{
-              color: active ? "#0369a1" : "#0f766e",
+              color: active ? "#0369a1" : funcaoColor,
               weight: active ? 6 : 4,
               opacity: 0.9,
             }}
@@ -1661,6 +1765,7 @@ export function EquipmentMap({
           editingCableId={editingCableMapId}
           highlightedId={highlightedId}
           displayMode={displayMode}
+          colors={colors}
           onSelectDevice={selectHandler}
           onOpenCableFibers={cableFibersHandler}
           onCopyCoords={copyCoordsHandler}

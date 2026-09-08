@@ -301,15 +301,65 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if kindSet["splice_boxes"] {
-		if err := appendRows("network_splice_boxes", "splice_box", "Emenda", ""); err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-			return
+		capN := take("splice_box")
+		if capN > 0 {
+			q := `SELECT id, description, display_number, latitude, longitude, box_model
+				FROM network_splice_boxes
+				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
+			args := []any{}
+			n := 1
+			q += infraMapBBoxSQL(hasBBox, &n, &args, minLat, maxLat, minLng, maxLng)
+			q += infraMapProjectSQL(projectID, &n, &args)
+			q += infraMapLocalitySQL("network_splice_boxes", localityID, &n, &args)
+			q += infraMapHideInactiveSQL("network_splice_boxes")
+			q += orderNearCenter(&n, &args, true)
+			q += fmt.Sprintf(` LIMIT $%d`, n)
+			args = append(args, capN)
+			rows, err := s.DB().Query(ctx, q, args...)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+				return
+			}
+			fetched := 0
+			for rows.Next() {
+				var id uuid.UUID
+				var desc string
+				var displayNum int
+				var lat, lon float64
+				var boxModel string
+				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &boxModel); err != nil {
+					rows.Close()
+					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+					return
+				}
+				pt := map[string]any{
+					"id":             id.String(),
+					"description":    desc,
+					"display_number": displayNum,
+					"lat":            lat,
+					"lng":            lon,
+					"point_type":     "splice_box",
+					"id_prefix":      "Emenda",
+					"box_model":      boxModel,
+				}
+				pts = append(pts, pt)
+				fetched++
+				remaining--
+				if remaining <= 0 {
+					hitCap = true
+					break
+				}
+			}
+			rows.Close()
+			if fetched >= capN {
+				hitCap = true
+			}
 		}
 	}
 	if kindSet["cables"] {
 		capN := take("cable")
 		if capN > 0 {
-			q := `SELECT id, description, display_number, latitude, longitude, path
+			q := `SELECT id, description, display_number, latitude, longitude, path, funcao
 				FROM network_cables
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
 			args := []any{}
@@ -333,7 +383,8 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				var displayNum int
 				var lat, lon float64
 				var pathRaw []byte
-				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &pathRaw); err != nil {
+				var funcao string
+				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &pathRaw, &funcao); err != nil {
 					rows.Close()
 					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 					return
@@ -346,6 +397,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					"lng":            lon,
 					"point_type":     "cable",
 					"id_prefix":      "Cabo",
+					"funcao":         funcao,
 				}
 				if len(pathRaw) > 0 && string(pathRaw) != "null" {
 					var path any
@@ -484,98 +536,35 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// mapInfrastructureLimit limita pins de infra no mapa. Com filtro de projecto/localidade o tecto sobe.
-// Sem filtro (todos os projectos) o tecto também é generoso — CTOs espalhadas por várias localidades.
+// mapInfrastructureLimit limita pins de infra no mapa. Antes encolhia por zoom (ex.: só 2500 no
+// total a partir do zoom 10, com "cable" a ficar com no máximo 80 desses — ver mapInfraKindCap
+// abaixo) — o bbox já restringe a consulta geograficamente ao que está mesmo visível na tela, e
+// afastar o zoom naturalmente aumenta a área (e por isso a contagem de elementos) coberta por
+// esse mesmo bbox. Escolher qual sub-conjunto mostrar dentro do bbox visível equivalia a esconder
+// elementos claramente em frente do utilizador (ver pedido: "todo elemento que estiver na minha
+// frente no mapa é pra ser exibido"). O tecto aqui passa a ser só uma válvula de segurança contra
+// uma vista absurdamente grande (país inteiro sem filtro), não um recorte do que aparece dentro
+// do viewport normal.
 func mapInfrastructureLimit(zoom float64, hasBBox bool, scoped bool) int {
-	if scoped {
-		if !hasBBox {
-			return 10000
-		}
-		switch {
-		case zoom < 11:
-			return 4000
-		case zoom < 13:
-			return 7000
-		case zoom < 15:
-			return 10000
-		default:
-			return 15000
-		}
-	}
 	if !hasBBox {
+		if scoped {
+			return 10000
+		}
 		return 4000
 	}
-	switch {
-	case zoom < 10:
-		return 2500
-	case zoom < 12:
-		return 5000
-	case zoom < 14:
-		return 8000
-	case zoom < 16:
-		return 12000
-	default:
-		return 15000
+	if scoped {
+		return 60000
 	}
+	return 40000
 }
 
-// mapInfraKindCap evita que um único tipo ocupe todo o orçamento (relaxado com filtro scoped).
+// mapInfraKindCap distribuía o orçamento total entre tipos de forma desigual (CTOs quase sempre
+// ficavam com o tecto inteiro, cabos/foguetes/postes ficavam com sobras minúsculas — daí sumirem
+// primeiro ao afastar o zoom). Agora cada tipo pode usar todo o orçamento total que sobrar
+// (mapInfrastructureLimit já é a única válvula de segurança necessária).
 func mapInfraKindCap(kind string, zoom float64, remaining int, scoped bool) int {
 	if remaining <= 0 {
 		return 0
 	}
-	if scoped {
-		return remaining
-	}
-	capN := remaining
-	switch kind {
-	case "cto":
-		// Prioridade às CTOs: tecto alto para cobrir várias localidades no viewport.
-		switch {
-		case zoom < 11:
-			if capN > 2000 {
-				capN = 2000
-			}
-		case zoom < 13:
-			if capN > 4500 {
-				capN = 4500
-			}
-		case zoom < 15:
-			if capN > 9000 {
-				capN = 9000
-			}
-		default:
-			if capN > 12000 {
-				capN = 12000
-			}
-		}
-	case "cable":
-		switch {
-		case zoom < 12:
-			if capN > 80 {
-				capN = 80
-			}
-		case zoom < 14:
-			if capN > 200 {
-				capN = 200
-			}
-		default:
-			if capN > 400 {
-				capN = 400
-			}
-		}
-	case "splice_box", "pole":
-		if zoom < 12 && capN > 80 {
-			capN = 80
-		} else if zoom < 15 && capN > 400 {
-			capN = 400
-		} else if capN > 1000 {
-			capN = 1000
-		}
-	case "project", "pop":
-		if capN > 120 {
-			capN = 120
-		}
-	}
-	return capN
+	return remaining
 }

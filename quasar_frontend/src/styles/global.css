@@ -700,7 +700,89 @@ h2 {
 }
 
 .map-settings-modal {
-  max-width: min(96vw, 640px);
+  /* 1.5x da largura anterior (1440px) */
+  max-width: min(98vw, 2160px);
+  width: 100%;
+  max-height: min(92vh, 920px);
+}
+.map-settings-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  align-items: start;
+}
+.map-settings-section--wide {
+  grid-column: 1 / -1;
+}
+/* Dentro do layout em colunas, o "border-top" pensado para empilhamento vertical (regra genérica
+   de .map-settings-section acima) ficaria torto — só a secção larga do fundo (categorias) volta
+   a ter a separação, as duas colunas lado a lado ficam sem risco entre elas. */
+.map-settings-columns > .map-settings-section {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+.map-settings-columns > .map-settings-section--wide {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 900px) {
+  .map-settings-columns {
+    grid-template-columns: 1fr;
+  }
+}
+.map-settings-image-url {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.map-settings-image-url input {
+  font-size: 12px;
+}
+.map-settings-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.map-settings-categories__head,
+.map-settings-categories__row {
+  display: grid;
+  grid-template-columns: 150px 90px 180px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.map-settings-categories__head {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.map-settings-categories__row {
+  padding: 4px 0;
+}
+.map-settings-categories__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .map-settings-categories__head,
+  .map-settings-categories__row {
+    grid-template-columns: 1fr;
+  }
+  .map-settings-categories__head {
+    display: none;
+  }
+  .map-settings-categories__row {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
 }
 .map-settings-section {
   margin-top: 4px;
@@ -723,7 +805,7 @@ h2 {
 }
 .map-settings-colors {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px 14px;
 }
 .map-settings-color-row {
@@ -754,7 +836,7 @@ h2 {
 }
 .map-settings-icon-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 6px;
 }
 .map-settings-icon-opt {
@@ -921,9 +1003,9 @@ h2 {
 .splitter-modal__toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 18px;
+  gap: 10px 18px;
   align-items: flex-end;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 8%, var(--panel2, var(--panel)));
   border: 1px solid var(--border);
@@ -955,6 +1037,31 @@ h2 {
   gap: 4px;
   font-size: 11px;
   color: var(--muted);
+}
+/* Linha "abas + campo" (ex.: Modelo da caixa ao lado das abas Fibra/Esquema) — junta 2 secções
+   que antes ficavam empilhadas em linhas separadas, cada uma gastando altura própria. */
+.splitter-modal__tabsrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.splitter-modal__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.splitter-modal__field--inline select {
+  width: auto;
+}
+/* Alterna entre a visão "Detalhado" e "Simples" do esquema 2D — reaproveita o par btn--sm/is-active
+   já usado noutras telas (ex.: abas do modal de Configurações da Topologia). */
+.splitter-scheme__viewmode {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .splitter-modal__sub .info-hint {
   margin-left: 6px;
@@ -1130,6 +1237,35 @@ h2 {
   background: #fee2e2;
   color: #b91c1c;
 }
+/* Estados exclusivos de fibra de CABO (utilizando/transporte/link/outros) — "livre" reaproveita
+   a cor verde acima, é o mesmo valor nos dois vocabulários (ver fiberSplitter.ts). */
+.splitter-scheme__badge--utilizando {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.splitter-scheme__badge--transporte {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.splitter-scheme__badge--link {
+  background: #cffafe;
+  color: #0e7490;
+}
+.splitter-scheme__badge--outros {
+  background: #e2e8f0;
+  color: #334155;
+}
+.splitter-scheme__meta--compact {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 8px;
+}
+.splitter-scheme__v--muted {
+  color: #64748b;
+  font-size: 10px;
+}
 .splitter-scheme__meta-row {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr);
@@ -1145,18 +1281,6 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.splitter-scheme__note {
-  margin-top: 2px;
-  text-align: center;
-  font-size: 10px;
-  line-height: 1.2;
-  color: #64748b;
-  font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 .splitter-scheme__caption {
   align-self: center;
@@ -1233,6 +1357,19 @@ h2 {
 }
 .splitter-port--defeito {
   border-top-color: #dc2626;
+}
+/* Estados exclusivos de fibra de CABO — ver comentário equivalente em .splitter-scheme__badge--*. */
+.splitter-port--utilizando {
+  border-top-color: #2563eb;
+}
+.splitter-port--transporte {
+  border-top-color: #7c3aed;
+}
+.splitter-port--link {
+  border-top-color: #0891b2;
+}
+.splitter-port--outros {
+  border-top-color: #64748b;
 }
 @media (max-width: 720px) {
   .splitter-scheme__body,

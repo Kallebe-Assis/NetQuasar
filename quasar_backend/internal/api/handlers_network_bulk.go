@@ -272,9 +272,9 @@ func (s *Server) bulkNetworkCables(w http.ResponseWriter, r *http.Request) {
 			_, err = s.DB().Exec(ctx, `
 				UPDATE network_cables SET
 					description=$2, cable_type=$3, fiber_count=$4, status=$5,
-					project_id=$6, latitude=$7, longitude=$8, updated_at=now()
+					project_id=$6, latitude=$7, longitude=$8, funcao=$9, updated_at=now()
 				WHERE id=$1`,
-				*existingID, desc, trimPtr(item.CableType), item.FiberCount, item.Status, projID, item.Latitude, item.Longitude,
+				*existingID, desc, trimPtr(item.CableType), item.FiberCount, item.Status, projID, item.Latitude, item.Longitude, item.Funcao,
 			)
 			if err != nil {
 				failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
@@ -284,9 +284,9 @@ func (s *Server) bulkNetworkCables(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_, err = s.DB().Exec(ctx, `
-			INSERT INTO network_cables (description, cable_type, fiber_count, status, project_id, latitude, longitude)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			desc, trimPtr(item.CableType), item.FiberCount, item.Status, projID, item.Latitude, item.Longitude,
+			INSERT INTO network_cables (description, cable_type, fiber_count, status, project_id, latitude, longitude, funcao)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			desc, trimPtr(item.CableType), item.FiberCount, item.Status, projID, item.Latitude, item.Longitude, item.Funcao,
 		)
 		if err != nil {
 			failed = append(failed, networkImportFail{Index: i, Line: line, Description: desc, Error: err.Error()})
