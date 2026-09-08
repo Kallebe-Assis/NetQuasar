@@ -28,6 +28,7 @@ import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { can, isAdminUser } from "../lib/auth";
+import { useUnsavedChangesGuard } from "../lib/unsavedChangesGuard";
 import {
   DEFAULT_CONNECTION_TYPE,
   DEFAULT_EDGE_ICON_SIZE,
@@ -651,6 +652,9 @@ function TopologyCanvas() {
     [reactFlow, markDirty],
   );
 
+  // Relança o erro depois de mostrar o toast — o guarda global de "sair sem salvar"
+  // (ShellLayout, useUnsavedChangesGuard abaixo) precisa de saber se a gravação falhou para NÃO
+  // navegar; o botão "Salvar" normal engole essa rejeição (o toast já chegou ao utilizador).
   const saveMut = useCallback(async () => {
     if (!activeProjectId) return;
     const doc = flowToDoc(nodes, edges);
@@ -662,8 +666,11 @@ function TopologyCanvas() {
       void qc.invalidateQueries({ queryKey: ["topology-projects"] });
     } catch (e) {
       toastErr(pushToast, e, "Falha ao salvar a topologia.");
+      throw e;
     }
   }, [activeProjectId, nodes, edges, colorOverrides, pushToast, qc]);
+
+  useUnsavedChangesGuard(dirty, saveMut);
 
   function clearAll() {
     setNodes([]);
@@ -757,7 +764,7 @@ function TopologyCanvas() {
           </select>
         ) : null}
         {canMutate && (
-          <button type="button" className="btn btn--primary" disabled={!dirty} onClick={() => void saveMut()}>
+          <button type="button" className="btn btn--primary" disabled={!dirty} onClick={() => void saveMut().catch(() => {})}>
             <Save size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
             {dirty ? "Salvar" : "Salvo"}
           </button>

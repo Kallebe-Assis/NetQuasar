@@ -882,6 +882,11 @@ export function MapInfraSidePanel({
             >
               {parsed.kind === "pop" ? "Abrir em POPs" : "Abrir em Conexões"}
             </Link>
+            {parsed.kind === "pop" ? (
+              <Link className="btn" to={APP_ROUTES.popRack(parsed.id)}>
+                Topologia 2D
+              </Link>
+            ) : null}
           </div>
         </div>
       ) : null}

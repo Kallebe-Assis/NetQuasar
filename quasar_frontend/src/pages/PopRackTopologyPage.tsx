@@ -9,6 +9,7 @@ import {
   ConnectionMode,
   Controls,
   MiniMap,
+  reconnectEdge,
   ReactFlow,
   ReactFlowProvider,
   type Connection,
@@ -17,6 +18,7 @@ import {
   type Node,
   type NodeChange,
   type OnConnect,
+  type OnReconnect,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./topology/topology.css";
@@ -29,6 +31,7 @@ import { can, isAdminUser } from "../lib/auth";
 import { APP_ROUTES } from "../app/routes";
 import { STANDARD_FIBER_SEQUENCE } from "../lib/fiberSplitter";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { useUnsavedChangesGuard } from "../lib/unsavedChangesGuard";
 import { FiberEdge } from "./poprack/FiberEdge";
 import { PortsEditModal } from "./poprack/PortsEditModal";
 import { RackNode } from "./poprack/RackNode";
@@ -256,6 +259,16 @@ function PopRackCanvas({ popId }: { popId: string }) {
     [markDirty],
   );
 
+  // Arrastar a ponta de uma fibra já ligada para outra porta — sem isto, a única forma de mudar
+  // onde uma ligação chega era apagar e refazer (mesmo padrão de TopologyPage.tsx).
+  const onReconnect: OnReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+      markDirty();
+    },
+    [markDirty],
+  );
+
   function openAddModal(kind: RackNodeKind) {
     addCounterRef.current += 1;
     setAddLabel(`${RACK_KIND_LABELS[kind]} ${addCounterRef.current}`);
@@ -294,7 +307,10 @@ function PopRackCanvas({ popId }: { popId: string }) {
     setAddModal(null);
   }
 
-  async function save() {
+  // Relança o erro depois de mostrar o toast — o guarda de "sair sem salvar" (ShellLayout,
+  // useUnsavedChangesGuard abaixo) precisa de saber se a gravação falhou para NÃO navegar; o
+  // botão "Salvar" normal (mais abaixo) engole essa rejeição, o toast já chegou ao utilizador.
+  const save = useCallback(async () => {
     const doc = flowToDoc(nodes, edges);
     try {
       await apiFetch(`/api/v1/pops/${popId}/rack-diagram`, { method: "PUT", json: doc });
@@ -303,8 +319,11 @@ function PopRackCanvas({ popId }: { popId: string }) {
       void qc.invalidateQueries({ queryKey: ["pop-rack-diagram", popId] });
     } catch (e) {
       toastErr(pushToast, e, "Falha ao salvar o diagrama.");
+      throw e;
     }
-  }
+  }, [nodes, edges, popId, pushToast, qc]);
+
+  useUnsavedChangesGuard(dirty, save);
 
   if (canvasQ.isPending) return <p style={{ padding: 16 }}>Carregando diagrama…</p>;
   if (canvasQ.isError) return <div className="msg msg--err" style={{ margin: 16 }}>Falha ao carregar o diagrama do POP.</div>;
@@ -318,29 +337,33 @@ function PopRackCanvas({ popId }: { popId: string }) {
         <h1 style={{ fontSize: 16, margin: 0 }}>
           Topologia 2D — {popQ.data?.description ?? "POP"}
         </h1>
-        {canMutate && (
-          <>
-            <button type="button" className="btn btn--sm" onClick={() => openAddModal("olt")}>
-              <Plus size={13} style={{ verticalAlign: -2 }} /> OLT
-            </button>
-            <button type="button" className="btn btn--sm" onClick={() => openAddModal("mikrotik")}>
-              <Plus size={13} style={{ verticalAlign: -2 }} /> Mikrotik
-            </button>
-            <button type="button" className="btn btn--sm" onClick={() => openAddModal("switch")}>
-              <Plus size={13} style={{ verticalAlign: -2 }} /> Switch
-            </button>
-            <button type="button" className="btn btn--sm" onClick={() => openAddModal("dio")}>
-              <Plus size={13} style={{ verticalAlign: -2 }} /> DIO
-            </button>
-            <button type="button" className="btn btn--sm" onClick={() => openAddModal("manual")}>
-              <Plus size={13} style={{ verticalAlign: -2 }} /> Caixa
-            </button>
-          </>
-        )}
+        {/* Grupo "Adicionar" + "Salvar" fica todo à direita (topo-toolbar__legend tem
+            margin-left:auto) — antes os botões de adicionar ficavam logo depois do título, bem
+            no meio/topo da tela, exactamente onde o balão flutuante de actividade do
+            monitoramento (.runtime-indicator, position:fixed centrado) também aparece. */}
         <div className="topo-toolbar__legend">
+          {canMutate && (
+            <>
+              <button type="button" className="btn btn--sm" onClick={() => openAddModal("olt")}>
+                <Plus size={13} style={{ verticalAlign: -2 }} /> OLT
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => openAddModal("mikrotik")}>
+                <Plus size={13} style={{ verticalAlign: -2 }} /> Mikrotik
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => openAddModal("switch")}>
+                <Plus size={13} style={{ verticalAlign: -2 }} /> Switch
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => openAddModal("dio")}>
+                <Plus size={13} style={{ verticalAlign: -2 }} /> DIO
+              </button>
+              <button type="button" className="btn btn--sm" onClick={() => openAddModal("manual")}>
+                <Plus size={13} style={{ verticalAlign: -2 }} /> Caixa
+              </button>
+            </>
+          )}
           {dirty ? <span style={{ color: "var(--warn, #d29922)" }}>Alterações não salvas</span> : null}
           {canMutate && (
-            <button type="button" className="btn btn--primary btn--sm" onClick={save} disabled={!dirty}>
+            <button type="button" className="btn btn--primary btn--sm" onClick={() => void save().catch(() => {})} disabled={!dirty}>
               <Save size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Salvar
             </button>
           )}
@@ -357,6 +380,8 @@ function PopRackCanvas({ popId }: { popId: string }) {
             onNodesChange={canMutate ? onNodesChange : undefined}
             onEdgesChange={canMutate ? onEdgesChange : undefined}
             onConnect={canMutate ? onConnect : undefined}
+            onReconnect={canMutate ? onReconnect : undefined}
+            edgesReconnectable={canMutate}
             nodesDraggable={canMutate}
             nodesConnectable={canMutate}
             elementsSelectable

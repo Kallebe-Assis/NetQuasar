@@ -1,5 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
-import { CircleDot, CircleDotDashed, type LucideIcon } from "lucide-react";
+import { CircleDot, CircleDotDashed, EthernetPort, type LucideIcon } from "lucide-react";
 
 /** Tipo de caixa/rack no diagrama 2D do POP — cada um vira um rectângulo com uma porta por
  * interface (ver RackNode.tsx). "manual" é qualquer coisa sem cadastro (ex.: DIO, patch panel). */
@@ -23,13 +23,16 @@ export const RACK_PORT_TYPE_LABELS: Record<RackPortType, string> = {
   ether_1000: "Ethernet /1000",
 };
 
-/** Ícones exactos pedidos pelo utilizador — SFP+ e Ethernet (/100 e /1000) partilham o mesmo
- * ícone (CircleDot), só SFP puro usa o tracejado (CircleDotDashed). */
+// O pedido original dava o mesmo SVG (circle-dot) para SFP+ e para as duas Ethernet — na
+// prática isso deixava os 3 tipos indistinguíveis no diagrama ("ícone de ether não mudou" era
+// visualmente verdade, os 3 desenhavam o mesmo círculo). Ethernet passa a usar EthernetPort
+// (ícone dedicado do lucide-react) — continua a mesma ideia (só SFP puro é tracejado), mas agora
+// dá pra diferenciar SFP+ de Ethernet à primeira vista.
 export const RACK_PORT_TYPE_ICONS: Record<RackPortType, LucideIcon> = {
   sfp: CircleDotDashed,
   sfp_plus: CircleDot,
-  ether_100: CircleDot,
-  ether_1000: CircleDot,
+  ether_100: EthernetPort,
+  ether_1000: EthernetPort,
 };
 
 export type RackPort = { index: number; label: string; description?: string; portType?: RackPortType | null };

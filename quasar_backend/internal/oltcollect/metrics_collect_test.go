@@ -33,6 +33,17 @@ func TestParseOpticalDbm(t *testing.T) {
 	if f, ok := parseOpticalDbm("34.80", 0); !ok || isPlausibleOnuRxDbm(f) {
 		t.Fatalf("temp 34.80 must not be plausible RX, got %v ok=%v", f, ok)
 	}
+	// Bug real reportado: PON TX de uma VSOL chega já em dBm decimal ("6.803", confirmado por
+	// snmpwalk manual do utilizador), mas o perfil tinha value_divisor=100 configurado (para
+	// outro formato) — aplicado por cima do valor já em dBm, TODAS as PONs arredondavam para
+	// exibir "0.1" (6.803/100=0.068). Uma string decimal nunca deve levar divisor por cima,
+	// mesmo com um divisor configurado > 1 (ver opticalDbmScaleForValue).
+	if f, ok := parseOpticalDbm("6.803", 100); !ok || f != 6.803 {
+		t.Fatalf("decimal string com divisor configurado não deve reescalar, got %v ok=%v", f, ok)
+	}
+	if f, ok := parseOpticalDbm(`STRING: "-15.60"`, 1000); !ok || f != -15.6 {
+		t.Fatalf("decimal string vsol com divisor configurado não deve reescalar, got %v ok=%v", f, ok)
+	}
 }
 
 func TestParseOnuRxDbm_vsol(t *testing.T) {

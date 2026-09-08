@@ -1,6 +1,6 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bolt,
@@ -39,9 +39,11 @@ import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
 import { AlertNotificationWatcher } from "../components/AlertNotificationWatcher";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { AppToastProvider } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
 import { ROUTE_VIEW_PERMISSION } from "../lib/permissions";
+import { getUnsavedGuard } from "../lib/unsavedChangesGuard";
 import { APP_ROUTES } from "./routes";
 
 const SIDEBAR_COLLAPSED_KEY = "netquasar.sidebar.collapsed";
@@ -179,8 +181,35 @@ function NavIcons({ icons, mobile }: { icons: LucideIcon[]; mobile: boolean }) {
 
 export function ShellLayout() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const location = useLocation();
   const isMobileNav = useIsMobileNav();
+  // "Alterações não salvas" — Topologia (geral e 2D do POP) regista-se em setUnsavedGuard
+  // (lib/unsavedChangesGuard.ts) enquanto tiver edições por salvar. Aqui, um único
+  // onClickCapture no wrapper de todo o layout intercepta qualquer clique em link (menu lateral
+  // ou dentro da própria página, ex.: o botão "Voltar") — cobre tudo com um só sítio, em vez de
+  // ter de alterar cada NavLink/Link individualmente.
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [unsavedBusy, setUnsavedBusy] = useState(false);
+  const handleNavClickCapture = useCallback((e: ReactMouseEvent) => {
+    const guard = getUnsavedGuard();
+    if (!guard?.dirty) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const anchor = (e.target as HTMLElement).closest("a[href]") as HTMLAnchorElement | null;
+    if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+    let url: URL;
+    try {
+      url = new URL(anchor.href, window.location.href);
+    } catch {
+      return;
+    }
+    if (url.origin !== window.location.origin) return;
+    const dest = url.pathname + url.search + url.hash;
+    if (dest === location.pathname + location.search + location.hash) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPendingHref(dest);
+  }, [location.pathname, location.search, location.hash]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -287,7 +316,7 @@ export function ShellLayout() {
 
   return (
     <AppToastProvider>
-      <div className={layoutClass}>
+      <div className={layoutClass} onClickCapture={handleNavClickCapture}>
         <header className="mobile-topbar" aria-label="Barra de navegação móvel">
           <button
             type="button"
@@ -430,6 +459,38 @@ export function ShellLayout() {
           <Outlet />
         </main>
       </div>
+      <ConfirmModal
+        open={pendingHref != null}
+        title="Alterações não salvas"
+        message="Esta tela tem alterações que ainda não foram salvas. O que deseja fazer?"
+        cancelLabel="Cancelar"
+        secondaryLabel="Salvar e sair"
+        confirmLabel="Sair sem salvar"
+        danger
+        busy={unsavedBusy}
+        onCancel={() => setPendingHref(null)}
+        onConfirm={() => {
+          const href = pendingHref;
+          setPendingHref(null);
+          if (href) navigate(href);
+        }}
+        onSecondary={async () => {
+          const guard = getUnsavedGuard();
+          const href = pendingHref;
+          if (!guard || !href) return;
+          setUnsavedBusy(true);
+          try {
+            await guard.save();
+            setPendingHref(null);
+            navigate(href);
+          } catch {
+            // erro já reportado por toast na própria página (save() das telas de Topologia já
+            // mostra toastErr) — só não navega, o utilizador decide de novo no mesmo modal.
+          } finally {
+            setUnsavedBusy(false);
+          }
+        }}
+      />
     </AppToastProvider>
   );
 }

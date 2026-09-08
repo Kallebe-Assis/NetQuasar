@@ -20,6 +20,7 @@ import { displayAlertType } from "../lib/alertLabels";
 import { DashboardGeralView } from "./dashboard/DashboardGeralView";
 import { DashboardEquipamentosView } from "./dashboard/DashboardEquipamentosView";
 import { DashboardFibraView } from "./dashboard/DashboardFibraView";
+import { DashboardPppoeView } from "./dashboard/DashboardPppoeView";
 import { DashboardServidorView } from "./dashboard/DashboardServidorView";
 import type { DashboardAnalytics, OltCapacity, TopRow } from "./dashboard/dashboardShared";
 import { num, trunc } from "./dashboard/dashboardShared";
@@ -30,16 +31,17 @@ const FleetDashboardPage = lazy(() =>
   import("./fleet/FleetDashboardPage").then((m) => ({ default: m.FleetDashboardPage })),
 );
 
-type DashboardView = "geral" | "equipamentos" | "fibra" | "servidor" | "frota";
+type DashboardView = "geral" | "equipamentos" | "fibra" | "sessoes" | "servidor" | "frota";
 
 const VIEW_LABELS: Record<DashboardView, string> = {
   geral: "Geral",
   equipamentos: "Equipamentos",
   fibra: "Fibra óptica",
+  sessoes: "Sessões PPPoE",
   servidor: "Servidor NetQuasar",
   frota: "Frota",
 };
-const VIEW_ORDER: DashboardView[] = ["geral", "equipamentos", "fibra", "servidor", "frota"];
+const VIEW_ORDER: DashboardView[] = ["geral", "equipamentos", "fibra", "sessoes", "servidor", "frota"];
 // Views que partilham os dados agregados de /dashboard/analytics (período/atualizar aplicam-se
 // só a estas — "servidor" e "frota" têm as suas próprias fontes de dados e período).
 const SHARED_DATA_VIEWS = new Set<DashboardView>(["geral", "equipamentos", "fibra"]);
@@ -257,9 +259,9 @@ export function DashboardPage() {
               onChange={(e) => setDays(Number(e.target.value) || DASHBOARD_DEFAULT_DAYS)}
               title="Janela temporal das séries"
             >
-              {[7, 14, 30, 60, 90].map((d) => (
+              {[1, 3, 7, 14, 30, 60, 90].map((d) => (
                 <option key={d} value={d}>
-                  {d} dias
+                  {d === 1 ? "24h" : `${d} dias`}
                 </option>
               ))}
             </select>
@@ -313,6 +315,7 @@ export function DashboardPage() {
               ctoPorts={dash.data?.cto_ports}
             />
           ) : null}
+          {view === "sessoes" ? <DashboardPppoeView /> : null}
           {view === "servidor" ? <DashboardServidorView /> : null}
           {view === "frota" ? (
             <Suspense fallback={<p>A carregar…</p>}>

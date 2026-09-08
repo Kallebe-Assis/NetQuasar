@@ -706,6 +706,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		r.Get("/dashboard/analytics", s.dashboardAnalytics)
 		r.Get("/dashboard/data-gaps", s.dashboardDataGaps)
 		r.Get("/dashboard/olt-capacity", s.dashboardOltCapacity)
+		r.Get("/dashboard/pppoe-sessions", s.dashboardPppoeSessions)
 		r.Get("/system/health-panel", s.systemHealthPanel)
 
 		r.Route("/fleet", func(r chi.Router) {

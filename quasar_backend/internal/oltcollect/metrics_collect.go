@@ -654,12 +654,19 @@ func opticalDbmScale(configured int, raw float64) float64 {
 }
 
 func opticalDbmScaleForValue(configured int, raw float64, isDecimalString bool) float64 {
-	if configured > 1 {
-		return float64(configured)
-	}
-	// VSOL envia STRING "-15.60" já em dBm — não aplicar escala centi/milli.
+	// VSOL (e outros) enviam STRING "-15.60" / "6.803" já em dBm — nunca aplicar o divisor
+	// configurado por cima disso, senão dá escala dupla. Bug real reportado: PON TX desta OLT
+	// chega como "6.803"/"5.617"/"8.576"/… (confirmado por snmpwalk manual do utilizador), mas o
+	// perfil tinha value_divisor=100 configurado (para outro formato/vendor) — aplicado por cima
+	// do valor já em dBm, 6.803 virava 0.068, que arredonda para exibir "0.1" em TODAS as PONs,
+	// disparando o alerta de TX baixo com um valor tecnicamente "plausível" (não exactamente 0,
+	// por isso o filtro isPlausibleOltPonOptical não pegava). Isto tinha de vir ANTES do check de
+	// "configured > 1" — antes vinha depois, e o divisor sempre ganhava primeiro.
 	if isDecimalString {
 		return 1
+	}
+	if configured > 1 {
+		return float64(configured)
 	}
 	return opticalDbmScale(configured, raw)
 }

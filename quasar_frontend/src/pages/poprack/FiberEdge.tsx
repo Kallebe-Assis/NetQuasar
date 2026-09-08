@@ -43,7 +43,10 @@ function FiberEdgeInner({
         {selected && (
           <div
             className="topo-edge-toolbar"
-            style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + 8}px)` }}
+            // +36px (era +8) — o utilizador pediu mais distância do equipamento sendo editado: as
+            // portas ficam na borda de baixo da caixa (RackNode.tsx), então o ponto médio da
+            // ligação costuma cair perto/dentro do rectângulo da caixa mais próxima.
+            style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + 36}px)` }}
           >
             <div className="rack-edge-toolbar__swatches">
               {STANDARD_FIBER_SEQUENCE.map((f) => (
