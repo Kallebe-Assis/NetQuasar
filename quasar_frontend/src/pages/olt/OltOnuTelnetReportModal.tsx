@@ -24,6 +24,7 @@ import {
   type OltTelnetReportStep,
 } from "../../lib/oltTelnetReportFormat";
 import { EM_DASH } from "../../lib/formatDisplay";
+import { classifyOnuRx, ONU_RX_QUALITY_COLOR, ONU_RX_QUALITY_LABEL, useOnuRxThresholds, type OnuRxThresholds } from "../../lib/onuRxQuality";
 
 export type OltOnuReportPonMeta = {
   pon?: number | null;
@@ -80,37 +81,26 @@ function parseDbm(v?: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Faixas de referência GPON (sensibilidade típica de ONU: -8 a -28/-30 dBm) — usadas só para
-// colorir o medidor visual; os alertas reais de potência continuam a usar os limiares
-// configuráveis em Configurações -> Alertas, independentes daqui.
+// Faixas de referência GPON (sensibilidade típica de ONU: -8 a -28/-30 dBm) — só a escala do
+// medidor visual; os limiares "bom/aceitável/ruim" em si vêm configurados em Configurações → OLT
+// (ver useOnuRxThresholds/classifyOnuRx em lib/onuRxQuality.ts), e os alertas reais de potência
+// continuam a usar os limiares configuráveis em Configurações → Alertas, independentes daqui.
 const RX_MIN = -30;
 const RX_MAX = -8;
-const RX_BAD_AT = -27;
-const RX_OK_AT = -23;
 const TX_MIN = -5;
 const TX_MAX = 8;
-
-type PowerBand = "ruim" | "aceitavel" | "bom";
-
-function rxBand(v: number): PowerBand {
-  if (v <= RX_BAD_AT) return "ruim";
-  if (v <= RX_OK_AT) return "aceitavel";
-  return "bom";
-}
 
 function clampPercent(v: number, min: number, max: number): number {
   const pct = ((v - min) / (max - min)) * 100;
   return Math.max(2, Math.min(98, pct));
 }
 
-const BAND_COLOR: Record<PowerBand, string> = { ruim: "var(--err)", aceitavel: "var(--warn)", bom: "var(--ok)" };
-
-function PowerGauge({ label, dbmText }: { label: string; dbmText?: string }) {
+function PowerGauge({ label, dbmText, rxThresholds }: { label: string; dbmText?: string; rxThresholds: OnuRxThresholds }) {
   const v = parseDbm(dbmText);
   if (v == null) return null;
   const isRx = label === "RX";
-  const band = isRx ? rxBand(v) : "bom";
-  const color = isRx ? BAND_COLOR[band] : "var(--warn)";
+  const band = isRx ? classifyOnuRx(v, rxThresholds) : "bom";
+  const color = isRx ? ONU_RX_QUALITY_COLOR[band] : "var(--warn)";
   const pct = isRx ? clampPercent(v, RX_MIN, RX_MAX) : clampPercent(v, TX_MIN, TX_MAX);
   return (
     <div className="onu-report-gauge" style={{ borderColor: `color-mix(in srgb, ${color} 45%, var(--border))`, background: `color-mix(in srgb, ${color} 10%, var(--panel2))` }}>
@@ -122,9 +112,9 @@ function PowerGauge({ label, dbmText }: { label: string; dbmText?: string }) {
       </div>
       {isRx ? (
         <div className="onu-report-gauge__bands">
-          <span style={{ color: band === "ruim" ? BAND_COLOR.ruim : "var(--muted)" }}>Ruim</span>
-          <span style={{ color: band === "aceitavel" ? BAND_COLOR.aceitavel : "var(--muted)" }}>Aceitável</span>
-          <span style={{ color: band === "bom" ? BAND_COLOR.bom : "var(--muted)" }}>Bom</span>
+          <span style={{ color: band === "ruim" ? ONU_RX_QUALITY_COLOR.ruim : "var(--muted)" }}>{ONU_RX_QUALITY_LABEL.ruim}</span>
+          <span style={{ color: band === "aceitavel" ? ONU_RX_QUALITY_COLOR.aceitavel : "var(--muted)" }}>{ONU_RX_QUALITY_LABEL.aceitavel}</span>
+          <span style={{ color: band === "bom" ? ONU_RX_QUALITY_COLOR.bom : "var(--muted)" }}>{ONU_RX_QUALITY_LABEL.bom}</span>
         </div>
       ) : null}
       <div className="onu-report-gauge__label">{label} Level</div>
@@ -179,6 +169,7 @@ function KV({ label, value }: { label: string; value?: string }) {
 
 export function OltOnuTelnetReportModal({ open, loading, title, oltDescription, steps, ponMeta, onClose, onRefresh, refreshing }: Props) {
   const [showRaw, setShowRaw] = useState(false);
+  const { thresholds: rxThresholds } = useOnuRxThresholds();
   const sections = useMemo(() => buildTelnetReportSections(steps), [steps]);
   const rows = useMemo(() => {
     const extra = ponMetaRows(ponMeta);
@@ -269,8 +260,8 @@ export function OltOnuTelnetReportModal({ open, loading, title, oltDescription, 
             {hasLinkStatus ? (
               <Card icon={<ShieldCheck size={16} />} title="Status do Link">
                 <div className="onu-report-linkstatus">
-                  <PowerGauge label="RX" dbmText={rx} />
-                  <PowerGauge label="TX" dbmText={tx} />
+                  <PowerGauge label="RX" dbmText={rx} rxThresholds={rxThresholds} />
+                  <PowerGauge label="TX" dbmText={tx} rxThresholds={rxThresholds} />
                   <div className="onu-report-linkstatus__meta">
                     <InfoRow icon={<Compass size={15} />} label="Distância" value={distance} />
                     <InfoRow icon={<Clock size={15} />} label="Tempo Online" value={uptime} />

@@ -167,6 +167,13 @@ func (s *Server) hubsoftSearch(w http.ResponseWriter, r *http.Request) {
 	if !res.OK && result.Message == "" {
 		result.Message = res.ErrorMessage
 	}
+	// A API da HubSoft não pagina de verdade este endpoint (testado ao vivo — ver comentário em
+	// SearchClientsQueryOverrides) e rejeita limit acima de 100: bater exactamente nesse teto é o
+	// único sinal de que pode haver mais resultados não mostrados — avisa em vez de dar a entender
+	// silenciosamente que a lista está completa.
+	if result.OK && len(result.Clients) == 100 {
+		result.Message = "Mostrando os 100 primeiros resultados (limite da API HubSoft para esta consulta) — pode haver mais; refine o termo de busca para ver os demais."
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -544,6 +551,168 @@ func (s *Server) hubsoftReportClients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// hubsoftReportServices — aba Relatório → Serviços: quantos serviços existem, quantos em cada
+// status, quantos em cada plano, e a mesma repartição por localidade (ver BuildServicesReport).
+// Sem período (fotografia do estado actual) — varre a base inteira via /cliente/todos, por isso
+// usa a mesma folga generosa de timeout do relatório de Clientes sem filtro de conexão.
+func (s *Server) hubsoftReportServices(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 4*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildServicesReport(ctx, cfg, token))
+}
+
+// hubsoftServicesTelegramRequest — o frontend já tem o relatório carregado (cacheado até 5min,
+// ver ServicesReportSection no React) — em vez de varrer /cliente/todos outra vez só para
+// mandar uma mensagem, o pedido vem com os DADOS já calculados (mesmo formato de
+// integrationhubsoft.ServicesReport) e a SELECÇÃO do que o utilizador quer mandar. Isto evita
+// tanto um round-trip lento à HubSoft quanto o risco de a mensagem divergir do que está no ecrã.
+type hubsoftServicesTelegramRequest struct {
+	integrationhubsoft.ServicesReport
+	// Sections: qualquer combinação de "total", "status", "plan", "locality_totals",
+	// "specific_locality" — ver SECTION_OPTIONS em HubsoftReportPage.tsx.
+	Sections []string `json:"sections"`
+	// SpecificLocalityKey identifica a localidade escolhida quando "specific_locality" está em
+	// Sections — mesma chave usada como key de React no frontend: "{city}|{state}".
+	SpecificLocalityKey string `json:"specific_locality_key,omitempty"`
+}
+
+// hubsoftReportServicesTelegram — botão "Enviar por Telegram" da aba Serviços: o utilizador
+// escolhe quais blocos mandar (ver hubsoftServicesTelegramRequest); "tudo" no frontend equivale a
+// seleccionar total+status+plan+locality_totals — deliberadamente NUNCA inclui o detalhe de
+// plano/status de CADA localidade (só "specific_locality", uma de cada vez, faz isso), senão a
+// mensagem explode de tamanho com dezenas de localidades × dezenas de planos.
+func (s *Server) hubsoftReportServicesTelegram(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	if _, err := s.loadHubsoftConfig(r.Context(), integID); err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+
+	var body hubsoftServicesTelegramRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	sections := map[string]bool{}
+	for _, sc := range body.Sections {
+		sections[strings.ToLower(strings.TrimSpace(sc))] = true
+	}
+	if len(sections) == 0 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "selecione ao menos um item para enviar", nil)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📊 HUBSOFT — SERVIÇOS\n")
+	wrote := false
+
+	if sections["total"] {
+		sb.WriteString(fmt.Sprintf("\nTotal de serviços: %d\n", body.Total))
+		wrote = true
+	}
+	if sections["status"] && len(body.ByStatus) > 0 {
+		sb.WriteString("\n📌 Por status\n")
+		for _, st := range body.ByStatus {
+			sb.WriteString(fmt.Sprintf("  • %s — %d\n", st.Name, st.Count))
+		}
+		wrote = true
+	}
+	if sections["plan"] && len(body.ByPlan) > 0 {
+		sb.WriteString("\n📦 Por plano\n")
+		for i, p := range body.ByPlan {
+			if i >= 25 {
+				sb.WriteString(fmt.Sprintf("  … e mais %d plano(s)\n", len(body.ByPlan)-25))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("  • %s — %d\n", p.Name, p.Count))
+		}
+		wrote = true
+	}
+	if sections["locality_totals"] && len(body.ByLocality) > 0 {
+		sb.WriteString("\n📍 Por localidade\n")
+		for i, loc := range body.ByLocality {
+			if i >= 25 {
+				sb.WriteString(fmt.Sprintf("  … e mais %d localidade(s)\n", len(body.ByLocality)-25))
+				break
+			}
+			label := loc.City
+			if loc.State != "" {
+				label += "/" + loc.State
+			}
+			sb.WriteString(fmt.Sprintf("  • %s — %d\n", label, loc.Total))
+		}
+		wrote = true
+	}
+	if sections["specific_locality"] && strings.TrimSpace(body.SpecificLocalityKey) != "" {
+		for _, loc := range body.ByLocality {
+			if loc.City+"|"+loc.State != body.SpecificLocalityKey {
+				continue
+			}
+			label := loc.City
+			if loc.State != "" {
+				label += "/" + loc.State
+			}
+			sb.WriteString(fmt.Sprintf("\n🏙️ %s — %d serviço(s)\n", label, loc.Total))
+			if len(loc.ByStatus) > 0 {
+				sb.WriteString("  Status:\n")
+				for _, st := range loc.ByStatus {
+					sb.WriteString(fmt.Sprintf("    • %s — %d\n", st.Name, st.Count))
+				}
+			}
+			if len(loc.ByPlan) > 0 {
+				sb.WriteString("  Plano:\n")
+				for _, p := range loc.ByPlan {
+					sb.WriteString(fmt.Sprintf("    • %s — %d\n", p.Name, p.Count))
+				}
+			}
+			wrote = true
+			break
+		}
+	}
+	if !wrote {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "nada para enviar com os itens seleccionados", nil)
+		return
+	}
+	sb.WriteString("\n—\nNetQuasar · relatório")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	tgCfg, err := telegramclient.LoadConfig(ctx, s.DB(), "reports")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if !tgCfg.Ready() {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "Telegram de relatórios não configurado (bot_token/chat_id) — configure em Configurações → Telegram.", nil)
+		return
+	}
+	if err := telegramclient.SendMessageChunks(ctx, tgCfg, sb.String()); err != nil {
+		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func periodFromQuery(r *http.Request) (from, to string) {

@@ -41,6 +41,11 @@ var systemReportCatalog = []map[string]string{
 	{"id": "system-general", "title": "Visão geral do sistema", "description": "Métricas consolidadas de equipamentos, localidades, clientes, PONs, eventos e mais.", "group": "Sistema e cadastros"},
 	{"id": "integrations", "title": "Integrações", "description": "Integrações configuradas e estado de cada uma.", "group": "Sistema e cadastros"},
 	{"id": "hubsoft-overview", "title": "HubSoft — atendimentos, O.S. e financeiro", "description": "Totais de atendimentos, ordens de serviço e faturas dos últimos 30 dias, direto da integração HubSoft.", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-services-by-plan", "title": "HubSoft — Serviços por plano", "description": "Total de serviços e repartição por status e por plano — fotografia actual da base (sem período).", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-services-by-locality", "title": "HubSoft — Serviços por localidade", "description": "Total de serviços e repartição por status e por localidade — fotografia actual da base (sem período).", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-services-full", "title": "HubSoft — Serviços (plano e localidade)", "description": "Total de serviços e repartição por status, plano E localidade — fotografia actual da base (sem período).", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-work-orders-period", "title": "HubSoft — Ordens de serviço por período", "description": "Ordens de serviço abertas/finalizadas no período, com ranking por técnico.", "group": "Sistema e cadastros"},
+	{"id": "hubsoft-attendance-period", "title": "HubSoft — Atendimentos por período", "description": "Atendimentos abertos/realizados no período, com repartição por status.", "group": "Sistema e cadastros"},
 	{"id": "automations", "title": "Automações", "description": "Execuções de automações e relatórios agendados.", "group": "Sistema e cadastros"},
 	{"id": "commercial-base", "title": "Base comercial", "description": "Clientes por localidade — totais mensais ou detalhe.", "group": "Sistema e cadastros"},
 }
@@ -172,6 +177,16 @@ func (s *Server) buildSystemReport(ctx context.Context, id string, opts systemRe
 		return s.reportBGPOverview(ctx, pool, base)
 	case "hubsoft-overview":
 		return s.reportHubsoftOverview(ctx, pool, base)
+	case "hubsoft-services-by-plan":
+		return s.reportHubsoftServices(ctx, pool, base, hubsoftServicesSections{Plan: true})
+	case "hubsoft-services-by-locality":
+		return s.reportHubsoftServices(ctx, pool, base, hubsoftServicesSections{Locality: true})
+	case "hubsoft-services-full":
+		return s.reportHubsoftServices(ctx, pool, base, hubsoftServicesSections{Plan: true, Locality: true})
+	case "hubsoft-work-orders-period":
+		return s.reportHubsoftWorkOrdersPeriod(ctx, pool, base, opts.PeriodMode)
+	case "hubsoft-attendance-period":
+		return s.reportHubsoftAttendancePeriod(ctx, pool, base, opts.PeriodMode)
 	case "network-events":
 		return s.reportNetworkEvents(ctx, pool, base, opts.PeriodMode)
 	case "ftth-infra":
@@ -647,7 +662,8 @@ type systemReportOptions struct {
 
 func reportUsesPeriodMode(id string) bool {
 	switch id {
-	case "network-events", "ftth-infra", "pon-down", "automations", "monitoring-health", "commercial-base":
+	case "network-events", "ftth-infra", "pon-down", "automations", "monitoring-health", "commercial-base",
+		"hubsoft-work-orders-period", "hubsoft-attendance-period":
 		return true
 	}
 	return false
@@ -1764,5 +1780,172 @@ func (s *Server) reportHubsoftOverview(ctx context.Context, pool *pgxpool.Pool, 
 		"Valor total":  fmt.Sprintf("R$ %.2f", fin.TotalValue),
 		"Recebido (%)": fmt.Sprintf("%.1f%%", fin.PaidPct),
 	}
+	return base, nil
+}
+
+// hubsoftIntegrationToken resolve config+token da integração HubSoft — repetido em
+// reportHubsoftOverview/Services/WorkOrdersPeriod/AttendancePeriod, factorizado aqui. ok=false
+// quando a integração não está configurada ou o login falhou — nesse caso title/summary já vêm
+// preenchidos com a nota explicativa, o chamador só precisa devolver base, nil.
+func (s *Server) hubsoftIntegrationToken(ctx context.Context, pool *pgxpool.Pool, base map[string]any, title string) (cfg integrationhubsoft.Config, token string, ok bool, err error) {
+	var integID uuid.UUID
+	var baseURL string
+	var authCfg []byte
+	scanErr := pool.QueryRow(ctx, `SELECT id, base_url, auth_config FROM integrations WHERE slug='hubsoft' LIMIT 1`).
+		Scan(&integID, &baseURL, &authCfg)
+	if scanErr == pgx.ErrNoRows {
+		base["title"] = title
+		base["summary"] = map[string]any{"Nota": "Integração HubSoft não configurada."}
+		return cfg, "", false, nil
+	}
+	if scanErr != nil {
+		return cfg, "", false, scanErr
+	}
+	cfg = integrationhubsoft.Config{
+		BaseURL: strings.TrimSpace(baseURL),
+		Auth:    integrationhttp.AuthConfigFromJSON(authCfg),
+	}
+	token, tokErr := s.hubsoftToken(ctx, integID, cfg)
+	if tokErr != nil {
+		base["title"] = title
+		base["summary"] = map[string]any{"Nota": "Falha ao autenticar na HubSoft: " + tokErr.Error()}
+		return cfg, "", false, nil
+	}
+	return cfg, token, true, nil
+}
+
+// hubsoftServicesSections escolhe entre plano/localidade/ambos — pedido explícito do
+// utilizador ("por localidade ou por plano ou pelos dois"), por isso 3 entradas separadas no
+// catálogo (hubsoft-services-by-plan/by-locality/full) em vez de uma única com tudo sempre.
+type hubsoftServicesSections struct {
+	Plan     bool
+	Locality bool
+}
+
+// reportHubsoftServices — fotografia actual da base (BuildServicesReport, sem período, pagina a
+// base inteira de verdade). Deliberadamente lean: localidade aqui é só o TOTAL de cada uma (como
+// no botão "Enviar por Telegram" da aba Serviços da integração, ver hubsoftReportServicesTelegram)
+// — nunca o detalhe de plano/status por localidade, senão uma automação diária/semanal geraria
+// uma mensagem enorme sem ninguém pedir.
+func (s *Server) reportHubsoftServices(ctx context.Context, pool *pgxpool.Pool, base map[string]any, sections hubsoftServicesSections) (map[string]any, error) {
+	title := "HubSoft — Serviços"
+	cfg, token, ok, err := s.hubsoftIntegrationToken(ctx, pool, base, title)
+	if err != nil || !ok {
+		return base, err
+	}
+	rep := integrationhubsoft.BuildServicesReport(ctx, cfg, token)
+	if !rep.OK {
+		base["title"] = title
+		base["summary"] = map[string]any{"Nota": firstNonEmptyStr(rep.Message, "Falha ao coletar serviços.")}
+		return base, nil
+	}
+	summary := map[string]any{"Total de serviços": rep.Total}
+	if len(rep.ByStatus) > 0 {
+		var sb strings.Builder
+		for _, st := range rep.ByStatus {
+			sb.WriteString(fmt.Sprintf("\n  • %s — %d", st.Name, st.Count))
+		}
+		summary["Por status"] = sb.String()
+	}
+	if sections.Plan && len(rep.ByPlan) > 0 {
+		var sb strings.Builder
+		for i, p := range rep.ByPlan {
+			if i >= 25 {
+				sb.WriteString(fmt.Sprintf("\n  … e mais %d plano(s)", len(rep.ByPlan)-25))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("\n  • %s — %d", p.Name, p.Count))
+		}
+		summary["Por plano"] = sb.String()
+	}
+	if sections.Locality && len(rep.ByLocality) > 0 {
+		var sb strings.Builder
+		for i, loc := range rep.ByLocality {
+			if i >= 25 {
+				sb.WriteString(fmt.Sprintf("\n  … e mais %d localidade(s)", len(rep.ByLocality)-25))
+				break
+			}
+			label := loc.City
+			if loc.State != "" {
+				label += "/" + loc.State
+			}
+			sb.WriteString(fmt.Sprintf("\n  • %s — %d", label, loc.Total))
+		}
+		summary["Por localidade"] = sb.String()
+	}
+	base["title"] = title
+	base["summary"] = summary
+	return base, nil
+}
+
+// reportHubsoftWorkOrdersPeriod — mesmo relatório/mensagem já usado pelo botão "Enviar por
+// Telegram" da aba Relatório → Ordens de serviço da integração (ver
+// hubsoftReportWorkOrdersTelegram), aqui reaproveitado para poder ser agendado como qualquer
+// outro relatório de sistema (Configurações → Automações → Nova automação). period_days da
+// automação decide o intervalo (reportUsesPeriodMode inclui este id).
+func (s *Server) reportHubsoftWorkOrdersPeriod(ctx context.Context, pool *pgxpool.Pool, base map[string]any, period periodModeReportOptions) (map[string]any, error) {
+	title := "HubSoft — Ordens de serviço por período"
+	cfg, token, ok, err := s.hubsoftIntegrationToken(ctx, pool, base, title)
+	if err != nil || !ok {
+		return base, err
+	}
+	rep := integrationhubsoft.BuildWorkOrderPeriodReport(ctx, cfg, token, period.From, period.To)
+	if !rep.OK {
+		base["title"] = title
+		base["summary"] = map[string]any{"Nota": firstNonEmptyStr(rep.Message, "Falha ao coletar ordens de serviço.")}
+		return base, nil
+	}
+	summary := map[string]any{
+		"Período":       reporttelegram.FormatPeriodBR(rep.From, rep.To),
+		"Total":         rep.Total,
+		"Finalizadas":   rep.Finished,
+		"% finalizadas": fmt.Sprintf("%.1f%%", rep.FinishedPct),
+	}
+	if len(rep.ByTechnician) > 0 {
+		var sb strings.Builder
+		for i, t := range rep.ByTechnician {
+			if i >= 15 {
+				sb.WriteString(fmt.Sprintf("\n  … e mais %d técnico(s)", len(rep.ByTechnician)-15))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("\n  %d. %s — %d fechadas de %d (%.1f%% do total)", i+1, t.Technician, t.Finished, t.Total, t.PctOfFinished))
+		}
+		summary["Técnicos (ranking)"] = sb.String()
+	}
+	base["title"] = title
+	base["summary"] = summary
+	return base, nil
+}
+
+// reportHubsoftAttendancePeriod — mesmo relatório do botão "Enviar por Telegram" da aba
+// Relatório → Atendimentos da integração (ver hubsoftReportAttendanceTelegram), agendável.
+func (s *Server) reportHubsoftAttendancePeriod(ctx context.Context, pool *pgxpool.Pool, base map[string]any, period periodModeReportOptions) (map[string]any, error) {
+	title := "HubSoft — Atendimentos por período"
+	cfg, token, ok, err := s.hubsoftIntegrationToken(ctx, pool, base, title)
+	if err != nil || !ok {
+		return base, err
+	}
+	rep := integrationhubsoft.BuildAttendancePeriodReport(ctx, cfg, token, period.From, period.To)
+	if !rep.OK {
+		base["title"] = title
+		base["summary"] = map[string]any{"Nota": firstNonEmptyStr(rep.Message, "Falha ao coletar atendimentos.")}
+		return base, nil
+	}
+	summary := map[string]any{
+		"Período":    reporttelegram.FormatPeriodBR(rep.From, rep.To),
+		"Total":      rep.Total,
+		"Fechados":   rep.Closed,
+		"Abertos":    rep.Open,
+		"% fechados": fmt.Sprintf("%.1f%%", rep.ClosedPct),
+	}
+	if len(rep.ByStatus) > 0 {
+		var sb strings.Builder
+		for _, st := range rep.ByStatus {
+			sb.WriteString(fmt.Sprintf("\n  • %s — %d", st.Name, st.Count))
+		}
+		summary["Por status"] = sb.String()
+	}
+	base["title"] = title
+	base["summary"] = summary
 	return base, nil
 }

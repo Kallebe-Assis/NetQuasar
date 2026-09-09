@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, Send, ShieldAlert, SquareStack } from "lucide-react";
+import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, ShieldAlert, SquareStack } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
+import { AffectedClientsModal } from "../components/AffectedClientsModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -286,23 +287,10 @@ export function AlertsPage() {
     verifyOneMut.mutate(alertId);
   }
 
-  // "Clientes afetados" (3 pontinhos, só para OLT offline/PON DOWN) — reúne as ONUs afetadas com
-  // cliente vinculado e manda os nomes por Telegram (bot de monitorização). Erros específicos
-  // (sem ONU/sem cliente vinculado/Telegram não configurado) chegam como texto normal da API,
-  // não precisa de tratamento especial aqui — o toast já mostra a mensagem do backend.
-  const affectedClientsMut = useMutation({
-    mutationFn: (alertId: string) =>
-      apiFetch<{ ok: boolean; client_count: number; onu_count: number }>(
-        `/api/v1/alerts/${alertId}/affected-clients-telegram`,
-        { method: "POST", json: {} },
-      ),
-    onSuccess: (res) => {
-      pushToast({ tone: "ok", text: `Enviado no Telegram: ${res.client_count} cliente(s) afetado(s) (${res.onu_count} ONU(s)).` });
-    },
-    onError: (e: unknown) => {
-      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao enviar clientes afetados." });
-    },
-  });
+  // "Clientes afetados" (3 pontinhos, só para OLT offline/PON DOWN) — abre um modal com a lista
+  // de ONUs afetadas que têm cliente vinculado (ver AffectedClientsModal), com opção de exportar
+  // CSV e/ou enviar por Telegram a partir de lá.
+  const [affectedClientsAlertId, setAffectedClientsAlertId] = useState<string | null>(null);
 
   // "Clientes afetados": OLT offline (ping_unreachable numa OLT) ou PON DOWN — nos dois casos há
   // um conjunto de ONUs claramente identificável (a OLT inteira, ou só a PON) para procurar
@@ -712,13 +700,8 @@ export function AlertsPage() {
                                       ? [
                                           {
                                             id: "affected-clients",
-                                            label:
-                                              affectedClientsMut.isPending && affectedClientsMut.variables === a.id
-                                                ? "A enviar…"
-                                                : "Clientes afetados",
-                                            icon: <Send size={13} />,
-                                            disabled: affectedClientsMut.isPending,
-                                            onClick: () => affectedClientsMut.mutate(a.id),
+                                            label: "Clientes afetados",
+                                            onClick: () => setAffectedClientsAlertId(a.id),
                                           },
                                         ]
                                       : []),
@@ -982,6 +965,12 @@ export function AlertsPage() {
           setReactivateId(null);
           reactivateMut.mutate(id);
         }}
+      />
+
+      <AffectedClientsModal
+        open={affectedClientsAlertId != null}
+        alertId={affectedClientsAlertId}
+        onClose={() => setAffectedClientsAlertId(null)}
       />
     </div>
   );

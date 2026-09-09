@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ActionMenu } from "./ActionMenu";
 import { EM_DASH, formatNullable, formatSnmpMetricCell } from "../lib/formatDisplay";
+import { classifyOnuRx, ONU_RX_QUALITY_COLOR, ONU_RX_QUALITY_LABEL, useOnuRxThresholds } from "../lib/onuRxQuality";
 
 export type VsOnuRow = {
   pon?: number;
@@ -48,6 +49,15 @@ function displayOnuRx(u: VsOnuRow): string {
     return dbm.toFixed(2);
   }
   return metricCell(u.rx_pwr);
+}
+
+/** dBm numérico da RX da ONU, preferindo o campo já parseado (rx_dbm) e caindo para o texto
+ * (rx_pwr) — mesma prioridade de displayOnuRx acima, só que devolvendo o número em vez do texto
+ * formatado, para poder classificar bom/aceitável/ruim (ver lib/onuRxQuality.ts). */
+function onuRxDbmValue(u: VsOnuRow): number | null {
+  if (typeof u.rx_dbm === "number" && Number.isFinite(u.rx_dbm) && u.rx_dbm <= 0) return u.rx_dbm;
+  const n = Number.parseFloat(String(u.rx_pwr ?? "").replace(",", "."));
+  return Number.isFinite(n) && n <= 0 ? n : null;
 }
 
 function rowHasText(u: VsOnuRow, key: keyof VsOnuRow): boolean {
@@ -201,6 +211,7 @@ type Props = {
 };
 
 export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusMode, offlineRxDbm, onShowHistory }: Props) {
+  const { thresholds: rxThresholds } = useOnuRxThresholds();
   const visible = useMemo(
     () => buildVisibleColumns(enabledMetrics, rows, rxStatusMode),
     [enabledMetrics, rows, rxStatusMode],
@@ -222,7 +233,7 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
         ? note
         : note && note.trim() !== ""
           ? note
-          : "Nenhuma ONU encontrada. Verifique os OIDs em Configurações → Perfis OLT e se a OLT responde SNMP (IP e community).";
+          : "Nenhuma ONU encontrada. Verifique os OIDs em Configurações → OLT e se a OLT responde SNMP (IP e community).";
     return <p style={{ fontSize: 12, color: "var(--muted)" }}>{hint}</p>;
   }
 
@@ -259,12 +270,17 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
                 )}
                 {visible.has("status") && <td>{onlineBadge(u, rxStatusMode)}</td>}
                 {visible.has("phase") && <td>{cell(u.phase_sta)}</td>}
-                {visible.has("rx") && (
-                  <td className="mono">
-                    {displayOnuRx(u)}
-                    {telnetCliBadge(u)}
-                  </td>
-                )}
+                {visible.has("rx") &&
+                  (() => {
+                    const rxDbm = onuRxDbmValue(u);
+                    const rxQuality = rxDbm != null ? classifyOnuRx(rxDbm, rxThresholds) : null;
+                    return (
+                      <td className="mono" style={rxQuality ? { color: ONU_RX_QUALITY_COLOR[rxQuality] } : undefined} title={rxQuality ? ONU_RX_QUALITY_LABEL[rxQuality] : undefined}>
+                        {displayOnuRx(u)}
+                        {telnetCliBadge(u)}
+                      </td>
+                    );
+                  })()}
                 {visible.has("tx") && (
                   <td className="mono">
                     {metricCell(u.tx_pwr)}

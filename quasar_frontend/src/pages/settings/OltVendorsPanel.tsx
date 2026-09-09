@@ -4,7 +4,103 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
+import { DEFAULT_ONU_RX_THRESHOLDS, useOnuRxThresholds } from "../../lib/onuRxQuality";
 import { OltMetricsOidTable, type OltMetricFieldMeta } from "./OltMetricsOidTable";
+
+/** Faixas "Boa/Aceitável/Ruim" da potência RX da ONU — usadas no medidor de "Detalhes da ONU"
+ * (OltOnuTelnetReportModal.tsx) e na coluna RX da tabela principal de ONUs (OltVsolOnuTable.tsx).
+ * Guardadas em monitoring_settings (GET/PATCH /api/v1/settings/monitoring, mesma query key
+ * "mon-settings" já usada em Monitoramento → offset de latência) — só a UI de edição fica aqui,
+ * pedido explícito do utilizador ("configurar na aba de Perfis OLT"). */
+function OnuRxQualityCard() {
+  const qc = useQueryClient();
+  const { push: pushToast } = useAppToast();
+  const { data, thresholds, isLoading } = useOnuRxThresholds();
+  const [good, setGood] = useState(String(DEFAULT_ONU_RX_THRESHOLDS.onu_rx_good_dbm));
+  const [bad, setBad] = useState(String(DEFAULT_ONU_RX_THRESHOLDS.onu_rx_bad_dbm));
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (!dirty && data) {
+      setGood(String(data.onu_rx_good_dbm));
+      setBad(String(data.onu_rx_bad_dbm));
+    }
+  }, [data, dirty]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/v1/settings/monitoring", {
+        method: "PATCH",
+        json: { onu_rx_good_dbm: Number(good.replace(",", ".")), onu_rx_bad_dbm: Number(bad.replace(",", ".")) },
+      }),
+    onSuccess: () => {
+      toastOk(pushToast, "Faixas de RX guardadas.");
+      setDirty(false);
+      void qc.invalidateQueries({ queryKey: ["mon-settings"] });
+    },
+    onError: (e: unknown) => toastErr(pushToast, e instanceof Error ? e.message : "Falha ao guardar."),
+  });
+
+  const goodNum = Number(good.replace(",", "."));
+  const badNum = Number(bad.replace(",", "."));
+  const invalid = !Number.isFinite(goodNum) || !Number.isFinite(badNum) || goodNum <= badNum;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ margin: 0 }}>Qualidade da potência RX (ONU)</h2>
+      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, marginBottom: 12 }}>
+        Faixas usadas para classificar a potência RX de cada ONU como <strong>Boa</strong>, <strong>Aceitável</strong> ou{" "}
+        <strong>Ruim</strong> — na tabela de ONUs e no relatório detalhado. Valores em dBm; a OLT reporta números negativos, quanto
+        mais próximo de 0, melhor o sinal.
+      </p>
+      <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div className="field">
+          <label>Boa a partir de (dBm)</label>
+          <input
+            className="input mono"
+            style={{ width: 110 }}
+            value={good}
+            disabled={isLoading}
+            onChange={(e) => {
+              setGood(e.target.value);
+              setDirty(true);
+            }}
+          />
+        </div>
+        <div className="field">
+          <label>Ruim abaixo de (dBm)</label>
+          <input
+            className="input mono"
+            style={{ width: 110 }}
+            value={bad}
+            disabled={isLoading}
+            onChange={(e) => {
+              setBad(e.target.value);
+              setDirty(true);
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={isLoading || invalid || save.isPending || !dirty}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "A guardar…" : "Guardar"}
+        </button>
+      </div>
+      {invalid && dirty ? (
+        <p style={{ fontSize: 11, color: "var(--err)", marginTop: 8 }}>
+          &quot;Boa a partir de&quot; precisa ser maior que &quot;Ruim abaixo de&quot;.
+        </p>
+      ) : (
+        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+          Entre {thresholds.onu_rx_bad_dbm} e {thresholds.onu_rx_good_dbm} dBm fica <strong>Aceitável</strong>.
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** Textarea à largura do modal; altura acompanha o conteúdo até um máximo. */
 function OltCmdTextarea({
@@ -1121,6 +1217,7 @@ function OltVendorsPanel() {
 
   return (
     <>
+      <OnuRxQualityCard />
       <div className="olt-profiles-layout">
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>

@@ -1,14 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, RefreshCw, Server } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Menu, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
-import { ApiError, apiFetch } from "../../lib/api";
+import { ApiError, apiFetch, downloadBlob } from "../../lib/api";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
+import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { OltOnuClientLinkModal } from "./OltOnuClientLinkModal";
 import { OltOnuClientEditModal } from "./OltOnuClientEditModal";
@@ -119,6 +120,33 @@ function fmtRx(r: OltOnuSearchResult): string {
 
 function rowKey(r: Pick<OltOnuSearchResult, "olt_id" | "pon" | "onu" | "serial">): string {
   return `${r.olt_id}|${r.pon ?? 0}|${r.onu ?? 0}|${(r.serial ?? "").toLowerCase()}`;
+}
+
+/** Exporta exactamente o que está filtrado no ecrã (OLT/PON seleccionados + filtros de
+ * potência/temperatura/voltagem/cliente) — todas as páginas, não só a visível. */
+function exportOnuSearchCsv(rows: OltOnuSearchResult[]) {
+  const header = [
+    "OLT", "IP", "Marca", "PON", "ONU", "Serial", "Modelo", "Status",
+    "RX (dBm)", "TX", "Temp.", "Voltagem", "Cliente", "Localidade",
+  ];
+  const body = rows.map((r) => [
+    r.olt_description ?? "",
+    r.olt_ip ?? "",
+    r.olt_brand ?? "",
+    r.pon != null ? String(r.pon) : "",
+    r.onu != null ? String(r.onu) : "",
+    r.serial ?? "",
+    r.model ?? "",
+    r.online === true ? "Online" : r.online === false ? "Offline" : "",
+    fmtRx(r),
+    r.tx_pwr ?? "",
+    r.temp ?? "",
+    r.voltage ?? "",
+    r.client_name ?? "",
+    r.locality_name ?? "",
+  ]);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadBlob(`onus_${stamp}.csv`, buildExcelCsvBlob([header, ...body]));
 }
 
 function applyTelnetFieldsToRow(row: OltOnuSearchResult, steps: OltTelnetReportStep[]): OltOnuSearchResult {
@@ -650,6 +678,17 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           }}
         >
           <Filter size={16} />
+        </button>
+
+        <button
+          type="button"
+          className="btn btn--icon"
+          title="Exportar CSV (OLT/PON e filtros actuais)"
+          aria-label="Exportar CSV"
+          disabled={enrichedResults.length === 0}
+          onClick={() => exportOnuSearchCsv(enrichedResults)}
+        >
+          <Download size={16} />
         </button>
 
         {canMutate ? (

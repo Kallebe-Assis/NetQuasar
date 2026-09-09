@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Send } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { InfoHint } from "../../components/InfoHint";
@@ -15,6 +16,8 @@ import type {
   HubsoftFinancialReportResponse,
   HubsoftReportClientsResponse,
   HubsoftReportServiceRow,
+  HubsoftServiceLocalityBreakdown,
+  HubsoftServicesReportResponse,
   HubsoftWorkOrderReportResponse,
 } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
@@ -38,7 +41,7 @@ const SERVICE_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "franquia_excedida", label: "Franquia excedida" },
 ];
 
-type Section = "clients" | "attendance" | "work_orders" | "financial";
+type Section = "clients" | "services" | "attendance" | "work_orders" | "financial";
 
 function fmtInt(n?: number): string {
   return (n ?? 0).toLocaleString("pt-BR");
@@ -170,14 +173,14 @@ function TelegramSendButton({ path }: { path: string }) {
   );
 }
 
-function StatusBreakdownTable({ items }: { items: { name: string; count: number }[] }) {
+function StatusBreakdownTable({ items, labelHeader = "Status" }: { items: { name: string; count: number }[]; labelHeader?: string }) {
   if (items.length === 0) return null;
   return (
     <div className="table-wrap" style={{ marginTop: 10 }}>
       <table style={{ fontSize: 12 }}>
         <thead>
           <tr>
-            <th>Status</th>
+            <th>{labelHeader}</th>
             <th>Quantidade</th>
           </tr>
         </thead>
@@ -408,6 +411,336 @@ function ClientsReportSection() {
           prefetchExtras
         />
       ) : null}
+    </div>
+  );
+}
+
+function localityLabel(loc: Pick<HubsoftServiceLocalityBreakdown, "city" | "state">): string {
+  return loc.state ? `${loc.city} / ${loc.state}` : loc.city;
+}
+
+/** Tabela geral — uma linha por localidade (nome + total). Clicar numa linha abre
+ * LocalityDetailModal com a repartição por status/plano só dela. */
+function LocalityTable({ items, onSelect }: { items: HubsoftServiceLocalityBreakdown[]; onSelect: (loc: HubsoftServiceLocalityBreakdown) => void }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="table-wrap" style={{ marginTop: 10 }}>
+      <table style={{ fontSize: 12 }}>
+        <thead>
+          <tr>
+            <th>Localidade</th>
+            <th>Total de serviços</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((loc) => (
+            <tr
+              key={`${loc.city}|${loc.state ?? ""}`}
+              style={{ cursor: "pointer" }}
+              onClick={() => onSelect(loc)}
+            >
+              <td>{localityLabel(loc)}</td>
+              <td className="mono">{fmtInt(loc.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Modal com a repartição por status e por plano de UMA localidade — aberta ao clicar numa
+ * linha de LocalityTable. */
+type LocalityDetailTab = "status" | "plan" | "neighborhood";
+
+const LOCALITY_DETAIL_TABS: { id: LocalityDetailTab; label: string; headerLabel: string }[] = [
+  { id: "status", label: "Status", headerLabel: "Status" },
+  { id: "plan", label: "Plano", headerLabel: "Plano" },
+  { id: "neighborhood", label: "Bairro", headerLabel: "Bairro" },
+];
+
+/** Uma tabela de cada vez (Status/Plano/Bairro em abas) em vez de lado a lado — com o Status
+ * (poucas linhas) e o Plano (muitas linhas) lado a lado o modal ficava desproporcional (uma
+ * coluna bem mais alta que a outra, reportado). Bairro é só totais de propósito (ver
+ * ByNeighborhood no backend) — não repete status/plano por bairro, já é cheio o suficiente. */
+function LocalityDetailModal({ loc, onClose }: { loc: HubsoftServiceLocalityBreakdown | null; onClose: () => void }) {
+  const [tab, setTab] = useState<LocalityDetailTab>("status");
+  useEffect(() => {
+    if (loc) setTab("status");
+  }, [loc?.city, loc?.state]);
+
+  if (!loc) return null;
+  const itemsByTab: Record<LocalityDetailTab, { name: string; count: number }[]> = {
+    status: loc.by_status,
+    plan: loc.by_plan,
+    neighborhood: loc.by_neighborhood,
+  };
+  const active = LOCALITY_DETAIL_TABS.find((t) => t.id === tab) ?? LOCALITY_DETAIL_TABS[0];
+
+  return createPortal(
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        style={{ maxWidth: 640, width: "100%", display: "flex", flexDirection: "column" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h3 style={{ margin: 0 }}>{localityLabel(loc)}</h3>
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
+              {fmtInt(loc.total)} serviço(s) nesta localidade
+            </p>
+          </div>
+          <button type="button" className="btn btn--icon" aria-label="Fechar" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="row" style={{ gap: 6, marginTop: 12 }}>
+          {LOCALITY_DETAIL_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`btn btn--sm${tab === t.id ? " btn--primary" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ maxHeight: "62vh", overflowY: "auto", marginTop: 4 }}>
+          <StatusBreakdownTable items={itemsByTab[tab]} labelHeader={active.headerLabel} />
+        </div>
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+          <button type="button" className="btn" onClick={onClose}>
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+const SERVICE_TELEGRAM_SECTIONS: { id: string; label: string }[] = [
+  { id: "total", label: "Total de logins" },
+  { id: "status", label: "Total por status" },
+  { id: "plan", label: "Total por plano" },
+  { id: "locality_totals", label: "Total por localidade" },
+];
+
+/** Botão "Enviar por Telegram" da aba Serviços — ao contrário de TelegramSendButton (relatórios
+ * por período, sempre mandam o resumo inteiro), aqui o utilizador escolhe PRIMEIRO quais blocos
+ * mandar (pedido explícito), porque o relatório inteiro (todos os planos de todas as localidades)
+ * facilmente estoura o tamanho de uma mensagem Telegram legível. Manda os dados já carregados
+ * nesta tela (data) — não pede ao backend para varrer a HubSoft outra vez, reaproveita a mesma
+ * fotografia que está no ecrã (mesmo espírito do cache de 5min da consulta). */
+function ServicesTelegramButton({ data }: { data: HubsoftServicesReportResponse }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [specificLocalityKey, setSpecificLocalityKey] = useState("");
+  const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const m = useMutation({
+    mutationFn: () => {
+      const sections = Array.from(selected);
+      if (specificLocalityKey) sections.push("specific_locality");
+      return apiFetch(`/api/v1/integrations/${SLUG}/hubsoft/report/services/telegram`, {
+        method: "POST",
+        json: {
+          total: data.total,
+          by_status: data.by_status,
+          by_plan: data.by_plan,
+          by_locality: data.by_locality,
+          sections,
+          specific_locality_key: specificLocalityKey || undefined,
+        },
+      });
+    },
+    onSuccess: () => {
+      setFeedback({ ok: true, message: "Enviado para o Telegram." });
+      setOpen(false);
+    },
+    onError: (e) => setFeedback({ ok: false, message: e instanceof Error ? e.message : "Falha ao enviar." }),
+  });
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const canSend = selected.size > 0 || specificLocalityKey !== "";
+
+  return (
+    <>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <button
+          type="button"
+          className="btn btn--sm"
+          onClick={() => {
+            setFeedback(null);
+            setOpen(true);
+          }}
+        >
+          <Send size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
+          Enviar por Telegram
+        </button>
+        {feedback ? (
+          <span style={{ fontSize: 11, color: feedback.ok ? "var(--ok)" : "var(--err)" }}>{feedback.message}</span>
+        ) : null}
+      </div>
+      {open
+        ? createPortal(
+            <div className="modal-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
+              <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }} onMouseDown={(e) => e.stopPropagation()}>
+                <h3 style={{ margin: "0 0 4px" }}>Enviar por Telegram</h3>
+                <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px" }}>
+                  Escolha o que mandar — para não ficar uma mensagem gigante, "por localidade" manda só o total de cada
+                  uma (sem detalhar plano/status). Use "Localidade específica" para ver o detalhe de uma só.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {SERVICE_TELEGRAM_SECTIONS.map((s) => (
+                    <label key={s.id} className="row" style={{ gap: 8, alignItems: "center", fontSize: 13 }}>
+                      <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+                      {s.label}
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={() => setSelected(new Set(SERVICE_TELEGRAM_SECTIONS.map((s) => s.id)))}
+                  >
+                    Tudo
+                  </button>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                  <label style={{ fontSize: 13, display: "block", marginBottom: 4 }}>Localidade específica (opcional)</label>
+                  <select className="input" value={specificLocalityKey} onChange={(e) => setSpecificLocalityKey(e.target.value)}>
+                    <option value="">— Nenhuma —</option>
+                    {data.by_locality.map((loc) => (
+                      <option key={`${loc.city}|${loc.state ?? ""}`} value={`${loc.city}|${loc.state ?? ""}`}>
+                        {localityLabel(loc)} ({fmtInt(loc.total)})
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                    Manda o total, por status e por plano só dessa localidade.
+                  </p>
+                </div>
+                <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                  <button type="button" className="btn" onClick={() => setOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn btn--primary" disabled={!canSend || m.isPending} onClick={() => m.mutate()}>
+                    {m.isPending ? "A enviar…" : "Enviar"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
+/** Aba Relatório → Serviços: quantos serviços existem, quantos em cada status, quantos em cada
+ * plano, e a mesma repartição dentro de cada localidade. Sem período — fotografia do estado
+ * actual da base inteira (ver BuildServicesReport no backend), por isso pode demorar mais que os
+ * relatórios por período. */
+function ServicesReportSection() {
+  const qc = useQueryClient();
+  const [selectedLocality, setSelectedLocality] = useState<HubsoftServiceLocalityBreakdown | null>(null);
+  const q = useQuery({
+    queryKey: ["hubsoft-report-services"],
+    queryFn: () => apiFetch<HubsoftServicesReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/services`),
+    // Pedido explícito: manter sempre em cache, só actualizar sozinho se o utilizador voltar a
+    // esta aba depois de pelo menos 5 minutos — refetchOnWindowFocus já é false globalmente
+    // (main.tsx), staleTime é o que decide se o mount desta secção dispara um refetch ou só
+    // mostra o que já está em cache (React Query mantém o cache entre montagens/desmontagens
+    // da secção enquanto o utilizador troca de aba dentro do relatório).
+    staleTime: 5 * 60 * 1000,
+  });
+  const d = q.data;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card" style={{ padding: 14 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Serviços — status, localidade e plano</h3>
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
+              Fotografia do estado actual da base inteira (não é amostra nem depende de período).
+            </p>
+          </div>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={q.isFetching}
+              onClick={() => void qc.invalidateQueries({ queryKey: ["hubsoft-report-services"] })}
+            >
+              {q.isFetching ? "A atualizar…" : "Atualizar"}
+            </button>
+            {d?.ok ? <ServicesTelegramButton data={d} /> : null}
+          </div>
+        </div>
+      </div>
+
+      {q.isLoading ? (
+        <div className="card" style={{ padding: 14 }}>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>A carregar (pode demorar — varre a base inteira)…</p>
+        </div>
+      ) : q.isError ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{(q.error as Error).message}</div>
+        </div>
+      ) : !d?.ok ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{d?.message || "Falha ao consultar."}</div>
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 14 }}>
+            <div className="dashboard-kpi-row" style={{ gridTemplateColumns: "minmax(0, 220px)" }}>
+              <div className="stat">
+                <div className="stat__k">Total de serviços</div>
+                <div className="stat__v">{fmtInt(d.total)}</div>
+              </div>
+            </div>
+            {d.truncated ? (
+              <p style={{ fontSize: 11, color: "var(--warn)", margin: "8px 0 0" }}>
+                Base maior que o teto de páginas do relatório — os números cobrem uma parte da base, não o total exacto.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="card" style={{ padding: 14 }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Por status</h4>
+            <StatusBreakdownTable items={d.by_status} labelHeader="Status" />
+          </div>
+
+          <div className="card" style={{ padding: 14 }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Por plano</h4>
+            <StatusBreakdownTable items={d.by_plan} labelHeader="Plano" />
+          </div>
+
+          <div className="card" style={{ padding: 14 }}>
+            <h4 style={{ margin: "0 0 4px", fontSize: 13 }}>Por localidade ({fmtInt(d.by_locality.length)})</h4>
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+              Clique numa localidade para ver a repartição por status, plano e bairro só dela.
+            </p>
+            <LocalityTable items={d.by_locality} onSelect={setSelectedLocality} />
+          </div>
+        </>
+      )}
+      <LocalityDetailModal loc={selectedLocality} onClose={() => setSelectedLocality(null)} />
     </div>
   );
 }
@@ -810,6 +1143,7 @@ function FinancialReportSection() {
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "clients", label: "Clientes" },
+  { id: "services", label: "Serviços" },
   { id: "attendance", label: "Atendimentos" },
   { id: "work_orders", label: "Ordens de serviço" },
   { id: "financial", label: "Financeiro" },
@@ -842,6 +1176,7 @@ export function HubsoftReportPage() {
       </div>
 
       {section === "clients" && <ClientsReportSection />}
+      {section === "services" && <ServicesReportSection />}
       {section === "attendance" && <AttendanceReportSection />}
       {section === "work_orders" && <WorkOrderReportSection />}
       {section === "financial" && <FinancialReportSection />}

@@ -33,6 +33,11 @@ export function HubsoftConsultPage() {
     staleTime: Infinity,
   });
 
+  // limit era 20 (teto interno arbitrário) — agora 100, o máximo real aceite pela API (ver
+  // SearchClientsQueryOverrides no backend). A API não pagina de verdade este endpoint (testado
+  // ao vivo — page/pagina + itens_por_pagina foram tentados e a API ignora, devolvendo sempre a
+  // mesma primeira página ou nada), então não há como navegar além destes 100 por consulta; o
+  // backend já avisa (result.message) quando a resposta bate exactamente nesse teto.
   const searchM = useMutation({
     mutationFn: (opts: { busca: string; termo: string }) =>
       apiFetch<ClientSearchResponse>(`/api/v1/integrations/${slug}/hubsoft/search`, {
@@ -206,6 +211,9 @@ export function HubsoftConsultPage() {
                 Resultados {result.ok ? `(${showCount}${resultFilter.trim() && showCount !== allClients.length ? ` de ${allClients.length}` : ""})` : ""}
               </span>
             </div>
+            {result.ok && allClients.length > 0 && result.message ? (
+              <p style={{ fontSize: 11, color: "var(--warn)", margin: "0 0 8px" }}>{result.message}</p>
+            ) : null}
 
             <HubsoftClientResults
               clients={allClients}

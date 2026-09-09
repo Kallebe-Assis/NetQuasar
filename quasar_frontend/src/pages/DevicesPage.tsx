@@ -853,7 +853,7 @@ export function DevicesPage() {
         throw new Error("Telemetria exige ping ativo no equipamento.");
       }
       if (isOlt && !(form.model ?? "").trim()) {
-        throw new Error("Selecione o modelo da OLT (Definições → Perfis OLT para cadastrar modelos).");
+        throw new Error("Selecione o modelo da OLT (Definições → OLT para cadastrar modelos).");
       }
       const ponErr = validatePonInterfacesForm(form);
       if (ponErr) throw new Error(ponErr);
@@ -1944,7 +1944,7 @@ export function DevicesPage() {
                       <option value="">
                         {oltModelOptions.length
                           ? "— escolher modelo —"
-                          : "Cadastre modelos em Definições → Perfis OLT"}
+                          : "Cadastre modelos em Definições → OLT"}
                       </option>
                       {oltModelOptions.map((m) => (
                         <option key={m} value={m}>
@@ -1954,7 +1954,7 @@ export function DevicesPage() {
                     </select>
                     {formIsOlt && normalizeBrand(form.brand) && oltModelOptions.length === 0 && !oltModelsCatalog.isLoading && (
                       <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                        Nenhum modelo para esta marca. Crie em <strong>Definições → Perfis OLT</strong>.
+                        Nenhum modelo para esta marca. Crie em <strong>Definições → OLT</strong>.
                       </p>
                     )}
                   </>

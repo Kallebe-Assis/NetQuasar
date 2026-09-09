@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps } from "@xyflow/react";
 import { Plus, Trash2 } from "lucide-react";
-import { STANDARD_FIBER_SEQUENCE } from "../../lib/fiberSplitter";
+import { lightFiberBorder, STANDARD_FIBER_SEQUENCE } from "../../lib/fiberSplitter";
 import {
   CABLE_TYPE_LABELS,
   EDGE_DASH_LABELS,
@@ -99,6 +99,12 @@ function FiberEdgeInner({
   const color = data?.colorHex || "#64748b";
   const label = (data?.label ?? "").trim();
   const palette = cableType === "ethernet" ? NETWORK_CABLE_COLORS : STANDARD_FIBER_SEQUENCE;
+  // Fibra Branca (e outras cores claras) sobre o fundo claro do canvas fica praticamente
+  // invisível — mesmo problema já corrigido nos diagramas de splitter/emenda (ver
+  // lightFiberBorder/lightFiberShadow em fiberSplitter.ts), mas aqui o traço é um <path> SVG,
+  // não uma barra CSS — não dá para usar box-shadow, por isso desenha-se um traço mais grosso
+  // por baixo, numa cor escura semi-transparente, como contorno.
+  const needsOutline = lightFiberBorder(data?.colorName ?? "");
 
   const points: Point[] = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
   const hasWaypoints = waypoints.length > 0;
@@ -130,7 +136,9 @@ function FiberEdgeInner({
       // ponto arrastado no ângulo (0/45/90/…) em relação a QUEM ele liga directamente, não a
       // todos os outros pontos do caminho (ver snapToNeighborAngles acima).
       const pts: Point[] = [{ x: sourceX, y: sourceY }, ...current, { x: targetX, y: targetY }];
-      const threshold = 10 / reactFlow.getZoom();
+      // 10px pedia ficar "bem bem bem próximo" do ângulo exacto para prender (reportado) — mais
+      // bruto/generoso para prender de mais longe, sem precisar de precisão cirúrgica.
+      const threshold = 26 / reactFlow.getZoom();
       const pos = snapToNeighborAngles(raw, [pts[index], pts[index + 2]], threshold);
       current = current.map((p, i) => (i === index ? pos : p));
       setLiveWaypoints(current);
@@ -159,6 +167,13 @@ function FiberEdgeInner({
 
   return (
     <>
+      {needsOutline && (
+        <BaseEdge
+          path={edgePath}
+          interactionWidth={0}
+          style={{ stroke: "rgba(15, 23, 42, .5)", strokeWidth: (selected ? 4 : 2.5) + 2.5 }}
+        />
+      )}
       <BaseEdge
         id={id}
         path={edgePath}

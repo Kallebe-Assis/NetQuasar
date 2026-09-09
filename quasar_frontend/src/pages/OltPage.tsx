@@ -628,7 +628,7 @@ export function OltPage() {
           : summaryObj?.vsol_walk_note
             ? String(summaryObj.vsol_walk_note)
             : summaryObj?.onu_metrics_missing
-              ? "Nenhuma MIB SNMP configurada para monitoramento deste modelo. Configure em Definições → Perfis OLT."
+              ? "Nenhuma MIB SNMP configurada para monitoramento deste modelo. Configure em Definições → OLT."
               : "";
     if (base) parts.unshift(base);
     return parts.length > 0 ? parts.join(" · ") : undefined;
@@ -767,7 +767,7 @@ export function OltPage() {
             <InfoHint label="Sobre dados OLT e PON">
               <p>
                 Equipamentos OLT. Os dados de PON e ONU vêm do perfil SNMP configurado em{" "}
-                <strong>Definições → Perfis OLT</strong> (serial, estado, RX, TX, temperatura, modelo). Clique numa linha para ver detalhes.
+                <strong>Definições → OLT</strong> (serial, estado, RX, TX, temperatura, modelo). Clique numa linha para ver detalhes.
               </p>
             </InfoHint>
           </h1>

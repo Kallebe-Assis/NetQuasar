@@ -75,7 +75,10 @@
   clip-path: polygon(0 0, 94% 0, 100% 14px, 100% calc(100% - 14px), 94% 100%, 0 100%);
   padding: 8px 20px 8px 10px;
   min-width: 150px;
-  background: linear-gradient(160deg, color-mix(in srgb, #ea580c 20%, var(--panel)), var(--panel) 70%);
+  /* Esvaía para var(--panel) (branco puro no tema claro) — sobre o fundo do canvas, quase tão
+     claro, o cartão ficava quase invisível (reportado, mesmo problema da fibra branca). Esvai
+     para --panel2 (cinza claro já usado no resto da app para esta finalidade) em vez de --panel. */
+  background: linear-gradient(160deg, color-mix(in srgb, #ea580c 20%, var(--panel)), var(--panel2) 70%);
   box-shadow: 0 0 0 1px color-mix(in srgb, #ea580c 45%, transparent), 0 2px 8px rgba(234, 88, 12, 0.18);
 }
 .rack-node__exit-icon {

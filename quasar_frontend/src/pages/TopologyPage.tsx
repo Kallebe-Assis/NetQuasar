@@ -832,7 +832,15 @@ function TopologyCanvas() {
             onDragOver={canMutate ? (e) => e.preventDefault() : undefined}
             nodesDraggable={canMutate && !locked}
             nodesConnectable={canMutate && !locked}
-            elementsSelectable={!canMutate || !locked}
+            // Sempre selecionável (não é destrutivo, só estado visual — quem trava/liga
+            // continua gated em nodesDraggable/nodesConnectable acima). Importante: o
+            // React Flow põe pointer-events:none no wrapper INTEIRO do nó quando nem
+            // selecionável nem arrastável (ver hasPointerEvents em NodeWrapper na lib) —
+            // com cadeado trancado isso bloqueava até cliques em coisas dentro do nó que
+            // nada têm a ver com editar o mapa, como a seta "abrir topologia do POP" em
+            // GroupNode.tsx (bug real reportado: cadeado trancado impedia navegar para a
+            // topologia do POP a partir do agrupador).
+            elementsSelectable={true}
             deleteKeyCode={canMutate ? ["Backspace", "Delete"] : null}
             connectionMode={ConnectionMode.Loose}
             elevateNodesOnSelect={false}

@@ -618,9 +618,11 @@ func mustAtoiHHMM(s string) int {
 func (s *Server) getMonitoringSettings(w http.ResponseWriter, r *http.Request) {
 	var vps, timeout int
 	var raw []byte
+	var rxGood, rxBad float64
 	err := s.DB().QueryRow(r.Context(), `
-		SELECT vps_latency_offset_ms, internet_check_targets, internet_check_timeout_ms FROM monitoring_settings WHERE id=1
-	`).Scan(&vps, &raw, &timeout)
+		SELECT vps_latency_offset_ms, internet_check_targets, internet_check_timeout_ms, onu_rx_good_dbm, onu_rx_bad_dbm
+		FROM monitoring_settings WHERE id=1
+	`).Scan(&vps, &raw, &timeout, &rxGood, &rxBad)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -629,6 +631,8 @@ func (s *Server) getMonitoringSettings(w http.ResponseWriter, r *http.Request) {
 		"vps_latency_offset_ms":     vps,
 		"internet_check_targets":    json.RawMessage(raw),
 		"internet_check_timeout_ms": timeout,
+		"onu_rx_good_dbm":           rxGood,
+		"onu_rx_bad_dbm":            rxBad,
 	})
 }
 
@@ -641,7 +645,8 @@ func (s *Server) patchMonitoringSettings(w http.ResponseWriter, r *http.Request)
 	// leitura atual
 	var vps, timeout int
 	var targets []byte
-	if err := s.DB().QueryRow(r.Context(), `SELECT vps_latency_offset_ms, internet_check_targets, internet_check_timeout_ms FROM monitoring_settings WHERE id=1`).Scan(&vps, &targets, &timeout); err != nil {
+	var rxGood, rxBad float64
+	if err := s.DB().QueryRow(r.Context(), `SELECT vps_latency_offset_ms, internet_check_targets, internet_check_timeout_ms, onu_rx_good_dbm, onu_rx_bad_dbm FROM monitoring_settings WHERE id=1`).Scan(&vps, &targets, &timeout, &rxGood, &rxBad); err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
@@ -672,20 +677,43 @@ func (s *Server) patchMonitoringSettings(w http.ResponseWriter, r *http.Request)
 		}
 		timeout = n
 	}
+	if v, ok := body["onu_rx_good_dbm"]; ok {
+		var n float64
+		if err := json.Unmarshal(v, &n); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_FIELD", "onu_rx_good_dbm", nil)
+			return
+		}
+		rxGood = n
+	}
+	if v, ok := body["onu_rx_bad_dbm"]; ok {
+		var n float64
+		if err := json.Unmarshal(v, &n); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_FIELD", "onu_rx_bad_dbm", nil)
+			return
+		}
+		rxBad = n
+	}
+	if rxGood <= rxBad {
+		writeErr(w, 422, "VALIDATION", "onu_rx_good_dbm precisa ser maior que onu_rx_bad_dbm", nil)
+		return
+	}
 	_, err := s.DB().Exec(r.Context(), `
 		UPDATE monitoring_settings SET
 			vps_latency_offset_ms = $1,
 			internet_check_targets = $2::jsonb,
 			internet_check_timeout_ms = $3,
+			onu_rx_good_dbm = $4,
+			onu_rx_bad_dbm = $5,
 			updated_at = now()
 		WHERE id = 1
-	`, vps, targets, timeout)
+	`, vps, targets, timeout, rxGood, rxBad)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	s.appendAuditLog(r.Context(), "monitoring_settings", "1", "patch", s.actorFromRequest(r), nil, map[string]any{
 		"vps_latency_offset_ms": vps, "internet_check_timeout_ms": timeout,
+		"onu_rx_good_dbm": rxGood, "onu_rx_bad_dbm": rxBad,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

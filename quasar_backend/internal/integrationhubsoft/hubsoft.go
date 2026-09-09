@@ -88,13 +88,29 @@ func SearchClientsQueryOverrides(detailed bool) map[string]string {
 			"incluir_alarmes": "sim", "incluir_contrato": "sim", "incluir_stfc": "sim",
 			"incluir_mvno": "sim", "incluir_anexos": "sim", "incluir_desbloqueios": "sim",
 			"order_by": "data_cadastro", "order_type": "desc",
+			// Sem isto, sm["endereco_instalacao"] nunca vem no payload deste endpoint e
+			// mapServices() deixa InstallAddress/City/coordenadas sempre vazios — reportado
+			// como "falta o endereço no cadastro do cliente" (o cartão do cliente deriva
+			// Address do primeiro serviço, ver mapClientItem). Mesmo parâmetro que já
+			// funciona em /cliente/todos (reportFromClientsTodos).
+			"relacoes": "endereco_instalacao",
 		}
 	}
 	return map[string]string{
-		"inativo": "todos", "limit": "20", "cancelado": "nao", "ultima_conexao": "sim",
+		// 100 é o máximo aceite pela API (acima disso ela rejeita — "O limite máximo de
+		// resultados é de 100 itens", já confirmado noutro ponto deste ficheiro/
+		// SearchByIPOrMAC). Era 20 — um teto interno arbitrário, bem abaixo do que a própria API
+		// permite. NÃO é paginação real: testado ao vivo (page/pagina, com e sem
+		// itens_por_pagina emparelhado) — a API ignora esses parâmetros neste endpoint e devolve
+		// sempre a mesma primeira página (ou nada, sem "itens_por_pagina"); nunca avança. Não há
+		// como listar além destes 100 por consulta — só refinando o termo.
+		"inativo": "todos", "limit": "100", "cancelado": "nao", "ultima_conexao": "sim",
 		"incluir_alarmes": "nao", "incluir_contrato": "sim", "incluir_stfc": "nao",
 		"incluir_mvno": "nao", "incluir_anexos": "nao", "incluir_desbloqueios": "nao",
 		"order_by": "data_cadastro", "order_type": "desc",
+		// Ver comentário equivalente no ramo "detailed" acima — falta isto que deixava o
+		// endereço sempre vazio no cartão do cliente.
+		"relacoes": "endereco_instalacao",
 	}
 }
 
@@ -1368,6 +1384,118 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 		}
 	}
 	return ReportListResult{OK: true, Rows: rows, TotalScanned: total, Truncated: total > len(items)}, nil
+}
+
+// --- Relatório: serviços por status/localidade/plano (aba Relatório → Serviços) ----------------
+
+// ServiceLocalityBreakdown repartição por status, por plano e por bairro DENTRO de uma
+// localidade (cidade + estado do endereço de instalação do serviço) — ver BuildServicesReport.
+// ByNeighborhood é deliberadamente só totais (nome do bairro + contagem), sem repetir a
+// repartição por status/plano dentro de cada bairro — pedido explícito do utilizador para não
+// inchar ainda mais o modal/mensagem (já cheio com Status+Plano da própria localidade).
+type ServiceLocalityBreakdown struct {
+	City           string       `json:"city"`
+	State          string       `json:"state,omitempty"`
+	Total          int          `json:"total"`
+	ByStatus       []NamedCount `json:"by_status"`
+	ByPlan         []NamedCount `json:"by_plan"`
+	ByNeighborhood []NamedCount `json:"by_neighborhood"`
+}
+
+type ServicesReport struct {
+	OK         bool                       `json:"ok"`
+	Message    string                     `json:"message,omitempty"`
+	Total      int                        `json:"total"`
+	ByStatus   []NamedCount               `json:"by_status"`
+	ByPlan     []NamedCount               `json:"by_plan"`
+	ByLocality []ServiceLocalityBreakdown `json:"by_locality"`
+	Truncated  bool                       `json:"truncated,omitempty"`
+}
+
+// BuildServicesReport varre TODOS os clientes/serviços (não uma amostra — /cliente/todos pagina
+// de verdade, ver fetchAllPages) e calcula quantos serviços existem, quantos em cada status,
+// quantos em cada plano, e a mesma repartição (status + plano) dentro de cada localidade —
+// pedido explícito do utilizador ("quantos são, quantos estão em cada status, separados por
+// localidade, divididos em quais planos"). Ao contrário do Dashboard (BuildDashboard, que varre
+// por AMOSTRA de nome_razaosocial e rotula os números como "amostra"), aqui os números são reais:
+// /cliente/todos pagina a base inteira, é o mesmo endpoint/mecanismo já usado pelo relatório de
+// Clientes (reportFromClientsTodos) e pelos relatórios de Atendimentos/O.S./Financeiro por
+// período. Não tem período — é uma fotografia do estado actual da base, não um histórico.
+func BuildServicesReport(ctx context.Context, cfg Config, token string) ServicesReport {
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/cliente/todos",
+		map[string]string{"relacoes": "endereco_instalacao"}, maxReportPages, "clientes")
+	if err != nil {
+		return ServicesReport{OK: false, Message: "Falha ao coletar clientes/serviços: " + err.Error()}
+	}
+
+	type localityAgg struct {
+		city, state  string
+		total        int
+		status       map[string]int
+		plan         map[string]int
+		neighborhood map[string]int
+	}
+	localities := map[string]*localityAgg{}
+	statusCount := map[string]int{}
+	planCount := map[string]int{}
+	serviceTotal := 0
+
+	for _, m := range items {
+		svcArr, _ := m["servicos"].([]any)
+		for _, sit := range svcArr {
+			sm, ok := sit.(map[string]any)
+			if !ok {
+				continue
+			}
+			serviceTotal++
+			status := firstNonEmpty(pickStr(sm, "status"), "Sem status")
+			plan := firstNonEmpty(pickStr(sm, "nome"), "Sem plano")
+			statusCount[status]++
+			planCount[plan]++
+
+			city, state, neighborhood := "Sem cidade", "", "Sem bairro"
+			if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {
+				city = firstNonEmpty(pickStr(addr, "cidade"), "Sem cidade")
+				state = pickStr(addr, "estado")
+				neighborhood = firstNonEmpty(pickStr(addr, "bairro"), "Sem bairro")
+			}
+			key := strings.ToUpper(city) + "|" + strings.ToUpper(state)
+			loc := localities[key]
+			if loc == nil {
+				loc = &localityAgg{city: city, state: state, status: map[string]int{}, plan: map[string]int{}, neighborhood: map[string]int{}}
+				localities[key] = loc
+			}
+			loc.total++
+			loc.status[status]++
+			loc.plan[plan]++
+			loc.neighborhood[neighborhood]++
+		}
+	}
+
+	byLocality := make([]ServiceLocalityBreakdown, 0, len(localities))
+	for _, loc := range localities {
+		byLocality = append(byLocality, ServiceLocalityBreakdown{
+			City: loc.city, State: loc.state, Total: loc.total,
+			ByStatus:       topNamedCounts(loc.status, nil, 50),
+			ByPlan:         topNamedCounts(loc.plan, nil, 50),
+			ByNeighborhood: topNamedCounts(loc.neighborhood, nil, 100),
+		})
+	}
+	sort.Slice(byLocality, func(i, j int) bool {
+		if byLocality[i].Total != byLocality[j].Total {
+			return byLocality[i].Total > byLocality[j].Total
+		}
+		return byLocality[i].City < byLocality[j].City
+	})
+
+	return ServicesReport{
+		OK:         true,
+		Total:      serviceTotal,
+		ByStatus:   topNamedCounts(statusCount, nil, 50),
+		ByPlan:     topNamedCounts(planCount, nil, 50),
+		ByLocality: byLocality,
+		Truncated:  total > len(items),
+	}
 }
 
 // --- Relatório: atendimentos por período (aba Relatório → Atendimentos) ------------------------

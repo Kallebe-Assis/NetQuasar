@@ -464,6 +464,26 @@ export type HubsoftAttendanceReportResponse = {
   truncated?: boolean;
 };
 
+export type HubsoftServiceLocalityBreakdown = {
+  city: string;
+  state?: string;
+  total: number;
+  by_status: NamedCount[];
+  by_plan: NamedCount[];
+  /** Só totais (nome do bairro + contagem) — sem repetir status/plano por bairro, de propósito. */
+  by_neighborhood: NamedCount[];
+};
+
+export type HubsoftServicesReportResponse = {
+  ok: boolean;
+  message?: string;
+  total: number;
+  by_status: NamedCount[];
+  by_plan: NamedCount[];
+  by_locality: HubsoftServiceLocalityBreakdown[];
+  truncated?: boolean;
+};
+
 export type HubsoftTechnicianStat = {
   technician: string;
   total: number;

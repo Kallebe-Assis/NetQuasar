@@ -57,7 +57,7 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   appearance: "Aparência",
   connection: "Rede e SNMP",
   telegram: "Telegram",
-  olt: "Perfis OLT",
+  olt: "OLT",
   mikrotik: "MikroTik",
   switch: "Switch",
   bng: "BNG",
