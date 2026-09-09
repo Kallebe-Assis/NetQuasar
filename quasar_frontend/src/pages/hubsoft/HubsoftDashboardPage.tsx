@@ -156,6 +156,11 @@ function SupportDashboard({ d }: { d: RecentActivityResponse }) {
       <div className="report-chart-grid" style={{ marginTop: 16 }}>
         <CategoryBarChart title="Atendimentos por status (amostra)" data={d.attendance_status_breakdown} unit="Atendimentos" />
         <CategoryBarChart title="Ordens de serviço por status (amostra)" data={d.work_order_status_breakdown} unit="Ordens" />
+        <CategoryBarChart
+          title="O.S. fechadas por técnico (últimas exibidas)"
+          data={d.work_order_technician_breakdown}
+          unit="Ordens"
+        />
       </div>
     </>
   );

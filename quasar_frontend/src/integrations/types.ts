@@ -192,6 +192,9 @@ export type WorkOrderItem = {
   description?: string;
   scheduled_at?: string;
   created_at?: string;
+  /** Técnico/utilizador Hubsoft que fez o FECHAMENTO da O.S. (campo "usuario_fechamento" da
+   * API) — vazio enquanto a O.S. não é fechada. */
+  closed_by_user?: string;
   attendance_protocol?: string;
   raw?: Record<string, unknown>;
   /** Só preenchido pela varredura "recentes de todos os clientes" (aba Ordens de serviço). */
@@ -209,6 +212,9 @@ export type RecentActivityResponse = {
   total_work_orders_found: number;
   attendance_status_breakdown: NamedCount[];
   work_order_status_breakdown: NamedCount[];
+  /** O.S. fechadas por técnico/responsável (usuario_fechamento) — só entre as O.S. de
+   * `work_orders` (as mais recentes exibidas), não o período inteiro. */
+  work_order_technician_breakdown: NamedCount[];
 };
 
 export type ClientDebt = {

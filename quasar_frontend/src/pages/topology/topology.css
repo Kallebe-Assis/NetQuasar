@@ -204,6 +204,16 @@
   gap: 4px;
   min-width: 170px;
 }
+.topo-group-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
 .topo-device-label {
   display: flex;
   flex-direction: column;

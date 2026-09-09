@@ -888,6 +888,7 @@ export function WorkOrdersTabContent({
                 <th>Estado O.S.</th>
                 <th>Plano / serviço</th>
                 <th>Tipo de O.S.</th>
+                <th>Fechada por</th>
                 <th>Cadastro</th>
                 <th>Agendamento</th>
                 <th className="integration-support-table__col-actions" />
@@ -914,6 +915,7 @@ export function WorkOrdersTabContent({
                     {o.value ? <div className="integration-os-plan__meta">Valor: {o.value}</div> : null}
                   </td>
                   <td className="integration-support-table__cell">{o.type || "—"}</td>
+                  <td className="integration-support-table__cell">{o.closed_by_user || "—"}</td>
                   <td className="integration-support-table__cell integration-support-table__cell--date">
                     {formatIntegrationDateTime(o.created_at) || "—"}
                   </td>

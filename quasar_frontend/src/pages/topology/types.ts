@@ -24,6 +24,11 @@ export type GroupNodeData = {
   shape: "rect" | "circle";
   label: string;
   color?: string;
+  /** Vincula este agrupador "POP" a um POP real (GET /api/v1/pops) — quando definido, mostra um
+   * botão para abrir a Topologia 2D desse POP específico (PopRackTopologyPage.tsx). Cada
+   * equipamento já pertence a um POP via devices.pop_id; isto só liga o AGRUPADOR VISUAL ao
+   * mesmo POP para navegar de uma topologia para a outra. */
+  popId?: string | null;
   onRemove?: (id: string) => void;
 } & Record<string, unknown>;
 
@@ -105,6 +110,8 @@ export type TopologyDocument = {
     height: number;
     label: string;
     color?: string;
+    /** POP real vinculado a este agrupador — ver GroupNodeData.popId. */
+    pop_id?: string | null;
   }>;
   settings?: {
     // Cor personalizada por tipo de conexão (Configurações → Cores) — chave ausente/tipo ausente

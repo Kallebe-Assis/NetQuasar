@@ -186,10 +186,15 @@ export function BngOverviewPanel(props: Props) {
       </div>
 
       <div className="mk-noc-kpi-row" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-        <KpiCard icon={Cpu} title="CPU">
+        {/* "(placa)" — hwEntityCpuUsage/hwEntityMemUsage medem a placa/entidade física do
+            equipamento, não o slot de VS específico. Num router Huawei com Virtual System, a
+            placa tem memória total maior que a de uma VS isolada — por isso este % (ex.: 49%)
+            não bate com o "usado/total" da VS mostrado em BGP → CPU & Memória (ex.: 1/9 GB):
+            são dois recursos diferentes, não um erro de cálculo. */}
+        <KpiCard icon={Cpu} title="CPU (placa)">
           <RingGauge pct={cpuPct} label="CPU" color="var(--mk-cpu)" />
         </KpiCard>
-        <KpiCard icon={MemoryStick} title="Memória">
+        <KpiCard icon={MemoryStick} title="Memória (placa)">
           <RingGauge pct={memPct} label="RAM" color="var(--accent)" />
         </KpiCard>
         <KpiCard icon={Thermometer} title="Temperatura">

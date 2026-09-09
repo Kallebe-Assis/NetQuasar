@@ -100,7 +100,7 @@ function docToFlow(doc: TopologyDocument, devices: Map<string, TopologyDevice>) 
     width: g.width,
     height: g.height,
     zIndex: -1, // POP sempre no plano de trás — nunca sobrepõe equipamentos nem a barra de uma ligação seleccionada.
-    data: { shape: g.shape, label: g.label, color: g.color } satisfies GroupNodeData,
+    data: { shape: g.shape, label: g.label, color: g.color, popId: g.pop_id ?? null } satisfies GroupNodeData,
   }));
   // Grupos primeiro no array (parent antes do filho — exigência do React Flow para z-index/render).
   const orderedNodes = [...groupNodes, ...nodes];
@@ -130,6 +130,7 @@ function flowToDoc(nodes: Node[], edges: Edge[]): TopologyDocument {
         height: (n.height as number) ?? DEFAULT_GROUP_SIZE.height,
         label: data.label,
         color: data.color,
+        pop_id: data.popId ?? undefined,
       });
       continue;
     }

@@ -764,6 +764,10 @@ type RecentActivityResult struct {
 	TotalWorkOrdersFound      int              `json:"total_work_orders_found"`
 	AttendanceStatusBreakdown []NamedCount     `json:"attendance_status_breakdown"`
 	WorkOrderStatusBreakdown  []NamedCount     `json:"work_order_status_breakdown"`
+	// WorkOrderTechnicianBreakdown conta, só entre as O.S. de WorkOrders (os `limitEach` itens
+	// mais recentes, não o período inteiro — ver enrichWorkOrderClosers), quantas cada técnico
+	// fechou (campo "usuario_fechamento"); pendentes/agendadas não entram (ainda sem fechamento).
+	WorkOrderTechnicianBreakdown []NamedCount `json:"work_order_technician_breakdown"`
 }
 
 // BuildRecentActivity varre uma amostra rápida de clientes e, para cada um (em paralelo),
@@ -1761,6 +1765,39 @@ func enrichAttendanceDescriptions(ctx context.Context, cfg Config, token string,
 	wg.Wait()
 }
 
+// enrichWorkOrderClosers preenche WorkOrderItem.ClosedByUser (técnico/responsável que fechou a
+// O.S. — campo "usuario_fechamento") — /ordem_servico/todos não traz este campo (confirmado ao
+// vivo), só o detalhe de UMA O.S. (/cliente/ordem_servico?busca=numero_ordem_servico, o mesmo
+// usado pelo "Ver mais", ver FetchWorkOrderDetail). Só é chamado com a lista JÁ truncada aos
+// itens finais mostrados na tela — mesmo padrão/custo de enrichAttendanceDescriptions acima (só
+// não busca em O.S. sem status de fechamento/pendentes, que nunca têm usuario_fechamento).
+func enrichWorkOrderClosers(ctx context.Context, cfg Config, token string, items []WorkOrderItem) {
+	sem := make(chan struct{}, enrichDescriptionConcurrency)
+	var wg sync.WaitGroup
+	for i := range items {
+		numero := items[i].Number
+		if numero == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, numero string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			detail, err := FetchWorkOrderDetail(ctx, cfg, token, numero)
+			if err != nil || !detail.OK {
+				return
+			}
+			items[i].ClosedByUser = detail.ClosedByUser
+		}(i, numero)
+	}
+	wg.Wait()
+}
+
 // BuildRecentActivityFast últimos 30 dias de atendimentos + O.S., devolve os `limitEach` mais
 // recentes de cada mais as repartições por status — mesma forma de resposta de
 // BuildRecentActivity (RecentActivityResult), só a fonte dos dados muda.
@@ -1819,7 +1856,12 @@ func BuildRecentActivityFast(ctx context.Context, cfg Config, token string, limi
 			Description: firstNonEmpty(pickStr(m, "descricao_abertura"), pickStr(m, "descricao_servico")),
 			// "servico" vem como texto "(numero_plano) NOME DO PLANO" — confirmado na doc/amostra
 			// da API, DIFERENTE de descricao_servico (texto livre, não é o nome do plano).
-			PlanName:    pickStr(m, "servico"),
+			PlanName: pickStr(m, "servico"),
+			// "usuario_fechamento" NÃO vem no /ordem_servico/todos (confirmado ao vivo: 210 O.S.
+			// finalizadas na amostra, nenhuma com este campo) — só no detalhe de UMA O.S. (GET
+			// /cliente/ordem_servico?busca=numero_ordem_servico, ver FetchWorkOrderDetail). Por
+			// isso fica vazio aqui e é preenchido depois, só para os `limitEach` itens finais, por
+			// enrichWorkOrderClosers — mesma técnica de enrichAttendanceDescriptions acima.
 			ScheduledAt: pickStr(m, "data_inicio_programado"),
 			CreatedAt:   pickStr(m, "data_cadastro"),
 			ClientName:  pickStr(m, "cliente"), // já vem como texto "(código) NOME" neste endpoint
@@ -1839,13 +1881,26 @@ func BuildRecentActivityFast(ctx context.Context, cfg Config, token string, limi
 		workOrders = workOrders[:limitEach]
 	}
 	enrichAttendanceDescriptions(ctx, cfg, token, attendance)
+	enrichWorkOrderClosers(ctx, cfg, token, workOrders)
+
+	// Só dá para contar por técnico depois de enriquecido (usuario_fechamento não vem no
+	// /todos — ver comentário em enrichWorkOrderClosers), e só sobre os `limitEach` itens
+	// enriquecidos, não as até 224/2000 O.S. varridas — ao contrário de WorkOrderStatusBreakdown
+	// (esse sim cobre o período inteiro, o campo "status" já vem certo no /todos).
+	woTechnicianCount := map[string]int{}
+	for _, wo := range workOrders {
+		if wo.ClosedByUser != "" {
+			woTechnicianCount[wo.ClosedByUser]++
+		}
+	}
 
 	return RecentActivityResult{
 		OK: true, SampleClients: 0, // já não é amostra por cliente — cobre todos os registos do período (últimos 30 dias)
 		Attendance: attendance, WorkOrders: workOrders,
 		TotalAttendanceFound: attTotal, TotalWorkOrdersFound: woTotal,
-		AttendanceStatusBreakdown: topNamedCounts(attStatusCount, nil, 8),
-		WorkOrderStatusBreakdown:  topNamedCounts(woStatusCount, nil, 8),
+		AttendanceStatusBreakdown:    topNamedCounts(attStatusCount, nil, 8),
+		WorkOrderStatusBreakdown:     topNamedCounts(woStatusCount, nil, 8),
+		WorkOrderTechnicianBreakdown: topNamedCounts(woTechnicianCount, nil, 8),
 	}
 }
 
@@ -2240,6 +2295,11 @@ type WorkOrderItem struct {
 	PlanName    string `json:"plan_name,omitempty"`
 	ScheduledAt string `json:"scheduled_at,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
+	// ClosedByUser é o utilizador/técnico Hubsoft que fez o fechamento da O.S. (campo
+	// "usuario_fechamento" — ver comentário completo em WorkOrderDetail.ClosedByUser, que já
+	// usava este mesmo campo, só que apenas no detalhe de UMA O.S.; aqui passa a vir também na
+	// listagem, sem precisar abrir "Ver mais" O.S. a O.S. para saber quem fechou cada uma).
+	ClosedByUser string `json:"closed_by_user,omitempty"`
 	// Ver comentário equivalente em AttendanceItem.
 	ClientName string `json:"client_name,omitempty"`
 	ClientCode string `json:"client_code,omitempty"`

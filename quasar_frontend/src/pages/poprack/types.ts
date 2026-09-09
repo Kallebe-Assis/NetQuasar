@@ -1,9 +1,13 @@
 import type { Edge, Node } from "@xyflow/react";
-import { CircleDot, CircleDotDashed, EthernetPort, type LucideIcon } from "lucide-react";
+import { CircleDot, CircleDotDashed, EthernetPort, Link2, MapPin, Signpost, Waves, type LucideIcon } from "lucide-react";
 
 /** Tipo de caixa/rack no diagrama 2D do POP — cada um vira um rectângulo com uma porta por
- * interface (ver RackNode.tsx). "manual" é qualquer coisa sem cadastro (ex.: DIO, patch panel). */
-export type RackNodeKind = "olt" | "mikrotik" | "switch" | "dio" | "manual";
+ * interface (ver RackNode.tsx). "manual" é qualquer coisa sem cadastro (ex.: DIO, patch panel).
+ * "saida" é o marcador de "sai do POP" — liga-se a uma porta PON (ou qualquer outra) para indicar
+ * que aquela fibra, com aquela cor (ver FiberEdge.tsx), segue para fora do POP rumo à
+ * distribuição/cliente; não representa um equipamento real, só o ponto onde o diagrama "corta"
+ * a fibra que continua lá fora. Por isso é menor e visualmente diferente das outras caixas. */
+export type RackNodeKind = "olt" | "mikrotik" | "switch" | "dio" | "manual" | "saida";
 
 export const RACK_KIND_LABELS: Record<RackNodeKind, string> = {
   olt: "OLT",
@@ -11,6 +15,28 @@ export const RACK_KIND_LABELS: Record<RackNodeKind, string> = {
   switch: "Switch",
   dio: "DIO",
   manual: "Caixa",
+  saida: "Saída",
+};
+
+/** Sub-tipo de uma caixa "Saída" — o QUE aquela fibra que sai do POP representa. Escolhido
+ * directamente no nó (RackNode.tsx), não no modal de adicionar. "localidade" ganha um segundo
+ * selector para vincular a uma localidade cadastrada de verdade (GET /api/v1/commercial/localities). */
+export type RackExitKind = "distribuicao" | "transporte" | "link" | "localidade";
+
+export const RACK_EXIT_KIND_LABELS: Record<RackExitKind, string> = {
+  distribuicao: "Distribuição / cliente",
+  transporte: "Transporte",
+  link: "Link",
+  localidade: "Localidade",
+};
+
+// Waves para "transporte" — mesmo ícone já usado no tipo de conexão "transporte" da Topologia
+// geral (ConnectionEdge.tsx), pra manter a mesma linguagem visual entre as duas telas.
+export const RACK_EXIT_KIND_ICONS: Record<RackExitKind, LucideIcon> = {
+  distribuicao: Signpost,
+  transporte: Waves,
+  link: Link2,
+  localidade: MapPin,
 };
 
 /** Tipo de interface de uma porta — tudo opcional (o utilizador pode deixar em branco). */
@@ -44,6 +70,10 @@ export type RackNodeData = {
    * não é usado para puxar dados ao vivo (o diagrama é um documento livre, como a Topologia). */
   deviceId?: string | null;
   ports: RackPort[];
+  /** Só kind="saida" — ver RackExitKind. Ausente = "distribuicao" (o comportamento original). */
+  exitKind?: RackExitKind | null;
+  /** Só kind="saida" e exitKind="localidade" — vínculo real a commercial_localities. */
+  localityId?: string | null;
   // Injectados por PopRackTopologyPage.tsx — mesmo padrão controlado de pages/topology/types.ts
   // (onPatch/onRemove via data, nunca useReactFlow().setNodes directamente).
   onPatch?: (id: string, patch: Partial<RackNodeData>) => void;
@@ -77,6 +107,8 @@ export type PopRackDocument = {
     label: string;
     device_id?: string | null;
     ports: RackPort[];
+    exit_kind?: RackExitKind | null;
+    locality_id?: string | null;
   }>;
   edges: Array<{
     id: string;

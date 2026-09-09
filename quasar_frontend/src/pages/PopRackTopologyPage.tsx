@@ -66,7 +66,14 @@ function docToFlow(doc: PopRackDocument): { nodes: Node[]; edges: Edge[] } {
     id: n.id,
     type: "rack",
     position: { x: n.x, y: n.y },
-    data: { kind: n.kind, label: n.label, deviceId: n.device_id ?? null, ports: n.ports } satisfies RackNodeData,
+    data: {
+      kind: n.kind,
+      label: n.label,
+      deviceId: n.device_id ?? null,
+      ports: n.ports,
+      exitKind: n.exit_kind ?? null,
+      localityId: n.locality_id ?? null,
+    } satisfies RackNodeData,
   }));
   const edges: Edge[] = doc.edges.map((e) => ({
     id: e.id,
@@ -92,6 +99,8 @@ function flowToDoc(nodes: Node[], edges: Edge[]): PopRackDocument {
       label: data.label,
       device_id: data.deviceId ?? undefined,
       ports: data.ports,
+      exit_kind: data.exitKind ?? undefined,
+      locality_id: data.localityId ?? undefined,
     });
   }
   for (const e of edges) {
@@ -272,7 +281,7 @@ function PopRackCanvas({ popId }: { popId: string }) {
   function openAddModal(kind: RackNodeKind) {
     addCounterRef.current += 1;
     setAddLabel(`${RACK_KIND_LABELS[kind]} ${addCounterRef.current}`);
-    setAddPorts(kind === "olt" ? "16" : kind === "dio" ? "12" : "8");
+    setAddPorts(kind === "olt" ? "16" : kind === "dio" ? "12" : kind === "saida" ? "1" : "8");
     setAddDeviceId("");
     setAddModal(kind);
   }
@@ -359,6 +368,14 @@ function PopRackCanvas({ popId }: { popId: string }) {
               <button type="button" className="btn btn--sm" onClick={() => openAddModal("manual")}>
                 <Plus size={13} style={{ verticalAlign: -2 }} /> Caixa
               </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                title="Marca onde uma fibra sai do POP rumo à distribuição/cliente"
+                onClick={() => openAddModal("saida")}
+              >
+                <Plus size={13} style={{ verticalAlign: -2 }} /> Saída
+              </button>
             </>
           )}
           {dirty ? <span style={{ color: "var(--warn, #d29922)" }}>Alterações não salvas</span> : null}
@@ -403,6 +420,13 @@ function PopRackCanvas({ popId }: { popId: string }) {
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setAddModal(null)}>
           <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 360 }} onMouseDown={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Adicionar {RACK_KIND_LABELS[addModal]}</h3>
+            {addModal === "saida" ? (
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px" }}>
+                Não é um equipamento — é só o ponto onde a fibra sai do POP. Depois de adicionar,
+                escolha o tipo (Distribuição/cliente, Transporte, Link ou Localidade) direto na
+                caixinha, ligue uma porta PON (ou outra) a ela, e escolha a cor da fibra na ligação.
+              </p>
+            ) : null}
             {deviceOptionsForKind.length > 0 ? (
               <div className="field">
                 <label>Equipamento cadastrado (opcional)</label>

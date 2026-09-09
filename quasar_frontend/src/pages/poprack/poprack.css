@@ -42,6 +42,33 @@
 .rack-node--manual {
   border-top: 3px solid #64748b;
 }
+/* "Saída" — não é um equipamento real, é o ponto onde a fibra sai do POP rumo à
+   distribuição/cliente (ver types.ts). Contorno tracejado + laranja para não confundir com uma
+   caixa de verdade à primeira vista. */
+.rack-node--saida {
+  border-style: dashed;
+  border-top: 3px dashed #ea580c;
+  min-width: 132px;
+  background: color-mix(in srgb, #ea580c 6%, var(--panel));
+}
+.rack-node__exit-icon {
+  color: #ea580c;
+  flex-shrink: 0;
+}
+.rack-node__exit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rack-node__exit-select {
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  max-width: 100%;
+}
 
 .rack-node__header {
   display: flex;

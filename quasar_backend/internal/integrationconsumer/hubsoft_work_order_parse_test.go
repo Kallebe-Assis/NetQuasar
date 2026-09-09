@@ -65,3 +65,44 @@ func TestParseHubsoftClientWorkOrder_nested_servico(t *testing.T) {
 func stringsContainsMap(s string) bool {
 	return len(s) >= 4 && s[:4] == "map["
 }
+
+// Campos confirmados em docs/source/clientes/ordem_servico.rst (github.com/hubsoftbrasil/api):
+// "tipo" e "usuario_fechamento" — este último é o técnico/responsável que fechou a O.S., null/
+// vazio enquanto ela não é fechada.
+func TestParseHubsoftClientWorkOrder_closedByUserAndType(t *testing.T) {
+	raw := []byte(`{
+		"status":"success",
+		"ordens_servico":[
+			{
+				"id_ordem_servico":102,
+				"numero_ordem_servico":"96",
+				"tipo":"INSTALAÇÃO",
+				"status":"finalizado",
+				"usuario_abertura":"Master",
+				"usuario_fechamento":"Master",
+				"status_fechamento":"concluido",
+				"data_cadastro":"19/05/2018 10:17:03"
+			},
+			{
+				"id_ordem_servico":78,
+				"numero_ordem_servico":"74",
+				"tipo":"SUPORTE",
+				"status":"aguardando_agendamento",
+				"usuario_abertura":"Master",
+				"usuario_fechamento":null,
+				"data_cadastro":"12/04/2018 15:26:28"
+			}
+		]
+	}`)
+	r := ParseHubsoftClientWorkOrder(raw)
+	if !r.OK || len(r.Items) != 2 {
+		t.Fatalf("ok=%v items=%d msg=%s", r.OK, len(r.Items), r.Message)
+	}
+	closed, pending := r.Items[0], r.Items[1]
+	if closed.Type != "INSTALAÇÃO" || closed.ClosedByUser != "Master" {
+		t.Fatalf("closed item=%+v", closed)
+	}
+	if pending.Type != "SUPORTE" || pending.ClosedByUser != "" {
+		t.Fatalf("pending item=%+v", pending)
+	}
+}

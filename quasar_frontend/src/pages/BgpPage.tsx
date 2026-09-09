@@ -70,9 +70,12 @@ function peerStateBadge(label?: string) {
   );
 }
 
+// "(placa)" — hwEntityCpuUsage/hwEntityMemUsage medem a placa/entidade física do equipamento,
+// não o slot de VS específico da aba "CPU & Memória" abaixo (vs_res_mem_used/vs_res_mem_total).
+// Numa VS, o recurso alocado é uma fatia menor da placa toda — os dois % não têm por que bater.
 const HEALTH_LABELS: Record<string, string> = {
-  cpu_usage: "CPU",
-  memory_usage: "Memória",
+  cpu_usage: "CPU (placa)",
+  memory_usage: "Memória (placa)",
   sys_uptime: "Uptime",
 };
 

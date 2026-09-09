@@ -4343,7 +4343,9 @@ h3 .info-hint {
 .integration-support-table__grid--att td:nth-child(7) {
   width: 6.5rem;
 }
-/* Ordens de serviço */
+/* Ordens de serviço — colunas (sem "Cliente", só visível na varredura de todos os clientes):
+   1 N.º O.S., 2 Estado O.S., 3 Plano/serviço, 4 Tipo de O.S., 5 Fechada por (técnico/
+   responsável do fechamento), 6 Cadastro, 7 Agendamento, 8 Ações. */
 .integration-support-table__grid--os th:nth-child(1),
 .integration-support-table__grid--os td:nth-child(1) {
   width: 16%;
@@ -4354,20 +4356,22 @@ h3 .info-hint {
 }
 .integration-support-table__grid--os th:nth-child(3),
 .integration-support-table__grid--os td:nth-child(3) {
-  width: 30%;
+  width: 26%;
 }
 .integration-support-table__grid--os th:nth-child(4),
-.integration-support-table__grid--os td:nth-child(4) {
-  width: 14%;
-}
+.integration-support-table__grid--os td:nth-child(4),
 .integration-support-table__grid--os th:nth-child(5),
-.integration-support-table__grid--os td:nth-child(5),
-.integration-support-table__grid--os th:nth-child(6),
-.integration-support-table__grid--os td:nth-child(6) {
-  width: 11%;
+.integration-support-table__grid--os td:nth-child(5) {
+  width: 13%;
 }
+.integration-support-table__grid--os th:nth-child(6),
+.integration-support-table__grid--os td:nth-child(6),
 .integration-support-table__grid--os th:nth-child(7),
 .integration-support-table__grid--os td:nth-child(7) {
+  width: 9%;
+}
+.integration-support-table__grid--os th:nth-child(8),
+.integration-support-table__grid--os td:nth-child(8) {
   width: 6.5rem;
 }
 .integration-consult-card__meta {

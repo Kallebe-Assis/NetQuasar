@@ -12,12 +12,21 @@ type WorkOrderItem struct {
 	Number             string                 `json:"number,omitempty"`
 	Status             string                 `json:"status,omitempty"`
 	StatusLabel        string                 `json:"status_label,omitempty"`
-	PlanName           string                 `json:"plan_name,omitempty"`
-	ServiceStatus      string                 `json:"service_status,omitempty"`
-	Value              string                 `json:"value,omitempty"`
-	Description        string                 `json:"description,omitempty"`
-	ScheduledAt        string                 `json:"scheduled_at,omitempty"`
-	CreatedAt          string                 `json:"created_at,omitempty"`
+	// Type é o tipo da O.S. (campo "tipo" da Hubsoft — ex.: "SUPORTE", "INSTALAÇÃO"). Coluna "Tipo
+	// de O.S." já existia na tabela sem este campo ser preenchido neste caminho (consulta de UM
+	// cliente, ver ParseClientWorkOrder) — ficava sempre "—".
+	Type          string                 `json:"type,omitempty"`
+	PlanName      string                 `json:"plan_name,omitempty"`
+	ServiceStatus string                 `json:"service_status,omitempty"`
+	Value         string                 `json:"value,omitempty"`
+	Description   string                 `json:"description,omitempty"`
+	ScheduledAt   string                 `json:"scheduled_at,omitempty"`
+	CreatedAt     string                 `json:"created_at,omitempty"`
+	// ClosedByUser é o utilizador/técnico Hubsoft que fez o FECHAMENTO da O.S. (campo
+	// "usuario_fechamento" — confirmado na doc oficial docs/source/clientes/ordem_servico.rst do
+	// repositório github.com/hubsoftbrasil/api: string simples com o nome do utilizador, vazio/
+	// null enquanto a O.S. não é fechada).
+	ClosedByUser       string                 `json:"closed_by_user,omitempty"`
 	AttendanceProtocol string                 `json:"attendance_protocol,omitempty"`
 	Raw                map[string]interface{} `json:"raw,omitempty"`
 }
@@ -96,11 +105,13 @@ func mapWorkOrderItem(it any) (WorkOrderItem, bool) {
 		ID:     pickStr(m, "id_ordem_servico", "id", "uuid_ordem_servico"),
 		Number: pickStr(m, "numero_ordem_servico", "numero", "numero_os"),
 		Status: pickStr(m, "status", "status_ordem_servico", "situacao", "status_prefixo"),
+		Type:   pickStr(m, "tipo"),
 		Description: firstNonEmpty(
 			pickStr(m, "descricao", "descricao_ordem_servico", "observacao", "observacoes", "detalhe", "detalhes"),
 		),
-		ScheduledAt: pickStr(m, "data_inicio_programado", "data_agendamento", "agendado_para", "data_programada"),
-		CreatedAt:   pickStr(m, "data_cadastro", "created_at", "aberto_em"),
+		ScheduledAt:  pickStr(m, "data_inicio_programado", "data_agendamento", "agendado_para", "data_programada"),
+		CreatedAt:    pickStr(m, "data_cadastro", "created_at", "aberto_em"),
+		ClosedByUser: pickStr(m, "usuario_fechamento"),
 	}
 	if row.Number == "" {
 		row.Number = row.ID

@@ -374,18 +374,16 @@ func loadKnownLoginStatusSet(ctx context.Context, db *pgxpool.Pool) (map[string]
 	return out, rows.Err()
 }
 
-// bngLoginStatusLabel: "online"/"offline" quando o login já foi visto em algum BNG, "" (nunca
-// visto — status desconhecido) caso contrário. Ver loadKnownLoginStatusSet.
+// bngLoginStatusLabel: "online" só quando o BNG confirma a sessão activa agora; qualquer outro
+// caso — visto e offline, OU nunca visto em nenhum BNG conhecido — vira "offline" (pedido
+// explícito do utilizador: um login sem sessão confirmada no BNG deve contar como offline, não
+// ficar num terceiro estado "desconhecido"). Ver loadKnownLoginStatusSet.
 func bngLoginStatusLabel(statusSet map[string]bool, login string) string {
 	key := strings.ToLower(strings.TrimSpace(login))
 	if key == "" {
 		return ""
 	}
-	online, known := statusSet[key]
-	if !known {
-		return ""
-	}
-	if online {
+	if online := statusSet[key]; online {
 		return "online"
 	}
 	return "offline"

@@ -401,6 +401,17 @@ export function DeviceReportModal({ device, onClose }: Props) {
     },
   });
 
+  // Alerta activo de "possível reinício" (uptime baixo) para este equipamento — mostra a
+  // bolinha colorida + "ALERTA UPTIME" na barra de resumo, ao lado do valor de uptime. Não dá
+  // pra filtrar por device_id no /alerts/active (só severity/type/limit), então filtra-se aqui.
+  const reportUptimeAlert = useQuery({
+    queryKey: ["device-report-uptime-alert", id],
+    enabled: !!id,
+    staleTime: 30_000,
+    queryFn: () => apiFetch<{ alerts: Array<{ device_id?: string; severity?: string }> }>("/api/v1/alerts/active?type=uptime_restart_low&limit=500"),
+  });
+  const uptimeAlertSeverity = reportUptimeAlert.data?.alerts?.find((a) => a.device_id === id)?.severity ?? null;
+
   const deviceCadastro = useQuery({
     queryKey: ["device-report-cadastro", id],
     enabled: !!id,
@@ -559,6 +570,11 @@ export function DeviceReportModal({ device, onClose }: Props) {
           {sysInfo.uptime ? (
             <span>
               Uptime: <strong className="mono">{sysInfo.uptime}</strong>
+            </span>
+          ) : null}
+          {uptimeAlertSeverity ? (
+            <span className={`badge ${uptimeAlertSeverity === "critical" ? "badge--err" : uptimeAlertSeverity === "warning" ? "badge--warn" : "badge--off"}`}>
+              ● ALERTA UPTIME
             </span>
           ) : null}
         </div>

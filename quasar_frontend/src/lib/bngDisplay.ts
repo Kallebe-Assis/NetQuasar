@@ -121,11 +121,14 @@ export function formatBngTemperature(raw: unknown): string {
 
 export type OverviewFieldKey = "sys_name" | "sys_uptime" | "cpu_usage" | "memory_usage" | "temperature";
 
+// "(placa)" — hwEntityCpuUsage/hwEntityMemUsage medem a placa/entidade física, não o slot de VS
+// específico (num Huawei com Virtual System, a VS tem um recurso alocado à parte, menor que o da
+// placa toda — ver BgpCpuTab.tsx / vs_res_mem_used/vs_res_mem_total, "%" diferente de propósito).
 export const OVERVIEW_FIELD_LABELS: Record<OverviewFieldKey, string> = {
   sys_name: "Nome do equipamento",
   sys_uptime: "Uptime",
-  cpu_usage: "CPU",
-  memory_usage: "Memória",
+  cpu_usage: "CPU (placa)",
+  memory_usage: "Memória (placa)",
   temperature: "Temperatura",
 };
 
