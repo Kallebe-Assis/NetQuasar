@@ -12,6 +12,17 @@
   z-index: 1001;
 }
 
+/* .react-flow__edgelabel-renderer é onde vivem os pontos de organização do caminho e o botão "+"
+   de FiberEdge.tsx (HTML sobreposto, não SVG) — como ficam POSICIONADOS EM CIMA do próprio traço
+   da ligação (por definição, um waypoint é um ponto do caminho), sem subir este container acima
+   do z-index:1001 da camada de edges (regra acima) o hit-test do clique/drag ia sempre para o
+   <path> SVG da fibra por baixo (que também aceita clique, para seleccionar a ligação), nunca
+   para o marcador — confirmado ao vivo: o pointerdown chegava a um SVGAnimatedString (o <path>),
+   nunca ao <div> do waypoint. */
+.topo-canvas-wrap .react-flow__edgelabel-renderer {
+  z-index: 1002;
+}
+
 .rack-node {
   display: flex;
   flex-direction: column;
@@ -154,4 +165,75 @@
 .rack-edge-toolbar__swatch--active {
   outline: 2px solid var(--accent, #58a6ff);
   outline-offset: 1px;
+}
+/* Selector de cor livre (hexadecimal) — mesmo tamanho/grelha dos swatches nomeados, mas o
+   quadrado mostra a cor actual e clicar abre o color-picker nativo do browser (<input
+   type="color">, escondido, preenche o quadrado). */
+.rack-edge-toolbar__swatch--hex {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(from 90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+}
+.rack-edge-toolbar__swatch--hex input[type="color"] {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.rack-edge-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.rack-edge-toolbar__row .btn--sm.is-active {
+  color: var(--accent, #58a6ff);
+  background: color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent);
+  border-color: var(--accent, #58a6ff);
+}
+
+/* Ponto intermédio do caminho de uma fibra (waypoint) e botão "+" para adicionar um novo — ambos
+   vivem no .react-flow__edgelabel-renderer (HTML sobreposto ao canvas, já na mesma transformação
+   de pan/zoom — ver FiberEdge.tsx), só aparecem com a ligação seleccionada. */
+.rack-edge-waypoint {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent, #58a6ff);
+  border: 2px solid var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  pointer-events: auto;
+}
+.rack-edge-waypoint:active {
+  cursor: grabbing;
+}
+.rack-edge-waypoint-add {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.55;
+}
+.rack-edge-waypoint-add:hover {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--accent, #58a6ff);
+  color: var(--accent, #58a6ff);
 }

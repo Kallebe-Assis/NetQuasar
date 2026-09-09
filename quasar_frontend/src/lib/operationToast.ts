@@ -18,6 +18,12 @@ export function toastInfo(push: ToastPush, text: string): void {
   push({ tone: "info", text });
 }
 
+/** Toast de aviso — algo fora do comum mas que NÃO impediu a operação (ex.: ligação entre tipos
+ * de porta diferentes, permitida mesmo assim). */
+export function toastWarn(push: ToastPush, text: string): void {
+  push({ tone: "warn", text });
+}
+
 /** Toast de erro com mensagem amigável. */
 export function toastErr(push: ToastPush, e: unknown, fallback = "Operação falhou."): void {
   push({ tone: "err", text: errorMessageFromUnknown(e) || fallback });

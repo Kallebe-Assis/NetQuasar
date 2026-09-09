@@ -85,10 +85,58 @@ export type RackNodeData = {
   onEditPorts?: (id: string) => void;
 } & Record<string, unknown>;
 
+/** Tipo do cabo representado pela ligação — "fiber" (o comportamento original: cores reais de
+ * fibra, ver STANDARD_FIBER_SEQUENCE) ou "ethernet" (cabo de rede — paleta própria, mais curta,
+ * ver NETWORK_CABLE_COLORS). Ausente = "fiber" (documentos antigos, todos eram fibra). */
+export type CableType = "fiber" | "ethernet";
+
+export const CABLE_TYPE_LABELS: Record<CableType, string> = {
+  fiber: "Fibra óptica",
+  ethernet: "Cabo de rede",
+};
+
+/** Paleta curta para cabo de rede — cores de capa comuns (não tem o significado "posição no tubo"
+ * das cores de fibra), mais uma escolha livre via o selector hexadecimal ao lado. */
+export const NETWORK_CABLE_COLORS = [
+  { name: "Azul", hex: "#2563eb" },
+  { name: "Cinza", hex: "#64748b" },
+  { name: "Amarelo", hex: "#eab308" },
+  { name: "Verde", hex: "#16a34a" },
+  { name: "Laranja", hex: "#ea580c" },
+  { name: "Preto", hex: "#0f172a" },
+] as const;
+
+/** Traço da linha — independente do tipo de cabo, só visual (ajuda a distinguir ligações que se
+ * cruzam/sobrepõem no diagrama). Ausente = "solid" (comportamento original). */
+export type EdgeDashStyle = "solid" | "dashed" | "dotted";
+
+export const EDGE_DASH_LABELS: Record<EdgeDashStyle, string> = {
+  solid: "Contínua",
+  dashed: "Tracejada",
+  dotted: "Pontilhada",
+};
+
+/** strokeDasharray por estilo — undefined (não definir o atributo) para "solid". */
+export const EDGE_DASH_PATTERNS: Record<EdgeDashStyle, string | undefined> = {
+  solid: undefined,
+  dashed: "9 6",
+  dotted: "1.5 4.5",
+};
+
+/** Ponto intermédio do caminho de uma ligação, em coordenadas do canvas (mesmo referencial de
+ * node.position) — permite ao utilizador "desenhar" o percurso do cabo em vez de deixar sempre a
+ * curva automática entre origem e destino (ver FiberEdge.tsx: arrastar para mover, botão "+" no
+ * meio de cada troço para adicionar, duplo-clique para remover). Vazio/ausente = comportamento
+ * original (curva Bezier directa origem→destino). */
+export type EdgeWaypoint = { x: number; y: number };
+
 export type FiberEdgeData = {
   colorName: string;
   colorHex: string;
   label?: string;
+  cableType?: CableType | null;
+  dashStyle?: EdgeDashStyle | null;
+  waypoints?: EdgeWaypoint[];
   onPatch?: (id: string, patch: Partial<FiberEdgeData>) => void;
   onRemove?: (id: string) => void;
 } & Record<string, unknown>;
@@ -119,6 +167,9 @@ export type PopRackDocument = {
     color_name: string;
     color_hex: string;
     label?: string;
+    cable_type?: CableType | null;
+    dash_style?: EdgeDashStyle | null;
+    waypoints?: EdgeWaypoint[];
   }>;
 };
 

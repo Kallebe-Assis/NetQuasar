@@ -26,7 +26,7 @@ import "./poprack/poprack.css";
 import { ArrowLeft, Plus, Save } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
-import { toastErr, toastOk } from "../lib/operationToast";
+import { toastErr, toastOk, toastWarn } from "../lib/operationToast";
 import { can, isAdminUser } from "../lib/auth";
 import { APP_ROUTES } from "../app/routes";
 import { STANDARD_FIBER_SEQUENCE } from "../lib/fiberSplitter";
@@ -39,12 +39,27 @@ import {
   buildPorts,
   emptyPopRackDocument,
   RACK_KIND_LABELS,
+  RACK_PORT_TYPE_LABELS,
   type FiberEdgeData,
   type PopRackDocument,
   type RackNodeData,
   type RackNodeKind,
   type RackPort,
+  type RackPortType,
 } from "./poprack/types";
+
+/** Tipo da porta ligada por um handle de fibra (`port-<index>`) — usado só para avisar quando os
+ * dois lados de uma ligação são de tipos diferentes (ver onConnect/onReconnect abaixo); ligar é
+ * sempre permitido, o aviso é só informativo (o utilizador pode ter um adaptador/conversor). */
+function portTypeAtHandle(nodeList: Node[], nodeId?: string | null, handleId?: string | null): RackPortType | null | undefined {
+  if (!nodeId || !handleId) return undefined;
+  const node = nodeList.find((n) => n.id === nodeId);
+  if (!node) return undefined;
+  const idx = Number(handleId.replace("port-", ""));
+  if (!Number.isFinite(idx)) return undefined;
+  const ports = (node.data as RackNodeData).ports ?? [];
+  return ports.find((p) => p.index === idx)?.portType;
+}
 
 const nodeTypes = { rack: RackNode };
 const edgeTypes = { fiber: FiberEdge };
@@ -82,7 +97,14 @@ function docToFlow(doc: PopRackDocument): { nodes: Node[]; edges: Edge[] } {
     sourceHandle: e.source_handle,
     targetHandle: e.target_handle,
     type: "fiber",
-    data: { colorName: e.color_name, colorHex: e.color_hex, label: e.label } satisfies FiberEdgeData,
+    data: {
+      colorName: e.color_name,
+      colorHex: e.color_hex,
+      label: e.label,
+      cableType: e.cable_type ?? "fiber",
+      dashStyle: e.dash_style ?? "solid",
+      waypoints: e.waypoints ?? [],
+    } satisfies FiberEdgeData,
   }));
   return { nodes, edges };
 }
@@ -114,6 +136,9 @@ function flowToDoc(nodes: Node[], edges: Edge[]): PopRackDocument {
       color_name: data.colorName ?? DEFAULT_FIBER.name,
       color_hex: data.colorHex ?? DEFAULT_FIBER.hex,
       label: data.label,
+      cable_type: data.cableType ?? "fiber",
+      dash_style: data.dashStyle ?? "solid",
+      waypoints: data.waypoints ?? [],
     });
   }
   return doc;
@@ -174,17 +199,19 @@ function PopRackCanvas({ popId }: { popId: string }) {
     if (hydratedRef.current) setDirty(true);
   }, []);
 
+  // "select"/"dimensions" não são edições reais (ver comentário equivalente em TopologyPage.tsx)
+  // — sem o filtro, abrir a tela e clicar num nó já bastava para pedir confirmação de saída.
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setNodes((nds) => applyNodeChanges(changes, nds));
-      markDirty();
+      if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) markDirty();
     },
     [markDirty],
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       setEdges((eds) => applyEdgeChanges(changes, eds));
-      markDirty();
+      if (changes.some((c) => c.type !== "select")) markDirty();
     },
     [markDirty],
   );
@@ -250,8 +277,20 @@ function PopRackCanvas({ popId }: { popId: string }) {
     [edges, patchEdgeData, removeEdgeById],
   );
 
+  function warnIfPortTypeMismatch(connection: Connection) {
+    const sourceType = portTypeAtHandle(nodes, connection.source, connection.sourceHandle);
+    const targetType = portTypeAtHandle(nodes, connection.target, connection.targetHandle);
+    if (sourceType && targetType && sourceType !== targetType) {
+      toastWarn(
+        pushToast,
+        `Ligação entre tipos diferentes: ${RACK_PORT_TYPE_LABELS[sourceType]} ↔ ${RACK_PORT_TYPE_LABELS[targetType]}. A ligação foi feita mesmo assim.`,
+      );
+    }
+  }
+
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
+      warnIfPortTypeMismatch(connection);
       setEdges((eds) => {
         const deselected: Edge[] = eds.map((e) => ({ ...e, selected: false }));
         const newEdge: Edge = {
@@ -265,17 +304,18 @@ function PopRackCanvas({ popId }: { popId: string }) {
       });
       markDirty();
     },
-    [markDirty],
+    [markDirty, nodes, pushToast],
   );
 
   // Arrastar a ponta de uma fibra já ligada para outra porta — sem isto, a única forma de mudar
   // onde uma ligação chega era apagar e refazer (mesmo padrão de TopologyPage.tsx).
   const onReconnect: OnReconnect = useCallback(
     (oldEdge: Edge, newConnection: Connection) => {
+      warnIfPortTypeMismatch(newConnection);
       setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
       markDirty();
     },
-    [markDirty],
+    [markDirty, nodes, pushToast],
   );
 
   function openAddModal(kind: RackNodeKind) {

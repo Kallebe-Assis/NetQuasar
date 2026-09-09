@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Search, Server, User, Wifi, X } from "lucide-react";
+import { LayoutGrid, MapPin, Search, Server, User, Wifi, X } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { searchAppScreens } from "../lib/appSearchIndex";
 
-type GlobalSearchKind = "device" | "connection" | "cto" | "pole" | "splice_box" | "cable" | "project" | "pop" | "onu";
+type GlobalSearchKind = "device" | "connection" | "cto" | "pole" | "splice_box" | "cable" | "project" | "pop" | "onu" | "screen";
 
 type GlobalSearchResult = {
   kind: GlobalSearchKind;
@@ -24,6 +25,7 @@ const KIND_LABELS: Record<GlobalSearchKind, string> = {
   project: "Projetos",
   pop: "POPs",
   onu: "ONUs",
+  screen: "Telas do sistema",
 };
 
 function iconForKind(kind: GlobalSearchKind) {
@@ -34,6 +36,8 @@ function iconForKind(kind: GlobalSearchKind) {
       return <User size={14} aria-hidden />;
     case "onu":
       return <Wifi size={14} aria-hidden />;
+    case "screen":
+      return <LayoutGrid size={14} aria-hidden />;
     default:
       return <MapPin size={14} aria-hidden />;
   }
@@ -61,6 +65,14 @@ export function GlobalSearchBar() {
 
   async function runSearch() {
     const term = q.trim();
+    // Telas/abas do próprio sistema (appSearchIndex.ts) — estático, não depende da API, então
+    // continua a aparecer mesmo se a pesquisa de equipamentos/logins/etc. falhar.
+    const screenResults: GlobalSearchResult[] = searchAppScreens(term).map((e) => ({
+      kind: "screen",
+      label: e.label,
+      subtitle: e.subtitle,
+      href: e.href,
+    }));
     if (term.length < 2) {
       setError("Digite pelo menos 2 caracteres para pesquisar.");
       setResults(null);
@@ -72,11 +84,12 @@ export function GlobalSearchBar() {
     setOpen(true);
     try {
       const res = await apiFetch<GlobalSearchResponse>(`/api/v1/search/global?q=${encodeURIComponent(term)}`);
-      setResults(res.results);
+      setResults([...screenResults, ...res.results]);
       setSearchedFor(term);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha na pesquisa.");
-      setResults(null);
+      setResults(screenResults.length > 0 ? screenResults : null);
+      setSearchedFor(term);
     } finally {
       setLoading(false);
     }
@@ -144,14 +157,11 @@ export function GlobalSearchBar() {
       </div>
 
       <div className={`global-search__panel${showPanel ? " global-search__panel--open" : ""}`} role="listbox" aria-label="Resultados da pesquisa">
-        {error ? (
-          <p className="global-search__empty">{error}</p>
-        ) : loading ? (
-          <p className="global-search__empty">A pesquisar em equipamentos, logins, infraestrutura e ONUs…</p>
-        ) : results && results.length === 0 ? (
-          <p className="global-search__empty">Nenhum resultado para «{searchedFor}».</p>
-        ) : results && results.length > 0 ? (
+        {results && results.length > 0 ? (
           <div className="global-search__results">
+            {/* Erro na pesquisa de dados (equipamentos/logins/etc.) não esconde as telas do
+                sistema já encontradas localmente (ver runSearch) — só um aviso discreto no topo. */}
+            {error ? <p className="global-search__empty">{error}</p> : null}
             {grouped.map(([kind, items]) => (
               <div key={kind} className="global-search__group">
                 <div className="global-search__group-title">{KIND_LABELS[kind]}</div>
@@ -167,6 +177,12 @@ export function GlobalSearchBar() {
               </div>
             ))}
           </div>
+        ) : error ? (
+          <p className="global-search__empty">{error}</p>
+        ) : loading ? (
+          <p className="global-search__empty">A pesquisar em equipamentos, logins, infraestrutura e ONUs…</p>
+        ) : results && results.length === 0 ? (
+          <p className="global-search__empty">Nenhum resultado para «{searchedFor}».</p>
         ) : null}
       </div>
     </div>

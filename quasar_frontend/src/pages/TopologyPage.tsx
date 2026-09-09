@@ -300,14 +300,18 @@ function TopologyCanvas() {
     if (hydratedProjectIdRef.current) setDirty(true);
   }, []);
 
+  // "select" (clicar para seleccionar/desseleccionar) e "dimensions" (o React Flow mede cada nó
+  // ao carregar a tela) chegam aqui mas NÃO são edições — sem este filtro, só de abrir a tela e
+  // clicar em algo (sem mover/editar nada) já marcava "sujo" e a tela passava a pedir confirmação
+  // de saída mesmo sem nada por salvar (bug reportado).
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((nds) => applyNodeChanges(changes, nds));
-    markDirty();
+    if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) markDirty();
   }, [markDirty]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     setEdges((eds) => applyEdgeChanges(changes, eds));
-    markDirty();
+    if (changes.some((c) => c.type !== "select")) markDirty();
   }, [markDirty]);
 
   // Callbacks reais (mexem no estado do próprio TopologyCanvas) injectados no `data` de cada
