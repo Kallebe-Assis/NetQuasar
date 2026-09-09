@@ -26,7 +26,7 @@ Temperature:                  31.430(C)`
 	if fields["Temperatura"] != "31.430" {
 		t.Fatalf("Temperatura=%q", fields["Temperatura"])
 	}
-	row := map[string]any{}
+	row := map[string]any{"online": true}
 	mergeTelnetFieldsIntoOnuRow(row, fields, "2026-01-01T00:00:00Z")
 	if row["rx_dbm"].(float64) != -23.28 {
 		t.Fatalf("rx_dbm=%v", row["rx_dbm"])
@@ -172,9 +172,30 @@ func TestParseVsolPonOnuRxPowerTable(t *testing.T) {
 	if fields["RX"] != "-18.12" {
 		t.Fatalf("RX=%q fields=%v", fields["RX"], fields)
 	}
-	row := map[string]any{}
+	row := map[string]any{"online": true}
 	mergeTelnetFieldsIntoOnuRow(row, fields, "2026-01-01T00:00:00Z")
 	if row["rx_dbm"].(float64) != -18.12 {
 		t.Fatalf("rx_dbm=%v", row["rx_dbm"])
+	}
+}
+
+// TestMergeTelnetFieldsIntoOnuRow_skipsLiveTelemetryWhenOffline reproduz o bug ao vivo (OLT
+// VSOL real, ONU offline) onde o telnet ainda respondia com a última leitura óptica válida —
+// essa leitura não deve sobrepor a limpeza já feita em BuildOnuTable.
+func TestMergeTelnetFieldsIntoOnuRow_skipsLiveTelemetryWhenOffline(t *testing.T) {
+	fields := map[string]string{"RX": "-23.280", "TX": "2.568", "Voltagem": "3.28", "Temperatura": "31.430", "SN": "ABCD1234"}
+	row := map[string]any{"online": false}
+	mergeTelnetFieldsIntoOnuRow(row, fields, "2026-01-01T00:00:00Z")
+	if row["rx_pwr"] != nil || row["rx_dbm"] != nil {
+		t.Fatalf("rx should stay unset for offline ONU, got rx_pwr=%v rx_dbm=%v", row["rx_pwr"], row["rx_dbm"])
+	}
+	if row["tx_pwr"] != nil || row["tx_dbm"] != nil {
+		t.Fatalf("tx should stay unset for offline ONU, got tx_pwr=%v tx_dbm=%v", row["tx_pwr"], row["tx_dbm"])
+	}
+	if row["temp"] != nil || row["voltage"] != nil {
+		t.Fatalf("temp/voltage should stay unset for offline ONU, got temp=%v voltage=%v", row["temp"], row["voltage"])
+	}
+	if row["serial"] != "ABCD1234" {
+		t.Fatalf("identity fields should still merge even offline, got serial=%v", row["serial"])
 	}
 }

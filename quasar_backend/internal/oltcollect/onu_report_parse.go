@@ -420,23 +420,31 @@ func mergeTelnetFieldsIntoOnuRow(row map[string]any, fields map[string]string, r
 	if v := fields["Estado"]; v != "" {
 		setIfEmpty("phase_sta", v)
 	}
-	if v := fields["RX"]; v != "" {
-		row["rx_pwr"] = v
-		if dbm := parseDbmValue(v); dbm != nil {
-			row["rx_dbm"] = *dbm
+	// Leituras "ao vivo" (RX/TX/Temperatura/Voltagem) só fazem sentido para uma ONU que a
+	// própria coleta SNMP (que roda ANTES deste enriquecimento telnet, ver BuildOnuTable)
+	// já marcou como online agora — a OLT muitas vezes responde ao "show ... rx-power" de uma
+	// ONU offline com a última leitura óptica válida antes de cair, exactamente o mesmo
+	// problema já corrigido do lado SNMP. Sem este guard, o telnet reintroduzia o dado obsoleto
+	// por cima da limpeza feita em BuildOnuTable.
+	if onuRowOnline(row) {
+		if v := fields["RX"]; v != "" {
+			row["rx_pwr"] = v
+			if dbm := parseDbmValue(v); dbm != nil {
+				row["rx_dbm"] = *dbm
+			}
 		}
-	}
-	if v := fields["TX"]; v != "" {
-		row["tx_pwr"] = v
-		if dbm := parseDbmValue(v); dbm != nil {
-			row["tx_dbm"] = *dbm
+		if v := fields["TX"]; v != "" {
+			row["tx_pwr"] = v
+			if dbm := parseDbmValue(v); dbm != nil {
+				row["tx_dbm"] = *dbm
+			}
 		}
-	}
-	if v := fields["Temperatura"]; v != "" {
-		row["temp"] = v
-	}
-	if v := fields["Voltagem"]; v != "" {
-		row["voltage"] = v
+		if v := fields["Temperatura"]; v != "" {
+			row["temp"] = v
+		}
+		if v := fields["Voltagem"]; v != "" {
+			row["voltage"] = v
+		}
 	}
 	if v := fields["Canal"]; v != "" {
 		setIfEmpty("channel", v)

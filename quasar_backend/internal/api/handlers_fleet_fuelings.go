@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/netquasar/netquasar/quasar_backend/internal/fleetvalidate"
+	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 )
 
@@ -809,7 +810,7 @@ func (s *Server) composeFleetReportTelegram(ctx context.Context, kind, from, to 
 		return "", fmt.Errorf("kind inválido")
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Frota — %s\nPeríodo: %s a %s\n\n", title, from, to)
+	fmt.Fprintf(&b, "Frota — %s\nPeríodo: %s\n\n", title, reporttelegram.FormatPeriodBR(from, to))
 
 	switch kind {
 	case "fuelings":

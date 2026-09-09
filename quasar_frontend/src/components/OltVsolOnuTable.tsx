@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { ActionMenu } from "./ActionMenu";
 import { EM_DASH, formatNullable, formatSnmpMetricCell } from "../lib/formatDisplay";
 
 export type VsOnuRow = {
@@ -194,9 +195,12 @@ type Props = {
   enabledMetrics?: string[];
   rxStatusMode?: boolean;
   offlineRxDbm?: number;
+  /** Item "Histórico" no menu de 3 pontinhos de cada linha — ausente esconde a coluna de ações
+   * inteira (ex.: quando o chamador ainda não sabe o device_id). */
+  onShowHistory?: (pon: number, onu: number, label: string) => void;
 };
 
-export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusMode, offlineRxDbm }: Props) {
+export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusMode, offlineRxDbm, onShowHistory }: Props) {
   const visible = useMemo(
     () => buildVisibleColumns(enabledMetrics, rows, rxStatusMode),
     [enabledMetrics, rows, rxStatusMode],
@@ -240,6 +244,7 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
               {visible.has("model") && <th>Modelo da ONU</th>}
               {visible.has("serial") && <th>Serial</th>}
               {visible.has("vlan") && <th className="mono">VLAN</th>}
+              {onShowHistory && <th aria-label="Ações" />}
             </tr>
           </thead>
           <tbody>
@@ -294,6 +299,24 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
                   </td>
                 )}
                 {visible.has("vlan") && <td className="mono">{cell(u.vlan)}</td>}
+                {onShowHistory && (
+                  <td style={{ textAlign: "right" }}>
+                    {u.pon != null && u.onu != null ? (
+                      <ActionMenu
+                        align="end"
+                        title="Ações da ONU"
+                        items={[
+                          {
+                            id: "history",
+                            label: "Histórico",
+                            onClick: () =>
+                              onShowHistory(u.pon as number, u.onu as number, `PON ${cell(u.pon_compact ?? u.pon)} · ONU ${u.onu}`),
+                          },
+                        ]}
+                      />
+                    ) : null}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

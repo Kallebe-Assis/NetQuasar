@@ -767,7 +767,7 @@ func (s *Server) hubsoftReportAttendanceTelegram(w http.ResponseWriter, r *http.
 		return
 	}
 	summary := map[string]any{
-		"Período":    rep.From + " a " + rep.To,
+		"Período":    reporttelegram.FormatPeriodBR(rep.From, rep.To),
 		"Total":      rep.Total,
 		"Fechados":   rep.Closed,
 		"Abertos":    rep.Open,
@@ -808,16 +808,25 @@ func (s *Server) hubsoftReportWorkOrdersTelegram(w http.ResponseWriter, r *http.
 		return
 	}
 	summary := map[string]any{
-		"Período":       rep.From + " a " + rep.To,
+		"Período":       reporttelegram.FormatPeriodBR(rep.From, rep.To),
 		"Total":         rep.Total,
 		"Finalizadas":   rep.Finished,
 		"% finalizadas": fmt.Sprintf("%.1f%%", rep.FinishedPct),
 	}
-	for i, t := range rep.ByTechnician {
-		if i >= 10 {
-			break
+	// Ranking por técnico como UM bloco só (não uma entrada "Técnico: X" por técnico) — o resumo
+	// ordena as chaves alfabeticamente (ComposeSystemReport), o que misturava os técnicos com os
+	// totais gerais e os reordenava por nome, perdendo o ranking por nº de O.S. fechadas que
+	// rep.ByTechnician já traz pronto (reportado como "mensagem não está bem organizada").
+	if len(rep.ByTechnician) > 0 {
+		var sb strings.Builder
+		for i, t := range rep.ByTechnician {
+			if i >= 10 {
+				sb.WriteString(fmt.Sprintf("\n  … e mais %d técnico(s)", len(rep.ByTechnician)-10))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("\n  %d. %s — %d fechadas de %d (%.1f%% do total)", i+1, t.Technician, t.Finished, t.Total, t.PctOfFinished))
 		}
-		summary[fmt.Sprintf("Técnico: %s", t.Technician)] = fmt.Sprintf("%d finalizadas de %d (%.1f%% do total)", t.Finished, t.Total, t.PctOfFinished)
+		summary["Técnicos (ranking)"] = sb.String()
 	}
 	if err := s.hubsoftSendTelegram(ctx, "HubSoft — Ordens de serviço por período", summary); err != nil {
 		writeErr(w, http.StatusBadGateway, "TELEGRAM_SEND_FAILED", err.Error(), nil)
@@ -851,7 +860,7 @@ func (s *Server) hubsoftReportFinancialTelegram(w http.ResponseWriter, r *http.R
 		return
 	}
 	summary := map[string]any{
-		"Período":     rep.From + " a " + rep.To,
+		"Período":     reporttelegram.FormatPeriodBR(rep.From, rep.To),
 		"Faturas":     rep.Total,
 		"Valor total": fmt.Sprintf("R$ %.2f", rep.TotalValue),
 		"Recebido":    fmt.Sprintf("R$ %.2f (%.1f%%) — %d fatura(s)", rep.PaidValue, rep.PaidPct, rep.PaidCount),

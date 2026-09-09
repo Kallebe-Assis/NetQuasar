@@ -21,6 +21,7 @@ import { OltUnauthorizedOnusTab } from "./olt/OltUnauthorizedOnusTab";
 import { OltMetricsCollectLogModal, type MetricsWalkRow } from "../components/OltMetricsCollectLogModal";
 import { OltSnmpDebugPanel } from "../components/OltSnmpDebugPanel";
 import { OltVsolOnuTable, type VsOnuRow } from "../components/OltVsolOnuTable";
+import { OnuHistoryModal } from "../components/OnuHistoryModal";
 
 type OltRow = {
   id: string;
@@ -321,6 +322,7 @@ export function OltPage() {
   const qc = useQueryClient();
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);
   const [sel, setSel] = useState<string | null>(null);
+  const [onuHistoryTarget, setOnuHistoryTarget] = useState<{ pon: number; onu: number; label: string } | null>(null);
   const [snmpDebugOpen, setSnmpDebugOpen] = useState(false);
   const [refreshScope, setRefreshScope] = useState<"onu" | "full" | "telemetry">("onu");
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -1248,6 +1250,7 @@ export function OltPage() {
                     offlineRxDbm={offlineRxDbm}
                     onuRefs={typeof summaryObj?.vsol_onu_refs_count === "number" ? summaryObj.vsol_onu_refs_count : undefined}
                     note={onuTableNote}
+                    onShowHistory={(pon, onu, label) => setOnuHistoryTarget({ pon, onu, label })}
                   />
                 </>
               )}
@@ -1411,6 +1414,14 @@ export function OltPage() {
           </div>
         </div>
       )}
+      <OnuHistoryModal
+        open={!!onuHistoryTarget}
+        deviceId={sel ?? ""}
+        pon={onuHistoryTarget?.pon ?? null}
+        onu={onuHistoryTarget?.onu ?? null}
+        label={onuHistoryTarget?.label}
+        onClose={() => setOnuHistoryTarget(null)}
+      />
     </>
   );
 }

@@ -1,21 +1,74 @@
 import type { Edge, Node } from "@xyflow/react";
-import { CircleDot, CircleDotDashed, EthernetPort, Link2, MapPin, Signpost, Waves, type LucideIcon } from "lucide-react";
+import {
+  BatteryCharging,
+  Boxes,
+  CircleDot,
+  CircleDotDashed,
+  Cpu,
+  EthernetPort,
+  Layers,
+  Link2,
+  LogOut,
+  MapPin,
+  Network,
+  Router,
+  Signpost,
+  Waves,
+  Wifi,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 
 /** Tipo de caixa/rack no diagrama 2D do POP — cada um vira um rectângulo com uma porta por
  * interface (ver RackNode.tsx). "manual" é qualquer coisa sem cadastro (ex.: DIO, patch panel).
+ * "ap"/"roteador"/"energia" também não têm cadastro correspondente na tela de Equipamentos (só
+ * OLT/Mikrotik/Switch têm) — entram sempre como "Digitar manualmente" no modal de adicionar.
  * "saida" é o marcador de "sai do POP" — liga-se a uma porta PON (ou qualquer outra) para indicar
  * que aquela fibra, com aquela cor (ver FiberEdge.tsx), segue para fora do POP rumo à
  * distribuição/cliente; não representa um equipamento real, só o ponto onde o diagrama "corta"
- * a fibra que continua lá fora. Por isso é menor e visualmente diferente das outras caixas. */
-export type RackNodeKind = "olt" | "mikrotik" | "switch" | "dio" | "manual" | "saida";
+ * a fibra que continua lá fora. Por isso tem um design diferente das outras caixas (ver
+ * poprack.css, .rack-node--saida). */
+export type RackNodeKind = "olt" | "mikrotik" | "switch" | "roteador" | "ap" | "energia" | "dio" | "manual" | "saida";
 
 export const RACK_KIND_LABELS: Record<RackNodeKind, string> = {
   olt: "OLT",
   mikrotik: "Mikrotik",
   switch: "Switch",
+  roteador: "Roteador",
+  ap: "AP",
+  energia: "Energia",
   dio: "DIO",
   manual: "Caixa",
   saida: "Saída",
+};
+
+// Ícone de cada tipo de caixa — usado no botão "Adicionar Elemento" (PopRackTopologyPage.tsx) e
+// no cabeçalho do próprio nó (RackNode.tsx). OLT/Mikrotik/Switch reaproveitam os mesmos ícones já
+// usados no menu lateral (ShellLayout.tsx) para a mesma categoria de equipamento.
+export const RACK_KIND_ICONS: Record<RackNodeKind, LucideIcon> = {
+  olt: Zap,
+  mikrotik: Cpu,
+  switch: Network,
+  roteador: Router,
+  ap: Wifi,
+  energia: BatteryCharging,
+  dio: Layers,
+  manual: Boxes,
+  saida: LogOut,
+};
+
+/** Porta/quantidade sugerida ao abrir o modal "Adicionar <Elemento>" — só um ponto de partida, o
+ * utilizador ainda pode alterar antes de confirmar (ver PopRackTopologyPage.tsx). */
+export const RACK_KIND_DEFAULT_PORTS: Record<RackNodeKind, number> = {
+  olt: 16,
+  mikrotik: 8,
+  switch: 8,
+  roteador: 4,
+  ap: 2,
+  energia: 6,
+  dio: 12,
+  manual: 8,
+  saida: 1,
 };
 
 /** Sub-tipo de uma caixa "Saída" — o QUE aquela fibra que sai do POP representa. Escolhido

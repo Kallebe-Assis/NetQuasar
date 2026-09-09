@@ -53,18 +53,41 @@
 .rack-node--manual {
   border-top: 3px solid #64748b;
 }
+.rack-node--roteador {
+  border-top: 3px solid #0891b2;
+}
+.rack-node--ap {
+  border-top: 3px solid #0ea5e9;
+}
+.rack-node--energia {
+  border-top: 3px solid #d97706;
+}
 /* "Saída" — não é um equipamento real, é o ponto onde a fibra sai do POP rumo à
-   distribuição/cliente (ver types.ts). Contorno tracejado + laranja para não confundir com uma
-   caixa de verdade à primeira vista. */
+   distribuição/cliente (ver types.ts) — design deliberadamente diferente das caixas de
+   equipamento acima (que são todas o mesmo rectângulo, só a cor do topo muda): cantos
+   arredondados só à esquerda + ponta recortada à direita (clip-path), como uma etiqueta/placa
+   apontando para fora — reforça visualmente a ideia de "por aqui a fibra sai", não "isto é uma
+   caixa". Ícone do tipo de saída (RACK_EXIT_KIND_ICONS) vira um selo circular preenchido em vez
+   do ícone solto usado no cabeçalho das outras caixas (rack-node__kind-icon). */
 .rack-node--saida {
-  border-style: dashed;
-  border-top: 3px dashed #ea580c;
-  min-width: 132px;
-  background: color-mix(in srgb, #ea580c 6%, var(--panel));
+  border: none;
+  border-radius: 10px 3px 3px 10px;
+  clip-path: polygon(0 0, 94% 0, 100% 14px, 100% calc(100% - 14px), 94% 100%, 0 100%);
+  padding: 8px 20px 8px 10px;
+  min-width: 150px;
+  background: linear-gradient(160deg, color-mix(in srgb, #ea580c 20%, var(--panel)), var(--panel) 70%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ea580c 45%, transparent), 0 2px 8px rgba(234, 88, 12, 0.18);
 }
 .rack-node__exit-icon {
-  color: #ea580c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ea580c;
+  color: #fff;
 }
 .rack-node__exit-fields {
   display: flex;
@@ -81,10 +104,32 @@
   max-width: 100%;
 }
 
+/* Menu "Adicionar elemento" (PopRackTopologyPage.tsx) — substitui a fila de um botão por tipo de
+   caixa; reaproveita a aparência de .action-menu__item (global.css) só com ícone + rótulo lado a
+   lado em vez de texto simples. */
+.poprack-add-menu {
+  min-width: 170px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.poprack-add-menu__item {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.poprack-add-menu__item:hover:not(:disabled) {
+  color: var(--text);
+}
+
 .rack-node__header {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.rack-node__kind-icon {
+  color: var(--muted);
+  flex-shrink: 0;
 }
 .rack-node__kind {
   font-size: 9px;

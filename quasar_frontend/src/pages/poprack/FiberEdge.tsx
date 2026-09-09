@@ -22,6 +22,32 @@ function polylinePath(points: Point[]): string {
   return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
+/** Ângulos de "auto ajuste" (a cada 45°: horizontal, vertical, diagonal) — arrastar um ponto do
+ * caminho (waypoint) encosta nesses ângulos em relação aos pontos vizinhos (o troço antes/depois
+ * dele), como as guias inteligentes de ferramentas de desenho. Devolve o ponto ajustado quando
+ * cai dentro do threshold (em unidades do canvas, já compensado pelo zoom pelo chamador), senão
+ * devolve o ponto tal como veio. */
+function snapToNeighborAngles(point: Point, neighbors: Array<Point | undefined>, thresholdFlow: number): Point {
+  let best: Point | null = null;
+  let bestPerp = thresholdFlow;
+  for (const anchor of neighbors) {
+    if (!anchor) continue;
+    const dx = point.x - anchor.x;
+    const dy = point.y - anchor.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1e-6) continue;
+    const angle = Math.atan2(dy, dx);
+    const step = Math.PI / 4; // 8 direções: 0°/45°/90°/135°/180°/225°/270°/315°
+    const snapAngle = Math.round(angle / step) * step;
+    const perp = Math.abs(dist * Math.sin(angle - snapAngle));
+    if (perp < bestPerp) {
+      bestPerp = perp;
+      best = { x: anchor.x + dist * Math.cos(snapAngle), y: anchor.y + dist * Math.sin(snapAngle) };
+    }
+  }
+  return best ?? point;
+}
+
 /** Ponto a t (0–1) ao longo do comprimento total do polyline — usado para posicionar o rótulo/
  * toolbar no "meio visual" do caminho real, não só a média dos pontos. */
 function pointAtT(points: Point[], t: number): Point {
@@ -81,6 +107,11 @@ function FiberEdgeInner({
   const mid = hasWaypoints ? pointAtT(points, 0.5) : { x: bezierLabelX, y: bezierLabelY };
   const labelX = mid.x;
   const labelY = mid.y;
+  // Card de edição fica sempre ABAIXO do ponto mais baixo do caminho inteiro (origem, destino e
+  // todos os waypoints), não só do ponto médio — antes ficava a +36px do meio da curva e, com
+  // caminhos mais largos/organizados manualmente, acabava em cima de um troço que o utilizador
+  // queria clicar (reportado). Assim nunca sobrepõe a própria ligação.
+  const toolbarY = Math.max(sourceY, targetY, ...waypoints.map((w) => w.y)) + 22;
 
   function patchData(patch: Partial<FiberEdgeData>) {
     data?.onPatch?.(id, patch);
@@ -94,8 +125,14 @@ function FiberEdgeInner({
     e.preventDefault();
     let current = [...(data?.waypoints ?? [])];
     function onMove(ev: PointerEvent) {
-      const pos = reactFlow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
-      current = current.map((p, i) => (i === index ? { x: pos.x, y: pos.y } : p));
+      const raw = reactFlow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+      // Vizinhos deste ponto na cadeia origem→waypoints→destino — o "auto ajuste" encosta o
+      // ponto arrastado no ângulo (0/45/90/…) em relação a QUEM ele liga directamente, não a
+      // todos os outros pontos do caminho (ver snapToNeighborAngles acima).
+      const pts: Point[] = [{ x: sourceX, y: sourceY }, ...current, { x: targetX, y: targetY }];
+      const threshold = 10 / reactFlow.getZoom();
+      const pos = snapToNeighborAngles(raw, [pts[index], pts[index + 2]], threshold);
+      current = current.map((p, i) => (i === index ? pos : p));
       setLiveWaypoints(current);
     }
     function onUp() {
@@ -177,10 +214,7 @@ function FiberEdgeInner({
             })}
             <div
               className="topo-edge-toolbar"
-              // +36px (era +8) — o utilizador pediu mais distância do equipamento sendo editado: as
-              // portas ficam na borda de baixo da caixa (RackNode.tsx), então o ponto médio da
-              // ligação costuma cair perto/dentro do rectângulo da caixa mais próxima.
-              style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${labelY + 36}px)` }}
+              style={{ transform: `translate(-50%, 0) translate(${labelX}px, ${toolbarY}px)` }}
             >
               <div className="rack-edge-toolbar__row">
                 {(Object.entries(CABLE_TYPE_LABELS) as Array<[CableType, string]>).map(([v, lbl]) => (

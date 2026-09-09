@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, ShieldAlert, SquareStack } from "lucide-react";
+import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, Send, ShieldAlert, SquareStack } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
@@ -47,6 +47,8 @@ type ActiveAlert = {
   incident_id?: string | null;
   meta?: unknown;
   pop_name?: string | null;
+  /** Categoria do equipamento (ex.: "OLT") — só usado para decidir se mostra «Clientes afetados». */
+  device_category?: string | null;
 };
 
 type OpenIncident = {
@@ -282,6 +284,32 @@ export function AlertsPage() {
   async function runVerifyOne(alertId: string) {
     setVerifyingId(alertId);
     verifyOneMut.mutate(alertId);
+  }
+
+  // "Clientes afetados" (3 pontinhos, só para OLT offline/PON DOWN) — reúne as ONUs afetadas com
+  // cliente vinculado e manda os nomes por Telegram (bot de monitorização). Erros específicos
+  // (sem ONU/sem cliente vinculado/Telegram não configurado) chegam como texto normal da API,
+  // não precisa de tratamento especial aqui — o toast já mostra a mensagem do backend.
+  const affectedClientsMut = useMutation({
+    mutationFn: (alertId: string) =>
+      apiFetch<{ ok: boolean; client_count: number; onu_count: number }>(
+        `/api/v1/alerts/${alertId}/affected-clients-telegram`,
+        { method: "POST", json: {} },
+      ),
+    onSuccess: (res) => {
+      pushToast({ tone: "ok", text: `Enviado no Telegram: ${res.client_count} cliente(s) afetado(s) (${res.onu_count} ONU(s)).` });
+    },
+    onError: (e: unknown) => {
+      pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao enviar clientes afetados." });
+    },
+  });
+
+  // "Clientes afetados": OLT offline (ping_unreachable numa OLT) ou PON DOWN — nos dois casos há
+  // um conjunto de ONUs claramente identificável (a OLT inteira, ou só a PON) para procurar
+  // clientes vinculados (ver alertAffectedClientsTelegram no backend).
+  function showAffectedClientsButton(a: ActiveAlert): boolean {
+    if (a.type === "pon_down") return true;
+    return a.type === "ping_unreachable" && (a.device_category ?? "").trim().toLowerCase() === "olt";
   }
 
   const rawAlerts = active.data?.alerts ?? [];
@@ -680,6 +708,20 @@ export function AlertsPage() {
                                       disabled: ignoreMut.isPending || busy,
                                       onClick: () => ignoreMut.mutate(a.id),
                                     },
+                                    ...(showAffectedClientsButton(a)
+                                      ? [
+                                          {
+                                            id: "affected-clients",
+                                            label:
+                                              affectedClientsMut.isPending && affectedClientsMut.variables === a.id
+                                                ? "A enviar…"
+                                                : "Clientes afetados",
+                                            icon: <Send size={13} />,
+                                            disabled: affectedClientsMut.isPending,
+                                            onClick: () => affectedClientsMut.mutate(a.id),
+                                          },
+                                        ]
+                                      : []),
                                   ]}
                                 />
                               ) : null}

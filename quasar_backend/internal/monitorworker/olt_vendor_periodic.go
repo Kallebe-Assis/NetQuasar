@@ -199,6 +199,7 @@ func CollectOltVendorPeriodic(
 			updated_at = now()
 	`, deviceID, sb, pb)
 	oltsamples.RecordSample(sctx, pool, deviceID, sb, pb)
+	oltsamples.RecordOnuHistory(sctx, pool, deviceID, sb)
 	if log != nil {
 		log.Info().
 			Str("component", "olt_pon_collect").

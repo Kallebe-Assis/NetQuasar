@@ -20,6 +20,26 @@ func FormatGeneratedAt(iso string) string {
 	return t.Local().Format("02/01/2006 15:04")
 }
 
+// FormatDateBR converte uma data "AAAA-MM-DD" (formato de <input type=date>/parâmetro de query,
+// usado em quase todos os relatórios por período) para "DD/MM/AAAA" — devolve a string original
+// sem alterar se não bater com esse formato (ex.: já vier em BR, ou vazia), nunca esconde o valor.
+func FormatDateBR(iso string) string {
+	iso = strings.TrimSpace(iso)
+	if iso == "" {
+		return iso
+	}
+	t, err := time.Parse("2006-01-02", iso)
+	if err != nil {
+		return iso
+	}
+	return t.Format("02/01/2006")
+}
+
+// FormatPeriodBR formata um intervalo "de/até" já convertendo os dois extremos com FormatDateBR.
+func FormatPeriodBR(fromISO, toISO string) string {
+	return FormatDateBR(fromISO) + " a " + FormatDateBR(toISO)
+}
+
 // FormatValue formata valores de resumo (inclui mapas) em texto legível.
 func FormatValue(v any) string {
 	switch x := v.(type) {

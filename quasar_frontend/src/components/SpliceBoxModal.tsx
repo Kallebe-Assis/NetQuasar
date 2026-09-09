@@ -12,6 +12,7 @@ import {
   formatFeedFiberColor,
   isCableFiberCount,
   lightFiberBorder,
+  lightFiberShadow,
   parseSplitterOutputs,
   type SpliceBoxModel,
   type SplicePair,
@@ -245,6 +246,7 @@ export function SpliceBoxModal({
                       feedSpec.name === "Branco" || feedSpec.name === "Amarelo" || feedSpec.name === "Desconhecido"
                         ? "rgba(0,0,0,.25)"
                         : "transparent",
+                    boxShadow: lightFiberShadow(feedSpec.name),
                   }}
                 />
                 <label className="splitter-modal__field" style={{ flex: 1, minWidth: 0 }}>
@@ -294,6 +296,7 @@ export function SpliceBoxModal({
                           style={{
                             background: p.left_color_hex,
                             borderColor: lightFiberBorder(p.left_color) ? "rgba(0,0,0,.25)" : "transparent",
+                            boxShadow: lightFiberShadow(p.left_color),
                           }}
                           title={p.left_color}
                         />
@@ -329,6 +332,7 @@ export function SpliceBoxModal({
                           style={{
                             background: p.right_color_hex,
                             borderColor: lightFiberBorder(p.right_color) ? "rgba(0,0,0,.25)" : "transparent",
+                            boxShadow: lightFiberShadow(p.right_color),
                           }}
                           title={p.right_color}
                         />

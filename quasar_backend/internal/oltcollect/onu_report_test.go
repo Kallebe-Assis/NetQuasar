@@ -328,3 +328,45 @@ func TestCarryForwardTelnetFromPrev(t *testing.T) {
 		t.Fatal("should not carry to refreshed key")
 	}
 }
+
+func TestCarryForwardTelnetFromPrev_skipsLiveFieldsWhenOffline(t *testing.T) {
+	prev := []map[string]any{{
+		"pon": 1, "onu": 2, "data_source_telnet": true,
+		"serial": "ABCD1234", "rx_pwr": "-22.5", "temp": "40.0",
+		"telnet_report_at": "2026-01-01T00:00:00Z",
+	}}
+	out := []map[string]any{
+		{"pon": 1, "onu": 2, "online": false},
+	}
+	carryForwardTelnetFromPrev(out, prev, map[string]bool{})
+	if out[0]["rx_pwr"] != nil {
+		t.Fatalf("should not carry live telemetry to an offline ONU, got rx_pwr=%v", out[0]["rx_pwr"])
+	}
+	if out[0]["temp"] != nil {
+		t.Fatalf("should not carry live telemetry to an offline ONU, got temp=%v", out[0]["temp"])
+	}
+	if out[0]["serial"] != "ABCD1234" {
+		t.Fatalf("identity fields should still carry forward even offline, got serial=%v", out[0]["serial"])
+	}
+}
+
+// TestStripOfflineOnuTelemetry reproduz o bug real do pipeline "onu_metrics_collect" (o
+// realmente usado em produção pela OLT VSOL testada ao vivo): a OLT continua a responder por
+// SNMP com a última leitura válida (rx_pwr/temp/etc) de uma ONU já offline.
+func TestStripOfflineOnuTelemetry(t *testing.T) {
+	rows := []map[string]any{
+		{"pon": 1, "onu": 1, "online": true, "rx_pwr": "-21.50", "rx_dbm": -21.5, "temp": "35.000(C)"},
+		{"pon": 1, "onu": 2, "online": false, "rx_pwr": "N/A", "rx_dbm": -24.08, "tx_pwr": "N/A", "temp": "0.000(C)", "serial": "ZTEG20420649"},
+	}
+	stripOfflineOnuTelemetry(rows)
+	if rows[0]["rx_pwr"] != "-21.50" || rows[0]["temp"] != "35.000(C)" {
+		t.Fatalf("online row should keep its telemetry, got %v", rows[0])
+	}
+	off := rows[1]
+	if off["rx_pwr"] != nil || off["rx_dbm"] != nil || off["tx_pwr"] != nil || off["temp"] != nil {
+		t.Fatalf("offline row should have telemetry stripped, got %v", off)
+	}
+	if off["serial"] != "ZTEG20420649" {
+		t.Fatalf("identity fields should survive, got serial=%v", off["serial"])
+	}
+}

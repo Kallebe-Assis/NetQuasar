@@ -7,6 +7,8 @@ export type ActionMenuItem = {
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** Ícone opcional antes do rótulo (ex.: ícone do Telegram num item "enviar por Telegram"). */
+  icon?: ReactNode;
 };
 
 export function ActionMenu({
@@ -52,7 +54,14 @@ export function ActionMenu({
               it.onClick();
             }}
           >
-            {it.label}
+            {it.icon ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {it.icon}
+                {it.label}
+              </span>
+            ) : (
+              it.label
+            )}
           </button>
         ))
       }

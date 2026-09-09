@@ -2,6 +2,7 @@ import {
   destinationLabel,
   FIBER_DESTINATIONS,
   lightFiberBorder,
+  lightFiberShadow,
   normalizeFiberDestination,
   SPLITTER_PORT_STATUSES,
   statusLabel,
@@ -48,6 +49,7 @@ export function FiberPortsGrid({
                 style={{
                   background: p.color_hex,
                   borderColor: lightFiberBorder(p.color) ? "rgba(0,0,0,.25)" : "transparent",
+                  boxShadow: lightFiberShadow(p.color),
                 }}
                 title={p.hint}
               />
@@ -242,6 +244,7 @@ export function SplitterScheme2D({
             style={{
               background: feedHex,
               borderColor: lightFiberBorder(feedColor) ? "rgba(0,0,0,.28)" : "transparent",
+              boxShadow: lightFiberShadow(feedColor),
             }}
             title={`Alimentação · ${feedColor}`}
           />
@@ -303,6 +306,7 @@ export function SplitterScheme2D({
                 style={{
                   background: p.color_hex,
                   borderColor: lightFiberBorder(p.color) ? "rgba(0,0,0,.28)" : "transparent",
+                  boxShadow: lightFiberShadow(p.color),
                 }}
                 title={`${p.color} · porta ${p.port}`}
               />
@@ -383,6 +387,7 @@ export function CableFibersScheme2D({
                 style={{
                   background: p.color_hex,
                   borderColor: lightFiberBorder(p.color) ? "rgba(0,0,0,.28)" : "transparent",
+                  boxShadow: lightFiberShadow(p.color),
                 }}
                 title={`${p.color} · fibra ${p.port}`}
               />
@@ -438,6 +443,7 @@ export function SpliceEmendaScheme2D({
                 style={{
                   background: p.left_color_hex,
                   borderColor: lightFiberBorder(p.left_color) ? "rgba(0,0,0,.28)" : "transparent",
+                  boxShadow: lightFiberShadow(p.left_color),
                 }}
               />
             </div>
@@ -451,6 +457,7 @@ export function SpliceEmendaScheme2D({
                 style={{
                   background: p.right_color_hex,
                   borderColor: lightFiberBorder(p.right_color) ? "rgba(0,0,0,.28)" : "transparent",
+                  boxShadow: lightFiberShadow(p.right_color),
                 }}
               />
               <FiberMetaCard title={`${p.port} · ${p.right_color}`} color={p.right_color} feedOnly compact={compact} />

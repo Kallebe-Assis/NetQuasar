@@ -428,6 +428,16 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 		return oi < oj
 	})
 
+	// Sempre — este é o pipeline genérico "onu_metrics_collect" (colector dirigido por perfil
+	// SNMP, o caminho realmente usado em produção pela OLT VSOL testada ao vivo — distinto do
+	// pipeline vsolparse.BuildOnuTable, corrigido antes mas que não cobria este caminho). A OLT
+	// muitas vezes continua a devolver por SNMP a ÚLTIMA leitura óptica/temperatura válida de
+	// uma ONU já offline (confirmado ao vivo, refresh completo, rx_pwr/temp ainda preenchidos
+	// numa ONU "online:false"). Limpa-se aqui, no único sítio por onde TODAS as linhas passam
+	// antes de ir para o summary — mesmo tratamento já aplicado em vsolparse.BuildOnuTable e no
+	// enriquecimento telnet (mergeTelnetFieldsIntoOnuRow/carryTelnetFieldsFromPrev).
+	stripOfflineOnuTelemetry(onuRows)
+
 	online, offline := 0, 0
 	for _, r := range onuRows {
 		if on, ok := r["online"].(bool); ok {

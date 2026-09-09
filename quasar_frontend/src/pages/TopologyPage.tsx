@@ -6,6 +6,7 @@ import {
   applyNodeChanges,
   Background,
   ConnectionMode,
+  ControlButton,
   Controls,
   MiniMap,
   reconnectEdge,
@@ -22,7 +23,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./topology/topology.css";
-import { Circle, Redo2, Save, Settings, Square, Undo2 } from "lucide-react";
+import { Circle, Lock, LockOpen, Redo2, Save, Settings, Square, Undo2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
@@ -204,6 +205,11 @@ function TopologyCanvas() {
     }
   });
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  // Cadeado — começa TRAVADO por padrão (ver comentário completo em PopRackTopologyPage.tsx: tem
+  // de ser estado nosso com setter de verdade, o React Flow lê nodesDraggable sempre da prop, não
+  // do store interno — o botão de cadeado nativo do <Controls> não conseguiria destravar arrastar
+  // de nós nesta versão da lib, por isso o cadeado é todo nosso, ver <Controls> mais abaixo).
+  const [locked, setLocked] = useState(true);
   // Painel de equipamentos retrátil — mesmo padrão do menu lateral esquerdo (ShellLayout.tsx,
   // SIDEBAR_COLLAPSED_KEY): estado lembrado no navegador.
   const [devicePanelCollapsed, setDevicePanelCollapsed] = useState(() => {
@@ -824,9 +830,9 @@ function TopologyCanvas() {
             onNodeDragStop={canMutate ? onNodeDragStop : undefined}
             onDrop={canMutate ? onDrop : undefined}
             onDragOver={canMutate ? (e) => e.preventDefault() : undefined}
-            nodesDraggable={canMutate}
-            nodesConnectable={canMutate}
-            elementsSelectable
+            nodesDraggable={canMutate && !locked}
+            nodesConnectable={canMutate && !locked}
+            elementsSelectable={!canMutate || !locked}
             deleteKeyCode={canMutate ? ["Backspace", "Delete"] : null}
             connectionMode={ConnectionMode.Loose}
             elevateNodesOnSelect={false}
@@ -835,7 +841,16 @@ function TopologyCanvas() {
             maxZoom={2}
           >
             <Background gap={20} />
-            <Controls />
+            <Controls showInteractive={false}>
+              {canMutate && (
+                <ControlButton
+                  onClick={() => setLocked((v) => !v)}
+                  title={locked ? "Destravar edição" : "Travar edição (evita mover/ligar por engano)"}
+                >
+                  {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                </ControlButton>
+              )}
+            </Controls>
             <MiniMap pannable zoomable />
           </ReactFlow>
         </div>

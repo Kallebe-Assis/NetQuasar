@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api";
 import {
   RACK_EXIT_KIND_ICONS,
   RACK_EXIT_KIND_LABELS,
+  RACK_KIND_ICONS,
   RACK_KIND_LABELS,
   RACK_PORT_TYPE_ICONS,
   type RackExitKind,
@@ -22,6 +23,7 @@ function RackNodeInner({ id, data, selected }: NodeProps<RackNodeT & { data: Rac
   const isExit = data.kind === "saida";
   const exitKind: RackExitKind = data.exitKind ?? "distribuicao";
   const ExitIcon = RACK_EXIT_KIND_ICONS[exitKind];
+  const KindIcon = RACK_KIND_ICONS[data.kind];
 
   const localitiesQ = useQuery({
     queryKey: ["poprack-localities"],
@@ -51,7 +53,7 @@ function RackNodeInner({ id, data, selected }: NodeProps<RackNodeT & { data: Rac
         </button>
       </NodeToolbar>
       <div className="rack-node__header">
-        {isExit ? <ExitIcon size={11} className="rack-node__exit-icon" /> : null}
+        {isExit ? <ExitIcon size={11} className="rack-node__exit-icon" /> : <KindIcon size={12} className="rack-node__kind-icon" />}
         <span className="rack-node__kind">{RACK_KIND_LABELS[data.kind]}</span>
         <input
           className="rack-node__label-input"

@@ -191,6 +191,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 		return out, err
 	}
 	oltsamples.RecordSample(ctx, pool, id, sb, pb)
+	oltsamples.RecordOnuHistory(ctx, pool, id, sb)
 
 	out.PonCount = len(curMaps)
 	out.OK = out.PonCount > 0

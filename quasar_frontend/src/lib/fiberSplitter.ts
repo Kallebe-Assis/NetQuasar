@@ -207,6 +207,16 @@ export function lightFiberBorder(color: string): boolean {
   return color === "Branco" || color === "Amarelo" || color === "Desconhecido";
 }
 
+/** Sombra/contorno escuro para o "fio" (.splitter-scheme__wire) de cores claras — sem isto a
+ * fibra Branca ficava praticamente invisível: o CSS da barra já tem um box-shadow BRANCO (glow
+ * pensado para contraste no tema escuro, ver global.css), que some de propósito contra o fundo
+ * claro do card em vez de ajudar — aqui substitui-se por uma sombra escura só para as cores que
+ * lightFiberBorder já sinaliza como precisando de reforço (Branco/Amarelo/Desconhecido).
+ * `undefined` deixa o box-shadow branco do CSS em vigor para as demais cores. */
+export function lightFiberShadow(color: string): string | undefined {
+  return lightFiberBorder(color) ? "0 0 0 1px rgba(15, 23, 42, .4), 0 1px 3px rgba(15, 23, 42, .3)" : undefined;
+}
+
 export type SpliceBoxModel = "emenda" | "distribuicao";
 
 export type SplicePair = {

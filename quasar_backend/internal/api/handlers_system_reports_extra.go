@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/networkevents"
+	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 )
 
 func reportPeriodWhere(from, to, col string, startArg int) (string, []any) {
@@ -693,11 +694,11 @@ func (s *Server) reportDeviceAlertAnalysis(ctx context.Context, pool *pgxpool.Po
 
 	periodLabel := "todo o histórico"
 	if from != "" && to != "" {
-		periodLabel = fmt.Sprintf("%s a %s", from, to)
+		periodLabel = reporttelegram.FormatPeriodBR(from, to)
 	} else if from != "" {
-		periodLabel = "desde " + from
+		periodLabel = "desde " + reporttelegram.FormatDateBR(from)
 	} else if to != "" {
-		periodLabel = "até " + to
+		periodLabel = "até " + reporttelegram.FormatDateBR(to)
 	}
 	title := "Análise de equipamentos por alertas"
 	desc := fmt.Sprintf("Ranking de equipamentos por volume de alertas (%s)", periodLabel)

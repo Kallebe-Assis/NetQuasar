@@ -7,6 +7,7 @@ import {
   applyNodeChanges,
   Background,
   ConnectionMode,
+  ControlButton,
   Controls,
   MiniMap,
   reconnectEdge,
@@ -23,7 +24,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./topology/topology.css";
 import "./poprack/poprack.css";
-import { ArrowLeft, Plus, Save } from "lucide-react";
+import { ArrowLeft, Lock, LockOpen, Plus, Redo2, Save, Undo2 } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk, toastWarn } from "../lib/operationToast";
@@ -31,6 +32,7 @@ import { can, isAdminUser } from "../lib/auth";
 import { APP_ROUTES } from "../app/routes";
 import { STANDARD_FIBER_SEQUENCE } from "../lib/fiberSplitter";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { DropdownMenu } from "../components/DropdownMenu";
 import { useUnsavedChangesGuard } from "../lib/unsavedChangesGuard";
 import { FiberEdge } from "./poprack/FiberEdge";
 import { PortsEditModal } from "./poprack/PortsEditModal";
@@ -38,6 +40,8 @@ import { RackNode } from "./poprack/RackNode";
 import {
   buildPorts,
   emptyPopRackDocument,
+  RACK_KIND_DEFAULT_PORTS,
+  RACK_KIND_ICONS,
   RACK_KIND_LABELS,
   RACK_PORT_TYPE_LABELS,
   type FiberEdgeData,
@@ -47,6 +51,10 @@ import {
   type RackPort,
   type RackPortType,
 } from "./poprack/types";
+
+// Ordem de exibição no menu "Adicionar Elemento" — equipamento activo primeiro, depois
+// energia/passivo, "Saída" por último (é conceptualmente diferente, não é um equipamento).
+const ADD_ELEMENT_KINDS: RackNodeKind[] = ["olt", "switch", "mikrotik", "roteador", "ap", "energia", "dio", "manual", "saida"];
 
 /** Tipo da porta ligada por um handle de fibra (`port-<index>`) — usado só para avisar quando os
  * dois lados de uma ligação são de tipos diferentes (ver onConnect/onReconnect abaixo); ligar é
@@ -160,6 +168,16 @@ function PopRackCanvas({ popId }: { popId: string }) {
   const [addDeviceId, setAddDeviceId] = useState("");
   const [removeRequestId, setRemoveRequestId] = useState<string | null>(null);
   const [editPortsId, setEditPortsId] = useState<string | null>(null);
+  // Cadeado — começa TRAVADO por padrão (pedido explícito, para ninguém mover/ligar/seleccionar
+  // nada sem querer só de abrir a tela). Precisa de ser ESTADO NOSSO (com setter de verdade, não
+  // só um valor inicial) porque nodesDraggable, ao contrário de nodesConnectable/elementsSelectable,
+  // o React Flow lê-o SEMPRE da prop passada a <ReactFlow> (nunca do store interno) — confirmado
+  // a ler o código-fonte da lib: NodeRenderer só subscreve nodesConnectable/elementsSelectable do
+  // store, nodesDraggable vem sempre de "props.nodesDraggable" tal e qual. Ou seja, o botão de
+  // cadeado NATIVO do <Controls> (que só mexe no store) nunca conseguiria destravar o arrastar de
+  // nós nesta versão da biblioteca — por isso o cadeado é todo nosso (showInteractive={false} no
+  // <Controls>, botão próprio a seguir, ver mais abaixo) em vez de usar o embutido.
+  const [locked, setLocked] = useState(true);
 
   const popQ = useQuery({
     queryKey: ["pop-detail", popId],
@@ -198,6 +216,79 @@ function PopRackCanvas({ popId }: { popId: string }) {
   const markDirty = useCallback(() => {
     if (hydratedRef.current) setDirty(true);
   }, []);
+
+  // --- desfazer/refazer -------------------------------------------------------------------
+  // Mesmo histórico "debounced" de TopologyPage.tsx (ver comentário completo lá) — qualquer
+  // mudança em nodes/edges agenda um commit 400ms depois; um gesto contínuo (arrastar um nó ou
+  // waypoint) vira 1 só passo de undo, não uma pilha de micro-passos.
+  type Snap = { nodes: Node[]; edges: Edge[] };
+  const [past, setPast] = useState<Snap[]>([]);
+  const [future, setFuture] = useState<Snap[]>([]);
+  const baselineRef = useRef<Snap | null>(null);
+  const skipRef = useRef(false);
+  const debounceRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (skipRef.current) {
+      skipRef.current = false;
+      baselineRef.current = { nodes, edges };
+      return;
+    }
+    window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      const baseline = baselineRef.current;
+      if (baseline) {
+        setPast((p) => [...p.slice(-49), baseline]);
+        setFuture([]);
+      }
+      baselineRef.current = { nodes, edges };
+    }, 400);
+    return () => window.clearTimeout(debounceRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges]);
+
+  const undo = useCallback(() => {
+    if (past.length === 0) return;
+    window.clearTimeout(debounceRef.current);
+    const prev = past[past.length - 1];
+    setPast(past.slice(0, -1));
+    setFuture([...future, { nodes, edges }]);
+    skipRef.current = true;
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setDirty(true);
+  }, [past, future, nodes, edges]);
+
+  const redo = useCallback(() => {
+    if (future.length === 0) return;
+    window.clearTimeout(debounceRef.current);
+    const next = future[future.length - 1];
+    setFuture(future.slice(0, -1));
+    setPast([...past, { nodes, edges }]);
+    skipRef.current = true;
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setDirty(true);
+  }, [past, future, nodes, edges]);
+
+  // Ctrl+Z / Ctrl+Y (ou Ctrl+Shift+Z) — ignorado quando o foco está num campo de texto.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (typing || !(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
 
   // "select"/"dimensions" não são edições reais (ver comentário equivalente em TopologyPage.tsx)
   // — sem o filtro, abrir a tela e clicar num nó já bastava para pedir confirmação de saída.
@@ -321,7 +412,7 @@ function PopRackCanvas({ popId }: { popId: string }) {
   function openAddModal(kind: RackNodeKind) {
     addCounterRef.current += 1;
     setAddLabel(`${RACK_KIND_LABELS[kind]} ${addCounterRef.current}`);
-    setAddPorts(kind === "olt" ? "16" : kind === "dio" ? "12" : kind === "saida" ? "1" : "8");
+    setAddPorts(String(RACK_KIND_DEFAULT_PORTS[kind]));
     setAddDeviceId("");
     setAddModal(kind);
   }
@@ -392,31 +483,47 @@ function PopRackCanvas({ popId }: { popId: string }) {
             monitoramento (.runtime-indicator, position:fixed centrado) também aparece. */}
         <div className="topo-toolbar__legend">
           {canMutate && (
-            <>
-              <button type="button" className="btn btn--sm" onClick={() => openAddModal("olt")}>
-                <Plus size={13} style={{ verticalAlign: -2 }} /> OLT
-              </button>
-              <button type="button" className="btn btn--sm" onClick={() => openAddModal("mikrotik")}>
-                <Plus size={13} style={{ verticalAlign: -2 }} /> Mikrotik
-              </button>
-              <button type="button" className="btn btn--sm" onClick={() => openAddModal("switch")}>
-                <Plus size={13} style={{ verticalAlign: -2 }} /> Switch
-              </button>
-              <button type="button" className="btn btn--sm" onClick={() => openAddModal("dio")}>
-                <Plus size={13} style={{ verticalAlign: -2 }} /> DIO
-              </button>
-              <button type="button" className="btn btn--sm" onClick={() => openAddModal("manual")}>
-                <Plus size={13} style={{ verticalAlign: -2 }} /> Caixa
-              </button>
-              <button
-                type="button"
-                className="btn btn--sm"
-                title="Marca onde uma fibra sai do POP rumo à distribuição/cliente"
-                onClick={() => openAddModal("saida")}
-              >
-                <Plus size={13} style={{ verticalAlign: -2 }} /> Saída
-              </button>
-            </>
+            <DropdownMenu
+              align="end"
+              trigger={({ toggle, open }) => (
+                <button type="button" className="btn btn--sm" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
+                  <Plus size={13} style={{ verticalAlign: -2 }} /> Adicionar elemento
+                </button>
+              )}
+            >
+              {({ close }) => (
+                <div className="poprack-add-menu">
+                  {ADD_ELEMENT_KINDS.map((kind) => {
+                    const Icon = RACK_KIND_ICONS[kind];
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        className="action-menu__item poprack-add-menu__item"
+                        title={kind === "saida" ? "Marca onde uma fibra sai do POP rumo à distribuição/cliente" : undefined}
+                        onClick={() => {
+                          close();
+                          openAddModal(kind);
+                        }}
+                      >
+                        <Icon size={14} />
+                        {RACK_KIND_LABELS[kind]}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </DropdownMenu>
+          )}
+          {canMutate && (
+            <button type="button" className="btn btn--icon" title="Desfazer (Ctrl+Z)" disabled={past.length === 0} onClick={undo}>
+              <Undo2 size={14} />
+            </button>
+          )}
+          {canMutate && (
+            <button type="button" className="btn btn--icon" title="Refazer (Ctrl+Y)" disabled={future.length === 0} onClick={redo}>
+              <Redo2 size={14} />
+            </button>
           )}
           {dirty ? <span style={{ color: "var(--warn, #d29922)" }}>Alterações não salvas</span> : null}
           {canMutate && (
@@ -439,9 +546,9 @@ function PopRackCanvas({ popId }: { popId: string }) {
             onConnect={canMutate ? onConnect : undefined}
             onReconnect={canMutate ? onReconnect : undefined}
             edgesReconnectable={canMutate}
-            nodesDraggable={canMutate}
-            nodesConnectable={canMutate}
-            elementsSelectable
+            nodesDraggable={canMutate && !locked}
+            nodesConnectable={canMutate && !locked}
+            elementsSelectable={!canMutate || !locked}
             deleteKeyCode={canMutate ? ["Backspace", "Delete"] : null}
             connectionMode={ConnectionMode.Loose}
             elevateNodesOnSelect={false}
@@ -450,7 +557,16 @@ function PopRackCanvas({ popId }: { popId: string }) {
             maxZoom={2}
           >
             <Background gap={20} />
-            <Controls />
+            <Controls showInteractive={false}>
+              {canMutate && (
+                <ControlButton
+                  onClick={() => setLocked((v) => !v)}
+                  title={locked ? "Destravar edição" : "Travar edição (evita mover/ligar por engano)"}
+                >
+                  {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                </ControlButton>
+              )}
+            </Controls>
             <MiniMap pannable zoomable />
           </ReactFlow>
         </div>

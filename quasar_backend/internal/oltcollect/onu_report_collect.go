@@ -96,6 +96,27 @@ func onuRowOnline(row map[string]any) bool {
 	return false
 }
 
+// onuLiveMetricsKeys leituras "ao vivo" (óptica/temperatura) que só fazem sentido vindas de
+// uma ONU respondendo agora — a OLT muitas vezes continua a devolver por SNMP a última leitura
+// válida de uma ONU já offline (confirmado ao vivo em produção), então limpa-se sempre que o
+// status resolvido da linha for offline.
+var onuLiveMetricsKeys = []string{"rx_pwr", "rx_dbm", "tx_pwr", "tx_dbm", "temp", "voltage", "bias"}
+
+// stripOfflineOnuTelemetry remove campos de leitura ao vivo das linhas cujo status resolvido
+// (row["online"]/row["onu_online_sta"]/row["oper_status_label"], ver onuRowOnline) for offline.
+// Chamado no fim de cada pipeline de coleta ONU (vsolparse.BuildOnuTable, CollectOnuMetrics,
+// e o enriquecimento telnet) para que a UI mostre "-" em vez de um dado obsoleto.
+func stripOfflineOnuTelemetry(rows []map[string]any) {
+	for _, row := range rows {
+		if row == nil || onuRowOnline(row) {
+			continue
+		}
+		for _, k := range onuLiveMetricsKeys {
+			delete(row, k)
+		}
+	}
+}
+
 func onuTargetFromRow(row map[string]any) OnuReportTarget {
 	t := OnuReportTarget{}
 	if row == nil {

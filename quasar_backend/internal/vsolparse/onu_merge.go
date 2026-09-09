@@ -44,17 +44,27 @@ func onuRowKey(r map[string]any) string {
 	return fmt.Sprintf("%d.%d", pon, onu)
 }
 
+// liveTelemetryOnuFields só fazem sentido vindos de uma ONU respondendo agora — ao contrário de
+// model/serial/vendor/etc. (provisionamento, continua válido mesmo momentaneamente offline), uma
+// leitura de potência/voltagem/temperatura de quando a ONU ainda estava online não deve continuar
+// a aparecer como se fosse actual depois dela cair (pedido do utilizador: "-" enquanto offline).
+var liveTelemetryOnuFields = []string{"rx_pwr", "tx_pwr", "voltage", "temp", "bias"}
+
 func mergeOnuRow(old, neu map[string]any) map[string]any {
 	out := make(map[string]any, len(old)+4)
 	for k, v := range old {
 		out[k] = v
 	}
+	online := false
 	for k, v := range neu {
 		switch k {
 		case "online", "onu_online_sta":
 			if sta, ok := neu["onu_online_sta"]; ok && intVal(sta) != fieldUnset {
 				out["online"] = neu["online"]
 				out["onu_online_sta"] = sta
+				if b, ok := neu["online"].(bool); ok {
+					online = b
+				}
 			} else {
 				out["online"] = false
 				out["onu_online_sta"] = fieldUnset
@@ -69,6 +79,14 @@ func mergeOnuRow(old, neu map[string]any) map[string]any {
 			if strVal(v) != "" {
 				out[k] = v
 			}
+		}
+	}
+	// Só depois de aplicar os valores frescos acima (para cobrir tanto o caso raro de `neu` trazer
+	// algo para uma ONU já offline, como o caso normal de `neu` não trazer nada e `out` ainda ter
+	// o valor herdado de `old`) — limpa a telemetria ao vivo se o estado final é offline.
+	if !online {
+		for _, k := range liveTelemetryOnuFields {
+			delete(out, k)
 		}
 	}
 	return out

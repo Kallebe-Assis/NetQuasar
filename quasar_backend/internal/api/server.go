@@ -418,6 +418,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/ignored/{id}/reactivate", s.alertIgnoreReactivate)
 				r.Post("/{id}/ignore", s.alertIgnore)
 				r.Post("/{id}/verify", s.alertVerifyOne)
+				r.Post("/{id}/affected-clients-telegram", s.alertAffectedClientsTelegram)
 				r.Post("/suppressions", s.createSuppression)
 				r.Patch("/suppressions/{id}", s.patchSuppression)
 				r.Delete("/suppressions/{id}", s.deleteSuppression)
@@ -549,6 +550,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices", s.listOLTDevices)
 			r.Get("/devices/{id}", s.getOLTDevice)
 			r.Get("/devices/{id}/snmp-debug", s.getOLTSnmpDebug)
+			r.Get("/devices/{id}/onu-history", s.getOLTOnuHistory)
 			r.Get("/reports/history", s.getOLTReportsHistory)
 			r.Post("/onu-search", s.searchOLTOnus)
 			r.Group(func(r chi.Router) {

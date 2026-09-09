@@ -86,11 +86,18 @@ func selectRotatingOnuBatch(candidates []map[string]any, maxN, offset int) (batc
 	return batch, nextOffset
 }
 
+// onuTelnetCarryKeys campos de identidade/config — fazem sentido preservar do snapshot
+// anterior mesmo que a ONU esteja offline agora (não são "leituras ao vivo").
 var onuTelnetCarryKeys = []string{
 	"serial", "model", "profile_name", "phase_sta", "channel",
-	"rx_pwr", "rx_dbm", "tx_pwr", "tx_dbm", "temp", "voltage",
 	"telnet_report_at", "data_source_telnet", "telnet_fields",
 }
+
+// onuTelnetLiveCarryKeys leituras ópticas/eléctricas — só fazem sentido herdadas do ciclo
+// anterior (ONU fora do lote de rodízio desta vez) se a ONU segue online agora; herdar por
+// cima de uma ONU que caiu reintroduzia dado obsoleto (rx/tx/temp/voltage de quando ainda
+// respondia), o mesmo problema já corrigido do lado SNMP em BuildOnuTable.
+var onuTelnetLiveCarryKeys = []string{"rx_pwr", "rx_dbm", "tx_pwr", "tx_dbm", "temp", "voltage"}
 
 func carryTelnetFieldsFromPrev(dst, src map[string]any) {
 	if dst == nil || src == nil {
@@ -102,6 +109,13 @@ func carryTelnetFieldsFromPrev(dst, src map[string]any) {
 	for _, k := range onuTelnetCarryKeys {
 		if v, ok := src[k]; ok && v != nil {
 			dst[k] = v
+		}
+	}
+	if onuRowOnline(dst) {
+		for _, k := range onuTelnetLiveCarryKeys {
+			if v, ok := src[k]; ok && v != nil {
+				dst[k] = v
+			}
 		}
 	}
 }

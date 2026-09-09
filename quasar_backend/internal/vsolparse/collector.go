@@ -209,6 +209,21 @@ func BuildOnuTable(refs []OnuRef, vars []probing.SNMPVar, prev []map[string]any,
 	if mergePrev && len(prev) > 0 {
 		rows = MergeOnuRowsTelemetry(prev, rows)
 	}
+	// Sempre — mesmo sem merge (colecta completa, fullTelemetry=true): a própria OLT muitas
+	// vezes continua a devolver por SNMP a ÚLTIMA leitura óptica/temperatura/voltagem válida de
+	// uma ONU que já caiu (não limpa o registo no MIB só porque ficou offline) — confirmado ao
+	// vivo (OLT VSOL real, refresh completo, ONU offline com rx_pwr/temp/voltage ainda
+	// preenchidos vindos direto do SNMP, sem passar pelo merge nenhum). O pedido do utilizador é
+	// que a UI mostre "-" enquanto a ONU estiver offline, então limpa-se aqui, no único sítio por
+	// onde TODAS as linhas passam, faça a colecta merge ou não.
+	for _, row := range rows {
+		online, _ := row["online"].(bool)
+		if !online {
+			for _, k := range liveTelemetryOnuFields {
+				delete(row, k)
+			}
+		}
+	}
 	return rows
 }
 
