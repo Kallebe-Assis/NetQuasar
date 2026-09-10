@@ -37,7 +37,21 @@ export function friendlyApiMessage(raw: unknown): string {
   return t;
 }
 
+/** Erro de validação vindo do servidor (400/422 com mensagem já escrita para humanos): deve ser
+ * mostrado tal e qual. Passá-lo por friendlyApiMessage transforma, por ex., "telemetry_timeout_ms
+ * entre 5000 e 600000" em "Tempo de espera esgotado. Tente novamente." só porque contém a palavra
+ * "timeout" — escondendo o motivo real da recusa. */
+function isServerValidationError(e: unknown): e is ApiError {
+  return (
+    e instanceof ApiError &&
+    (e.code === "VALIDATION" || e.code === "BAD_FIELD" || e.status === 400 || e.status === 422) &&
+    typeof e.message === "string" &&
+    e.message.trim() !== ""
+  );
+}
+
 export function errorMessageFromUnknown(e: unknown): string {
+  if (isServerValidationError(e)) return e.message.trim();
   if (e instanceof ApiError) return friendlyApiMessage(e.message);
   if (e instanceof Error) return friendlyApiMessage(e.message);
   return friendlyApiMessage(String(e));
@@ -53,10 +67,11 @@ export type ParsedApiError = {
 export function parseApiErrorForModal(e: unknown, title = "Erro"): ParsedApiError {
   if (e instanceof ApiError) {
     const body = e.body as { error?: string; code?: string; message?: string } | undefined;
-    const rawMsg = body?.error ?? body?.message ?? e.message;
+    const rawMsg = String(body?.error ?? body?.message ?? e.message ?? "");
+    const passthrough = isServerValidationError(e);
     return {
       title: e.status >= 500 ? "Erro no servidor" : title,
-      message: friendlyApiMessage(rawMsg || e.message),
+      message: passthrough ? rawMsg.trim() : friendlyApiMessage(rawMsg),
       code: e.code ?? body?.code,
       status: e.status,
     };

@@ -524,11 +524,18 @@ func (s *Server) patchMonitoringIntervals(w http.ResponseWriter, r *http.Request
 	for _, pair := range []struct {
 		name string
 		val  int
-	}{{"telemetry_timeout_ms", telTimeout}, {"interface_snapshot_timeout_ms", ifaceTimeout}, {"olt_if_derived_pon_timeout_ms", oltTimeout}, {"mikrotik_timeout_ms", mikrotikTimeout}, {"bng_timeout_ms", bngTimeout}} {
+	}{{"telemetry_timeout_ms", telTimeout}, {"interface_snapshot_timeout_ms", ifaceTimeout}, {"mikrotik_timeout_ms", mikrotikTimeout}, {"bng_timeout_ms", bngTimeout}} {
 		if pair.val < 5000 || pair.val > 600000 {
 			writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", pair.name+" entre 5000 e 600000 (5 s – 10 min)", map[string]any{pair.name: pair.val})
 			return
 		}
+	}
+	// olt_if_derived_pon_timeout_ms e olt_onu_telnet_timeout_ms têm tecto próprio de 60 min — não o
+	// genérico de 10 min — porque OLTs com milhares de ONUs precisam de janelas longas de coleta
+	// (é o que ClampOltIfDerivedTimeoutMsPublic / ClampOltOnuTelnetTimeoutMsPublic já aplicam em runtime).
+	if oltTimeout < 5000 || oltTimeout > 3600000 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_if_derived_pon_timeout_ms entre 5000 e 3600000 (5 s – 60 min)", map[string]any{"olt_if_derived_pon_timeout_ms": oltTimeout})
+		return
 	}
 	if oltOnuTelnetTimeout < 5000 || oltOnuTelnetTimeout > 3600000 {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "olt_onu_telnet_timeout_ms entre 5000 e 3600000 (5 s – 60 min)", map[string]any{"olt_onu_telnet_timeout_ms": oltOnuTelnetTimeout})
