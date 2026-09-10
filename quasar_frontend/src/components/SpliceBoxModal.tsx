@@ -137,7 +137,7 @@ export function SpliceBoxModal({
           splitter: normalized,
           fiber_color: formatFeedFiberColor(feedColor),
           fiber_count: parseSplitterOutputs(normalized),
-          splitter_ports: draftPorts.map(({ port, color: c, color_hex, label, status, note, destination }) => ({
+          splitter_ports: draftPorts.map(({ port, color: c, color_hex, label, status, note, destination, client_name }) => ({
             port,
             color: c,
             color_hex,
@@ -145,6 +145,7 @@ export function SpliceBoxModal({
             status,
             note,
             destination,
+            client_name: client_name?.trim() || "",
           })),
         },
       });
@@ -262,7 +263,7 @@ export function SpliceBoxModal({
               </div>
             </div>
             <div className="splitter-modal__section-label">Fibras de saída ({outputs})</div>
-            <FiberPortsGrid ports={draftPorts} canEdit={canEdit} onChange={setDraftPorts} />
+            <FiberPortsGrid ports={draftPorts} canEdit={canEdit} onChange={setDraftPorts} showClientName />
           </>
         ) : null}
 

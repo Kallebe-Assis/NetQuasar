@@ -60,6 +60,7 @@ func runHistoryRetentionBatches(ctx context.Context, pool *pgxpool.Pool, log *ze
 		{"ping_history", "checked_at"},
 		{"telemetry_samples", "collected_at"},
 		{"interface_snapshots", "collected_at"},
+		{"olt_pon_samples", "recorded_at"},
 	}
 	for _, t := range tables {
 		totalDeleted := int64(0)

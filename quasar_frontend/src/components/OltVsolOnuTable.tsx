@@ -156,6 +156,7 @@ function buildVisibleColumns(
   enabled: string[] | undefined,
   rows: VsOnuRow[],
   rxStatusMode?: boolean,
+  hasVlanResolver?: boolean,
 ): Set<ColKey> {
   const show = new Set<ColKey>();
   const any = (pred: (u: VsOnuRow) => boolean) => rows.some(pred);
@@ -183,7 +184,7 @@ function buildVisibleColumns(
   if (metricEnabled(enabled, "serial") || any((u) => rowHasText(u, "serial"))) {
     show.add("serial");
   }
-  if (metricEnabled(enabled, "vlan") || any((u) => rowHasText(u, "vlan"))) {
+  if (metricEnabled(enabled, "vlan") || any((u) => rowHasText(u, "vlan")) || hasVlanResolver) {
     show.add("vlan");
   }
   if (any((u) => rowHasText(u, "if_name") || rowHasText(u, "if_descr"))) {
@@ -208,13 +209,16 @@ type Props = {
   /** Item "Histórico" no menu de 3 pontinhos de cada linha — ausente esconde a coluna de ações
    * inteira (ex.: quando o chamador ainda não sabe o device_id). */
   onShowHistory?: (pon: number, onu: number, label: string) => void;
+  /** Resolve a VLAN de uma ONU pela PON dela + config do equipamento (pon_vlans no cadastro da
+   * OLT). Quando dado, a coluna VLAN aparece mesmo que as linhas não tragam vlan própria. */
+  vlanForPon?: (pon?: number) => string;
 };
 
-export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusMode, offlineRxDbm, onShowHistory }: Props) {
+export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusMode, offlineRxDbm, onShowHistory, vlanForPon }: Props) {
   const { thresholds: rxThresholds } = useOnuRxThresholds();
   const visible = useMemo(
-    () => buildVisibleColumns(enabledMetrics, rows, rxStatusMode),
-    [enabledMetrics, rows, rxStatusMode],
+    () => buildVisibleColumns(enabledMetrics, rows, rxStatusMode, !!vlanForPon),
+    [enabledMetrics, rows, rxStatusMode, vlanForPon],
   );
 
   const displayRows = useMemo(() => {
@@ -314,7 +318,22 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
                     {cell(u.serial)}
                   </td>
                 )}
-                {visible.has("vlan") && <td className="mono">{cell(u.vlan)}</td>}
+                {visible.has("vlan") && (
+                  <td className="mono">
+                    {(() => {
+                      const own = String(u.vlan ?? "").trim();
+                      if (own) return own;
+                      const byPon = vlanForPon?.(u.pon)?.trim();
+                      return byPon ? (
+                        <span title={`VLAN da PON ${u.pon} (cadastro do equipamento)`} style={{ color: "var(--muted)" }}>
+                          {byPon}
+                        </span>
+                      ) : (
+                        EM_DASH
+                      );
+                    })()}
+                  </td>
+                )}
                 {onShowHistory && (
                   <td style={{ textAlign: "right" }}>
                     {u.pon != null && u.onu != null ? (

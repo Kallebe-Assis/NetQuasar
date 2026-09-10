@@ -60,6 +60,8 @@ import {
   MaintenanceSwitch,
   ProjectSelect,
 } from "./ConnectionsFormFields";
+import { Switch } from "../../components/Switch";
+import { OriginElementFields, type OriginKind } from "./OriginElementFields";
 import { ConnectionsPager } from "./ConnectionsPager";
 import { ConnectionsTabToolbar } from "./ConnectionsTabToolbar";
 import type { ConnectionsTabProps } from "./shared";
@@ -320,10 +322,21 @@ export function InfrastructureTab({
       notes: "",
     };
     if (variant === "cto") {
-      return { ...base, splitter: "", transmitter: "", olt_device_id: "", pon: "", fiber_color: "Desconhecido", locality_id: "" };
+      return {
+        ...base,
+        splitter: "",
+        transmitter: "",
+        olt_device_id: "",
+        pon: "",
+        fiber_color: "Desconhecido",
+        locality_id: "",
+        origin_kind: "",
+        origin_ref_id: "",
+        origin_label: "",
+      };
     }
     if (variant === "splice") {
-      return { ...base, fiber_count: "12", box_model: "emenda" };
+      return { ...base, fiber_count: "12", box_model: "emenda", origin_kind: "", origin_ref_id: "", origin_label: "" };
     }
     if (variant === "cable") {
       return { ...base, cable_type: "", fiber_count: "", status: "ativo", funcao: "outro" };
@@ -351,6 +364,11 @@ export function InfrastructureTab({
     if (variant === "splice") {
       if (r.fiber_count != null) f.fiber_count = String(r.fiber_count);
       f.box_model = r.box_model === "distribuicao" ? "distribuicao" : "emenda";
+    }
+    if (variant === "cto" || variant === "splice") {
+      f.origin_kind = r.origin_kind ? String(r.origin_kind) : "";
+      f.origin_ref_id = r.origin_ref_id ? String(r.origin_ref_id) : "";
+      f.origin_label = r.origin_label ? String(r.origin_label) : "";
     }
     if (variant === "cable") {
       f.cable_type = r.cable_type ? String(r.cable_type) : "";
@@ -414,6 +432,11 @@ export function InfrastructureTab({
       const fc = String(form.fiber_count).trim();
       payload.fiber_count = fc ? Number(fc) : null;
       payload.box_model = String(form.box_model || "emenda");
+    }
+    if (variant === "cto" || variant === "splice") {
+      payload.origin_kind = String(form.origin_kind || "").trim() || null;
+      payload.origin_ref_id = String(form.origin_ref_id || "").trim() || null;
+      payload.origin_label = String(form.origin_label || "").trim() || null;
     }
     if (variant === "cable") {
       payload.cable_type = String(form.cable_type).trim() || null;
@@ -1008,6 +1031,33 @@ export function InfrastructureTab({
                 </section>
               ) : null}
 
+              {variant === "cto" || variant === "splice" ? (
+                <section className="conn-form-modal__section">
+                  <h3 className="conn-form-modal__section-title">Origem do sinal</h3>
+                  <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
+                    De onde vem a fibra que alimenta este elemento (POP, foguete, CTO, OLT, switch, MikroTik ou rádio).
+                  </p>
+                  <div className="conn-form-modal__grid">
+                    <OriginElementFields
+                      value={{
+                        origin_kind: String(form.origin_kind || "") as OriginKind,
+                        origin_ref_id: String(form.origin_ref_id || ""),
+                        origin_label: String(form.origin_label || ""),
+                      }}
+                      excludeId={editId ?? undefined}
+                      onChange={(next) =>
+                        setForm({
+                          ...form,
+                          origin_kind: next.origin_kind,
+                          origin_ref_id: next.origin_ref_id,
+                          origin_label: next.origin_label,
+                        })
+                      }
+                    />
+                  </div>
+                </section>
+              ) : null}
+
               {variant === "splice" ? (
                 <section className="conn-form-modal__section">
                   <h3 className="conn-form-modal__section-title">Caixa de emenda</h3>
@@ -1178,14 +1228,14 @@ export function InfrastructureTab({
                         ))}
                       </select>
                     </div>
-                    <label className="conn-form-modal__field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <input
-                        type="checkbox"
+                    <div className="conn-form-modal__field field--full">
+                      <Switch
                         checked={Boolean(form.has_transformer)}
-                        onChange={(e) => setForm({ ...form, has_transformer: e.target.checked })}
+                        onChange={(v) => setForm({ ...form, has_transformer: v })}
+                        label="Com transformador"
+                        hint="O poste tem transformador da concessionária de energia."
                       />
-                      <span className="conn-form-modal__field-label" style={{ margin: 0 }}>Com transformador</span>
-                    </label>
+                    </div>
                   </div>
                 </section>
               ) : null}

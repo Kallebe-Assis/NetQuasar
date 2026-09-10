@@ -12,10 +12,21 @@ import {
 } from "recharts";
 import { InfoHint } from "../../components/InfoHint";
 import { apiFetch } from "../../lib/api";
+import { EmptyState } from "../../components/EmptyState";
 
 type HistoryPoint = { t: string; total: number; online: number; offline: number };
 type HistorySeries = { device_id: string; description: string; points: HistoryPoint[] };
 type HistoryBucket = "minute" | "hour" | "day";
+type PonSeries = { pon: number; pon_name: string; points: HistoryPoint[] };
+type PonHistoryResponse = {
+  device_id: string;
+  days: number;
+  bucket: HistoryBucket;
+  since: string;
+  until: string;
+  pons: PonSeries[];
+  aggregate: HistoryPoint[];
+};
 type HistoryResponse = {
   days: number;
   bucket: HistoryBucket;
@@ -65,7 +76,7 @@ function OnuHistoryChart({
     return (
       <div className="card" style={{ padding: 12 }}>
         <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h3>
-        <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Sem amostras no período. Atualize snapshots das OLTs para gerar histórico.</p>
+        <EmptyState variant="inline" title="Sem amostras no período." hint="Atualize snapshots das OLTs para gerar histórico." />
       </div>
     );
   }
@@ -137,6 +148,26 @@ export function OltReportsTab({ olts }: Props) {
     queryKey: ["olt-reports-history", queryParams],
     queryFn: () => apiFetch<HistoryResponse>(`/api/v1/olt/reports/history?${queryParams}`),
     staleTime: 30_000,
+  });
+
+  // Histórico por PORTA PON — só quando uma OLT específica está seleccionada (pedido explícito).
+  const ponQueryParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (appliedRange) {
+      p.set("from", appliedRange.from);
+      p.set("to", appliedRange.to);
+    } else {
+      p.set("days", String(days));
+    }
+    p.set("device_id", deviceId);
+    return p.toString();
+  }, [appliedRange, days, deviceId]);
+
+  const ponQ = useQuery({
+    queryKey: ["olt-reports-pon-history", ponQueryParams],
+    queryFn: () => apiFetch<PonHistoryResponse>(`/api/v1/olt/reports/pon-history?${ponQueryParams}`),
+    staleTime: 30_000,
+    enabled: deviceId !== "all",
   });
 
   const aggPoints = q.data?.aggregate?.points ?? [];
@@ -245,9 +276,12 @@ export function OltReportsTab({ olts }: Props) {
           </div>
         ) : null}
         {!q.isLoading && !hasAny && (
-          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 8, marginBottom: 0 }}>
-            Ainda não há histórico. Vá à lista de equipamentos e atualize snapshots, ou aguarde o relatório mensal automático.
-          </p>
+          <div style={{ marginTop: 10 }}>
+            <EmptyState
+              title="Ainda não há histórico."
+              hint="Vá à lista de equipamentos e atualize snapshots das OLTs, ou aguarde a coleta periódica / o relatório mensal automático."
+            />
+          </div>
         )}
       </div>
 
@@ -281,6 +315,51 @@ export function OltReportsTab({ olts }: Props) {
                 ))}
               </div>
             </>
+          )}
+
+          {deviceId !== "all" && (
+            <div style={{ marginTop: 24 }}>
+              <h2 style={{ marginBottom: 10, fontSize: 16 }}>
+                Histórico por PON {selectedOltLabel ? `— ${selectedOltLabel}` : ""}
+              </h2>
+              {ponQ.isLoading ? (
+                <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar histórico por PON…</p>
+              ) : ponQ.isError ? (
+                <div className="msg msg--err">{(ponQ.error as Error).message}</div>
+              ) : (ponQ.data?.pons ?? []).length === 0 ? (
+                <EmptyState
+                  title="Ainda não há histórico por PON para esta OLT"
+                  hint="Começa a partir da próxima colecta (manual ou periódica) — colectas anteriores a esta funcionalidade não são recuperáveis."
+                />
+              ) : (
+                <>
+                  <OnuHistoryChart
+                    title="Geral — soma de todas as PONs"
+                    data={ponQ.data?.aggregate ?? []}
+                    bucket={ponQ.data?.bucket ?? bucket}
+                    height={280}
+                  />
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                      gap: 12,
+                      marginTop: 12,
+                    }}
+                  >
+                    {(ponQ.data?.pons ?? []).map((p) => (
+                      <OnuHistoryChart
+                        key={p.pon}
+                        title={p.pon_name || `PON ${p.pon}`}
+                        data={p.points}
+                        bucket={ponQ.data?.bucket ?? bucket}
+                        height={170}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </>
       )}

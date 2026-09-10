@@ -316,3 +316,148 @@ func (s *Server) getOLTReportsHistory(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+// getOLTPonHistory — histórico por PORTA PON de UMA OLT específica (olt_pon_samples). Usado
+// pela aba Relatório da OLT só quando uma OLT está seleccionada: um gráfico grande com o
+// agregado (soma de todas as PONs por bucket) e um por PON para o grid. Mesmo bucketing
+// dinâmico de getOLTReportsHistory (pickOLTHistoryBucket).
+func (s *Server) getOLTPonHistory(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	idStr := strings.TrimSpace(q.Get("device_id"))
+	if idStr == "" || idStr == "all" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "device_id obrigatório — o histórico por PON é sempre de uma OLT específica.", nil)
+		return
+	}
+	deviceID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "device_id inválido.", nil)
+		return
+	}
+
+	days := 7
+	if d := strings.TrimSpace(q.Get("days")); d != "" {
+		if n, e := strconv.Atoi(d); e == nil {
+			days = n
+		}
+	}
+	switch days {
+	case 1, 3, 7, 30:
+	default:
+		days = 7
+	}
+	now := time.Now().UTC()
+	since := now.Add(-time.Duration(days) * 24 * time.Hour)
+	until := now
+	customRange := false
+	if fromStr := strings.TrimSpace(q.Get("from")); fromStr != "" {
+		t, e := time.Parse(time.RFC3339, fromStr)
+		if e != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", "Parâmetro \"from\" inválido — use ISO 8601 (RFC3339).", nil)
+			return
+		}
+		since, customRange = t.UTC(), true
+	}
+	if toStr := strings.TrimSpace(q.Get("to")); toStr != "" {
+		t, e := time.Parse(time.RFC3339, toStr)
+		if e != nil {
+			writeErr(w, http.StatusBadRequest, "VALIDATION", "Parâmetro \"to\" inválido — use ISO 8601 (RFC3339).", nil)
+			return
+		}
+		until, customRange = t.UTC(), true
+	}
+	if !until.After(since) {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "Período inválido: \"to\" deve ser depois de \"from\".", nil)
+		return
+	}
+	if since.Before(now.Add(-366 * 24 * time.Hour)) {
+		since = now.Add(-366 * 24 * time.Hour)
+	}
+
+	bucket, interval := pickOLTHistoryBucket(until.Sub(since))
+	if !customRange && days != 1 {
+		bucket, interval = "day", "1 day"
+	}
+
+	// Uma linha por (pon, bucket) — o valor de cada bucket é a última amostra dentro dele.
+	rows, err := s.DB().Query(r.Context(), `
+		SELECT DISTINCT ON (s.pon, date_trunc($1, s.recorded_at AT TIME ZONE 'UTC'))
+			s.pon,
+			COALESCE(NULLIF(s.pon_name, ''), 'PON ' || s.pon::text) AS pon_name,
+			date_trunc($1, s.recorded_at AT TIME ZONE 'UTC') AS bucket,
+			s.onu_total, s.onu_online, s.onu_offline
+		FROM olt_pon_samples s
+		WHERE s.device_id = $2 AND s.recorded_at >= $3 AND s.recorded_at < $4
+		ORDER BY s.pon, date_trunc($1, s.recorded_at AT TIME ZONE 'UTC'), s.recorded_at DESC
+	`, bucket, deviceID, since, until)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	defer rows.Close()
+
+	type ponPoint struct {
+		T       string `json:"t"`
+		Total   int    `json:"total"`
+		Online  int    `json:"online"`
+		Offline int    `json:"offline"`
+	}
+	type ponSeries struct {
+		Pon     int        `json:"pon"`
+		PonName string     `json:"pon_name"`
+		Points  []ponPoint `json:"points"`
+	}
+	byPon := map[int]*ponSeries{}
+	// agregado: soma de todas as PONs por bucket
+	agg := map[string]*ponPoint{}
+	aggOrder := []string{}
+
+	for rows.Next() {
+		var pon, total, online, offline int
+		var ponName string
+		var bt time.Time
+		if err := rows.Scan(&pon, &ponName, &bt, &total, &online, &offline); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+		ts := bt.UTC().Format(time.RFC3339)
+		ps := byPon[pon]
+		if ps == nil {
+			ps = &ponSeries{Pon: pon, PonName: ponName, Points: []ponPoint{}}
+			byPon[pon] = ps
+		}
+		ps.Points = append(ps.Points, ponPoint{T: ts, Total: total, Online: online, Offline: offline})
+
+		a := agg[ts]
+		if a == nil {
+			a = &ponPoint{T: ts}
+			agg[ts] = a
+			aggOrder = append(aggOrder, ts)
+		}
+		a.Total += total
+		a.Online += online
+		a.Offline += offline
+	}
+
+	pons := make([]ponSeries, 0, len(byPon))
+	for _, ps := range byPon {
+		pons = append(pons, *ps)
+	}
+	sort.Slice(pons, func(i, j int) bool { return pons[i].Pon < pons[j].Pon })
+
+	sort.Strings(aggOrder)
+	aggPts := make([]ponPoint, 0, len(aggOrder))
+	for _, ts := range aggOrder {
+		aggPts = append(aggPts, *agg[ts])
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id": deviceID.String(),
+		"days":      days,
+		"bucket":    bucket,
+		"since":     since.Format(time.RFC3339),
+		"until":     until.Format(time.RFC3339),
+		"interval":  interval,
+		"pons":      pons,
+		"aggregate": aggPts,
+	})
+}

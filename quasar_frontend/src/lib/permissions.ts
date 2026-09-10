@@ -2,6 +2,13 @@
 export type PermissionKey =
   | "*"
   | "dashboard.view"
+  | "dashboard.tab.geral"
+  | "dashboard.tab.equipamentos"
+  | "dashboard.tab.fibra"
+  | "dashboard.tab.infra"
+  | "dashboard.tab.sessoes"
+  | "dashboard.tab.servidor"
+  | "dashboard.tab.frota"
   | "monitoring.view"
   | "monitoring.control"
   | "realtime.view"
@@ -71,6 +78,13 @@ export type PermissionProfile = {
 
 export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "dashboard.view", module: "dashboard", module_label: "Dashboard", label: "Visualizar" },
+  { key: "dashboard.tab.geral", module: "dashboard", module_label: "Dashboard", label: "Aba: Geral" },
+  { key: "dashboard.tab.equipamentos", module: "dashboard", module_label: "Dashboard", label: "Aba: Equipamentos" },
+  { key: "dashboard.tab.fibra", module: "dashboard", module_label: "Dashboard", label: "Aba: Fibra óptica" },
+  { key: "dashboard.tab.infra", module: "dashboard", module_label: "Dashboard", label: "Aba: Infraestrutura" },
+  { key: "dashboard.tab.sessoes", module: "dashboard", module_label: "Dashboard", label: "Aba: Sessões PPPoE" },
+  { key: "dashboard.tab.servidor", module: "dashboard", module_label: "Dashboard", label: "Aba: Servidor NetQuasar" },
+  { key: "dashboard.tab.frota", module: "dashboard", module_label: "Dashboard", label: "Aba: Frota" },
   { key: "monitoring.view", module: "monitoring", module_label: "Monitoramento", label: "Visualizar" },
   { key: "monitoring.control", module: "monitoring", module_label: "Monitoramento", label: "Iniciar, parar e executar ciclos" },
   { key: "realtime.view", module: "realtime", module_label: "Tempo real", label: "Visualizar" },
@@ -123,6 +137,13 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 /** Espelha o perfil sistema «Usuário» / defaultViewerPermissions do backend (sem Configurações). */
 export const DEFAULT_USER_PERMISSIONS: PermissionKey[] = [
   "dashboard.view",
+  "dashboard.tab.geral",
+  "dashboard.tab.equipamentos",
+  "dashboard.tab.fibra",
+  "dashboard.tab.infra",
+  "dashboard.tab.sessoes",
+  "dashboard.tab.servidor",
+  "dashboard.tab.frota",
   "monitoring.view",
   "realtime.view",
   "integrations.view",

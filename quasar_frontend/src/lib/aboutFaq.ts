@@ -41,6 +41,36 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     a: "É um produto/projeto sob o controlo do desenvolvedor e da organização que o opera. Consulte a licença e política internas da sua instalação.",
     cat: "tecnico",
   },
+  {
+    q: "Como acompanho a potência RX das ONUs?",
+    a: "Na tela de OLT, aba ONUs, a coluna RX é classificada por cor (Boa / Aceitável / Ruim) segundo os limiares em Configurações → OLT → 'Qualidade da potência RX (ONU)'. O Dashboard → Fibra óptica lista, por PON, quantas ONUs ONLINE estão abaixo do limiar de 'boa'. Cada ONU tem ainda um 'Histórico' (últimas 10 colectas) nos 3 pontinhos da linha.",
+    cat: "funcoes",
+  },
+  {
+    q: "Existe histórico por PON de cada OLT?",
+    a: "Sim. Na tela de OLT → aba Relatório, ao seleccionar uma OLT específica aparece um gráfico geral (soma de todas as PONs) e um grid de 4 colunas com o histórico de cada porta PON (total/online/offline ao longo do período).",
+    cat: "funcoes",
+  },
+  {
+    q: "O que a aba Infraestrutura do Dashboard mostra?",
+    a: "Totais de projetos, CTOs, caixas de emenda e de distribuição, cabos e postes; o estado das CTOs (vazia / disponível / próxima da saturação / lotada / sem portas cadastradas); a contagem de CTOs por tipo de splitter (1x8, 1x16…); e a repartição de elementos por projeto de rede.",
+    cat: "funcoes",
+  },
+  {
+    q: "Dá para agendar relatórios da integração HubSoft?",
+    a: "Sim, em Configurações → Automações → Nova automação. Estão no catálogo: Serviços por plano / por localidade / ambos; Ordens de serviço por período (com ranking por técnico); Atendimentos por período; e a visão combinada. Cada automação tem a sua própria recorrência e é enviada pelo bot Telegram de relatórios.",
+    cat: "funcoes",
+  },
+  {
+    q: "Como exporto uma lista de ONUs?",
+    a: "Na tela de OLT → aba Pesquisa de ONUs, o botão de exportar (ícone de download na barra de filtros) gera um CSV com exactamente o que está filtrado — OLT e PON seleccionados mais os filtros de potência/temperatura/voltagem/cliente, incluindo todas as páginas do resultado.",
+    cat: "funcoes",
+  },
+  {
+    q: "O que é o botão 'Clientes afetados' nos alertas?",
+    a: "Em alertas de OLT offline (ping_unreachable numa OLT) ou PON DOWN, os 3 pontinhos oferecem 'Clientes afetados': abre um modal com os clientes ligados às ONUs no alcance do alerta (a OLT inteira ou só a PON caída), com opção de exportar CSV e de enviar a lista pelo Telegram.",
+    cat: "funcoes",
+  },
 
   // --- Conceitos ---
   {

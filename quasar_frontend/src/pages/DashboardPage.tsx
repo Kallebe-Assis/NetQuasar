@@ -6,6 +6,8 @@ import { DashboardPageLoader } from "../components/DashboardPageLoader";
 import { GlobalSearchBar } from "../components/GlobalSearchBar";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
+import { can } from "../lib/auth";
+import type { PermissionKey } from "../lib/permissions";
 import {
   DASHBOARD_DEFAULT_DAYS,
   DASHBOARD_GC_MS,
@@ -20,6 +22,7 @@ import { displayAlertType } from "../lib/alertLabels";
 import { DashboardGeralView } from "./dashboard/DashboardGeralView";
 import { DashboardEquipamentosView } from "./dashboard/DashboardEquipamentosView";
 import { DashboardFibraView } from "./dashboard/DashboardFibraView";
+import { DashboardInfraView } from "./dashboard/DashboardInfraView";
 import { DashboardPppoeView } from "./dashboard/DashboardPppoeView";
 import { DashboardServidorView } from "./dashboard/DashboardServidorView";
 import type { DashboardAnalytics, OltCapacity, TopRow } from "./dashboard/dashboardShared";
@@ -31,25 +34,51 @@ const FleetDashboardPage = lazy(() =>
   import("./fleet/FleetDashboardPage").then((m) => ({ default: m.FleetDashboardPage })),
 );
 
-type DashboardView = "geral" | "equipamentos" | "fibra" | "sessoes" | "servidor" | "frota";
+type DashboardView = "geral" | "equipamentos" | "fibra" | "infra" | "sessoes" | "servidor" | "frota";
 
 const VIEW_LABELS: Record<DashboardView, string> = {
   geral: "Geral",
   equipamentos: "Equipamentos",
   fibra: "Fibra óptica",
+  infra: "Infraestrutura",
   sessoes: "Sessões PPPoE",
   servidor: "Servidor NetQuasar",
   frota: "Frota",
 };
-const VIEW_ORDER: DashboardView[] = ["geral", "equipamentos", "fibra", "sessoes", "servidor", "frota"];
+const VIEW_ORDER: DashboardView[] = ["geral", "equipamentos", "fibra", "infra", "sessoes", "servidor", "frota"];
+// Cada aba tem a sua permissão — o perfil de permissão define quais o usuário vê. Perfis antigos
+// (sem nenhuma chave dashboard.tab.*) continuam a ver todas as abas: ver allowedViews() abaixo.
+const TAB_PERMISSION: Record<DashboardView, PermissionKey> = {
+  geral: "dashboard.tab.geral",
+  equipamentos: "dashboard.tab.equipamentos",
+  fibra: "dashboard.tab.fibra",
+  infra: "dashboard.tab.infra",
+  sessoes: "dashboard.tab.sessoes",
+  servidor: "dashboard.tab.servidor",
+  frota: "dashboard.tab.frota",
+};
+
+function allowedDashboardViews(): DashboardView[] {
+  const granted = VIEW_ORDER.filter((v) => can(TAB_PERMISSION[v]));
+  // Compatibilidade: perfil sem nenhuma chave de aba (criado antes desta funcionalidade) vê tudo.
+  return granted.length > 0 ? granted : VIEW_ORDER;
+}
 // Views que partilham os dados agregados de /dashboard/analytics (período/atualizar aplicam-se
 // só a estas — "servidor" e "frota" têm as suas próprias fontes de dados e período).
-const SHARED_DATA_VIEWS = new Set<DashboardView>(["geral", "equipamentos", "fibra"]);
+const SHARED_DATA_VIEWS = new Set<DashboardView>(["geral", "equipamentos", "fibra", "infra"]);
 
-function DashboardViewTabs({ active, onChange }: { active: DashboardView; onChange: (v: DashboardView) => void }) {
+function DashboardViewTabs({
+  active,
+  onChange,
+  views,
+}: {
+  active: DashboardView;
+  onChange: (v: DashboardView) => void;
+  views: DashboardView[];
+}) {
   return (
     <div className="tabs" style={{ marginBottom: 14 }}>
-      {VIEW_ORDER.map((v) => (
+      {views.map((v) => (
         <button key={v} type="button" className={active === v ? "active" : ""} onClick={() => onChange(v)}>
           {VIEW_LABELS[v]}
         </button>
@@ -60,7 +89,8 @@ function DashboardViewTabs({ active, onChange }: { active: DashboardView; onChan
 
 export function DashboardPage() {
   const qc = useQueryClient();
-  const [view, setView] = useState<DashboardView>("geral");
+  const allowedViews = useMemo(() => allowedDashboardViews(), []);
+  const [view, setView] = useState<DashboardView>(() => allowedDashboardViews()[0] ?? "geral");
   const [days, setDays] = useState(DASHBOARD_DEFAULT_DAYS);
   const [catViz, setCatViz] = useState<"pie" | "bar">("pie");
   const [pageIn, setPageIn] = useState(false);
@@ -187,6 +217,12 @@ export function DashboardPage() {
   }, [dash.data?.devices_by_network_status]);
 
   useEffect(() => {
+    if (!allowedViews.includes(view)) {
+      setView(allowedViews[0] ?? "geral");
+    }
+  }, [allowedViews, view]);
+
+  useEffect(() => {
     if (!SHARED_DATA_VIEWS.has(view)) {
       setPageIn(true);
       return;
@@ -222,9 +258,9 @@ export function DashboardPage() {
           Dashboard
           <InfoHint label="Sobre o dashboard">
             <p>
-              Escolha a vista com as abas abaixo. <strong>Geral</strong>, <strong>Equipamentos</strong> e <strong>Fibra óptica</strong> partilham a
-              janela de <strong>{dash.data?.days ?? days}</strong> dias selecionada. <strong>Servidor NetQuasar</strong> mostra a saúde do próprio
-              sistema, e <strong>Frota</strong> tem o seu próprio período.
+              Escolha a vista com as abas abaixo. <strong>Geral</strong>, <strong>Equipamentos</strong>, <strong>Fibra óptica</strong> e{" "}
+              <strong>Infraestrutura</strong> partilham a janela de <strong>{dash.data?.days ?? days}</strong> dias selecionada.{" "}
+              <strong>Servidor NetQuasar</strong> mostra a saúde do próprio sistema, e <strong>Frota</strong> tem o seu próprio período.
             </p>
           </InfoHint>
         </h1>
@@ -246,7 +282,7 @@ export function DashboardPage() {
         ) : null}
       </div>
 
-      <DashboardViewTabs active={view} onChange={setView} />
+      <DashboardViewTabs active={view} onChange={setView} views={allowedViews} />
 
       {SHARED_DATA_VIEWS.has(view) ? (
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
@@ -313,8 +349,10 @@ export function DashboardPage() {
               capacity={cap.data}
               capacityError={cap.isError ? (cap.error as Error).message : null}
               ctoPorts={dash.data?.cto_ports}
+              lowRxPons={dash.data?.low_rx_pons}
             />
           ) : null}
+          {view === "infra" ? <DashboardInfraView infra={dash.data?.infra_overview} /> : null}
           {view === "sessoes" ? <DashboardPppoeView /> : null}
           {view === "servidor" ? <DashboardServidorView /> : null}
           {view === "frota" ? (

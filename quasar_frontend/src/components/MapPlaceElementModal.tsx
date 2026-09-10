@@ -181,8 +181,8 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
             </>
           ) : null}
         </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <label className="splitter-modal__field">
+        <div className="map-place-modal__grid">
+          <label className="splitter-modal__field field--full">
             <span>Nome / descrição</span>
             <input
               className="input"
@@ -266,12 +266,12 @@ export function MapPlaceElementModal({ session, onClose, onSaved }: Props) {
             </>
           ) : null}
           {kind === "project" ? (
-            <label className="splitter-modal__field">
+            <label className="splitter-modal__field field--full">
               <span>Cor no mapa</span>
               <input className="input" type="color" value={projectColor} onChange={(e) => setProjectColor(e.target.value)} />
             </label>
           ) : null}
-          {err ? <div className="msg msg--err">{err}</div> : null}
+          {err ? <div className="msg msg--err field--full">{err}</div> : null}
         </div>
         <div className="row" style={{ justifyContent: "flex-end", marginTop: 14, gap: 8 }}>
           <button type="button" className="btn" onClick={onClose} disabled={saveMut.isPending}>

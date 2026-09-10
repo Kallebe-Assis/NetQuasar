@@ -542,6 +542,160 @@ func (s *Server) buildDashboardAnalytics(ctx context.Context, pool *pgxpool.Pool
 		return nil
 	})
 
+	// Dashboard → Fibra: por PON, quantas ONUs ONLINE estão com RX abaixo do limiar de "boa"
+	// (Configurações → OLT → "Qualidade da potência RX (ONU)", coluna onu_rx_good_dbm). Só conta
+	// linhas online e com rx_dbm numérico — offline e sem leitura óptica ficam de fora, como pedido.
+	g.Go(func() error {
+		var rxGood float64 = -23
+		_ = pool.QueryRow(gctx, `SELECT COALESCE(onu_rx_good_dbm, -23) FROM monitoring_settings WHERE id=1`).Scan(&rxGood)
+		rows, err := pool.Query(gctx, `
+			SELECT d.id::text, d.description, (e->>'pon')::int AS pon, COUNT(*)::bigint AS low_rx
+			FROM devices d
+			JOIN olt_snapshots o ON o.device_id = d.id
+			CROSS JOIN LATERAL jsonb_array_elements(
+				CASE WHEN jsonb_typeof(o.summary->'vsol_onu_rows') = 'array' THEN o.summary->'vsol_onu_rows' ELSE '[]'::jsonb END
+			) e
+			WHERE lower(trim(d.category)) = 'olt' AND `+sqlDeviceOperationalAtivoD+`
+				AND (e->>'online') = 'true'
+				AND e->>'rx_dbm' ~ '^-?[0-9]+(\.[0-9]+)?$'
+				AND (e->>'rx_dbm')::float8 < $1
+				AND (e->>'pon') ~ '^[0-9]+$'
+			GROUP BY d.id, d.description, (e->>'pon')::int
+			ORDER BY low_rx DESC, d.description, pon
+			LIMIT 300`, rxGood)
+		if err != nil {
+			set("low_rx_pons", map[string]any{"threshold_dbm": rxGood, "rows": []any{}})
+			return nil
+		}
+		defer rows.Close()
+		var list []map[string]any
+		var totalOnus int64
+		for rows.Next() {
+			var id, desc string
+			var pon int
+			var cnt int64
+			if rows.Scan(&id, &desc, &pon, &cnt) == nil {
+				list = append(list, map[string]any{"olt_id": id, "olt": desc, "pon": pon, "count": cnt})
+				totalOnus += cnt
+			}
+		}
+		set("low_rx_pons", map[string]any{
+			"threshold_dbm": rxGood,
+			"total_onus":    totalOnus,
+			"pon_count":     len(list),
+			"rows":          list,
+		})
+		return nil
+	})
+
+	// Dashboard → Infraestrutura: estado das CTOs (vazia/disponível/próx. saturação/lotada),
+	// CTOs por tipo de splitter, caixas de emenda vs distribuição, e totais por projeto.
+	g.Go(func() error {
+		infra := map[string]any{}
+
+		// Baldes de ocupação das CTOs (mesma definição "ocupada"/"livre" do card "Portas de CTO").
+		var totalCtos int64
+		_ = pool.QueryRow(gctx, `SELECT COUNT(*) FROM network_ctos`).Scan(&totalCtos)
+		buckets := map[string]int64{"vazia": 0, "disponivel": 0, "proxima_saturacao": 0, "lotada": 0, "sem_portas": 0}
+		bRows, err := pool.Query(gctx, `
+			SELECT bucket, COUNT(*)::bigint FROM (
+				SELECT CASE
+					WHEN total = 0 THEN 'sem_portas'
+					WHEN free = 0 THEN 'lotada'
+					WHEN used::float8 / total >= 0.8 THEN 'proxima_saturacao'
+					WHEN used = 0 THEN 'vazia'
+					ELSE 'disponivel'
+				END AS bucket
+				FROM (
+					SELECT
+						jsonb_array_length(sp) AS total,
+						(SELECT COUNT(*) FROM jsonb_array_elements(sp) x WHERE x->>'status' = 'ocupada') AS used,
+						(SELECT COUNT(*) FROM jsonb_array_elements(sp) x WHERE x->>'status' = 'livre') AS free
+					FROM (
+						SELECT CASE WHEN jsonb_typeof(splitter_ports) = 'array' THEN splitter_ports ELSE '[]'::jsonb END AS sp
+						FROM network_ctos
+					) s
+				) c
+			) b GROUP BY bucket`)
+		if err == nil {
+			for bRows.Next() {
+				var b string
+				var n int64
+				if bRows.Scan(&b, &n) == nil {
+					buckets[b] = n
+				}
+			}
+			bRows.Close()
+		}
+		infra["total_ctos"] = totalCtos
+		infra["cto_status"] = buckets
+
+		// CTOs por tipo de splitter (campo splitter, ex. "1x8", "1x16").
+		var bySplitter []map[string]any
+		spRows, err := pool.Query(gctx, `
+			SELECT COALESCE(NULLIF(trim(splitter), ''), '(não definido)'), COUNT(*)::bigint
+			FROM network_ctos GROUP BY 1 ORDER BY 2 DESC, 1`)
+		if err == nil {
+			for spRows.Next() {
+				var name string
+				var n int64
+				if spRows.Scan(&name, &n) == nil {
+					bySplitter = append(bySplitter, map[string]any{"splitter": name, "count": n})
+				}
+			}
+			spRows.Close()
+		}
+		infra["ctos_by_splitter"] = bySplitter
+
+		// Caixas de emenda: por modelo (emenda = fusões; distribuicao = splitter interno).
+		var emendas, distribuicoes int64
+		_ = pool.QueryRow(gctx, `
+			SELECT
+				COUNT(*) FILTER (WHERE box_model = 'emenda')::bigint,
+				COUNT(*) FILTER (WHERE box_model = 'distribuicao')::bigint
+			FROM network_splice_boxes`).Scan(&emendas, &distribuicoes)
+		infra["splice_boxes"] = map[string]any{"emenda": emendas, "distribuicao": distribuicoes, "total": emendas + distribuicoes}
+
+		// Totais por projeto.
+		var byProject []map[string]any
+		pRows, err := pool.Query(gctx, `
+			SELECT p.id::text, p.description, p.status,
+				(SELECT COUNT(*) FROM network_ctos c WHERE c.project_id = p.id)::bigint,
+				(SELECT COUNT(*) FROM network_splice_boxes s WHERE s.project_id = p.id AND s.box_model = 'emenda')::bigint,
+				(SELECT COUNT(*) FROM network_splice_boxes s WHERE s.project_id = p.id AND s.box_model = 'distribuicao')::bigint,
+				(SELECT COUNT(*) FROM network_cables cb WHERE cb.project_id = p.id)::bigint,
+				(SELECT COUNT(*) FROM network_poles pl WHERE pl.project_id = p.id)::bigint
+			FROM network_projects p
+			ORDER BY p.description`)
+		if err == nil {
+			for pRows.Next() {
+				var id, desc, status string
+				var ctos, em, dist, cables, poles int64
+				if pRows.Scan(&id, &desc, &status, &ctos, &em, &dist, &cables, &poles) == nil {
+					byProject = append(byProject, map[string]any{
+						"project_id": id, "description": desc, "status": status,
+						"ctos": ctos, "emendas": em, "distribuicoes": dist, "cables": cables, "poles": poles,
+					})
+				}
+			}
+			pRows.Close()
+		}
+		infra["by_project"] = byProject
+
+		var totalCables, totalPoles, totalProjects int64
+		_ = pool.QueryRow(gctx, `SELECT
+			(SELECT COUNT(*) FROM network_cables),
+			(SELECT COUNT(*) FROM network_poles),
+			(SELECT COUNT(*) FROM network_projects)`).Scan(&totalCables, &totalPoles, &totalProjects)
+		infra["totals"] = map[string]any{
+			"cables": totalCables, "poles": totalPoles, "projects": totalProjects,
+			"ctos": totalCtos, "splice_boxes": emendas + distribuicoes,
+		}
+
+		set("infra_overview", infra)
+		return nil
+	})
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}

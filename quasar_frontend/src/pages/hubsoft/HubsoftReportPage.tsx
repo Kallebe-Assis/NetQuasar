@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Send } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { InfoHint } from "../../components/InfoHint";
+import { EmptyState } from "../../components/EmptyState";
 import { ClientDetailModal } from "../../integrations/HubsoftClientResults";
 import type {
   ClientAttendanceResponse,
@@ -347,7 +348,11 @@ function ClientsReportSection() {
       </div>
 
       {appliedParams === null ? (
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>Ajuste os filtros e clique em Filtrar.</p>
+        <EmptyState
+          variant="inline"
+          title="Sem relatório ainda."
+          hint="Ajuste os filtros acima e clique em Filtrar."
+        />
       ) : reportQ.isLoading ? (
         <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
       ) : reportQ.isError ? (
@@ -355,7 +360,10 @@ function ClientsReportSection() {
       ) : !reportQ.data?.ok ? (
         <div className="msg msg--err">{reportQ.data?.message || "Falha ao consultar."}</div>
       ) : rows.length === 0 ? (
-        <div className="msg msg--warn">{reportQ.data?.message || "Nenhum resultado para esses filtros."}</div>
+        <EmptyState
+          title="Nenhum resultado para esses filtros."
+          hint={reportQ.data?.message || "Tente alargar o período ou remover filtros de plano/localidade."}
+        />
       ) : (
         <>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>

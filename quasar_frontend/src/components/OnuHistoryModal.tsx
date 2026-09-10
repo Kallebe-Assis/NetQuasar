@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { formatCollectedPt } from "../lib/deviceReportHelpers";
 import { EM_DASH, formatSnmpMetricCell } from "../lib/formatDisplay";
+import { EmptyState } from "./EmptyState";
 
 type OnuHistoryRow = {
   collected_at: string;
@@ -76,9 +77,10 @@ export function OnuHistoryModal({
         ) : q.isError ? (
           <div className="msg msg--err">{(q.error as Error).message}</div>
         ) : !q.data || q.data.history.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)" }}>
-            Sem histórico ainda para esta ONU — só fica disponível a partir da próxima colecta em diante.
-          </p>
+          <EmptyState
+            title="Sem histórico ainda para esta ONU"
+            hint="O histórico começa a partir da próxima colecta — não há como recuperar colectas anteriores a esta funcionalidade."
+          />
         ) : (
           <div className="table-wrap" style={{ marginTop: 10 }}>
             <table style={{ fontSize: 12, width: "100%" }}>

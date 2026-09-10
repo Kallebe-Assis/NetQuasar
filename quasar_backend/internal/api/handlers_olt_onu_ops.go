@@ -383,6 +383,17 @@ func (s *Server) authorizeOLTOnu(w http.ResponseWriter, r *http.Request) {
 		"command": action.Command, "commands": action.Commands, "ok": action.OK,
 	})
 
+	// Histórico "últimas autorizações" — só as bem-sucedidas (ver handlers_olt_onu_authorizations.go).
+	if action.OK {
+		if _, err := s.DB().Exec(ctx, `
+			INSERT INTO onu_authorizations (olt_device_id, olt_description, serial, model, pon, onu, vlan, authorized_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, id, sess.Desc, strings.ToUpper(strings.TrimSpace(body.Serial)), strings.TrimSpace(target.OnuType),
+			body.Pon, body.Onu, target.Vlan, actor); err != nil {
+			s.Log.Warn().Err(err).Msg("falha ao gravar histórico de autorização de ONU")
+		}
+	}
+
 	out := map[string]any{
 		"ok":              action.OK,
 		"olt_id":          id,

@@ -618,8 +618,11 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 	var lat, lon *float64
 	var splitterPorts []byte
 	var created, updated time.Time
+	var originKind, originLabel *string
+	var originRefID *uuid.UUID
 	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &splitter, &transmitter, &fiberColor, &notes,
-		&needsMaintenance, &projectID, &localityID, &splitterPorts, &oltDeviceID, &pon, &created, &updated)
+		&needsMaintenance, &projectID, &localityID, &splitterPorts, &oltDeviceID, &pon, &created, &updated,
+		&originKind, &originRefID, &originLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +677,80 @@ func scanNetworkCto(s *Server, ctx context.Context, rows interface{ Scan(dest ..
 			m["locality_name"] = *n
 		}
 	}
+	setNetworkOrigin(m, originKind, originLabel, originRefID)
 	return m, nil
+}
+
+// setNetworkOrigin adiciona os campos de origem (de onde vem o sinal) ao mapa de resposta de uma
+// CTO ou foguete, quando definidos.
+func setNetworkOrigin(m map[string]any, kind, label *string, ref *uuid.UUID) {
+	if kind != nil && strings.TrimSpace(*kind) != "" {
+		m["origin_kind"] = strings.TrimSpace(*kind)
+	}
+	if ref != nil && *ref != uuid.Nil {
+		m["origin_ref_id"] = *ref
+	}
+	if label != nil && strings.TrimSpace(*label) != "" {
+		m["origin_label"] = strings.TrimSpace(*label)
+	}
+}
+
+// networkOriginKinds são os tipos de elemento de origem aceites para uma CTO ou foguete.
+var networkOriginKinds = map[string]struct{}{
+	"pop": {}, "foguete": {}, "cto": {}, "olt": {}, "switch": {}, "mikrotik": {}, "radio": {},
+}
+
+// appendOriginPatch trata os campos origin_kind / origin_ref_id / origin_label num PATCH de CTO
+// ou foguete. Enviar origin_kind vazio/null limpa a origem inteira.
+func appendOriginPatch(body map[string]json.RawMessage, sets *[]string, args *[]any, n *int) error {
+	raw, ok := body["origin_kind"]
+	if !ok {
+		// Permite atualizar só o rótulo sem mexer no tipo.
+		if lraw, lok := body["origin_label"]; lok {
+			var lv *string
+			_ = json.Unmarshal(lraw, &lv)
+			*sets = append(*sets, "origin_label = $"+strconv.Itoa(*n))
+			*args = append(*args, trimPtr(lv))
+			*n++
+		}
+		return nil
+	}
+	var kind *string
+	_ = json.Unmarshal(raw, &kind)
+	if kind == nil || strings.TrimSpace(*kind) == "" {
+		*sets = append(*sets, "origin_kind = NULL", "origin_ref_id = NULL", "origin_label = NULL")
+		return nil
+	}
+	k := strings.ToLower(strings.TrimSpace(*kind))
+	if _, valid := networkOriginKinds[k]; !valid {
+		return errors.New("origin_kind inválido")
+	}
+	var refID *uuid.UUID
+	if rraw, rok := body["origin_ref_id"]; rok {
+		var rv *string
+		_ = json.Unmarshal(rraw, &rv)
+		id, err := optionalUUIDFromString(networkStrPtr(rv))
+		if err != nil {
+			return err
+		}
+		refID = id
+	}
+	var label *string
+	if lraw, lok := body["origin_label"]; lok {
+		var lv *string
+		_ = json.Unmarshal(lraw, &lv)
+		label = trimPtr(lv)
+	}
+	*sets = append(*sets, "origin_kind = $"+strconv.Itoa(*n))
+	*args = append(*args, k)
+	*n++
+	*sets = append(*sets, "origin_ref_id = $"+strconv.Itoa(*n))
+	*args = append(*args, refID)
+	*n++
+	*sets = append(*sets, "origin_label = $"+strconv.Itoa(*n))
+	*args = append(*args, label)
+	*n++
+	return nil
 }
 
 type oltPonCatalog struct {
@@ -775,7 +851,8 @@ func optionalPon(p *int) *int {
 }
 
 const networkCtoSelect = `id, display_number, description, latitude, longitude, splitter, transmitter, fiber_color, notes,
-	needs_maintenance, project_id, locality_id, splitter_ports, olt_device_id, pon, created_at, updated_at`
+	needs_maintenance, project_id, locality_id, splitter_ports, olt_device_id, pon, created_at, updated_at,
+	origin_kind, origin_ref_id, origin_label`
 
 func (s *Server) listNetworkCtos(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -1109,6 +1186,9 @@ func networkCtoPatch(body map[string]json.RawMessage) ([]string, []any, int, err
 		args = append(args, lat, lon)
 		n += 2
 	}
+	if err := appendOriginPatch(body, &sets, &args, &n); err != nil {
+		return nil, nil, 0, err
+	}
 	return sets, args, n, nil
 }
 
@@ -1218,7 +1298,8 @@ func (in *networkSpliceBoxInput) validate() error {
 }
 
 const networkSpliceSelect = `id, display_number, description, latitude, longitude, fiber_count, needs_maintenance, notes, project_id,
-	box_model, splitter, fiber_color, splitter_ports, splice_pairs, created_at, updated_at`
+	box_model, splitter, fiber_color, splitter_ports, splice_pairs, created_at, updated_at,
+	origin_kind, origin_ref_id, origin_label`
 
 func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
@@ -1233,8 +1314,11 @@ func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(d
 	var splitter, fiberColor *string
 	var splitterPorts, splicePairs []byte
 	var created, updated time.Time
+	var originKind, originLabel *string
+	var originRefID *uuid.UUID
 	err := rows.Scan(&id, &displayNumber, &description, &lat, &lon, &fiberCount, &needsMaintenance, &notes, &projectID,
-		&boxModel, &splitter, &fiberColor, &splitterPorts, &splicePairs, &created, &updated)
+		&boxModel, &splitter, &fiberColor, &splitterPorts, &splicePairs, &created, &updated,
+		&originKind, &originRefID, &originLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -1275,6 +1359,7 @@ func scanNetworkSpliceBox(s *Server, ctx context.Context, rows interface{ Scan(d
 			m["project_label"] = *lbl
 		}
 	}
+	setNetworkOrigin(m, originKind, originLabel, originRefID)
 	return m, nil
 }
 
@@ -1516,6 +1601,9 @@ func networkSplicePatch(body map[string]json.RawMessage) ([]string, []any, int, 
 			args = append(args, string(raw))
 			n++
 		}
+	}
+	if err := appendOriginPatch(body, &sets, &args, &n); err != nil {
+		return nil, nil, 0, err
 	}
 	return sets, args, n, nil
 }

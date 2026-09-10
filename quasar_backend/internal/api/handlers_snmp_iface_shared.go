@@ -691,6 +691,7 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 	if err == nil {
 		oltsamples.RecordSample(ctx, pool, devID, newSum, pb)
 		oltsamples.RecordOnuHistory(ctx, pool, devID, newSum)
+		oltsamples.RecordPonSamples(ctx, pool, devID, pb)
 	}
 	return err
 }

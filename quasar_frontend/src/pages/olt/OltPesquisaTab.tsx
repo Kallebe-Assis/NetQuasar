@@ -3,6 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Menu, Refresh
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { EmptyState } from "../../components/EmptyState";
 import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
@@ -208,6 +209,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState(1);
   const [clientLinkOpen, setClientLinkOpen] = useState(false);
+  const [bulkUnlinkOpen, setBulkUnlinkOpen] = useState(false);
   const [clientEditTarget, setClientEditTarget] = useState<OltOnuSearchResult | null>(null);
   const [clientEditBusy, setClientEditBusy] = useState(false);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
@@ -378,6 +380,32 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       return ov ? { ...r, ...ov } : r;
     });
   }, [displayResults, rowOverrides]);
+
+  // Seriais (únicos, maiúsculas) das ONUs no resultado actual que têm cliente vinculado — alvo do
+  // desvínculo em massa. Segue o mesmo âmbito do CSV (OLT / PON / filtros actuais).
+  const linkedSerials = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of enrichedResults) {
+      if ((r.client_name ?? "").trim() && (r.serial ?? "").trim()) {
+        set.add(String(r.serial).trim().toUpperCase());
+      }
+    }
+    return [...set];
+  }, [enrichedResults]);
+
+  const bulkUnlink = useMutation({
+    mutationFn: (serials: string[]) =>
+      apiFetch<{ removed: number; requested: number }>("/api/v1/olt/onu-client-links/unlink", {
+        method: "POST",
+        json: { serials },
+      }),
+    onSuccess: (data) => {
+      setBulkUnlinkOpen(false);
+      toastOk(pushToast, `${data.removed} vínculo(s) de cliente removido(s).`);
+      searchMut.mutate(payload);
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao desvincular em massa."),
+  });
 
   const totalPages = Math.max(1, Math.ceil(enrichedResults.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -680,30 +708,35 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           <Filter size={16} />
         </button>
 
-        <button
-          type="button"
-          className="btn btn--icon"
-          title="Exportar CSV (OLT/PON e filtros actuais)"
-          aria-label="Exportar CSV"
-          disabled={enrichedResults.length === 0}
-          onClick={() => exportOnuSearchCsv(enrichedResults)}
-        >
-          <Download size={16} />
-        </button>
-
-        {canMutate ? (
-          <ActionMenu
-            title="Opções"
-            icon={<Menu size={18} />}
-            items={[
-              {
-                id: "link-client",
-                label: "Vincular ONU ao Cliente",
-                onClick: () => setClientLinkOpen(true),
-              },
-            ]}
-          />
-        ) : null}
+        <ActionMenu
+          title="Opções"
+          icon={<Menu size={18} />}
+          items={[
+            {
+              id: "export-csv",
+              label: "Exportar ONUs em CSV",
+              icon: <Download size={15} />,
+              disabled: enrichedResults.length === 0,
+              onClick: () => exportOnuSearchCsv(enrichedResults),
+            },
+            ...(canMutate
+              ? [
+                  {
+                    id: "link-client",
+                    label: "Vincular clientes às ONUs…",
+                    onClick: () => setClientLinkOpen(true),
+                  },
+                  {
+                    id: "bulk-unlink",
+                    label: `Desvincular clientes em massa${linkedSerials.length ? ` (${linkedSerials.length})` : ""}`,
+                    danger: true as const,
+                    disabled: linkedSerials.length === 0,
+                    onClick: () => setBulkUnlinkOpen(true),
+                  },
+                ]
+              : []),
+          ]}
+        />
 
         <div className="conn-toolbar__spacer" aria-hidden />
         <PageCountPill label="ONUs encontradas" count={enrichedResults.length} />
@@ -818,12 +851,17 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           </tbody>
         </table>
         {!searchMut.isPending && enrichedResults.length === 0 ? (
-          <p style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
-            Nenhuma ONU encontrada nos snapshots.
-            {canMutate && debouncedQ.trim().length >= 2 && !selectedOltId
-              ? " Seleccione uma OLT para pesquisar o serial via telnet (com PON opcional)."
-              : " Atualize as OLTs em Equipamentos ou ajuste os filtros."}
-          </p>
+          <div style={{ padding: 12 }}>
+            <EmptyState
+              variant="inline"
+              title="Nenhuma ONU encontrada nos snapshots."
+              hint={
+                canMutate && debouncedQ.trim().length >= 2 && !selectedOltId
+                  ? "Seleccione uma OLT para pesquisar o serial via telnet (com PON opcional)."
+                  : "Atualize as OLTs em Equipamentos ou ajuste os filtros."
+              }
+            />
+          </div>
         ) : null}
       </div>
 
@@ -1009,6 +1047,21 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         open={clientLinkOpen}
         onClose={() => setClientLinkOpen(false)}
         onImported={() => searchMut.mutate(payload)}
+      />
+
+      <ConfirmModal
+        open={bulkUnlinkOpen}
+        title="Desvincular clientes em massa"
+        message={`Remover o vínculo de cliente de ${linkedSerials.length} ONU(s) — ${selectedOltLabel}${selectedPonLabel ? ` · ${selectedPonLabel}` : ""}. Isto não mexe na ONU nem na OLT, só apaga o nome do cliente. A ação não pode ser desfeita.`}
+        confirmLabel="Desvincular"
+        danger
+        busy={bulkUnlink.isPending}
+        onCancel={() => {
+          if (!bulkUnlink.isPending) setBulkUnlinkOpen(false);
+        }}
+        onConfirm={() => {
+          if (linkedSerials.length > 0) bulkUnlink.mutate(linkedSerials);
+        }}
       />
 
       <OltOnuClientEditModal

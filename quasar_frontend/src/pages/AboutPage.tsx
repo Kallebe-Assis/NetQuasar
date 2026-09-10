@@ -96,30 +96,33 @@ export function AboutPage() {
               <div>
                 <h3>O que é</h3>
                 <p>
-                  O NetQuasar centraliza a operação do NOC: equipamentos (routers, switches, OLTs, BNG), telemetria SNMP/ICMP,
-                  snapshots de interfaces e potenciais ópticos SFP, coleta de ONUs por PON, alertas com limiares configuráveis,
-                  notificações (Telegram/SMTP), mapa com infraestrutura de campo e módulos comerciais/integrações.
+                  O NetQuasar centraliza a operação do NOC: equipamentos (routers, switches, OLTs, BNG, BGP), telemetria
+                  SNMP/ICMP, snapshots de interfaces e potência óptica SFP, coleta de ONUs por PON com histórico, alertas com
+                  limiares configuráveis, notificações e relatórios por Telegram/SMTP, mapa com infraestrutura óptica de campo
+                  (CTOs, emendas, cabos, postes), topologia 2D por POP, módulos comerciais, frota e integrações com ERPs
+                  (HubSoft, IXC).
                 </p>
               </div>
               <div>
                 <h3>Objectivos</h3>
                 <ul>
-                  <li>Detectar falhas e degradações cedo (offline, latência, óptica, sessões).</li>
-                  <li>Dar contexto geográfico e de inventário (POP, localidade, mapa).</li>
+                  <li>Detectar falhas e degradações cedo (offline, latência, óptica, PON, sessões).</li>
+                  <li>Dar contexto geográfico e de inventário (POP, localidade, projeto, mapa).</li>
                   <li>Reduzir ruído com confirmações, ignorar padrão e incidentes correlacionados.</li>
-                  <li>Acelerar o dia a dia com refresh manual, ferramentas e relatórios.</li>
+                  <li>Acelerar o dia a dia com refresh manual, ferramentas, exportações CSV e relatórios agendáveis.</li>
                 </ul>
               </div>
               <div className="about-section__span">
                 <h3>Módulos principais</h3>
                 <ul className="about-chips">
-                  <li>Dashboard / Monitoramento / Tempo real</li>
-                  <li>Equipamentos, Localidades, Clientes, Elementos</li>
-                  <li>Alertas, Relatórios, Frota</li>
-                  <li>OLT, MikroTik, Switch, BNG, BGP, Mapa</li>
-                  <li>Ferramentas e Integrações</li>
-                  <li>Registros, Eventos da Rede</li>
-                  <li>Configurações e Automações</li>
+                  <li>Dashboard (Geral, Equipamentos, Fibra, Infraestrutura, Sessões, Servidor, Frota)</li>
+                  <li>Monitoramento / Tempo real / Alertas / Eventos da rede</li>
+                  <li>Equipamentos: Geral, MikroTik, OLT, BNG, BGP, Switch</li>
+                  <li>OLT: ONUs (histórico e qualidade RX), Pesquisa de ONUs, Relatório por PON</li>
+                  <li>Localidades, Clientes, Elementos ópticos, Mapa, Topologia 2D por POP</li>
+                  <li>Integrações (HubSoft/IXC): consulta, dashboards e relatórios (serviços, O.S., atendimentos)</li>
+                  <li>Frota, Relatórios de sistema, Registros de credenciais</li>
+                  <li>Configurações e Automações (relatórios agendados por Telegram)</li>
                 </ul>
               </div>
             </section>
@@ -199,7 +202,16 @@ export function AboutPage() {
               </table>
             </div>
             <h3>Protocolos e integrações</h3>
-            <p>SNMPv2c, ICMP/TCP probing, Telnet (alguns perfis), Telegram Bot API, SMTP, APIs de sistemas externos (ex. IXC/Hubsoft).</p>
+            <p>
+              SNMPv2c, ICMP/TCP probing, Telnet (perfis OLT por marca/modelo e comandos de relatório de ONU), SSH,
+              Telegram Bot API (dois perfis: monitorização e relatórios), SMTP, e APIs REST de ERPs — HubSoft (OAuth2,
+              cliente dedicado com paginação real onde a API suporta) e IXC (motor genérico de requisições configuráveis).
+            </p>
+            <h3>Bibliotecas de interface</h3>
+            <p>
+              React Router, TanStack Query (cache e revalidação), Recharts (gráficos), Leaflet (mapa geográfico),
+              React Flow / @xyflow (topologia 2D e diagramas de fibra), lucide-react (ícones). Tema claro/escuro com tokens CSS.
+            </p>
           </section>
         ) : null}
 

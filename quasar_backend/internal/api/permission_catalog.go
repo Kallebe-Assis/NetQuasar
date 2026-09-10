@@ -12,6 +12,13 @@ type permissionDefinition struct {
 
 var permissionCatalog = []permissionDefinition{
 	{Key: "dashboard.view", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Visualizar"},
+	{Key: "dashboard.tab.geral", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Geral"},
+	{Key: "dashboard.tab.equipamentos", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Equipamentos"},
+	{Key: "dashboard.tab.fibra", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Fibra óptica"},
+	{Key: "dashboard.tab.infra", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Infraestrutura"},
+	{Key: "dashboard.tab.sessoes", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Sessões PPPoE"},
+	{Key: "dashboard.tab.servidor", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Servidor NetQuasar"},
+	{Key: "dashboard.tab.frota", Module: "dashboard", ModuleLabel: "Dashboard", Label: "Aba: Frota"},
 	{Key: "monitoring.view", Module: "monitoring", ModuleLabel: "Monitoramento", Label: "Visualizar"},
 	{Key: "monitoring.control", Module: "monitoring", ModuleLabel: "Monitoramento", Label: "Iniciar, parar e executar ciclos"},
 	{Key: "realtime.view", Module: "realtime", ModuleLabel: "Tempo real", Label: "Visualizar"},

@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
-import type { CtoPortsSummary, OltCapacity, OltOnu } from "./dashboardShared";
+import type { CtoPortsSummary, LowRxPons, OltCapacity, OltOnu } from "./dashboardShared";
 import { ChartBox, Section, fmtInt, tooltipStyle, trunc } from "./dashboardShared";
 import { ctoOccupancyColor } from "../../lib/ctoPorts";
+import { EmptyState } from "../../components/EmptyState";
+
+const PON_CAP_PREVIEW = 20;
 
 type OltOnuBarRow = { name: string; Online: number; Offline: number; Total: number; brand: string };
 
@@ -12,6 +16,7 @@ export function DashboardFibraView({
   capacity,
   capacityError,
   ctoPorts,
+  lowRxPons,
 }: {
   oltOnuBar: OltOnuBarRow[];
   oltOnuByDevice?: OltOnu[];
@@ -19,7 +24,9 @@ export function DashboardFibraView({
   capacity?: OltCapacity;
   capacityError: string | null;
   ctoPorts?: CtoPortsSummary;
+  lowRxPons?: LowRxPons;
 }) {
+  const [showAllPons, setShowAllPons] = useState(false);
   const ctoPortsTotal = ctoPorts?.ports_total ?? 0;
   const ctoPortsUsed = ctoPorts?.ports_used ?? 0;
   const ctoPortsFree = ctoPorts?.ports_free ?? 0;
@@ -32,7 +39,7 @@ export function DashboardFibraView({
         subtitle="OLTs em operação Ativo: soma onu_total / onu_online / onu_offline nas PONs do último snapshot."
       >
         {oltOnuBar.length === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: 13 }}>Sem snapshots OLT. Associe equipamentos OLT e execute refresh de dados OLT.</p>
+          <EmptyState title="Sem snapshots OLT" hint="Associe equipamentos da categoria OLT e execute um refresh de dados OLT (ou aguarde a coleta periódica)." />
         ) : (
           <>
             <div className="row" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
@@ -105,41 +112,106 @@ export function DashboardFibraView({
         subtitle="Percentual de ocupação por PON (base 128 ONUs/PON) e tendência total de ONUs nos últimos 7 dias."
       >
         {capacityError && <div className="msg msg--err">{capacityError}</div>}
-        {capacity && (
+        {capacity && (() => {
+          const allPons = capacity.pon_rows ?? [];
+          const total = allPons.length;
+          const shown = showAllPons ? allPons : allPons.slice(0, PON_CAP_PREVIEW);
+          const hidden = total - shown.length;
+          return (
+            <>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {showAllPons ? `${fmtInt(total)} PONs` : `${fmtInt(shown.length)} de ${fmtInt(total)} PONs`}
+                </span>
+                {total > PON_CAP_PREVIEW ? (
+                  <button type="button" className="btn btn--sm" onClick={() => setShowAllPons((v) => !v)}>
+                    {showAllPons ? "Mostrar menos" : `Ver todos (${fmtInt(total)})`}
+                  </button>
+                ) : null}
+              </div>
+              <ChartBox h={showAllPons ? Math.min(900, 220 + shown.length * 14) : 280}>
+                <BarChart
+                  data={shown.map((p) => ({ name: `${trunc(p.olt, 12)}:${p.pon_id}`, "% uso": Number(p.usage_percent ?? 0) }))}
+                  margin={{ left: 8, right: 8, top: 12, bottom: 52 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-28} textAnchor="end" height={70} />
+                  <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} />
+                  <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
+                  <Bar dataKey="% uso" fill="#d29922" />
+                </BarChart>
+              </ChartBox>
+              <div className="table-wrap" style={{ marginTop: 10, maxHeight: showAllPons ? 520 : undefined, overflowY: showAllPons ? "auto" : undefined }}>
+                <table style={{ fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      <th>OLT</th>
+                      <th>PON</th>
+                      <th className="mono">ONU total</th>
+                      <th className="mono">% uso</th>
+                      <th>Alerta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((p, i) => (
+                      <tr key={`${p.olt_id}-${p.pon_id}-${i}`}>
+                        <td>{p.olt}</td>
+                        <td className="mono">{p.pon_id}</td>
+                        <td className="mono">{fmtInt(p.onu_total)}</td>
+                        <td className="mono">{Number(p.usage_percent ?? 0).toFixed(1)}%</td>
+                        <td>{p.near_saturation ? <span className="badge badge--err">próx. saturação</span> : <span className="badge badge--ok">ok</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {hidden > 0 && !showAllPons ? (
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>+{fmtInt(hidden)} PON(s) não mostradas — use "Ver todos".</p>
+              ) : null}
+            </>
+          );
+        })()}
+      </Section>
+
+      <Section
+        id="sec-low-rx-pons"
+        title="ONUs online com RX baixo por PON"
+        subtitle={`ONUs online (offline excluídas) com potência óptica RX abaixo de ${
+          lowRxPons?.threshold_dbm ?? -23
+        } dBm — limiar "RX boa" em Configurações → OLT → "Qualidade da potência RX (ONU)".`}
+      >
+        {(lowRxPons?.rows ?? []).length === 0 ? (
+          <EmptyState
+            title="Nenhuma ONU online com RX abaixo do limiar"
+            hint="Bom sinal — ou ainda não há snapshot OLT com leitura óptica (rx_dbm) para comparar."
+          />
+        ) : (
           <>
-            <ChartBox h={280}>
-              <BarChart
-                data={(capacity.pon_rows ?? [])
-                  .slice(0, 20)
-                  .map((p) => ({ name: `${trunc(p.olt, 12)}:${p.pon_id}`, "% uso": Number(p.usage_percent ?? 0) }))}
-                margin={{ left: 8, right: 8, top: 12, bottom: 52 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 9 }} interval={0} angle={-28} textAnchor="end" height={70} />
-                <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} />
-                <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipStyle} labelStyle={tooltipStyle} />
-                <Bar dataKey="% uso" fill="#d29922" />
-              </BarChart>
-            </ChartBox>
-            <div className="table-wrap" style={{ marginTop: 10 }}>
+            <div className="row" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+              <div className="stat" style={{ minWidth: 160 }}>
+                <div className="stat__k">ONUs online com RX baixo</div>
+                <div className="stat__v" style={{ color: "var(--warn)" }}>{fmtInt(lowRxPons?.total_onus)}</div>
+              </div>
+              <div className="stat" style={{ minWidth: 140 }}>
+                <div className="stat__k">PONs afetadas</div>
+                <div className="stat__v">{fmtInt(lowRxPons?.pon_count)}</div>
+              </div>
+            </div>
+            <div className="table-wrap">
               <table style={{ fontSize: 11 }}>
                 <thead>
                   <tr>
                     <th>OLT</th>
-                    <th>PON</th>
-                    <th className="mono">ONU total</th>
-                    <th className="mono">% uso</th>
-                    <th>Alerta</th>
+                    <th className="mono">PON</th>
+                    <th className="mono">ONUs online c/ RX baixo</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(capacity.pon_rows ?? []).slice(0, 30).map((p, i) => (
-                    <tr key={`${p.olt_id}-${p.pon_id}-${i}`}>
-                      <td>{p.olt}</td>
-                      <td className="mono">{p.pon_id}</td>
-                      <td className="mono">{fmtInt(p.onu_total)}</td>
-                      <td className="mono">{Number(p.usage_percent ?? 0).toFixed(1)}%</td>
-                      <td>{p.near_saturation ? <span className="badge badge--err">próx. saturação</span> : <span className="badge badge--ok">ok</span>}</td>
+                  {(lowRxPons?.rows ?? []).map((r) => (
+                    <tr key={`${r.olt_id}-${r.pon}`}>
+                      <td>{r.olt}</td>
+                      <td className="mono">{r.pon}</td>
+                      <td className="mono" style={{ color: "var(--warn)" }}>{fmtInt(r.count)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -155,9 +227,10 @@ export function DashboardFibraView({
         subtitle="Ocupação dos splitters cadastrados (aba Elementos → CTOs → esquema de fibras). Cadastre o status de cada porta para estes números ficarem completos."
       >
         {(ctoPorts?.ctos_with_ports ?? 0) === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: 13 }}>
-            Nenhuma CTO com status de porta cadastrado ainda ({fmtInt(ctoPorts?.total_ctos)} CTO(s) no total).
-          </p>
+          <EmptyState
+            title={`Nenhuma CTO com status de porta cadastrado ainda (${fmtInt(ctoPorts?.total_ctos)} CTO(s) no total)`}
+            hint="Abra Elementos → CTOs → esquema de fibras e marque cada porta como livre / ocupada para estes números aparecerem."
+          />
         ) : (
           <>
             <div className="row" style={{ gap: 12, marginBottom: 12, flexWrap: "wrap" }}>

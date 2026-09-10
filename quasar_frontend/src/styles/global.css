@@ -644,9 +644,26 @@ h2 {
 .map-place-modal {
   /* !important necessário: a regra base ".modal { max-width: 640px }" (mais abaixo neste
      ficheiro) tem a mesma especificidade e vinha depois na cascata, ganhando por ordem — mesmo
-     problema corrigido em .modal.map-settings-modal acima, aqui na direcção oposta (este modal
-     ficava mais LARGO que o previsto, 640px em vez de 440px). */
-  max-width: 440px !important;
+     problema corrigido em .modal.map-settings-modal acima. */
+  max-width: min(620px, 96vw) !important;
+}
+/* Distribuição dos campos do modal de cadastro rápido no mapa — 2 colunas, campos largos
+   (descrição, cor do projeto) ocupam a linha toda. */
+.map-place-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+.map-place-modal__grid > .field--full {
+  grid-column: 1 / -1;
+}
+.map-place-modal__grid .splitter-modal__field {
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .map-place-modal__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .map-popup-actions {

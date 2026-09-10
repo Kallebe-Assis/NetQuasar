@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ConfirmModal } from "./ConfirmModal";
+import { Switch } from "./Switch";
 import { can, isAdminUser } from "../lib/auth";
 import { apiFetch } from "../lib/api";
 import { CtoSplitterModal } from "./CtoSplitterModal";
@@ -34,6 +35,16 @@ import { queryKeys } from "../lib/queryKeys";
 import { ctoOccupancyColor, ctoOccupancyLabel } from "../lib/ctoPorts";
 import type { InfraMapKind } from "../lib/mapInfrastructureIcons";
 import { INFRA_MAP_KIND_LABELS } from "../lib/mapInfrastructureIcons";
+import { ORIGIN_KIND_LABELS, type OriginKind } from "../pages/connections/OriginElementFields";
+
+/** Rótulo legível da origem do sinal (de onde vem a fibra) de uma CTO / foguete. */
+function formatOriginLabel(kind?: string | null, label?: string | null): string {
+  const k = String(kind ?? "").trim() as OriginKind;
+  const kindLabel = k && k in ORIGIN_KIND_LABELS ? ORIGIN_KIND_LABELS[k as Exclude<OriginKind, "">] : "";
+  const name = String(label ?? "").trim();
+  if (kindLabel && name) return `${kindLabel} · ${name}`;
+  return name || kindLabel || "—";
+}
 
 export function parseInfraMapId(mapId: string): { kind: InfraMapKind; id: string } | null {
   if (!mapId.startsWith("infra-")) return null;
@@ -567,6 +578,12 @@ export function MapInfraSidePanel({
               <dt>Manutenção</dt>
               <dd>{ctoQ.data?.needs_maintenance ? "Sim" : "Não"}</dd>
             </div>
+            {ctoQ.data?.origin_kind ? (
+              <div>
+                <dt>Origem do sinal</dt>
+                <dd>{formatOriginLabel(ctoQ.data.origin_kind, ctoQ.data.origin_label)}</dd>
+              </div>
+            ) : null}
             {ctoQ.data?.notes ? (
               <div>
                 <dt>Notas</dt>
@@ -664,14 +681,11 @@ export function MapInfraSidePanel({
             <span>Notas</span>
             <textarea className="input" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </label>
-          <label className="conn-switch">
-            <input
-              type="checkbox"
-              checked={form.needs_maintenance}
-              onChange={(e) => setForm({ ...form, needs_maintenance: e.target.checked })}
-            />
-            Necessita manutenção
-          </label>
+          <Switch
+            checked={form.needs_maintenance}
+            onChange={(v) => setForm({ ...form, needs_maintenance: v })}
+            label="Necessita manutenção"
+          />
           {err ? <div className="msg msg--err">{err}</div> : null}
           <div className="map-infra-panel__actions">
             <button type="submit" className="btn btn--primary" disabled={saveMut.isPending}>
@@ -778,6 +792,12 @@ export function MapInfraSidePanel({
                 {fmtCoord(spliceQ.data?.latitude ?? fallback?.lat)}, {fmtCoord(spliceQ.data?.longitude ?? fallback?.lng)}
               </dd>
             </div>
+            {spliceQ.data?.origin_kind ? (
+              <div>
+                <dt>Origem do sinal</dt>
+                <dd>{formatOriginLabel(spliceQ.data.origin_kind, spliceQ.data.origin_label)}</dd>
+              </div>
+            ) : null}
           </dl>
           <div className="map-infra-panel__actions">
             <button type="button" className="btn btn--primary" onClick={() => setSpliceOpen(true)} disabled={!spliceQ.data}>

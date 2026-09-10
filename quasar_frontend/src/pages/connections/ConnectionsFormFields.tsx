@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { Switch } from "../../components/Switch";
 import { FIBER_COLORS } from "../../lib/networkInfrastructure";
 import type { CommercialLocality, NetworkProject } from "../../lib/networkInfrastructure";
 
@@ -85,12 +86,13 @@ type MaintenanceSwitchProps = {
 };
 
 export function MaintenanceSwitch({ checked, onChange }: MaintenanceSwitchProps) {
-  const id = useId();
   return (
-    <label className="conn-switch" htmlFor={id}>
-      <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      Necessita manutenção
-    </label>
+    <Switch
+      checked={checked}
+      onChange={onChange}
+      label="Necessita manutenção"
+      hint="Marca o elemento para revisão em campo."
+    />
   );
 }
 

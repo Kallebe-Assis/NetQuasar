@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api";
 import { errorMessageFromUnknown, parseApiErrorForModal } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
+import { EmptyState } from "../../components/EmptyState";
 
 type OltOption = {
   id: string;
@@ -54,6 +55,7 @@ type AuthorizePreview = {
 type AuthorizeResult = {
   ok: boolean;
   error?: string;
+  serial?: string;
   onu?: number;
   pon?: number;
   vlan?: string;
@@ -68,15 +70,62 @@ type ConfirmState = {
   preview: AuthorizePreview | null;
   previewError: string | null;
   actionError: string | null;
+  /** Depois de autorizar com sucesso, fica preenchido e o modal passa ao passo "vincular cliente". */
+  result: AuthorizeResult | null;
+  clientName: string;
+  clientLinked: boolean;
 };
 
-export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean; olts: OltOption[] }) {
+type RecentAuthorization = {
+  id: string;
+  olt_description?: string;
+  serial?: string;
+  model?: string;
+  pon?: number | null;
+  onu?: number | null;
+  vlan?: string;
+  client_name?: string;
+  authorized_by?: string;
+  authorized_at?: string;
+};
+
+export function OltUnauthorizedOnusTab({
+  canMutate,
+  olts,
+  onAuthorized,
+}: {
+  canMutate: boolean;
+  olts: OltOption[];
+  /** Chamado após autorizar uma ONU com sucesso — o pai dispara a coleta rápida da OLT para a ONU aparecer na lista. */
+  onAuthorized?: (info: { oltId: string }) => void;
+}) {
   const { push: pushToast } = useAppToast();
+  const qc = useQueryClient();
   const [oltId, setOltId] = useState("");
   const [showRaw, setShowRaw] = useState(false);
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
   const [authorizingKey, setAuthorizingKey] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  const recentAuths = useQuery({
+    queryKey: ["onu-auth-recent"],
+    queryFn: () => apiFetch<{ items: RecentAuthorization[] }>("/api/v1/olt/onu-authorizations/recent?limit=5"),
+    staleTime: 30_000,
+  });
+
+  const linkClient = useMutation({
+    mutationFn: ({ serial, clientName }: { serial: string; clientName: string }) =>
+      apiFetch<{ ok: boolean }>("/api/v1/olt/onu-client-links", {
+        method: "POST",
+        json: { serial, client_name: clientName },
+      }),
+    onSuccess: () => {
+      setConfirm((prev) => (prev ? { ...prev, clientLinked: true } : prev));
+      void qc.invalidateQueries({ queryKey: ["onu-auth-recent"] });
+      toastOk(pushToast, "Cliente vinculado à ONU.");
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao vincular cliente."),
+  });
 
   const selectedOlt = useMemo(() => olts.find((o) => o.id === oltId) ?? olts[0], [olts, oltId]);
   const effectiveId = oltId || selectedOlt?.id || "";
@@ -178,7 +227,10 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
           `ONU autorizada: PON ${data.pon ?? entry.pon} / ONU ${data.onu ?? "?"}${data.vlan ? ` · VLAN ${data.vlan}` : ""}${entry.serial ? ` (${entry.serial})` : ""}.`,
         );
         setHiddenKeys((prev) => new Set(prev).add(entryKey(entry)));
-        setConfirm(null);
+        // Não fecha o modal: passa ao passo "vincular cliente".
+        setConfirm((prev) => (prev ? { ...prev, result: data, actionError: null } : prev));
+        void qc.invalidateQueries({ queryKey: ["onu-auth-recent"] });
+        onAuthorized?.({ oltId: effectiveId });
       } else {
         const detail =
           [data.error, data.output ? truncate(data.output, 180) : ""].filter(Boolean).join(" — ") ||
@@ -204,20 +256,24 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
   const busyModal = preview.isPending || authorize.isPending;
   const canConfirm = !!confirm?.preview?.onu && !!confirm.preview.vlan && !busyModal && !confirm.previewError;
 
+  function freshConfirm(entry: UnauthorizedEntry): ConfirmState {
+    return { entry, preview: null, previewError: null, actionError: null, result: null, clientName: "", clientLinked: false };
+  }
+
   function openConfirm(entry: UnauthorizedEntry) {
-    setConfirm({ entry, preview: null, previewError: null, actionError: null });
+    setConfirm(freshConfirm(entry));
     preview.mutate(entry);
   }
 
   function retryPreview() {
     if (!confirm?.entry || preview.isPending) return;
     const entry = confirm.entry;
-    setConfirm({ entry, preview: null, previewError: null, actionError: null });
+    setConfirm(freshConfirm(entry));
     preview.mutate(entry);
   }
 
   function closeConfirm() {
-    if (busyModal) return;
+    if (busyModal || linkClient.isPending) return;
     setConfirm(null);
   }
 
@@ -369,6 +425,61 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
         </>
       )}
 
+      <div style={{ marginTop: 22 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
+          <strong style={{ fontSize: 13 }}>Últimas autorizações</strong>
+          <button
+            type="button"
+            className="btn btn--sm"
+            disabled={recentAuths.isFetching}
+            onClick={() => void recentAuths.refetch()}
+          >
+            <RefreshCw size={12} style={{ marginRight: 4, verticalAlign: -2 }} className={recentAuths.isFetching ? "map-refresh-spin" : undefined} />
+            Atualizar
+          </button>
+        </div>
+        {(recentAuths.data?.items ?? []).length === 0 ? (
+          <EmptyState
+            variant="inline"
+            title="Nenhuma autorização registada ainda."
+            hint="As ONUs que você autorizar aqui aparecem nesta lista."
+          />
+        ) : (
+          <div className="table-wrap" style={{ maxHeight: 260, overflow: "auto" }}>
+            <table style={{ fontSize: 11, width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>Quando</th>
+                  <th>Serial</th>
+                  <th>Modelo</th>
+                  <th>PON/ONU</th>
+                  <th>VLAN</th>
+                  <th>OLT</th>
+                  <th>Cliente</th>
+                  <th>Por</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(recentAuths.data?.items ?? []).map((a) => (
+                  <tr key={a.id}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {a.authorized_at ? new Date(a.authorized_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—"}
+                    </td>
+                    <td className="mono">{a.serial || "—"}</td>
+                    <td>{a.model || "—"}</td>
+                    <td>{(a.pon ?? "—") + " / " + (a.onu ?? "—")}</td>
+                    <td>{a.vlan || "—"}</td>
+                    <td>{a.olt_description || "—"}</td>
+                    <td>{a.client_name || <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                    <td>{a.authorized_by || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {confirm
         ? createPortal(
             <div className="modal-backdrop" role="presentation" onMouseDown={closeConfirm}>
@@ -380,12 +491,97 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                 onMouseDown={(e) => e.stopPropagation()}
                 style={{ maxWidth: 460 }}
               >
-                <h3 id="authorize-confirm-title">Confirmar autorização</h3>
+                <h3 id="authorize-confirm-title">
+                  {confirm.result?.ok ? "ONU autorizada" : "Confirmar autorização"}
+                </h3>
                 <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
-                  Confira os dados abaixo antes de autorizar esta ONU na OLT.
+                  {confirm.result?.ok
+                    ? "Autorização concluída. Vincule já o cliente a esta ONU, se quiser."
+                    : "Confira os dados abaixo antes de autorizar esta ONU na OLT."}
                 </p>
 
-                {preview.isPending ? (
+                {confirm.result?.ok ? (
+                  <>
+                    <dl
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "120px 1fr",
+                        gap: "6px 12px",
+                        margin: "0 0 14px",
+                        fontSize: 13,
+                      }}
+                    >
+                      <dt style={{ color: "var(--muted)" }}>Série</dt>
+                      <dd className="mono" style={{ margin: 0 }}>{confirm.entry.serial ?? confirm.result.serial ?? "—"}</dd>
+                      <dt style={{ color: "var(--muted)" }}>PON / ONU</dt>
+                      <dd style={{ margin: 0 }}>
+                        {confirm.result.pon ?? confirm.entry.pon ?? "—"} / {confirm.result.onu ?? "—"}
+                      </dd>
+                      <dt style={{ color: "var(--muted)" }}>VLAN</dt>
+                      <dd style={{ margin: 0 }}>{confirm.result.vlan ?? "—"}</dd>
+                    </dl>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 12,
+                        padding: "8px 10px",
+                        background: "var(--panel2)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: "var(--muted)",
+                      }}
+                    >
+                      <RefreshCw size={14} />A OLT está a ser recoletada para a nova ONU aparecer na lista de ONUs.
+                    </div>
+
+                    {confirm.clientLinked ? (
+                      <div className="msg msg--ok" style={{ marginBottom: 12 }}>
+                        Cliente <strong>{confirm.clientName.trim()}</strong> vinculado à ONU {confirm.entry.serial ?? ""}.
+                      </div>
+                    ) : (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                        <span style={{ fontSize: 12, color: "var(--muted)" }}>Nome do cliente</span>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input
+                            className="input"
+                            autoFocus
+                            placeholder="Ex.: João da Silva"
+                            value={confirm.clientName}
+                            disabled={linkClient.isPending}
+                            onChange={(e) => setConfirm((prev) => (prev ? { ...prev, clientName: e.target.value } : prev))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && confirm.clientName.trim() && confirm.entry.serial) {
+                                linkClient.mutate({ serial: confirm.entry.serial, clientName: confirm.clientName.trim() });
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn--primary"
+                            disabled={linkClient.isPending || !confirm.clientName.trim() || !confirm.entry.serial}
+                            onClick={() => {
+                              if (!confirm.entry.serial || !confirm.clientName.trim()) return;
+                              linkClient.mutate({ serial: confirm.entry.serial, clientName: confirm.clientName.trim() });
+                            }}
+                          >
+                            {linkClient.isPending ? "A vincular…" : "Vincular"}
+                          </button>
+                        </div>
+                      </label>
+                    )}
+
+                    <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                      <button type="button" className="btn btn--primary" disabled={linkClient.isPending} onClick={() => setConfirm(null)}>
+                        Concluir
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+
+                {!confirm.result?.ok && preview.isPending ? (
                   <div style={{ textAlign: "center", padding: "28px 8px" }} aria-busy="true">
                     <RefreshCw size={28} className="map-refresh-spin" style={{ color: "var(--muted)" }} />
                     <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--muted)" }}>
@@ -394,14 +590,14 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                   </div>
                 ) : null}
 
-                {confirm.previewError ? (
+                {!confirm.result?.ok && confirm.previewError ? (
                   <div className="msg msg--err" style={{ marginBottom: 12 }}>
                     <strong style={{ display: "block", marginBottom: 4 }}>Erro ao preparar autorização</strong>
                     {confirm.previewError}
                   </div>
                 ) : null}
 
-                {!preview.isPending && confirm.preview ? (
+                {!confirm.result?.ok && !preview.isPending && confirm.preview ? (
                   <dl
                     style={{
                       display: "grid",
@@ -461,14 +657,14 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                   </dl>
                 ) : null}
 
-                {confirm.actionError ? (
+                {!confirm.result?.ok && confirm.actionError ? (
                   <div className="msg msg--err" style={{ marginBottom: 12 }}>
                     <strong style={{ display: "block", marginBottom: 4 }}>Erro ao autorizar</strong>
                     {confirm.actionError}
                   </div>
                 ) : null}
 
-                {authorize.isPending ? (
+                {!confirm.result?.ok && authorize.isPending ? (
                   <div
                     style={{
                       display: "flex",
@@ -488,6 +684,7 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                   </div>
                 ) : null}
 
+                {confirm.result?.ok ? null : (
                 <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
                   <button type="button" className="btn" disabled={busyModal} onClick={closeConfirm}>
                     Cancelar
@@ -515,6 +712,7 @@ export function OltUnauthorizedOnusTab({ canMutate, olts }: { canMutate: boolean
                     </button>
                   )}
                 </div>
+                )}
               </div>
             </div>,
             document.body,

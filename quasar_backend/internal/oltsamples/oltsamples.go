@@ -96,6 +96,43 @@ func RecordOnuHistory(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUI
 	`, deviceID)
 }
 
+// RecordPonSamples grava uma amostra de onu_total/online/offline POR PON — lê o array `pons`
+// (mesma estrutura já usada em olt_snapshots.pons: cada elemento tem `pon`, `name`,
+// `onu_total`, `onu_online`, `onu_offline`). Chamado nos mesmos pontos que RecordSample.
+// Alimenta o gráfico "histórico por PON" da aba Relatório da OLT.
+func RecordPonSamples(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, ponsJSON []byte) {
+	if pool == nil || len(ponsJSON) == 0 {
+		return
+	}
+	var pons []map[string]any
+	if err := json.Unmarshal(ponsJSON, &pons); err != nil || len(pons) == 0 {
+		return
+	}
+	batch := &pgx.Batch{}
+	n := 0
+	for _, p := range pons {
+		pon := intVal(p, "pon")
+		if pon < 1 {
+			continue
+		}
+		name, _ := p["name"].(string)
+		total := intVal(p, "onu_total")
+		online := intVal(p, "onu_online")
+		offline := intVal(p, "onu_offline")
+		batch.Queue(`INSERT INTO olt_pon_samples (device_id, pon, pon_name, onu_total, onu_online, onu_offline)
+			VALUES ($1, $2, $3, $4, $5, $6)`, deviceID, pon, name, total, online, offline)
+		n++
+	}
+	if n == 0 {
+		return
+	}
+	br := pool.SendBatch(ctx, batch)
+	for i := 0; i < n; i++ {
+		_, _ = br.Exec()
+	}
+	_ = br.Close()
+}
+
 func intVal(m map[string]any, key string) int {
 	if m == nil {
 		return 0

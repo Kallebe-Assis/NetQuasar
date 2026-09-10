@@ -28,6 +28,9 @@ export function FiberPortsGrid({
   // Só em CableFibersModal: destino só é editável quando o Estado é diferente de "livre" — ver
   // fiberSplitter.ts (normalizeCableFiberDestination) e o pedido do utilizador.
   destinationRequiresNonFreeStatus = false,
+  // Campo livre "Cliente" por porta — só no splitter da CTO / foguete de distribuição, onde a
+  // porta atende um assinante; o modal de fibras de cabo não passa isto.
+  showClientName = false,
 }: {
   ports: SplitterPort[];
   canEdit: boolean;
@@ -36,6 +39,7 @@ export function FiberPortsGrid({
   destinationOptions?: readonly SelectOption[];
   normalizeDestinationValue?: (raw?: string | null) => string;
   destinationRequiresNonFreeStatus?: boolean;
+  showClientName?: boolean;
 }) {
   return (
     <div className="splitter-modal__grid">
@@ -103,6 +107,21 @@ export function FiberPortsGrid({
                 </select>
               </label>
             </div>
+            {showClientName ? (
+              <label className="splitter-modal__field">
+                <span>Cliente</span>
+                <input
+                  className="input"
+                  disabled={!canEdit}
+                  placeholder="Nome do cliente nesta porta"
+                  value={p.client_name ?? ""}
+                  onChange={(e) => {
+                    const client_name = e.target.value;
+                    onChange(ports.map((r, i) => (i === idx ? { ...r, client_name } : r)));
+                  }}
+                />
+              </label>
+            ) : null}
             <label className="splitter-modal__field">
               <span>Observação</span>
               <input
@@ -134,6 +153,7 @@ function FiberMetaCard({
   statusText,
   destinationText,
   note,
+  clientName,
   feedOnly = false,
   compact = false,
 }: {
@@ -143,6 +163,8 @@ function FiberMetaCard({
   statusText?: string;
   destinationText?: string;
   note?: string;
+  /** Nome do cliente vinculado a esta porta (só splitter de CTO / foguete de distribuição). */
+  clientName?: string;
   /** Fibra de alimentação: só título + cor (sem destino/obs). */
   feedOnly?: boolean;
   compact?: boolean;
@@ -156,6 +178,7 @@ function FiberMetaCard({
           <span className="splitter-scheme__v">{color}</span>
         )}
         {!feedOnly && destinationText ? <span className="splitter-scheme__v splitter-scheme__v--muted">{destinationText}</span> : null}
+        {!feedOnly && clientName?.trim() ? <span className="splitter-scheme__v">{clientName.trim()}</span> : null}
       </div>
     );
   }
@@ -182,6 +205,12 @@ function FiberMetaCard({
             <span className="splitter-scheme__k">Destino</span>
             <span className="splitter-scheme__v">{destinationText || "—"}</span>
           </div>
+          {clientName?.trim() ? (
+            <div className="splitter-scheme__meta-row">
+              <span className="splitter-scheme__k">Cliente</span>
+              <span className="splitter-scheme__v">{clientName.trim()}</span>
+            </div>
+          ) : null}
           {note?.trim() ? (
             <div className="splitter-scheme__meta-row">
               <span className="splitter-scheme__k">Observação</span>
@@ -317,6 +346,7 @@ export function SplitterScheme2D({
                 statusText={statusLabel(p.status as SplitterPortStatus)}
                 destinationText={destinationLabel(p.destination)}
                 note={p.note}
+                clientName={p.client_name}
                 compact={compact}
               />
             </div>

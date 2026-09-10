@@ -296,6 +296,7 @@ deriveLoop:
 	`, deviceID, sb, pb)
 	oltsamples.RecordSample(ctx, pool, deviceID, sb, pb)
 	oltsamples.RecordOnuHistory(ctx, pool, deviceID, sb)
+	oltsamples.RecordPonSamples(ctx, pool, deviceID, pb)
 
 	if log != nil {
 		log.Info().

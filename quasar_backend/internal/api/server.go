@@ -555,6 +555,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/devices/{id}/snmp-debug", s.getOLTSnmpDebug)
 			r.Get("/devices/{id}/onu-history", s.getOLTOnuHistory)
 			r.Get("/reports/history", s.getOLTReportsHistory)
+			r.Get("/reports/pon-history", s.getOLTPonHistory)
+			r.Get("/onu-authorizations/recent", s.recentOnuAuthorizations)
 			r.Post("/onu-search", s.searchOLTOnus)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("olt.collect", "olt.onu_manage", "*"))
@@ -567,7 +569,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/onu-authorize", s.authorizeOLTOnu)
 				r.Post("/devices/{id}/onu-deauthorize", s.deauthorizeOLTOnu)
 				r.Post("/devices/{id}/discover-vlans", s.discoverOLTVlanCatalog)
+				r.Post("/onu-client-links", s.linkOnuClientDirect)
 				r.Post("/onu-client-links/import", s.importOnuClientLinks)
+				r.Post("/onu-client-links/unlink", s.bulkUnlinkOnuClients)
 				r.Delete("/onu-client-links/{serial}", s.deleteOnuClientLink)
 			})
 		})

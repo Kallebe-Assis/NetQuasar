@@ -99,11 +99,16 @@ export type NetworkCto = {
     status?: string;
     note?: string;
     destination?: string;
+    client_name?: string;
   }> | null;
   /** Ver backend ctoPortCounts / lib/ctoPorts.ts. */
   ports_total?: number | null;
   ports_used?: number | null;
   ports_free?: number | null;
+  /** Origem do sinal — ver migração 143 e OriginElementFields.tsx. */
+  origin_kind?: string | null;
+  origin_ref_id?: string | null;
+  origin_label?: string | null;
 };
 
 export type NetworkSpliceBox = {
@@ -129,6 +134,7 @@ export type NetworkSpliceBox = {
     status?: string;
     note?: string;
     destination?: string;
+    client_name?: string;
   }> | null;
   splice_pairs?: Array<{
     port: number;
@@ -140,6 +146,10 @@ export type NetworkSpliceBox = {
     note?: string;
     destination?: string;
   }> | null;
+  /** Origem do sinal — ver migração 143 e OriginElementFields.tsx. */
+  origin_kind?: string | null;
+  origin_ref_id?: string | null;
+  origin_label?: string | null;
 };
 
 export type NetworkCable = {

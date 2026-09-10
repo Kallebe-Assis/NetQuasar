@@ -31,6 +31,8 @@ type OltRow = {
   model?: string | null;
   locality_id?: string | null;
   locality_name?: string | null;
+  /** VLAN por PON, do cadastro do equipamento (Equipamentos → OLT → PONs). Chave = nº da PON. */
+  pon_vlans?: Record<string, number | string> | null;
   /** ISO — última gravação do snapshot OLT (SNMP / PONs). */
   olt_snapshot_at?: string | null;
   snmp_health_status?: "unknown" | "ok" | "partial" | "failed" | null;
@@ -698,6 +700,14 @@ export function OltPage() {
       ? (summaryObj.offline_rx_dbm as number)
       : undefined;
   const selectedOlt = rows.find((x) => x.id === sel);
+  const vlanForPon = useMemo(() => {
+    const map = selectedOlt?.pon_vlans ?? null;
+    return (pon?: number): string => {
+      if (map == null || pon == null) return "";
+      const raw = map[String(pon)];
+      return raw == null || raw === "" ? "" : String(raw);
+    };
+  }, [selectedOlt?.pon_vlans]);
   const isZte =
     String(selectedOlt?.brand ?? "")
       .toLowerCase()
@@ -740,7 +750,13 @@ export function OltPage() {
           <h1>OLT</h1>
         </div>
         <OltPageTabs active={pageTab} onChange={setPageTab} />
-        <OltUnauthorizedOnusTab canMutate={canMutate} olts={list.data?.olts ?? []} />
+        <OltUnauthorizedOnusTab
+          canMutate={canMutate}
+          olts={list.data?.olts ?? []}
+          onAuthorized={({ oltId }) => {
+            if (oltId) refresh.mutate({ id: oltId, scope: "onu" });
+          }}
+        />
       </>
     );
   }
@@ -1251,6 +1267,7 @@ export function OltPage() {
                     onuRefs={typeof summaryObj?.vsol_onu_refs_count === "number" ? summaryObj.vsol_onu_refs_count : undefined}
                     note={onuTableNote}
                     onShowHistory={(pon, onu, label) => setOnuHistoryTarget({ pon, onu, label })}
+                    vlanForPon={vlanForPon}
                   />
                 </>
               )}

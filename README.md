@@ -144,7 +144,10 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 
 **Função:** visão executiva da rede.
 
-**Como funciona:** agrega dados de `device_probe_cache`, `alert_instances`, `olt_snapshots` e endpoints `/dashboard/analytics`, `/dashboard/olt-capacity`, `/dashboard/data-gaps`, `/overview/top-latency`. Carregamento progressivo com cache (`dashboardCache`). Mostra totais de ONUs online/offline em todas as OLTs, alertas críticos e lacunas de coleta.
+**Como funciona:** agrega dados de `device_probe_cache`, `alert_instances`, `olt_snapshots` e endpoints `/dashboard/analytics`, `/dashboard/olt-capacity`, `/dashboard/data-gaps`, `/overview/top-latency`. Carregamento progressivo com cache (`dashboardCache`). Abas: **Geral**, **Equipamentos**, **Fibra óptica**, **Infraestrutura**, **Sessões PPPoE**, **Servidor NetQuasar** e **Frota** (as quatro primeiras partilham a janela de dias seleccionada).
+
+- **Fibra óptica** — ONUs online/offline por OLT, capacidade por PON, portas de CTO, e uma lista por PON de quantas ONUs **online** estão com RX abaixo do limiar de "boa" (Configurações → OLT → *Qualidade da potência RX (ONU)*; offline e sem leitura óptica ficam de fora).
+- **Infraestrutura** — totais de projetos/CTOs/emendas/distribuições/cabos/postes, estado das CTOs (vazia / disponível / próxima da saturação ≥ 80% / lotada / sem portas cadastradas), CTOs por tipo de splitter (1x8, 1x16…) e elementos por projeto de rede.
 
 ---
 
@@ -170,7 +173,13 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 
 **Como funciona:** cada integração tem URL base, autenticação e **pedidos** configuráveis (templates HTTP). O motor `integrationhttp` executa pedidos; `integrationconsumer` expõe acções de consulta (cliente, OS, login PPPoE). Logs em `integration_logs`. Uso típico: pesquisar cliente por CPF/login a partir da tela **Conexões**.
 
-**HubSoft** (`internal/integrationhubsoft`, caminho dedicado — não passa pelo motor genérico acima) tem 6 abas próprias: Consulta, Atendimentos, Ordens de serviço, Financeiro, Dashboard e **Relatório** (`/integrations/hubsoft/relatorio`) — filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC, e relatórios por período de atendimentos, ordens de serviço (por técnico) e financeiro (percentual recebido/aberto/vencido, com opção de mês específico ou média dos últimos X meses), cada um com botão **Enviar por Telegram**. Usa os endpoints `/todos` da própria HubSoft (paginação real) em vez de varrer a base por amostra; os resultados de Atendimentos/O.S./Financeiro (Dashboard) ficam em cache no servidor (Redis) por alguns minutos — "Carregar dados ao iniciar o sistema" (Configurações → Integrações → HubSoft) aquece esse cache no arranque do servidor em vez de esperar a primeira visita à tela.
+**HubSoft** (`internal/integrationhubsoft`, caminho dedicado — não passa pelo motor genérico acima) tem abas próprias: Consulta, Atendimentos, Ordens de serviço, Financeiro, Dashboard e **Relatório** (`/integrations/hubsoft/relatorio`). O Relatório tem sub-abas:
+
+- **Clientes** — filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC (o cartão do cliente já traz o endereço de instalação).
+- **Serviços** — fotografia actual da base inteira: total, repartição por status, por plano e por localidade; a lista por localidade é uma tabela (uma linha por localidade) e clicar abre um modal com abas Status / Plano / Bairro só dessa localidade. Cache no cliente por 5 min. **Enviar por Telegram** abre uma selecção (Total de logins / por status / por plano / por localidade / localidade específica / tudo).
+- **Atendimentos** e **Ordens de serviço** por período (O.S. com ranking por técnico), e **Financeiro** (percentual recebido/aberto/vencido, mês específico ou média dos últimos X meses) — cada um com **Enviar por Telegram**.
+
+Usa os endpoints `/todos` da HubSoft (paginação real) para os relatórios por período; a Consulta usa `/cliente` (a API não pagina esse endpoint — devolve até 100 e avisa quando o resultado bate no teto). Resultados de Atendimentos/O.S./Financeiro (Dashboard) ficam em cache no servidor (Redis) por alguns minutos — "Carregar dados ao iniciar o sistema" (Configurações → Integrações → HubSoft) aquece esse cache no arranque. Todos os relatórios HubSoft estão também no catálogo de **Automações** (ver abaixo).
 
 ---
 
@@ -219,6 +228,8 @@ Estado operacional vem de `device_probe_cache` atualizado pelo worker.
 
 **Como funciona:** lista `GET /alerts/active` (exclui ignorados); filtros por severidade e tipo; estatísticas 24 h; incidentes correlacionados; menu ⋮ por linha (Verificar / Ignorar); botões **Verificar alertas** e **Alertas ignorados**. Histórico em `/alerts/history`. Refresh automático ~2,5 s com a página aberta.
 
+Em alertas de **OLT offline** (`ping_unreachable` numa OLT) ou **PON DOWN**, o menu ⋮ ganha **Clientes afetados**: um modal com os clientes ligados às ONUs no alcance do alerta (a OLT inteira ou só a PON caída, casando serial ↔ `onu_client_links`), com exportar CSV e enviar a lista pelo Telegram (`GET /alerts/{id}/affected-clients`, `POST …/affected-clients-telegram`).
+
 ---
 
 ### Mapa (`/map`)
@@ -264,7 +275,11 @@ Estado operacional vem de `device_probe_cache` atualizado pelo worker.
 
 **Função:** monitorização de PONs e ONUs.
 
-**Como funciona:** lista OLTs com snapshot (`olt_snapshots`: `pons`, `summary`, totais computados). Detalhe por OLT: tabela PON (status ON/OFF derivado de ONUs online), ONUs VSOL/ZTE, interfaces, log de coleta SNMP. **Atualizar** dispara refresh pelo perfil do fabricante. Relatórios mensais de ONU (histórico e export). Totais globais de ONUs online/offline no dashboard e nesta tela. Coleta periódica via worker (intervalo em configurações).
+**Como funciona:** lista OLTs com snapshot (`olt_snapshots`: `pons`, `summary`, totais computados). Detalhe por OLT: tabela PON (status ON/OFF derivado de ONUs online), ONUs VSOL/ZTE, interfaces, log de coleta SNMP. **Atualizar** dispara refresh pelo perfil do fabricante. Totais globais de ONUs online/offline no dashboard e nesta tela. Coleta periódica via worker (intervalo em configurações).
+
+- **Aba ONUs** — dados que não vêm por a ONU estar offline aparecem como "-" (não valor obsoleto). A coluna RX é classificada por cor (**Boa / Aceitável / Ruim**) pelos limiares em Configurações → OLT → *Qualidade da potência RX (ONU)* (`monitoring_settings.onu_rx_good_dbm` / `onu_rx_bad_dbm`). Cada linha tem **Histórico** nos 3 pontinhos: últimas 10 colectas dessa ONU (`olt_onu_history`, `GET /olt/devices/{id}/onu-history`).
+- **Aba Pesquisa de ONUs** — busca entre todas as OLTs por serial/modelo/cliente + filtros de OLT, PON, potência, temperatura, voltagem. Botão de **exportar CSV** (ícone) leva exactamente o que está filtrado (todas as páginas). O limite da consulta HubSoft-independente é a própria API/coleta.
+- **Aba Relatório** — histórico de ONUs por OLT (total/online/offline). Ao seleccionar **uma OLT específica**, mostra também um gráfico geral (soma de todas as PONs) e um grid de 4 colunas com o histórico de cada porta PON (`olt_pon_samples`, `GET /olt/reports/pon-history`).
 
 ---
 
@@ -368,7 +383,7 @@ Qualquer usuário autenticado acede às preferências pessoais. As restantes aba
 | **Base de dados** | DSN, teste, limpeza, backup B2 |
 | **Usuários** | CRUD, perfis de permissão e «Forçar desconexão» (invalida a sessão de outro usuário — efeito quase imediato, a app já verifica a sessão a cada poucos segundos) |
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
-| **OLT / MikroTik / Switch / BNG / BGP** | Perfis, coleta e (BGP) cadastro de operadoras (CNPJ, AS, limite de banda) |
+| **OLT / MikroTik / Switch / BNG / BGP** | Perfis por marca/modelo, coleta e (BGP) cadastro de operadoras (CNPJ, AS, limite de banda). A aba **OLT** tem ainda os limiares de *Qualidade da potência RX (ONU)* (dBm "boa" / "ruim") usados na tabela de ONUs e no Dashboard |
 | **Telegram** | Bot monitoring e relatórios |
 | **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial — mais **Automações personalizadas** (ilimitadas, qualquer relatório do sistema ou de frota, recorrência própria) |
 | **Auditoria** | `ops_audit_log` |
@@ -394,7 +409,9 @@ O watcher global reage a `monitoring_runtime.last_alerts_change_at` (offline, PO
 
 ### Automações agendadas
 
-Em **Configurações → Automações**: os 5 cadastros fixos — backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial — mais **Automações personalizadas** (`automation_schedules`, tabela própria, sem limite de instâncias): cada uma escolhe qualquer relatório do catálogo `/api/v1/reports/system` (alertas, BGP, HubSoft, OLT, BNG, etc.) ou um relatório de frota/combustível, com recorrência diária/semanal/dias específicos/mensal e janela de dados própria — enviado pelo bot Telegram "reports". Mesmo motor de agendamento (`scheduleutil`) dos 5 cadastros fixos, executando a cada verificação de 30 s do worker. Histórico em `automation_execution_log`.
+Em **Configurações → Automações**: os 5 cadastros fixos — backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial — mais **Automações personalizadas** (`automation_schedules`, tabela própria, sem limite de instâncias): cada uma escolhe qualquer relatório do catálogo `/api/v1/reports/system` ou um relatório de frota/combustível, com recorrência diária/semanal/dias específicos/mensal e janela de dados própria — enviado pelo bot Telegram "reports". Mesmo motor de agendamento (`scheduleutil`) dos 5 cadastros fixos, executando a cada verificação de 30 s do worker. Histórico em `automation_execution_log`.
+
+O catálogo de relatórios do sistema inclui alertas, BGP, OLT/BNG e **HubSoft**: `hubsoft-overview` (combinado), `hubsoft-services-by-plan` / `-by-locality` / `-full`, `hubsoft-work-orders-period` (com ranking por técnico) e `hubsoft-attendance-period` — cada um agendável de forma independente.
 
 ---
 

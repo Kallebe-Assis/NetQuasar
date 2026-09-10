@@ -28,6 +28,9 @@ export type SplitterPort = {
   status: string;
   note: string;
   destination: string;
+  /** Nome do cliente atendido nesta porta (splitter da CTO / foguete de distribuição). Texto
+   * livre — não é FK para nenhuma tabela, é só a etiqueta de quem está pendurado ali. */
+  client_name?: string;
 };
 
 export const SPLITTER_RATIOS = ["1x2", "1x4", "1x8", "1x16", "1x32", "1x64"] as const;
@@ -187,6 +190,7 @@ export function buildDefaultSplitterPorts(
       status: normalizeStatus(prev?.status),
       note: prev?.note ?? "",
       destination: normalizeDestination(prev?.destination),
+      client_name: prev?.client_name?.trim() || "",
     });
   }
   return out;

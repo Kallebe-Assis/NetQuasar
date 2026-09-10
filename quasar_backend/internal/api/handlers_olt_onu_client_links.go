@@ -225,6 +225,46 @@ func (s *Server) importOnuClientLinks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// bulkUnlinkOnuClients remove o vínculo serial → cliente de várias ONUs de uma vez (ação em
+// massa a partir da tela de ONUs — ver OltPesquisaTab). Também limpa o nome que ficou gravado
+// no histórico de autorizações desses seriais, para o vínculo desaparecer em todo o lado.
+func (s *Server) bulkUnlinkOnuClients(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Serials []string `json:"serials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	seen := map[string]bool{}
+	serials := make([]string, 0, len(body.Serials))
+	for _, raw := range body.Serials {
+		up := strings.ToUpper(strings.TrimSpace(raw))
+		if up == "" || seen[up] {
+			continue
+		}
+		seen[up] = true
+		serials = append(serials, up)
+	}
+	if len(serials) == 0 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "nenhum serial informado", nil)
+		return
+	}
+	ctx := r.Context()
+	tag, err := s.DB().Exec(ctx, `DELETE FROM onu_client_links WHERE serial = ANY($1)`, serials)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+		return
+	}
+	if _, err := s.DB().Exec(ctx, `UPDATE onu_authorizations SET client_name = '' WHERE serial = ANY($1)`, serials); err != nil {
+		s.Log.Warn().Err(err).Msg("falha ao limpar cliente do histórico de autorização (desvínculo em massa)")
+	}
+	s.appendAuditLog(ctx, "onu_client_link", "bulk", "unlink", s.actorFromRequest(r), nil, map[string]any{
+		"serials_count": len(serials), "removed": tag.RowsAffected(),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"removed": tag.RowsAffected(), "requested": len(serials)})
+}
+
 // deleteOnuClientLink remove o vínculo serial → cliente de uma única ONU (edição individual
 // a partir da pesquisa de ONUs — ver deviceIPDTO/OltOnuClientEditModal no frontend). Ao
 // contrário de importOnuClientLinks, aceita nome vazio implicitamente: é sempre uma remoção.

@@ -70,7 +70,7 @@ export function CtoSplitterModal({ open, ctoId, ctoName, splitter, feedFiberColo
         json: {
           splitter: normalized,
           fiber_color: color,
-          splitter_ports: draft.map(({ port, color: c, color_hex, label, status, note, destination }) => ({
+          splitter_ports: draft.map(({ port, color: c, color_hex, label, status, note, destination, client_name }) => ({
             port,
             color: c,
             color_hex,
@@ -78,6 +78,7 @@ export function CtoSplitterModal({ open, ctoId, ctoName, splitter, feedFiberColo
             status,
             note,
             destination,
+            client_name: client_name?.trim() || "",
           })),
         },
       });
@@ -174,7 +175,7 @@ export function CtoSplitterModal({ open, ctoId, ctoName, splitter, feedFiberColo
               </div>
 
               <div className="splitter-modal__section-label">Fibras de saída ({outputs})</div>
-              <FiberPortsGrid ports={draft} canEdit={canEdit} onChange={setDraft} />
+              <FiberPortsGrid ports={draft} canEdit={canEdit} onChange={setDraft} showClientName />
             </>
           ) : (
             <>

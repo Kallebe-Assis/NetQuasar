@@ -39,7 +39,10 @@ type authContext struct {
 
 func defaultViewerPermissions() []string {
 	return []string{
-		"dashboard.view", "monitoring.view", "realtime.view", "integrations.view",
+		"dashboard.view",
+		"dashboard.tab.geral", "dashboard.tab.equipamentos", "dashboard.tab.fibra", "dashboard.tab.infra",
+		"dashboard.tab.sessoes", "dashboard.tab.servidor", "dashboard.tab.frota",
+		"monitoring.view", "realtime.view", "integrations.view",
 		"pops.view", "devices.view", "commercial.view", "connections.view",
 		"alerts.view", "map.view", "tools.view", "olt.view", "mikrotik.view",
 		"switch.view", "bng.view", "bgp.view", "reports.view", "fleet.view", "network_events.view",

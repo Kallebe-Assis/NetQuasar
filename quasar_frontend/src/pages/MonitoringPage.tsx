@@ -14,6 +14,7 @@ import { useAppToast } from "../lib/appToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
 import { monitoringPollMs, useMonitoringLiveSync } from "../lib/monitoringLiveSync";
 import { queryKeys } from "../lib/queryKeys";
+import { MonitorEngineSummary } from "./monitoring/MonitorEngineSummary";
 
 type ActiveEquipRow = {
   id: string;
@@ -51,11 +52,21 @@ type MonState = {
   /** Última escrita em monitoring_runtime (ligar/desligar, ciclo, atividade) — útil para vários clientes. */
   runtime_updated_at?: string | null;
   last_alerts_change_at?: string | null;
+  last_cycle_at?: string | null;
   last_telemetry_cycle_at?: string | null;
   last_latency_cycle_at?: string | null;
   last_interface_snapshot_cycle_at?: string | null;
   last_olt_if_derived_cycle_at?: string | null;
+  last_pipeline_cycle_at?: string | null;
+  last_bng_cycle_at?: string | null;
+  last_cycle_ok_count?: number | null;
+  last_cycle_fail_count?: number | null;
+  current_activity?: string | null;
+  activity_started_at?: string | null;
   activity_updated_at?: string | null;
+  last_activity?: string | null;
+  last_activity_finished_at?: string | null;
+  last_internet_check_detail?: NetCheck | Record<string, unknown> | null;
 };
 type NightlyCfg = {
   enabled: boolean;
@@ -261,17 +272,6 @@ function formatMonitoringModeLabel(mode: string | undefined): string {
   return String(mode ?? "—").trim() || "—";
 }
 
-function formatInternetCheckLine(ok: boolean | null | undefined, isoAt: string | null | undefined): { status: string; when: string } | null {
-  if (isoAt == null || String(isoAt).trim() === "") return null;
-  const d = new Date(String(isoAt));
-  const when = Number.isNaN(d.getTime())
-    ? String(isoAt)
-    : d.toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  if (ok === true) return { status: "Internet acessível", when };
-  if (ok === false) return { status: "Internet inacessível (na última verificação)", when };
-  return { status: "Última verificação de internet", when };
-}
-
 function formatNetCheckToast(data: NetCheck): string {
   const head = data.ok ? "Internet acessível" : "Internet inacessível";
   const at = new Date(data.checked_at);
@@ -333,6 +333,7 @@ export function MonitoringPage() {
         telemetry_minutes: number;
         interface_snapshot_seconds?: number;
         olt_if_derived_pon_seconds?: number;
+        pipeline_cycle_seconds?: number;
         ping_timeout_ms: number;
       }>("/api/v1/settings/monitoring-intervals"),
   });
@@ -690,32 +691,15 @@ export function MonitoringPage() {
             }}
           >
             <h2 style={{ margin: 0 }}>Equipamentos monitorados</h2>
-            <div style={{ fontSize: 13, lineHeight: 1.55, textAlign: "right", color: "var(--text)", minWidth: 200 }}>
-              <div>
-                <strong>Monitoramento:</strong> {state.data?.is_running ? "ligado" : "desligado"}
-              </div>
-              <div>
-                <strong>Modo:</strong> {formatMonitoringModeLabel(state.data?.monitoring_mode)}
-              </div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }} title="Reflete qualquer alteração gravada no servidor (outros browsers incluídos)">
-                Estado no servidor:{" "}
-                {state.data?.runtime_updated_at
-                  ? new Date(state.data.runtime_updated_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" })
-                  : "—"}{" "}
-                · atualização ~1s
-              </div>
+            <div style={{ flex: "1 1 320px", maxWidth: 460, minWidth: 260 }}>
+              <MonitorEngineSummary
+                state={state.data}
+                intervals={intervals.data}
+                agoTick={agoTick}
+                modeLabel={formatMonitoringModeLabel(state.data?.monitoring_mode)}
+              />
             </div>
           </div>
-          {(() => {
-            const line = formatInternetCheckLine(state.data?.last_internet_check_ok ?? null, state.data?.last_internet_check_at ?? null);
-            if (!line) return null;
-            return (
-              <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)" }}>
-                <span>{line.status}</span>
-                <span style={{ marginLeft: 6 }}>· {line.when}</span>
-              </p>
-            );
-          })()}
           <div className="row" style={{ margin: "12px 0", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
             {canMutate ? (
               <>

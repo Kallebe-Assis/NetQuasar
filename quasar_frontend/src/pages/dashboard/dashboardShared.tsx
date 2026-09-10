@@ -55,6 +55,33 @@ export type DashboardAnalytics = {
   olt_onu_by_device?: OltOnu[];
   olt_onu_fleet_totals?: { onu_count?: number; onu_online?: number; onu_offline?: number };
   cto_ports?: CtoPortsSummary;
+  low_rx_pons?: LowRxPons;
+  infra_overview?: InfraOverview;
+};
+
+export type LowRxPons = {
+  threshold_dbm?: number;
+  total_onus?: number;
+  pon_count?: number;
+  rows?: Array<{ olt_id: string; olt: string; pon: number; count: number }>;
+};
+
+export type InfraOverview = {
+  total_ctos?: number;
+  cto_status?: { vazia?: number; disponivel?: number; proxima_saturacao?: number; lotada?: number; sem_portas?: number };
+  ctos_by_splitter?: Array<{ splitter: string; count: number }>;
+  splice_boxes?: { emenda?: number; distribuicao?: number; total?: number };
+  by_project?: Array<{
+    project_id: string;
+    description: string;
+    status: string;
+    ctos: number;
+    emendas: number;
+    distribuicoes: number;
+    cables: number;
+    poles: number;
+  }>;
+  totals?: { cables?: number; poles?: number; projects?: number; ctos?: number; splice_boxes?: number };
 };
 export type CtoPortsSummary = {
   total_ctos?: number;

@@ -4,6 +4,7 @@ import { Send } from "lucide-react";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { buildExcelCsvBlob } from "../lib/excelCsv";
 import { useAppToast } from "../lib/appToast";
+import { EmptyState } from "./EmptyState";
 
 type AffectedClient = { serial: string; client_name: string; pon: number; onu: number };
 type AffectedClientsResp = {
@@ -88,9 +89,10 @@ export function AffectedClientsModal({
         ) : q.isError ? (
           <div className="msg msg--err">{(q.error as Error).message}</div>
         ) : clients.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--muted)" }}>
-            Nenhuma das {q.data?.onu_count ?? 0} ONU(s) em {q.data?.scope_label} tem cliente vinculado.
-          </p>
+          <EmptyState
+            title="Nenhum cliente vinculado às ONUs afetadas."
+            hint={`Nenhuma das ${q.data?.onu_count ?? 0} ONU(s) em ${q.data?.scope_label ?? "—"} tem cliente vinculado. Vincule os clientes na aba Pesquisa da OLT.`}
+          />
         ) : (
           <>
             <div className="table-wrap" style={{ marginTop: 10, maxHeight: 320, overflowY: "auto" }}>
