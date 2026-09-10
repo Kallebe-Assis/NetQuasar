@@ -700,14 +700,16 @@ export function OltPage() {
       ? (summaryObj.offline_rx_dbm as number)
       : undefined;
   const selectedOlt = rows.find((x) => x.id === sel);
-  const vlanForPon = useMemo(() => {
+  // Resolve a VLAN de uma PON a partir do cadastro do equipamento (devices.pon_vlans). Função
+  // simples (sem useMemo) de propósito: este ponto do componente vem DEPOIS dos early returns
+  // acima (list.isLoading / list.isError), então um Hook aqui violaria as regras dos Hooks e
+  // derrubava a tela toda ("Rendered more hooks than during the previous render").
+  const vlanForPon = (pon?: number): string => {
     const map = selectedOlt?.pon_vlans ?? null;
-    return (pon?: number): string => {
-      if (map == null || pon == null) return "";
-      const raw = map[String(pon)];
-      return raw == null || raw === "" ? "" : String(raw);
-    };
-  }, [selectedOlt?.pon_vlans]);
+    if (map == null || pon == null) return "";
+    const raw = map[String(pon)];
+    return raw == null || raw === "" ? "" : String(raw);
+  };
   const isZte =
     String(selectedOlt?.brand ?? "")
       .toLowerCase()
