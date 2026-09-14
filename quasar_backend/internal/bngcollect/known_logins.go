@@ -279,7 +279,8 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 	rows, err := pool.Query(ctx, `
 		SELECT login, is_online, first_seen_at, last_seen_at, last_offline_at,
 		       session_index, vlan, ipv4, ipv6, ipv6_pd, mac, interface_name, domain,
-		       ip_type, ip_type_raw, car_up_cir_kbps, car_dn_cir_kbps, online_time_sec, auth_state, updated_at
+		       ip_type, ip_type_raw, car_up_cir_kbps, car_dn_cir_kbps, online_time_sec, auth_state, updated_at,
+		       comment
 		FROM bng_known_logins
 		WHERE device_id=$1
 		ORDER BY is_online DESC, login ASC
@@ -294,17 +295,18 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 	var latest *time.Time
 	for rows.Next() {
 		var (
-			login                                                                                       string
-			sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, ipTypeRaw, upCIR, dnCIR, auth *string
-			isOnline                                                                                    bool
-			firstSeen, lastSeen, updated                                                                time.Time
-			lastOffline                                                                                 *time.Time
-			onlineSec                                                                                   *int64
+			login                                                                                              string
+			sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, ipTypeRaw, upCIR, dnCIR, auth, cmnt *string
+			isOnline                                                                                           bool
+			firstSeen, lastSeen, updated                                                                       time.Time
+			lastOffline                                                                                        *time.Time
+			onlineSec                                                                                          *int64
 		)
 		if err := rows.Scan(
 			&login, &isOnline, &firstSeen, &lastSeen, &lastOffline,
 			&sessIdx, &vlan, &ipv4, &ipv6, &ipv6PD, &mac, &iface, &domain,
 			&ipType, &ipTypeRaw, &upCIR, &dnCIR, &onlineSec, &auth, &updated,
+			&cmnt,
 		); err != nil {
 			return nil, nil, 0, 0, err
 		}
@@ -353,6 +355,7 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 			"first_seen_at":   firstSeen.UTC().Format(time.RFC3339Nano),
 			"last_seen_at":    lastSeen.UTC().Format(time.RFC3339Nano),
 			"known_login":     true,
+			"comment":         nullIfEmpty(deref(cmnt)),
 		}
 		if lastOffline != nil {
 			m["last_offline_at"] = lastOffline.UTC().Format(time.RFC3339Nano)
@@ -375,23 +378,25 @@ func FindKnownLogin(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID,
 		return nil, false, nil
 	}
 	var (
-		gotLogin                                                                                   string
-		sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, ipTypeRaw, upCIR, dnCIR, auth *string
-		isOnline                                                                                    bool
-		firstSeen, lastSeen, updated                                                                time.Time
-		lastOffline                                                                                 *time.Time
-		onlineSec                                                                                   *int64
+		gotLogin                                                                                           string
+		sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, ipTypeRaw, upCIR, dnCIR, auth, cmnt *string
+		isOnline                                                                                           bool
+		firstSeen, lastSeen, updated                                                                       time.Time
+		lastOffline                                                                                        *time.Time
+		onlineSec                                                                                          *int64
 	)
 	err := pool.QueryRow(ctx, `
 		SELECT login, is_online, first_seen_at, last_seen_at, last_offline_at,
 		       session_index, vlan, ipv4, ipv6, ipv6_pd, mac, interface_name, domain,
-		       ip_type, ip_type_raw, car_up_cir_kbps, car_dn_cir_kbps, online_time_sec, auth_state, updated_at
+		       ip_type, ip_type_raw, car_up_cir_kbps, car_dn_cir_kbps, online_time_sec, auth_state, updated_at,
+		       comment
 		FROM bng_known_logins
 		WHERE device_id=$1 AND lower(trim(login))=lower(trim($2))
 	`, deviceID, login).Scan(
 		&gotLogin, &isOnline, &firstSeen, &lastSeen, &lastOffline,
 		&sessIdx, &vlan, &ipv4, &ipv6, &ipv6PD, &mac, &iface, &domain,
 		&ipType, &ipTypeRaw, &upCIR, &dnCIR, &onlineSec, &auth, &updated,
+		&cmnt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -437,6 +442,7 @@ func FindKnownLogin(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID,
 		"first_seen_at":   firstSeen.UTC().Format(time.RFC3339Nano),
 		"last_seen_at":    lastSeen.UTC().Format(time.RFC3339Nano),
 		"known_login":     true,
+		"comment":         nullIfEmpty(deref(cmnt)),
 	}
 	if lastOffline != nil {
 		m["last_offline_at"] = lastOffline.UTC().Format(time.RFC3339Nano)
@@ -472,9 +478,9 @@ func ListLoginEvents(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	out := make([]map[string]any, 0)
 	for rows.Next() {
 		var (
-			connectedAt                                                                time.Time
-			disconnectedAt                                                             *time.Time
-			durationSec, onlineSec                                                     *int64
+			connectedAt                                                                 time.Time
+			disconnectedAt                                                              *time.Time
+			durationSec, onlineSec                                                      *int64
 			sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, upCIR, dnCIR *string
 		)
 		if err := rows.Scan(

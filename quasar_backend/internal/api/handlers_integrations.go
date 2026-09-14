@@ -27,20 +27,21 @@ type integrationSummary struct {
 	LastTestAt      *time.Time `json:"last_test_at"`
 	LastTestOK      *bool      `json:"last_test_ok"`
 	LastTestMessage *string    `json:"last_test_message"`
+	LogoURL         *string    `json:"logo_url"`
 }
 
 type integrationDetail struct {
 	integrationSummary
-	DefaultHeaders   json.RawMessage `json:"default_headers"`
-	Variables        json.RawMessage `json:"variables"`
-	ConsumerConfig   json.RawMessage `json:"consumer_config"`
-	AuthConfig       json.RawMessage `json:"auth_config"`
-	TimeoutMs        int             `json:"timeout_ms"`
-	TLSInsecure      bool            `json:"tls_insecure"`
-	PasswordSet      bool            `json:"password_configured"`
-	TokenSet         bool            `json:"token_configured"`
-	SessionActive    bool            `json:"session_active"`
-	Requests         []requestRow    `json:"requests"`
+	DefaultHeaders json.RawMessage `json:"default_headers"`
+	Variables      json.RawMessage `json:"variables"`
+	ConsumerConfig json.RawMessage `json:"consumer_config"`
+	AuthConfig     json.RawMessage `json:"auth_config"`
+	TimeoutMs      int             `json:"timeout_ms"`
+	TLSInsecure    bool            `json:"tls_insecure"`
+	PasswordSet    bool            `json:"password_configured"`
+	TokenSet       bool            `json:"token_configured"`
+	SessionActive  bool            `json:"session_active"`
+	Requests       []requestRow    `json:"requests"`
 }
 
 type requestRow struct {
@@ -69,7 +70,7 @@ func (s *Server) listIntegrations(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB().Query(r.Context(), `
 		SELECT i.id, i.name, i.slug, i.description, i.base_url, i.enabled, i.auth_type,
 			(SELECT COUNT(*) FROM integration_requests ir WHERE ir.integration_id = i.id),
-			i.last_test_at, i.last_test_ok, i.last_test_message
+			i.last_test_at, i.last_test_ok, i.last_test_message, i.logo_url
 		FROM integrations i
 		ORDER BY i.name
 	`)
@@ -82,7 +83,7 @@ func (s *Server) listIntegrations(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var row integrationSummary
 		if err := rows.Scan(&row.ID, &row.Name, &row.Slug, &row.Description, &row.BaseURL, &row.Enabled, &row.AuthType,
-			&row.RequestCount, &row.LastTestAt, &row.LastTestOK, &row.LastTestMessage); err != nil {
+			&row.RequestCount, &row.LastTestAt, &row.LastTestOK, &row.LastTestMessage, &row.LogoURL); err != nil {
 			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 			return
 		}
@@ -174,13 +175,13 @@ func (s *Server) loadIntegrationDetail(ctx context.Context, id uuid.UUID) (*inte
 	err := s.DB().QueryRow(ctx, `
 		SELECT i.id, i.name, i.slug, i.description, i.base_url, i.enabled, i.auth_type,
 			(SELECT COUNT(*) FROM integration_requests ir WHERE ir.integration_id = i.id),
-			i.last_test_at, i.last_test_ok, i.last_test_message,
+			i.last_test_at, i.last_test_ok, i.last_test_message, i.logo_url,
 			i.default_headers, i.variables, i.consumer_config, i.auth_config, i.timeout_ms, i.tls_insecure,
 			i.session_token, i.session_expires_at
 		FROM integrations i WHERE i.id=$1
 	`, id).Scan(
 		&d.ID, &d.Name, &d.Slug, &d.Description, &d.BaseURL, &d.Enabled, &d.AuthType,
-		&d.RequestCount, &d.LastTestAt, &d.LastTestOK, &d.LastTestMessage,
+		&d.RequestCount, &d.LastTestAt, &d.LastTestOK, &d.LastTestMessage, &d.LogoURL,
 		&defHdr, &vars, &consumerCfg, &authCfg, &d.TimeoutMs, &d.TLSInsecure, &sessionToken, &sessionExp,
 	)
 	if err != nil {
@@ -259,16 +260,16 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var name, baseURL, authType, slug string
-	var desc *string
+	var desc, logoURL *string
 	var en bool
 	var tms int
 	var tls bool
 	var defHdr, vars, authCfg, consumerCfg []byte
 
 	err = s.DB().QueryRow(r.Context(), `
-		SELECT name, description, base_url, enabled, auth_type, default_headers, variables, consumer_config, auth_config, timeout_ms, tls_insecure, slug
+		SELECT name, description, base_url, enabled, auth_type, default_headers, variables, consumer_config, auth_config, timeout_ms, tls_insecure, slug, logo_url
 		FROM integrations WHERE id=$1
-	`, id).Scan(&name, &desc, &baseURL, &en, &authType, &defHdr, &vars, &consumerCfg, &authCfg, &tms, &tls, &slug)
+	`, id).Scan(&name, &desc, &baseURL, &en, &authType, &defHdr, &vars, &consumerCfg, &authCfg, &tms, &tls, &slug, &logoURL)
 	if err == pgx.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "integração não encontrada", nil)
 		return
@@ -311,6 +312,17 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["tls_insecure"]; ok {
 		_ = json.Unmarshal(v, &tls)
 	}
+	if v, ok := body["logo_url"]; ok {
+		_ = json.Unmarshal(v, &logoURL)
+		if logoURL != nil {
+			trimmed := strings.TrimSpace(*logoURL)
+			if trimmed == "" {
+				logoURL = nil
+			} else {
+				logoURL = &trimmed
+			}
+		}
+	}
 
 	_, err = s.DB().Exec(r.Context(), `
 		UPDATE integrations SET
@@ -319,10 +331,10 @@ func (s *Server) patchIntegration(w http.ResponseWriter, r *http.Request) {
 			variables=COALESCE($8::jsonb, variables),
 			consumer_config=COALESCE($9::jsonb, consumer_config),
 			auth_config=COALESCE($10::jsonb, auth_config),
-			timeout_ms=$11, tls_insecure=$12, updated_at=now()
+			timeout_ms=$11, tls_insecure=$12, logo_url=$13, updated_at=now()
 		WHERE id=$1
 	`, id, strings.TrimSpace(name), desc, strings.TrimSpace(baseURL), en, authType,
-		nullJSON(defHdr), nullJSON(vars), nullJSON(consumerCfg), nullJSON(authCfg), tms, tls)
+		nullJSON(defHdr), nullJSON(vars), nullJSON(consumerCfg), nullJSON(authCfg), tms, tls, logoURL)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
@@ -582,12 +594,12 @@ func (s *Server) integrationLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) requestRowToConfig(rr requestRow) integrationhttp.RequestConfig {
 	rc := integrationhttp.RequestConfig{
-		Method:          rr.Method,
-		Path:            rr.Path,
-		PathParams:      integrationhttp.ParsePathParams(rr.PathParams),
-		QueryParams:     integrationhttp.ParseQueryParams(rr.QueryParams),
-		Headers:         integrationhttp.ParseHeadersJSON(rr.Headers),
-		BodyType:        rr.BodyType,
+		Method:      rr.Method,
+		Path:        rr.Path,
+		PathParams:  integrationhttp.ParsePathParams(rr.PathParams),
+		QueryParams: integrationhttp.ParseQueryParams(rr.QueryParams),
+		Headers:     integrationhttp.ParseHeadersJSON(rr.Headers),
+		BodyType:    rr.BodyType,
 	}
 	if rr.BodyTemplate != nil {
 		rc.BodyTemplate = *rr.BodyTemplate

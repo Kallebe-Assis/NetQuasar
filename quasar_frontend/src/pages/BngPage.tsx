@@ -129,6 +129,9 @@ type PppoeSession = {
   last_seen_at?: string;
   last_offline_at?: string;
   known_login?: boolean;
+  /** Rótulo/nome do cliente — vem do comentário do /ppp secret (Mikrotik, via telnet). Não
+   * existe por SNMP (BNGs Huawei), fica vazio nesse caso. */
+  comment?: string;
 };
 
 type BngLoginEvent = {
@@ -2131,6 +2134,15 @@ export function BngPage() {
                       </select>
                     </div>
                     <div className="field" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>Cliente contém</label>
+                      <input
+                        className="input"
+                        value={advancedFilters.commentLike}
+                        onChange={(e) => setAdvancedFilters((f) => ({ ...f, commentLike: e.target.value }))}
+                        placeholder="Nome do cliente (Mikrotik)"
+                      />
+                    </div>
+                    <div className="field" style={{ margin: 0 }}>
                       <label style={{ fontSize: 11 }}>IPv4 contém</label>
                       <input
                         className="input mono"
@@ -2223,6 +2235,7 @@ export function BngPage() {
                     <tr>
                       <th>Status</th>
                       <th>Login</th>
+                      <th>Cliente</th>
                       <th>IPv4</th>
                       <th>Tipo IP</th>
                       <th>IPv6 WAN</th>
@@ -2239,7 +2252,7 @@ export function BngPage() {
                   <tbody>
                     {displayedSessions.length === 0 && !sessionTableLoading ? (
                       <tr>
-                        <td colSpan={13} style={{ color: "var(--muted)" }}>
+                        <td colSpan={14} style={{ color: "var(--muted)" }}>
                           {searchField === "login" && submittedLoginQuery.length < 2
                             ? "Digite o login e pressione Enter para pesquisar no equipamento (mín. 2 caracteres)."
                             : loginSearchActive
@@ -2262,6 +2275,9 @@ export function BngPage() {
                             </span>
                           </td>
                           <td className="mono">{bngCellDisplay(s.login)}</td>
+                          <td title={s.comment || ""} style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.comment || <span style={{ color: "var(--muted)" }}>—</span>}
+                          </td>
                           <td className="mono">{bngCellDisplay(s.ipv4)}</td>
                           <td>{formatBngIpType(s.ip_type, s.ip_type_raw, s)}</td>
                           <td className="mono" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }} title={formatBngIpv6Display(s.ipv6)}>

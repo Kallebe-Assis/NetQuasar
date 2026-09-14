@@ -483,6 +483,21 @@ export function InfrastructureTab({
     onError: (e) => toastErr(pushToast, e, "Falha ao guardar."),
   });
 
+  // Grava já, sem depender do utilizador lembrar-se de clicar em "Guardar" depois — "Usar cor da
+  // função" lia como uma acção imediata mas só limpava o campo do formulário; ficou um cabo com
+  // #e1ff00 preso porque a limpeza nunca chegou a ser gravada (nenhum PATCH com color:null no
+  // histórico de auditoria, só as duas cores manuais experimentadas antes).
+  const clearCableColorMut = useMutation({
+    mutationFn: () => apiFetch(`${meta.api}/${editId}`, { method: "PATCH", json: { color: null } }),
+    onSuccess: () => {
+      setForm((f) => ({ ...f, color: "" }));
+      qc.invalidateQueries({ queryKey: [...meta.queryKey] });
+      qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      toastOk(pushToast, "A usar a cor da função.");
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao limpar a cor."),
+  });
+
   const linkOltMut = useMutation({
     mutationFn: () =>
       apiFetch("/api/v1/commercial/network/ctos/link-olt", {
@@ -1183,8 +1198,16 @@ export function InfrastructureTab({
                           title="Cor própria deste cabo — sobrepõe a cor da função"
                         />
                         {form.color ? (
-                          <button type="button" className="btn btn--sm" onClick={() => setForm({ ...form, color: "" })}>
-                            Usar cor da função
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            disabled={clearCableColorMut.isPending}
+                            onClick={() => {
+                              if (editId) clearCableColorMut.mutate();
+                              else setForm({ ...form, color: "" });
+                            }}
+                          >
+                            {clearCableColorMut.isPending ? "A guardar…" : "Usar cor da função"}
                           </button>
                         ) : (
                           <span style={{ fontSize: 11, color: "var(--muted)" }}>Usando a cor da função</span>

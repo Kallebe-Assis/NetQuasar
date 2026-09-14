@@ -10,6 +10,9 @@ export type IntegrationSummary = {
   last_test_at?: string | null;
   last_test_ok?: boolean | null;
   last_test_message?: string | null;
+  /** Link da imagem mostrada no card/cabeçalho — guardado no banco (ver internal/api
+   * handlers_integrations.go), não no localStorage do navegador. */
+  logo_url?: string | null;
 };
 
 export type PathParam = {
@@ -200,6 +203,62 @@ export type WorkOrderItem = {
   /** Só preenchido pela varredura "recentes de todos os clientes" (aba Ordens de serviço). */
   client_name?: string;
   client_code?: string;
+};
+
+// --- Conferência (aba Ordens de serviço → botão "Conferência") -------------------------------
+
+export type HubsoftConferenceChecks = {
+  data_inicio: string;
+  data_fim: string;
+  check_connection: boolean;
+  check_remote_access: boolean;
+  check_ipv6: boolean;
+};
+
+export type HubsoftConferenceItem = {
+  id?: string;
+  number?: string;
+  status?: string;
+  type?: string;
+  description?: string;
+  created_at?: string;
+  scheduled_at?: string;
+  client_code?: string;
+  client_name?: string;
+  login?: string;
+  ipv4?: string;
+  /** Vem directo da HubSoft ("true"/"false"/"" sem dado) — mesmo campo do relatório de Clientes. */
+  connected?: string;
+  resolved: boolean;
+  connection_checked: boolean;
+  connection_online: boolean;
+  remote_access_checked: boolean;
+  remote_access_ok: boolean;
+  ipv6_checked: boolean;
+  ipv6_present: boolean;
+};
+
+export type HubsoftConferenceStatBucket = {
+  checked: number;
+  ok: number;
+  fail: number;
+};
+
+export type HubsoftConferenceResponse = {
+  ok: boolean;
+  message?: string;
+  from: string;
+  to: string;
+  total: number;
+  resolved: number;
+  truncated?: boolean;
+  checks: HubsoftConferenceChecks;
+  stats: {
+    connection: HubsoftConferenceStatBucket;
+    remote_access: HubsoftConferenceStatBucket;
+    ipv6: HubsoftConferenceStatBucket;
+  };
+  items: HubsoftConferenceItem[];
 };
 
 export type RecentActivityResponse = {

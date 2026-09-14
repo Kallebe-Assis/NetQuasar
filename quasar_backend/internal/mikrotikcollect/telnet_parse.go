@@ -43,29 +43,65 @@ func parseRouterOSLine(line string) map[string]string {
 	return out
 }
 
-func parseRouterOSRecords(output string) []map[string]string {
+// leadingRowIndex casa o número de linha no início de uma linha "print"/"print detail"
+// (ex.: " 3   ;;; comentário" ou " 0   R name=..."); leadingFlags casa as letras de flag de
+// uma-ou-poucas maiúsculas antes do primeiro key=value (ver legenda "Flags: R - radius", "X -
+// disabled", etc. no topo da saída) — em modo detail aparecem soltas, sem "flags=" explícito.
+var leadingRowIndex = regexp.MustCompile(`^\d+\s+`)
+var leadingFlags = regexp.MustCompile(`^([A-Z]{1,3})\s+\S`)
+
+// ParseRouterOSRecords faz parse de saída "print" / "print detail" do RouterOS em registos
+// key→value, um mapa por linha/objecto. Reconhece linhas de comentário (";;; texto", como em
+// /ppp secret print ou /ppp active print quando o objecto tem um comment configurado) — mesmo
+// quando o número da linha vem colado antes do ";;;" — e anexa-as como "comment" ao registo
+// seguinte; e as letras de flag soltas antes do primeiro key=value (ex. "R" de radius, "X" de
+// disabled), anexadas como "flags". Antes desta função ignorava ambos silenciosamente.
+func ParseRouterOSRecords(output string) []map[string]string {
 	lines := strings.Split(output, "\n")
 	var records []map[string]string
 	var cur map[string]string
+	var pendingComment string
+	var pendingFlags string
 	flush := func() {
 		if len(cur) > 0 {
 			records = append(records, cur)
 		}
 		cur = nil
 	}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	startRecord := func(line string) {
+		flush()
+		cur = parseRouterOSLine(line)
+		if pendingComment != "" {
+			cur["comment"] = pendingComment
+			pendingComment = ""
+		}
+		if pendingFlags != "" {
+			cur["flags"] = pendingFlags
+			pendingFlags = ""
+		}
+	}
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "Flags:") {
 			continue
 		}
+		// O número da linha ("#" da tabela) pode vir colado antes do ";;;" ou das flags, tanto na
+		// própria linha do registo como numa linha de comentário isolada acima dele.
+		line = leadingRowIndex.ReplaceAllString(line, "")
+		if strings.HasPrefix(line, ";;;") {
+			pendingComment = strings.TrimSpace(strings.TrimPrefix(line, ";;;"))
+			continue
+		}
+		if m := leadingFlags.FindStringSubmatch(line); m != nil {
+			pendingFlags = m[1]
+			line = strings.TrimSpace(line[len(m[1]):])
+		}
 		if strings.HasPrefix(line, "#") {
-			flush()
-			cur = parseRouterOSLine(strings.TrimPrefix(line, "#"))
+			startRecord(strings.TrimPrefix(line, "#"))
 			continue
 		}
 		if strings.Contains(line, "name=") || strings.Contains(line, "NAME=") {
-			flush()
-			cur = parseRouterOSLine(line)
+			startRecord(line)
 			continue
 		}
 		if cur == nil {
@@ -77,6 +113,11 @@ func parseRouterOSRecords(output string) []map[string]string {
 	}
 	flush()
 	return records
+}
+
+// parseRouterOSRecords — nome antigo, mantido para não mexer nos restantes call sites.
+func parseRouterOSRecords(output string) []map[string]string {
+	return ParseRouterOSRecords(output)
 }
 
 func parseSystemIdentity(output string) map[string]any {

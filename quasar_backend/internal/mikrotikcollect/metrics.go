@@ -80,7 +80,13 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo padrão do «Disco total» — confirmado sem índice de linha.", Placeholder: "1.3.6.1.2.1.25.2.3.1.6", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
 
 	// Health
-	{Key: "cpu_load", Section: "health", Label: "CPU (%)", Description: "Carga CPU MikroTik (mtxrHlCpuLoad em dispositivos reais). Valor SNMP frequentemente ×10 (ex.: 450 → 45% com divisor 10).", Placeholder: "1.3.6.1.4.1.14988.1.1.3.10.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "%", DefaultDivisor: 10, ShowDivisor: true},
+	// mtxrHlCpuLoad já vem em percentagem directa (0-100, sem casas decimais) — ao contrário dos
+	// sensores de temperatura/voltagem abaixo, que genuinamente usam ×10 no MIKROTIK-MIB para dar
+	// uma casa decimal num Integer32 SNMP. Confirmado contra o walk de referência em
+	// db/migrations/009_snmp_discovery_knowledge.sql (unidade "%", sem factor de escala). Um
+	// DefaultDivisor:10 aqui (copiado por engano do padrão dos sensores) fazia o CPU aparecer a
+	// 1/10 do valor real — ex.: 45% real virava "4.5%" na tela.
+	{Key: "cpu_load", Section: "health", Label: "CPU (%)", Description: "Carga CPU MikroTik (mtxrHlCpuLoad — já vem em % directa, sem factor de escala).", Placeholder: "1.3.6.1.4.1.14988.1.1.3.10.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "%", ShowDivisor: true},
 	{Key: "cpu_hr", Section: "health", Label: "CPU HOST-RESOURCES", Description: "hrProcessorLoad (alternativa universal).", Placeholder: "1.3.6.1.2.1.25.3.3.1.2.1", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "%", ShowDivisor: true},
 	{Key: "memory_total", Section: "health", Label: "Memória total", Description: "Tamanho total de RAM (hrStorage ou hrMemorySize).", Placeholder: "1.3.6.1.2.1.25.2.3.1.5.65536", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
 	{Key: "memory_used", Section: "health", Label: "Memória usada", Description: "RAM em uso (hrStorageUsed).", Placeholder: "1.3.6.1.2.1.25.2.3.1.6.65536", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},

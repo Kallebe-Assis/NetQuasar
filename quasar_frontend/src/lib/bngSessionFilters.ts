@@ -28,6 +28,8 @@ export type BngSessionAdvancedFilters = {
   minOnlineSec: string;
   dnLimitKbps: string;
   status: BngSessionStatusFilter;
+  /** Nome do cliente (comentário do /ppp secret — só equipamentos Mikrotik têm isto). */
+  commentLike: string;
 };
 
 export const BNG_SESSION_SEARCH_FIELDS: { value: BngSessionSearchField; label: string }[] = [
@@ -45,6 +47,7 @@ export const EMPTY_BNG_SESSION_FILTERS: BngSessionAdvancedFilters = {
   minOnlineSec: "",
   dnLimitKbps: "",
   status: "any",
+  commentLike: "",
 };
 
 export type BngSessionLike = PppoeSessionFields & {
@@ -61,6 +64,7 @@ export type BngSessionLike = PppoeSessionFields & {
   ip_type_raw?: string;
   online_time_sec?: string;
   car_dn_cir_kbps?: string;
+  comment?: string;
 };
 
 /** Normaliza MAC para comparação parcial (aceita :, -, . ou compacto). */
@@ -201,6 +205,11 @@ export function applyBngSessionAdvancedFilters(s: BngSessionLike, filters: BngSe
     return false;
   }
 
+  const commentLike = filters.commentLike.trim().toLowerCase();
+  if (commentLike && !String(s.comment ?? "").toLowerCase().includes(commentLike)) {
+    return false;
+  }
+
   const ipType = resolveIpTypeFilter(filters);
   if (ipType !== "any") {
     const got = sessionCanonicalIpType(s);
@@ -245,6 +254,7 @@ export function filterBngSessions(
 export function countActiveBngSessionFilters(advanced: BngSessionAdvancedFilters): number {
   let n = 0;
   if (advanced.status && advanced.status !== "any") n++;
+  if (advanced.commentLike.trim()) n++;
   if (advanced.ipv4Like.trim()) n++;
   if (resolveIpTypeFilter(advanced) !== "any") n++;
   if (advanced.vlans.trim()) n++;

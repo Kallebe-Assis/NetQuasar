@@ -114,8 +114,9 @@ function lastNMonths(n: number): { from: string; to: string; label: string }[] {
   return out;
 }
 
-/** Seletor de período reutilizado pelas 3 abas de relatório (Atendimentos/O.S./Financeiro). */
-function PeriodPicker({
+/** Seletor de período reutilizado pelas 3 abas de relatório (Atendimentos/O.S./Financeiro) e
+ * pela Conferência (aba Ordens de serviço → botão "Conferência", HubsoftConferenceModal.tsx). */
+export function PeriodPicker({
   from,
   to,
   onChange,

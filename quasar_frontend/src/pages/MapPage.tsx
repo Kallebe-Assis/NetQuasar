@@ -295,6 +295,11 @@ export function MapPage() {
   const [localityFlyNote, setLocalityFlyNote] = useState<string | null>(null);
   const [localityFlyPending, setLocalityFlyPending] = useState(false);
   const [detailFallback, setDetailFallback] = useState<Point | null>(null);
+  // Ao seleccionar um resultado de pesquisa de infra (CTO, cabo, caixa, poste, projecto, POP) que
+  // os filtros activos (projecto, localidade, função do cabo, toggles "Mostrar…") escondiam, o
+  // mapa mostra só esse ponto — ignorando os filtros — em vez de o painel abrir sem nenhum pino
+  // visível (pedido do utilizador). Fecha ao fechar o painel ou ao clicar noutro ponto qualquer.
+  const [searchIsolatePoint, setSearchIsolatePoint] = useState<Point | null>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [listPage, setListPage] = useState(0);
@@ -791,6 +796,14 @@ export function MapPage() {
         });
       }
     }
+    if (searchIsolatePoint) {
+      // Reaproveita a versão completa (cor por função, trajeto do cabo, etc.) se por acaso já
+      // estiver carregada; senão usa o mínimo vindo da pesquisa — o painel lateral busca o
+      // detalhe completo por si, isto aqui é só o pino no mapa.
+      const rich =
+        infra.find((p) => p.id === searchIsolatePoint.id) ?? equip.find((p) => p.id === searchIsolatePoint.id);
+      return [rich ?? searchIsolatePoint];
+    }
     return [...equip, ...conn, ...infra].filter((p) => !hiddenMapIds.has(p.id));
   }, [
     equipPoints,
@@ -805,6 +818,7 @@ export function MapPage() {
     localityFlyId,
     ctoColorMode,
     mapPrefsDraft.cto,
+    searchIsolatePoint,
     mapPrefsDraft.splice_box,
     spliceModelFilter,
     cableFuncaoFilter,
@@ -1192,6 +1206,10 @@ export function MapPage() {
   const openPointDetail = useCallback(
     (id: string, fly = true) => {
       setDetailFallback(null);
+      // Clicar noutro ponto qualquer sai do isolamento de pesquisa (ver searchIsolatePoint) e
+      // volta a respeitar os filtros activos — mas reabrir o mesmo ponto isolado (ex.: fechou e
+      // reabriu o popup) não deve fazer o mapa "saltar" de volta para a vista filtrada.
+      setSearchIsolatePoint((cur) => (cur && cur.id !== id ? null : cur));
       setSelId(id);
       const infra = parseInfraMapId(id);
       if (infra) {
@@ -1257,6 +1275,23 @@ export function MapPage() {
         setInfraPanelOpen(true);
         setDetailModalOpen(false);
       }
+      // Infra (CTO/cabo/caixa/poste/projecto/POP): isola este ponto no mapa, ignorando filtros de
+      // projecto/localidade/função/toggles — ligar "Mostrar CTOs" etc. acima não basta quando o
+      // que escondia o ponto era o filtro de projecto/localidade ou o bbox actual da vista.
+      if (row.kind !== "login" && row.kind !== "equipment") {
+        setSearchIsolatePoint({
+          id: row.map_id,
+          description: row.label,
+          category: row.category ?? searchKindLabel(row.kind),
+          lat: row.lat,
+          lng: row.lng,
+          status: "infra",
+          point_type: row.kind as InfraMapKind,
+          mapKind: row.kind as InfraMapKind,
+        });
+      } else {
+        setSearchIsolatePoint(null);
+      }
       setFlyTo({ lat: row.lat, lng: row.lng, zoom: 17 });
       setFlyKey((k) => k + 1);
     },
@@ -1271,6 +1306,7 @@ export function MapPage() {
     setSelId(null);
     setDetailModalOpen(false);
     setInfraPanelOpen(false);
+    setSearchIsolatePoint(null);
     setLocationPin({
       lat: hit.lat,
       lng: hit.lng,
@@ -2095,6 +2131,17 @@ export function MapPage() {
                     </div>
                   ) : null}
 
+                  {searchIsolatePoint ? (
+                    <div className="map-place-hint" role="status">
+                      <span>
+                        Mostrando só o resultado da pesquisa: <strong>{searchIsolatePoint.description}</strong> — filtros do mapa ignorados.
+                      </span>
+                      <button type="button" className="btn btn--sm" onClick={() => setSearchIsolatePoint(null)}>
+                        Voltar aos filtros
+                      </button>
+                    </div>
+                  ) : null}
+
                   {locationPin ? (
                     <div className="map-hidden-chip map-locate-chip">
                       <span>{locationPin.label?.trim() || "Ponto da pesquisa"}</span>
@@ -2361,6 +2408,7 @@ export function MapPage() {
                       setAutoOpenCableFibers(false);
                       setAutoOpenSplice(false);
                       setAutoOpenEdit(false);
+                      setSearchIsolatePoint(null);
                       setSelId(null);
                     }}
                     onHideFromMap={(id) => {

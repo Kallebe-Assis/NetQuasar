@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
-	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpprofile"
+	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/vsolparse"
 )
 
@@ -366,7 +366,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	}
 
 	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
-		return collectMikrotikProfile(ctx, pool, deviceID, host, community)
+		return collectMikrotikProfile(ctx, pool, deviceID, host, community, bngEnabled)
 	}
 
 	profJSON := profileJSONForDevice(ctx, pool, deviceID)
@@ -419,7 +419,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	return CollectResult{OK: sn.OK, OIDs: oids, SNMP: sn, Metrics: metrics}, nil
 }
 
-func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
+func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, bngEnabled bool) (CollectResult, error) {
 	timeout := 45 * time.Second
 	if dl, ok := ctx.Deadline(); ok {
 		if rem := time.Until(dl) - 3*time.Second; rem > 10*time.Second {
@@ -427,7 +427,36 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 		}
 	}
 	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, timeout)
-	return mikrotikResult(out, telnetOut, err)
+	result, resErr := mikrotikResult(out, telnetOut, err)
+
+	// BNG MikroTik: hwAccessTable (Huawei, ver bngcollect/metrics.go) não existe neste hardware —
+	// sessões PPPoE vêm por telnet CLI (/ppp active + /ppp secret) em vez de SNMP. Best-effort:
+	// não falha a coleta principal se isto der erro (ex.: sem credenciais telnet configuradas).
+	if bngEnabled {
+		pppTimeout := 45 * time.Second
+		if dl, ok := ctx.Deadline(); ok {
+			rem := time.Until(dl) - 3*time.Second
+			if rem < 15*time.Second {
+				pppTimeout = 0
+			} else if rem < pppTimeout {
+				pppTimeout = rem
+			}
+		}
+		if pppTimeout > 0 {
+			creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, pool, deviceID)
+			activeN, knownN, pppErr := bngcollect.CollectAndSyncMikrotikPPPoE(ctx, pool, deviceID, host, creds, pppTimeout)
+			if result.Metrics == nil {
+				result.Metrics = map[string]any{}
+			}
+			if pppErr != nil {
+				result.Metrics["mikrotik_pppoe_sync_error"] = pppErr.Error()
+			} else {
+				result.Metrics["mikrotik_pppoe_sync"] = map[string]any{"active": activeN, "known_logins": knownN}
+			}
+		}
+	}
+
+	return result, resErr
 }
 
 // CollectHealthAndStore ciclo rápido: só CPU/memória/temperatura/uptime (sem walks pesados).

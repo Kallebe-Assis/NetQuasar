@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, ImageUp, Link as LinkIcon, PlugZap, Trash2, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
+import { IntegrationLogoField } from "../../components/IntegrationLogoField";
 import type { IntegrationDetail } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { PageToastHost, usePageToast } from "../../lib/pageToast";
 import { queryKeys } from "../../lib/queryKeys";
-import { HUBSOFT_LOGO_MAX_BYTES, clearHubsoftLogo, useHubsoftLogo, writeHubsoftLogo } from "../../lib/hubsoftLogo";
 
 type TestOutcome = { ok: boolean; message: string; latency_ms?: number };
 
@@ -31,9 +31,6 @@ export function HubsoftConfigPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [testResult, setTestResult] = useState<TestOutcome | null>(null);
-  const logo = useHubsoftLogo();
-  const logoInputRef = useRef<HTMLInputElement>(null);
-  const [logoUrl, setLogoUrl] = useState("");
 
   useEffect(() => {
     const d = detailQ.data;
@@ -104,34 +101,6 @@ export function HubsoftConfigPage() {
     },
   });
 
-  function handleLogoFile(file: File | null) {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      showToast("err", "Selecione um ficheiro de imagem.");
-      return;
-    }
-    if (file.size > HUBSOFT_LOGO_MAX_BYTES) {
-      showToast("err", `Imagem muito grande (máx. ${Math.round(HUBSOFT_LOGO_MAX_BYTES / 1024)}KB).`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") writeHubsoftLogo(reader.result);
-    };
-    reader.onerror = () => showToast("err", "Falha ao ler a imagem.");
-    reader.readAsDataURL(file);
-  }
-
-  function applyLogoUrl() {
-    const url = logoUrl.trim();
-    if (!/^https?:\/\/.+/i.test(url)) {
-      showToast("err", "Cole um link http(s) válido de uma imagem.");
-      return;
-    }
-    writeHubsoftLogo(url);
-    setLogoUrl("");
-  }
-
   const busy = saveM.isPending || testM.isPending;
   const d = detailQ.data;
 
@@ -161,42 +130,7 @@ export function HubsoftConfigPage() {
           .
         </p>
 
-        <div className="field">
-          <label>Logo</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {logo ? <img src={logo} alt="" style={{ height: 32, maxWidth: 120, objectFit: "contain" }} /> : null}
-            <input
-              ref={logoInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(e) => handleLogoFile(e.target.files?.[0] ?? null)}
-            />
-            <button type="button" className="btn btn--sm" onClick={() => logoInputRef.current?.click()}>
-              <ImageUp size={13} /> {logo ? "Trocar logo" : "Enviar logo"}
-            </button>
-            {logo ? (
-              <button type="button" className="btn btn--sm" onClick={clearHubsoftLogo}>
-                <Trash2 size={13} /> Remover
-              </button>
-            ) : null}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <input
-              className="input mono"
-              style={{ flex: 1 }}
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              placeholder="…ou cole o link de uma imagem (https://…)"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyLogoUrl();
-              }}
-            />
-            <button type="button" className="btn btn--sm" disabled={!logoUrl.trim()} onClick={applyLogoUrl}>
-              <LinkIcon size={13} /> Usar link
-            </button>
-          </div>
-        </div>
+        <IntegrationLogoField slug={slug} logoUrl={d.logo_url} />
 
         <div className="field">
           <label>URL da API</label>

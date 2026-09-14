@@ -9,7 +9,6 @@ import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { isAdminUser } from "../lib/auth";
 import { queryKeys } from "../lib/queryKeys";
-import { useIntegrationLogo } from "../lib/integrationLogo";
 import type { IntegrationSummary } from "../integrations/types";
 import { APP_ROUTES } from "../app/routes";
 
@@ -17,9 +16,10 @@ function integrationTestPath(it: IntegrationSummary): string {
   return it.slug === "hubsoft" ? `/api/v1/integrations/${it.id}/hubsoft/test` : `/api/v1/integrations/${it.id}/test`;
 }
 
-/** Card de uma integração — logo à esquerda (por slug, ver integrationLogo.ts), nome clicável
- * (vai para a Consulta, tal como o botão), estado, e acções: Consultar / Configuração (admin) /
- * Ativar-Inativar (admin). Sem eliminar — só inativar (nunca perde a configuração). */
+/** Card de uma integração — logo à esquerda (it.logo_url, guardado no banco — ver
+ * handlers_integrations.go), nome clicável (vai para a Consulta, tal como o botão), estado, e
+ * acções: Consultar / Configuração (admin) / Ativar-Inativar (admin). Sem eliminar — só
+ * inativar (nunca perde a configuração). */
 function IntegrationCard({
   it,
   admin,
@@ -31,7 +31,7 @@ function IntegrationCard({
   onToggleEnabled: (it: IntegrationSummary) => void;
   togglingId: string | null;
 }) {
-  const logo = useIntegrationLogo(it.slug);
+  const logo = it.logo_url;
   return (
     <div
       className="panel"

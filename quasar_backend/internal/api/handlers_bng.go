@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
+	"github.com/netquasar/netquasar/quasar_backend/internal/mikrotikcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
@@ -738,7 +739,8 @@ func (s *Server) bngDeviceSessionsLiveBatch(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
 		return
 	}
-	if comm == "" {
+	isMikrotik := mikrotikcollect.IsMikrotikDevice(dev.Category, dev.Brand, dev.Model, dev.Description)
+	if !isMikrotik && comm == "" {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
 		return
 	}
@@ -757,6 +759,10 @@ func (s *Server) bngDeviceSessionsLiveBatch(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "máximo 100 sessões por consulta", nil)
 		return
 	}
+	if isMikrotik {
+		s.mikrotikSessionsLiveBatch(w, r, id, dev, body.Indices)
+		return
+	}
 	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -769,6 +775,38 @@ func (s *Server) bngDeviceSessionsLiveBatch(w http.ResponseWriter, r *http.Reque
 		"device_id": id,
 		"sessions":  out,
 		"source":    "snmp_live",
+		"count":     len(out),
+	})
+}
+
+// mikrotikSessionsLiveBatch é o equivalente MikroTik a bngDeviceSessionsLiveBatch (SNMP Huawei
+// FetchSessionsByIndices por índice) — em MikroTik o "index" é o próprio login (ver
+// SessionRowFromMikrotikActive), então em vez de GETs pontuais por índice faz-se uma única
+// leitura de /ppp active (rápida em RouterOS) e filtra-se pelos logins pedidos.
+func (s *Server) mikrotikSessionsLiveBatch(w http.ResponseWriter, r *http.Request, id uuid.UUID, dev bngDeviceRow, indices []string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+	defer cancel()
+	creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, s.DB(), id)
+	active, _, err := mikrotikcollect.CollectPPPoESessions(ctx, strings.TrimSpace(dev.IP), creds, 30*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "TELNET", err.Error(), nil)
+		return
+	}
+	want := make(map[string]bool, len(indices))
+	for _, idx := range indices {
+		want[strings.ToLower(strings.TrimSpace(idx))] = true
+	}
+	out := make([]map[string]any, 0, len(indices))
+	for _, e := range active {
+		if !want[strings.ToLower(e.Name)] {
+			continue
+		}
+		out = append(out, sessionRowToJSON(bngcollect.SessionRowFromMikrotikActive(e)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id": id,
+		"sessions":  out,
+		"source":    "telnet_live",
 		"count":     len(out),
 	})
 }
@@ -809,7 +847,9 @@ func (s *Server) bngDeviceSessionsCollect(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
 		return
 	}
-	if comm == "" {
+	host := strings.TrimSpace(dev.IP)
+	isMikrotik := mikrotikcollect.IsMikrotikDevice(dev.Category, dev.Brand, dev.Model, dev.Description)
+	if !isMikrotik && comm == "" {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
 		return
 	}
@@ -821,13 +861,36 @@ func (s *Server) bngDeviceSessionsCollect(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
-	host := strings.TrimSpace(dev.IP)
-	go s.runBngSessionsCollect(id, host, comm)
+	if isMikrotik {
+		go s.runMikrotikPPPoECollect(id, host)
+	} else {
+		go s.runBngSessionsCollect(id, host, comm)
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"accepted":  true,
 		"device_id": id,
-		"message":   "Consulta SNMP iniciada. Acompanhe o progresso em /sessions/collect/status.",
+		"message":   "Consulta iniciada. Acompanhe o progresso em /sessions/collect/status.",
 	})
+}
+
+// runMikrotikPPPoECollect é o equivalente MikroTik (telnet /ppp active + /ppp secret) a
+// runBngSessionsCollect (SNMP Huawei) — o botão "Consulta completa PPPoE" já existente na UI
+// passa a funcionar também para BNGs MikroTik, sem nenhuma mudança no frontend.
+func (s *Server) runMikrotikPPPoECollect(deviceID uuid.UUID, host string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	s.bngCollectProgress.update(deviceID, func(j *bngCollectJob) {
+		j.Phase = "login"
+		j.Message = "A consultar /ppp active e /ppp secret via telnet…"
+	})
+	creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, s.DB(), deviceID)
+	activeN, knownN, err := bngcollect.CollectAndSyncMikrotikPPPoE(ctx, s.DB(), deviceID, host, creds, 2*time.Minute)
+	if err != nil {
+		s.bngCollectProgress.finish(deviceID, 0, err.Error())
+		return
+	}
+	s.bngCollectProgress.finish(deviceID, activeN, "")
+	_ = knownN
 }
 
 func (s *Server) bngDeviceSessionsCollectStatus(w http.ResponseWriter, r *http.Request) {
@@ -1000,6 +1063,10 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento BNG não encontrado", nil)
 		return
 	}
+	if mikrotikcollect.IsMikrotikDevice(dev.Category, dev.Brand, dev.Model, dev.Description) {
+		s.mikrotikSessionLookup(w, r, id, dev, q)
+		return
+	}
 	if comm == "" {
 		writeErr(w, http.StatusBadRequest, "VALIDATION", "community SNMP não configurada", nil)
 		return
@@ -1051,6 +1118,56 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true, "source": "snmp_live", "query": q,
 		"session": sessionRowToJSON(row), "list_updated": true,
+	})
+}
+
+// mikrotikSessionLookup é o equivalente MikroTik a bngDeviceSessionLookup (SNMP Huawei):
+// consulta /ppp active ao vivo por telnet, procura o login exacto (case-insensitive) e, se não
+// estiver online agora, cai para o inventário (bng_known_logins) — mesmo comportamento pedido
+// para a busca híbrida SNMP: pesquisa exacta no equipamento + histórico como resguardo.
+func (s *Server) mikrotikSessionLookup(w http.ResponseWriter, r *http.Request, id uuid.UUID, dev bngDeviceRow, q string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, s.DB(), id)
+	active, _, err := mikrotikcollect.CollectPPPoESessions(ctx, strings.TrimSpace(dev.IP), creds, 25*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "TELNET", err.Error(), nil)
+		return
+	}
+	qLower := strings.ToLower(q)
+	for _, e := range active {
+		if strings.ToLower(e.Name) != qLower {
+			continue
+		}
+		row := bngcollect.SessionRowFromMikrotikActive(e)
+		if err := bngcollect.TouchKnownLoginOnline(ctx, s.DB(), id, row, ""); err != nil {
+			s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("mikrotik session lookup: falha ao atualizar known login")
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"found": true, "source": "telnet_live", "query": q,
+			"session": sessionRowToJSON(row), "list_updated": true,
+		})
+		return
+	}
+	if err := bngcollect.MarkKnownLoginOfflineIfExists(ctx, s.DB(), id, q, ""); err != nil {
+		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("mikrotik session lookup: falha ao marcar offline")
+	}
+	known, knownFound, kerr := bngcollect.FindKnownLogin(ctx, s.DB(), id, q)
+	if kerr != nil {
+		s.Log.Warn().Err(kerr).Str("device_id", id.String()).Str("login", q).Msg("mikrotik session lookup: falha ao consultar histórico")
+	}
+	if knownFound {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"found": true, "source": "known_logins", "query": q,
+			"session": known,
+			"note":    "Offline agora — dados da última vez visto (não é uma consulta ao vivo).",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"found": false, "source": "telnet_live", "query": q,
+		"session": map[string]any{"login": q, "status": "Down"},
+		"note":    "Usuário nunca visto neste equipamento.",
 	})
 }
 

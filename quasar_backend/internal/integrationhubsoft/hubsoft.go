@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1647,6 +1648,124 @@ func BuildWorkOrderPeriodReport(ctx context.Context, cfg Config, token, from, to
 	return WorkOrderPeriodReport{
 		OK: true, From: from, To: to, Total: total, Finished: finishedTotal, FinishedPct: pct,
 		ByStatus: topNamedCounts(statusCount, nil, 20), ByTechnician: byTech, Truncated: total > n,
+	}
+}
+
+// --- Conferência de O.S. por período (aba Ordens de serviço → botão "Conferência") -------------
+//
+// Cruza as O.S. de um período com o serviço do cliente correspondente (login, IPv4, estado
+// "conectado" — já vem directo da HubSoft, mesmo campo que alimenta o badge Conectado/
+// Desconectado da aba Relatório → Clientes) para dar o que a O.S. sozinha não tem. O resto das
+// conferências pedidas (IPv6, acesso remoto HTTP/HTTPS) não é dado da HubSoft — fica a cargo do
+// handler (internal/api/handlers_hubsoft_conference.go), que tem acesso a bng_known_logins e ao
+// probe de rede; este pacote só fala com a API da HubSoft.
+
+var clienteCodigoRe = regexp.MustCompile(`^\((\d+)\)`)
+
+// extractClientCodeFromLabel extrai o código de "(123) FULANO DE TAL" — formato em que o campo
+// "cliente" vem no endpoint /ordem_servico/todos (confirmado no comentário de enrichWorkOrders
+// acima, "já vem como texto (código) NOME neste endpoint").
+func extractClientCodeFromLabel(s string) string {
+	m := clienteCodigoRe.FindStringSubmatch(strings.TrimSpace(s))
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// ConferenceOSItem uma O.S. do período, cruzada com o serviço do cliente quando resolvida.
+type ConferenceOSItem struct {
+	ID          string `json:"id,omitempty"`
+	Number      string `json:"number,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	ScheduledAt string `json:"scheduled_at,omitempty"`
+	ClientCode  string `json:"client_code,omitempty"`
+	ClientName  string `json:"client_name,omitempty"`
+	Login       string `json:"login,omitempty"`
+	IPv4        string `json:"ipv4,omitempty"`
+	// Connected vem directo da HubSoft ("true"/"false"/"" sem dado) — mesmo campo do relatório
+	// de Clientes, não é cruzado com dados nossos.
+	Connected string `json:"connected,omitempty"`
+	// Resolved indica se achou o serviço do cliente (login/IPv4/connected preenchidos) — uma O.S.
+	// pode não resolver se o cliente foi removido/o campo "cliente" não trouxe código válido.
+	Resolved bool `json:"resolved"`
+}
+
+type WorkOrderConferenceData struct {
+	OK        bool               `json:"ok"`
+	Message   string             `json:"message,omitempty"`
+	From      string             `json:"from"`
+	To        string             `json:"to"`
+	Items     []ConferenceOSItem `json:"items"`
+	Total     int                `json:"total"`
+	Resolved  int                `json:"resolved"`
+	Truncated bool               `json:"truncated,omitempty"`
+}
+
+// BuildWorkOrderConferenceData faz duas varreduras paginadas (O.S. do período + roster completo
+// de clientes/serviços, este último o MESMO endpoint/parâmetros já usados pelo relatório de
+// Clientes) e junta-as em memória pelo código do cliente — evita N chamadas extra (uma por O.S.)
+// para resolver login/IPv4/estado de conexão.
+func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, to string) WorkOrderConferenceData {
+	from, to = defaultPeriod(from, to)
+	osItems, osTotal, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/ordem_servico/todos",
+		map[string]string{"data_inicio": from, "data_fim": to}, maxReportPages, "ordens_servico", "ordem_servico", "ordens")
+	if err != nil {
+		return WorkOrderConferenceData{Message: "Falha ao coletar ordens de serviço: " + err.Error(), From: from, To: to}
+	}
+	svcResult, svcErr := ListClientServiceReport(ctx, cfg, token, ReportListFilter{})
+	if svcErr != nil {
+		return WorkOrderConferenceData{Message: "Falha ao coletar clientes/serviços: " + svcErr.Error(), From: from, To: to}
+	}
+	byClient := make(map[string][]ReportServiceRow, len(svcResult.Rows))
+	for _, row := range svcResult.Rows {
+		if row.ClientCode == "" {
+			continue
+		}
+		byClient[row.ClientCode] = append(byClient[row.ClientCode], row)
+	}
+
+	items := make([]ConferenceOSItem, 0, len(osItems))
+	resolved := 0
+	for _, m := range osItems {
+		clienteLabel := pickStr(m, "cliente")
+		code := extractClientCodeFromLabel(clienteLabel)
+		it := ConferenceOSItem{
+			ID:          pickStr(m, "id_ordem_servico"),
+			Number:      firstNonEmpty(pickStr(m, "numero"), pickStr(m, "id_ordem_servico")),
+			Status:      firstNonEmpty(pickStr(m, "status"), "Sem status"),
+			Type:        pickStr(m, "tipo"),
+			Description: firstNonEmpty(pickStr(m, "descricao_abertura"), pickStr(m, "descricao_servico")),
+			CreatedAt:   pickStr(m, "data_cadastro"),
+			ScheduledAt: pickStr(m, "data_inicio_programado"),
+			ClientCode:  code,
+			ClientName:  strings.TrimSpace(clienteCodigoRe.ReplaceAllString(clienteLabel, "")),
+		}
+		if rows, ok := byClient[code]; code != "" && ok && len(rows) > 0 {
+			// Um cliente pode ter mais do que um serviço — prioriza o primeiro com login
+			// preenchido (caso comum: um só serviço), senão fica com o primeiro da lista.
+			best := rows[0]
+			for _, r := range rows {
+				if strings.TrimSpace(r.Login) != "" {
+					best = r
+					break
+				}
+			}
+			it.Login = best.Login
+			it.IPv4 = best.IPv4
+			it.Connected = best.Connected
+			it.Resolved = true
+			resolved++
+		}
+		items = append(items, it)
+	}
+
+	return WorkOrderConferenceData{
+		OK: true, From: from, To: to, Items: items, Total: osTotal, Resolved: resolved,
+		Truncated: osTotal > len(osItems),
 	}
 }
 

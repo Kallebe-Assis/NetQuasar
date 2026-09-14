@@ -419,6 +419,23 @@ export function MapInfraSidePanel({
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
   });
 
+  // Grava já, sem depender de um "Guardar" separado a seguir — "Usar cor da função" lia como uma
+  // acção imediata mas só limpava o campo local do formulário, deixando cabos presos numa cor
+  // manual antiga até o utilizador reparar e guardar de novo manualmente.
+  const clearCableColorMut = useMutation({
+    mutationFn: async () => {
+      if (!parsed || parsed.kind !== "cable") throw new Error("Só cabos podem ser editados aqui.");
+      await apiFetch(`/api/v1/commercial/network/cables/${parsed.id}`, { method: "PATCH", json: { color: null } });
+    },
+    onSuccess: async () => {
+      setCableForm((f) => ({ ...f, color: "" }));
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["map-cable-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao limpar a cor."),
+  });
+
   const saveSpliceMut = useMutation({
     mutationFn: async () => {
       if (!parsed || parsed.kind !== "splice_box") throw new Error("Só caixas de emenda podem ser editadas aqui.");
@@ -963,8 +980,13 @@ export function MapInfraSidePanel({
                 title="Cor própria deste cabo — sobrepõe a cor da função"
               />
               {cableForm.color ? (
-                <button type="button" className="btn btn--sm" onClick={() => setCableForm({ ...cableForm, color: "" })}>
-                  Usar cor da função
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={clearCableColorMut.isPending}
+                  onClick={() => clearCableColorMut.mutate()}
+                >
+                  {clearCableColorMut.isPending ? "A guardar…" : "Usar cor da função"}
                 </button>
               ) : (
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Usando a cor da função</span>

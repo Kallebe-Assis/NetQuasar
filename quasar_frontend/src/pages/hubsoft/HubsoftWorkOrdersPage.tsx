@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { ClipboardCheck, RefreshCw } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
+import { HubsoftConferenceModal } from "./HubsoftConferenceModal";
 import { WorkOrdersTabContent } from "../../integrations/HubsoftClientResults";
 import type { SupportDetailTarget } from "../../integrations/SupportItemDetailModal";
 import { HubsoftSupportDetailModal, type HubsoftDetailTarget } from "../../integrations/HubsoftSupportDetailModal";
@@ -18,6 +19,7 @@ import { queryKeys } from "../../lib/queryKeys";
 export function HubsoftWorkOrdersPage() {
   const qc = useQueryClient();
   const [detailTarget, setDetailTarget] = useState<HubsoftDetailTarget | null>(null);
+  const [conferenceOpen, setConferenceOpen] = useState(false);
 
   // Ver comentário equivalente em HubsoftAttendancePage.tsx.
   function handleShowDetail(t: SupportDetailTarget) {
@@ -48,14 +50,19 @@ export function HubsoftWorkOrdersPage() {
                 : "Consulta todas as ordens de serviço dos últimos 30 dias e mostra as mais recentes."}
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn--sm"
-            disabled={q.isFetching}
-            onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftRecentActivity })}
-          >
-            <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn--sm btn--primary" onClick={() => setConferenceOpen(true)}>
+              <ClipboardCheck size={13} style={{ marginRight: 4, verticalAlign: -2 }} /> Conferência
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={q.isFetching}
+              onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftRecentActivity })}
+            >
+              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
+            </button>
+          </div>
         </div>
 
         {q.isLoading ? (
@@ -72,6 +79,7 @@ export function HubsoftWorkOrdersPage() {
         )}
       </div>
       {detailTarget ? <HubsoftSupportDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
+      {conferenceOpen ? <HubsoftConferenceModal onClose={() => setConferenceOpen(false)} /> : null}
     </div>
   );
 }

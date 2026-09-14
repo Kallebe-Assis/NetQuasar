@@ -1,8 +1,11 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, BarChart3, ClipboardList, FileBarChart2, LifeBuoy, Receipt, Search, Settings } from "lucide-react";
 import { isAdminUser } from "../../lib/auth";
 import { APP_ROUTES } from "../../app/routes";
-import { useHubsoftLogo } from "../../lib/hubsoftLogo";
+import { apiFetch } from "../../lib/api";
+import { queryKeys } from "../../lib/queryKeys";
+import type { IntegrationSummary } from "../../integrations/types";
 
 /**
  * Cabeçalho dedicado às telas da HubSoft (Consulta/Atendimentos/Ordens/Financeiro/Dashboard/
@@ -13,7 +16,14 @@ import { useHubsoftLogo } from "../../lib/hubsoftLogo";
 export function HubsoftHeader() {
   const loc = useLocation();
   const admin = isAdminUser();
-  const logo = useHubsoftLogo();
+  // Mesma queryKey/endpoint já usado pelo card da tela Integrações — reaproveita a cache em vez
+  // de mais uma chamada; logo_url vem do banco (integrations.logo_url), não do localStorage.
+  const integrationsQ = useQuery({
+    queryKey: queryKeys.integrations,
+    queryFn: () => apiFetch<{ integrations: IntegrationSummary[] }>("/api/v1/integrations"),
+    staleTime: 60_000,
+  });
+  const logo = integrationsQ.data?.integrations.find((i) => i.slug === "hubsoft")?.logo_url;
 
   const tabs = [
     { to: APP_ROUTES.integrationConsulta("hubsoft"), label: "Consulta", icon: <Search size={14} /> },
