@@ -1,6 +1,7 @@
 import {
   formatBngIpType,
   formatBngKbitRate,
+  formatBngSessionStatus,
   sessionDisplayOnline,
   type PppoeSessionFields,
 } from "./bngDisplay";
@@ -13,6 +14,10 @@ export type BngIpTypeFilter = "any" | "ipv4" | "ipv6" | "dual";
 /** @deprecated use BngIpTypeFilter — mantido para compatibilidade de imports. */
 export type BngDualStackFilter = "any" | "yes" | "no";
 
+/** Filtro por status — agora que a lista traz todo o inventário (online + offline, ver
+ * bng_known_logins), este filtro é o que deixa ver só um dos dois. */
+export type BngSessionStatusFilter = "any" | "online" | "offline";
+
 export type BngSessionAdvancedFilters = {
   ipv4Like: string;
   /** Preferido: any | ipv4 | ipv6 | dual */
@@ -22,6 +27,7 @@ export type BngSessionAdvancedFilters = {
   vlans: string;
   minOnlineSec: string;
   dnLimitKbps: string;
+  status: BngSessionStatusFilter;
 };
 
 export const BNG_SESSION_SEARCH_FIELDS: { value: BngSessionSearchField; label: string }[] = [
@@ -38,6 +44,7 @@ export const EMPTY_BNG_SESSION_FILTERS: BngSessionAdvancedFilters = {
   vlans: "",
   minOnlineSec: "",
   dnLimitKbps: "",
+  status: "any",
 };
 
 export type BngSessionLike = PppoeSessionFields & {
@@ -183,6 +190,12 @@ function parseVlanList(raw: string): string[] {
 }
 
 export function applyBngSessionAdvancedFilters(s: BngSessionLike, filters: BngSessionAdvancedFilters): boolean {
+  if (filters.status && filters.status !== "any") {
+    const online = formatBngSessionStatus(s.status).online;
+    if (filters.status === "online" && !online) return false;
+    if (filters.status === "offline" && online) return false;
+  }
+
   const ipv4Like = filters.ipv4Like.trim();
   if (ipv4Like && !ipv4MatchesNeedle(String(s.ipv4 ?? ""), ipv4Like)) {
     return false;
@@ -231,6 +244,7 @@ export function filterBngSessions(
 
 export function countActiveBngSessionFilters(advanced: BngSessionAdvancedFilters): number {
   let n = 0;
+  if (advanced.status && advanced.status !== "any") n++;
   if (advanced.ipv4Like.trim()) n++;
   if (resolveIpTypeFilter(advanced) !== "any") n++;
   if (advanced.vlans.trim()) n++;

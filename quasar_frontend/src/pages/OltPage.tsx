@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { Filter } from "lucide-react";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
@@ -345,6 +346,15 @@ export function OltPage() {
   const [bulkOltFilter, setBulkOltFilter] = useState("");
   const [sortKey, setSortKey] = useState<OltSortKey>("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [oltFiltersOpen, setOltFiltersOpen] = useState(false);
+  const [oltFilterText, setOltFilterText] = useState("");
+  const [oltFilterLocality, setOltFilterLocality] = useState("");
+  const [oltFilterHealth, setOltFilterHealth] = useState<"" | "ok" | "partial" | "failed" | "unknown">("");
+  const [oltFilterIp, setOltFilterIp] = useState("");
+  const [oltFilterUpdated, setOltFilterUpdated] = useState<"" | "24h" | "7d" | "stale7d">("");
+  const [oltFilterTotalMin, setOltFilterTotalMin] = useState("");
+  const [oltFilterOnlineMin, setOltFilterOnlineMin] = useState("");
+  const [oltFilterOfflineMin, setOltFilterOfflineMin] = useState("");
   const [collectLogOpen, setCollectLogOpen] = useState(false);
   const [metricsWalkRows, setMetricsWalkRows] = useState<MetricsWalkRow[] | null>(null);
 
@@ -559,8 +569,75 @@ export function OltPage() {
     }
     return { online, offline, total };
   }, [rows]);
+  const oltLocalityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const n = String(r.locality_name ?? "").trim();
+      if (n) set.add(n);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt"));
+  }, [rows]);
+  const oltActiveFilterCount =
+    (oltFilterLocality ? 1 : 0) +
+    (oltFilterHealth ? 1 : 0) +
+    (oltFilterIp.trim() ? 1 : 0) +
+    (oltFilterUpdated ? 1 : 0) +
+    (oltFilterTotalMin.trim() ? 1 : 0) +
+    (oltFilterOnlineMin.trim() ? 1 : 0) +
+    (oltFilterOfflineMin.trim() ? 1 : 0);
+  function clearOltFilters() {
+    setOltFilterText("");
+    setOltFilterLocality("");
+    setOltFilterHealth("");
+    setOltFilterIp("");
+    setOltFilterUpdated("");
+    setOltFilterTotalMin("");
+    setOltFilterOnlineMin("");
+    setOltFilterOfflineMin("");
+  }
+  const filteredRows = useMemo(() => {
+    const text = oltFilterText.trim().toLowerCase();
+    const ip = oltFilterIp.trim().toLowerCase();
+    const totalMin = Number(oltFilterTotalMin);
+    const onlineMin = Number(oltFilterOnlineMin);
+    const offlineMin = Number(oltFilterOfflineMin);
+    const now = Date.now();
+    return rows.filter((r) => {
+      if (text) {
+        const hay = `${r.description ?? ""} ${r.ip ?? ""} ${r.locality_name ?? ""}`.toLowerCase();
+        if (!hay.includes(text)) return false;
+      }
+      if (oltFilterLocality && String(r.locality_name ?? "") !== oltFilterLocality) return false;
+      if (oltFilterHealth) {
+        const health = r.snmp_health_status ?? "unknown";
+        if (health !== oltFilterHealth) return false;
+      }
+      if (ip && !String(r.ip ?? "").toLowerCase().includes(ip)) return false;
+      if (oltFilterUpdated) {
+        const t = Date.parse(String(r.olt_snapshot_at ?? ""));
+        const ageMs = Number.isFinite(t) ? now - t : Infinity;
+        if (oltFilterUpdated === "24h" && !(ageMs <= 24 * 3600_000)) return false;
+        if (oltFilterUpdated === "7d" && !(ageMs <= 7 * 24 * 3600_000)) return false;
+        if (oltFilterUpdated === "stale7d" && !(ageMs > 7 * 24 * 3600_000)) return false;
+      }
+      if (Number.isFinite(totalMin) && oltFilterTotalMin.trim() && Number(r.computed?.onu_total_sum ?? 0) < totalMin) return false;
+      if (Number.isFinite(onlineMin) && oltFilterOnlineMin.trim() && Number(r.computed?.onu_online_sum ?? 0) < onlineMin) return false;
+      if (Number.isFinite(offlineMin) && oltFilterOfflineMin.trim() && Number(r.computed?.onu_offline_sum ?? 0) < offlineMin) return false;
+      return true;
+    });
+  }, [
+    rows,
+    oltFilterText,
+    oltFilterLocality,
+    oltFilterHealth,
+    oltFilterIp,
+    oltFilterUpdated,
+    oltFilterTotalMin,
+    oltFilterOnlineMin,
+    oltFilterOfflineMin,
+  ]);
   const sortedRows = useMemo(() => {
-    const out = [...rows];
+    const out = [...filteredRows];
     const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : -1);
     const txt = (v: unknown) => String(v ?? "").trim().toLowerCase();
     const ts = (v: unknown) => {
@@ -596,7 +673,7 @@ export function OltPage() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return out;
-  }, [rows, sortDir, sortKey]);
+  }, [filteredRows, sortDir, sortKey]);
 
   const onuTableNote = useMemo(() => {
     const summaryObj = detail.data?.summary as Record<string, unknown> | undefined;
@@ -789,7 +866,7 @@ export function OltPage() {
               </p>
             </InfoHint>
           </h1>
-          <PageCountPill label="OLTs" count={rows.length} />
+          <PageCountPill label="OLTs" count={filteredRows.length} />
         </div>
         {canMutate ? (
           <button
@@ -821,6 +898,103 @@ export function OltPage() {
             <div className="stat__k">Offline</div>
             <div className="stat__v">{formatNum(fleetOnu.offline)}</div>
           </div>
+        </div>
+      ) : null}
+      {!sel && rows.length > 0 ? (
+        <div className="card" style={{ marginBottom: 12, padding: "10px 12px" }}>
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={`btn btn--icon btn--icon-menu${oltFiltersOpen || oltActiveFilterCount > 0 ? " btn--filter-active" : ""}`}
+              title={oltActiveFilterCount > 0 ? `Filtros (${oltActiveFilterCount})` : "Filtros"}
+              aria-label={oltActiveFilterCount > 0 ? `Filtros (${oltActiveFilterCount})` : "Filtros"}
+              aria-expanded={oltFiltersOpen}
+              onClick={() => setOltFiltersOpen((o) => !o)}
+            >
+              <Filter size={18} />
+            </button>
+            <input
+              className="input devices-toolbar__search"
+              aria-label="Busca geral em OLTs"
+              placeholder="Busca geral (descrição, IP, localidade…)"
+              value={oltFilterText}
+              onChange={(e) => setOltFilterText(e.target.value)}
+            />
+          </div>
+          {oltFiltersOpen ? (
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: "1px solid var(--border)",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                gap: 10,
+              }}
+            >
+              <label className="filter-pill-field" style={{ minWidth: 170 }}>
+                <span className="filter-pill-field__label">Localidade</span>
+                <select className="select" style={{ width: "100%" }} value={oltFilterLocality} onChange={(e) => setOltFilterLocality(e.target.value)}>
+                  <option value="">Todas as localidades</option>
+                  {oltLocalityOptions.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 170 }}>
+                <span className="filter-pill-field__label">Saúde do SNMP</span>
+                <select
+                  className="select"
+                  style={{ width: "100%" }}
+                  value={oltFilterHealth}
+                  onChange={(e) => setOltFilterHealth(e.target.value as typeof oltFilterHealth)}
+                >
+                  <option value="">Todas</option>
+                  <option value="ok">🟢 OK</option>
+                  <option value="partial">🟡 Parcial</option>
+                  <option value="failed">🔴 Falha</option>
+                  <option value="unknown">— Desconhecida</option>
+                </select>
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 150 }}>
+                <span className="filter-pill-field__label">IP</span>
+                <input className="input mono" style={{ width: "100%" }} value={oltFilterIp} onChange={(e) => setOltFilterIp(e.target.value)} placeholder="10.0…" />
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 170 }}>
+                <span className="filter-pill-field__label">Última atualização</span>
+                <select
+                  className="select"
+                  style={{ width: "100%" }}
+                  value={oltFilterUpdated}
+                  onChange={(e) => setOltFilterUpdated(e.target.value as typeof oltFilterUpdated)}
+                >
+                  <option value="">Qualquer</option>
+                  <option value="24h">Últimas 24h</option>
+                  <option value="7d">Últimos 7 dias</option>
+                  <option value="stale7d">Há mais de 7 dias</option>
+                </select>
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 130 }}>
+                <span className="filter-pill-field__label">ONUs total mín.</span>
+                <input className="input mono" style={{ width: "100%" }} type="number" min={0} value={oltFilterTotalMin} onChange={(e) => setOltFilterTotalMin(e.target.value)} />
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 130 }}>
+                <span className="filter-pill-field__label">Online mín.</span>
+                <input className="input mono" style={{ width: "100%" }} type="number" min={0} value={oltFilterOnlineMin} onChange={(e) => setOltFilterOnlineMin(e.target.value)} />
+              </label>
+              <label className="filter-pill-field" style={{ minWidth: 130 }}>
+                <span className="filter-pill-field__label">Offline mín.</span>
+                <input className="input mono" style={{ width: "100%" }} type="number" min={0} value={oltFilterOfflineMin} onChange={(e) => setOltFilterOfflineMin(e.target.value)} />
+              </label>
+              <div style={{ alignSelf: "end" }}>
+                <button type="button" className="btn" onClick={clearOltFilters}>
+                  Limpar filtros
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {bulkOpen && canMutate && (

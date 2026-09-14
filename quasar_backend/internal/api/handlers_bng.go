@@ -1019,10 +1019,26 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 		if err := bngcollect.MarkKnownLoginOfflineIfExists(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix); err != nil {
 			s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao marcar offline")
 		}
+		// Não está online agora, mas pode já ter sido visto antes — cai para o inventário
+		// permanente (bng_known_logins) em vez de simplesmente "não encontrado" (pedido do
+		// utilizador: toda pesquisa deve considerar também o histórico, mostrando offline com os
+		// últimos dados conhecidos quando não está online no BNG agora).
+		known, knownFound, kerr := bngcollect.FindKnownLogin(r.Context(), s.DB(), id, q)
+		if kerr != nil {
+			s.Log.Warn().Err(kerr).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao consultar histórico")
+		}
+		if knownFound {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found": true, "source": "known_logins", "query": q,
+				"session": known,
+				"note":    "Offline agora — dados da última vez visto (não é uma consulta ao vivo).",
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"found": false, "source": "snmp_live", "query": q,
 			"session": sessionRowToJSON(row),
-			"note":    "Usuário não encontrado online no BNG.",
+			"note":    "Usuário nunca visto neste equipamento.",
 		})
 		return
 	}

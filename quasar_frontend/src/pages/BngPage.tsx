@@ -1341,10 +1341,11 @@ export function BngPage() {
   const [sessionRefreshMode, setSessionRefreshMode] = useState<BngSessionRefreshMode>(() => {
     try {
       const v = localStorage.getItem(BNG_SESSION_REFRESH_MODE_KEY);
-      return v === "auto" ? "auto" : "manual";
+      if (v === "auto" || v === "manual") return v;
     } catch {
-      return "manual";
+      /* localStorage indisponível — cai para o padrão abaixo */
     }
+    return "auto";
   });
   const [livePageSessions, setLivePageSessions] = useState<PppoeSession[] | null>(null);
   const [livePageLoading, setLivePageLoading] = useState(false);
@@ -2112,6 +2113,23 @@ export function BngPage() {
                       gap: 10,
                     }}
                   >
+                    <div className="field" style={{ margin: 0 }}>
+                      <label style={{ fontSize: 11 }}>Status</label>
+                      <select
+                        className="input"
+                        value={advancedFilters.status}
+                        onChange={(e) =>
+                          setAdvancedFilters((f) => ({
+                            ...f,
+                            status: e.target.value as BngSessionAdvancedFilters["status"],
+                          }))
+                        }
+                      >
+                        <option value="any">Todos</option>
+                        <option value="online">Somente online</option>
+                        <option value="offline">Somente offline</option>
+                      </select>
+                    </div>
                     <div className="field" style={{ margin: 0 }}>
                       <label style={{ fontSize: 11 }}>IPv4 contém</label>
                       <input

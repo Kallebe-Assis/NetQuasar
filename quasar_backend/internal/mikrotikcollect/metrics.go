@@ -6,18 +6,18 @@ import (
 )
 
 const (
-	ModeSNMPGet           = "snmp_get"
-	ModeSNMPWalk          = "snmp_walk"
-	ModeIFMibTable        = "if_mib_table"
-	ModeIFMibStatus       = "if_mib_status"
-	ModeIFMibPPPoE        = "if_mib_pppoe"
-	ModeOpticalSFPParse   = "optical_sfp_table"
-	ModeOpticalSFPColumn  = "optical_sfp_column"
+	ModeSNMPGet          = "snmp_get"
+	ModeSNMPWalk         = "snmp_walk"
+	ModeIFMibTable       = "if_mib_table"
+	ModeIFMibStatus      = "if_mib_status"
+	ModeIFMibPPPoE       = "if_mib_pppoe"
+	ModeOpticalSFPParse  = "optical_sfp_table"
+	ModeOpticalSFPColumn = "optical_sfp_column"
 )
 
 const (
-	TargetTelemetry   = "telemetry"
-	TargetInterfaces  = "interfaces"
+	TargetTelemetry  = "telemetry"
+	TargetInterfaces = "interfaces"
 )
 
 // MetricDef configuração de uma métrica MikroTik.
@@ -33,19 +33,19 @@ type MetricsConfig map[string]MetricDef
 
 // CatalogEntry metadados para UI e coleta.
 type CatalogEntry struct {
-	Key             string   `json:"key"`
-	Section         string   `json:"section"`
-	Label           string   `json:"label"`
-	Description     string   `json:"description"`
-	Placeholder     string   `json:"placeholder"`
-	CollectModes    []string `json:"collect_modes"`
-	DefaultMode     string   `json:"default_mode"`
-	WalkTarget      string   `json:"walk_target"`
-	Unit            string   `json:"unit,omitempty"`
-	DefaultDivisor  int      `json:"default_divisor,omitempty"`
-	ShowDivisor     bool     `json:"show_divisor,omitempty"`
-	IFMibColumn     int      `json:"if_mib_column,omitempty"`
-	OpticalColumn   int      `json:"optical_column,omitempty"`
+	Key            string   `json:"key"`
+	Section        string   `json:"section"`
+	Label          string   `json:"label"`
+	Description    string   `json:"description"`
+	Placeholder    string   `json:"placeholder"`
+	CollectModes   []string `json:"collect_modes"`
+	DefaultMode    string   `json:"default_mode"`
+	WalkTarget     string   `json:"walk_target"`
+	Unit           string   `json:"unit,omitempty"`
+	DefaultDivisor int      `json:"default_divisor,omitempty"`
+	ShowDivisor    bool     `json:"show_divisor,omitempty"`
+	IFMibColumn    int      `json:"if_mib_column,omitempty"`
+	OpticalColumn  int      `json:"optical_column,omitempty"`
 }
 
 var SectionLabels = map[string]string{
@@ -54,10 +54,10 @@ var SectionLabels = map[string]string{
 	"interfaces": "Interfaces",
 	"optical":    "Óptica / SFP",
 	"wireless":   "Wireless",
-	"ppp":       "PPP / Sessões",
-	"users":     "Users (Hotspot)",
-	"dhcp":      "DHCP",
-	"ip":        "IP",
+	"ppp":        "PPP / Sessões",
+	"users":      "Users (Hotspot)",
+	"dhcp":       "DHCP",
+	"ip":         "IP",
 }
 
 // MetricCatalog catálogo completo de métricas configuráveis.
@@ -70,6 +70,10 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "firmware_version", Section: "system", Label: "Versão firmware", Description: "Versão RouterOS em execução.", Placeholder: "1.3.6.1.4.1.14988.1.1.7.4.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
 	{Key: "board_name", Section: "system", Label: "Board / modelo", Description: "Nome da placa (mtxrBoardName).", Placeholder: "1.3.6.1.4.1.14988.1.1.7.9.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
 	{Key: "license_level", Section: "system", Label: "Nível licença", Description: "Nível da chave RouterOS.", Placeholder: "1.3.6.1.4.1.14988.1.1.4.3.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
+	// Mesma secção ("system") do par equivalente por telnet (telnet_sys_free_hdd/telnet_sys_total_hdd
+	// em telnet_metrics.go) — pedido do utilizador: encontrar o Disco no mesmo lugar em SNMP e Telnet.
+	{Key: "disk_total", Section: "system", Label: "Disco total", Description: "Capacidade total de disco/armazenamento (hrStorageSize — entrada hrStorageFixedDisk da hrStorageTable). Índice varia por modelo; 131072 é o mais comum no RouterOS (65536 é a RAM), confirme com um SNMP walk se não bater.", Placeholder: "1.3.6.1.2.1.25.2.3.1.5.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
+	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo índice do «Disco total».", Placeholder: "1.3.6.1.2.1.25.2.3.1.6.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
 
 	// Health
 	{Key: "cpu_load", Section: "health", Label: "CPU (%)", Description: "Carga CPU MikroTik (mtxrHlCpuLoad em dispositivos reais). Valor SNMP frequentemente ×10 (ex.: 450 → 45% com divisor 10).", Placeholder: "1.3.6.1.4.1.14988.1.1.3.10.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "%", DefaultDivisor: 10, ShowDivisor: true},
@@ -133,6 +137,7 @@ var MetricCatalog = []CatalogEntry{
 func mikrotikDefaultEnabled(key string) bool {
 	return key == "cpu_load" || key == "temperature" || key == "sys_uptime" ||
 		key == "memory_used" || key == "memory_total" ||
+		key == "disk_used" || key == "disk_total" ||
 		key == "if_mib_table" || key == "if_x_table" || key == "if_oper_status" ||
 		key == "optical_table" || key == "optical_rx_power" || key == "optical_tx_power" ||
 		key == "optical_temperature" || key == "optical_supply_voltage" || key == "optical_bias_current" ||

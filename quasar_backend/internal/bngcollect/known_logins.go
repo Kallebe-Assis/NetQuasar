@@ -362,6 +362,88 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 	return out, latest, onlineN, len(out), rows.Err()
 }
 
+// FindKnownLogin procura um único login no inventário permanente (bng_known_logins) — usado como
+// fallback de pesquisa quando o login não está online no BNG agora (lookup ao vivo não achou):
+// se já foi visto alguma vez, devolve os últimos dados conhecidos com is_online=false, em vez de
+// simplesmente "não encontrado". Mesmo formato de map que ListKnownLoginsAsSessions.
+func FindKnownLogin(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, login string) (map[string]any, bool, error) {
+	if pool == nil {
+		return nil, false, nil
+	}
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return nil, false, nil
+	}
+	var (
+		gotLogin                                                                                   string
+		sessIdx, vlan, ipv4, ipv6, ipv6PD, mac, iface, domain, ipType, ipTypeRaw, upCIR, dnCIR, auth *string
+		isOnline                                                                                    bool
+		firstSeen, lastSeen, updated                                                                time.Time
+		lastOffline                                                                                 *time.Time
+		onlineSec                                                                                   *int64
+	)
+	err := pool.QueryRow(ctx, `
+		SELECT login, is_online, first_seen_at, last_seen_at, last_offline_at,
+		       session_index, vlan, ipv4, ipv6, ipv6_pd, mac, interface_name, domain,
+		       ip_type, ip_type_raw, car_up_cir_kbps, car_dn_cir_kbps, online_time_sec, auth_state, updated_at
+		FROM bng_known_logins
+		WHERE device_id=$1 AND lower(trim(login))=lower(trim($2))
+	`, deviceID, login).Scan(
+		&gotLogin, &isOnline, &firstSeen, &lastSeen, &lastOffline,
+		&sessIdx, &vlan, &ipv4, &ipv6, &ipv6PD, &mac, &iface, &domain,
+		&ipType, &ipTypeRaw, &upCIR, &dnCIR, &onlineSec, &auth, &updated,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	status := "Down"
+	if isOnline {
+		status = "Up"
+	}
+	onlineTimeSec := ""
+	onlineTime := ""
+	if onlineSec != nil && *onlineSec > 0 {
+		onlineTimeSec = fmt.Sprintf("%d", *onlineSec)
+		onlineTime = FormatDurationSeconds(int(*onlineSec))
+	}
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	m := map[string]any{
+		"index":           deref(sessIdx),
+		"login":           gotLogin,
+		"ipv4":            nullIfEmpty(deref(ipv4)),
+		"ipv6":            nullIfEmpty(deref(ipv6)),
+		"ipv6_pd":         nullIfEmpty(deref(ipv6PD)),
+		"mac":             nullIfEmpty(deref(mac)),
+		"vlan":            nullIfEmpty(deref(vlan)),
+		"interface":       nullIfEmpty(deref(iface)),
+		"domain":          nullIfEmpty(deref(domain)),
+		"ip_type":         nullIfEmpty(deref(ipType)),
+		"ip_type_raw":     nullIfEmpty(deref(ipTypeRaw)),
+		"car_up_cir_kbps": nullIfEmpty(deref(upCIR)),
+		"car_dn_cir_kbps": nullIfEmpty(deref(dnCIR)),
+		"online_time_sec": nullIfEmpty(onlineTimeSec),
+		"online_time":     nullIfEmpty(onlineTime),
+		"auth_state":      nullIfEmpty(deref(auth)),
+		"status":          status,
+		"is_online":       isOnline,
+		"first_seen_at":   firstSeen.UTC().Format(time.RFC3339Nano),
+		"last_seen_at":    lastSeen.UTC().Format(time.RFC3339Nano),
+		"known_login":     true,
+	}
+	if lastOffline != nil {
+		m["last_offline_at"] = lastOffline.UTC().Format(time.RFC3339Nano)
+	}
+	return EnrichSessionMaps([]map[string]any{m})[0], true, nil
+}
+
 // ListLoginEvents devolve histórico de conexões de um login.
 func ListLoginEvents(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, login string, limit int) ([]map[string]any, error) {
 	if pool == nil {

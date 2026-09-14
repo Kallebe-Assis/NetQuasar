@@ -76,6 +76,8 @@
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: 8px;
+  width: 130px !important;
+  height: 100px !important;
 }
 .topo-canvas-wrap .react-flow__attribution {
   background: transparent;
@@ -433,5 +435,13 @@
   .topo-canvas-wrap .react-flow__handle {
     width: 22px;
     height: 22px;
+  }
+}
+
+/* Minimapa (canto inferior direito do canvas) — no telefone ocupa espaço demais num canvas já
+   pequeno; não é essencial para navegar (os controles de zoom/pan continuam disponíveis). */
+@media (max-width: 767px) {
+  .topo-canvas-wrap .react-flow__minimap {
+    display: none;
   }
 }
