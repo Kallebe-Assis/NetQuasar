@@ -72,8 +72,12 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "license_level", Section: "system", Label: "Nível licença", Description: "Nível da chave RouterOS.", Placeholder: "1.3.6.1.4.1.14988.1.1.4.3.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
 	// Mesma secção ("system") do par equivalente por telnet (telnet_sys_free_hdd/telnet_sys_total_hdd
 	// em telnet_metrics.go) — pedido do utilizador: encontrar o Disco no mesmo lugar em SNMP e Telnet.
-	{Key: "disk_total", Section: "system", Label: "Disco total", Description: "Capacidade total de disco/armazenamento (hrStorageSize — entrada hrStorageFixedDisk da hrStorageTable). Índice varia por modelo; 131072 é o mais comum no RouterOS (65536 é a RAM), confirme com um SNMP walk se não bater.", Placeholder: "1.3.6.1.2.1.25.2.3.1.5.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
-	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo índice do «Disco total».", Placeholder: "1.3.6.1.2.1.25.2.3.1.6.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
+	// OID confirmado em produção (snmpget directo, sem índice) — o agente SNMP do RouterOS
+	// testado responde hrStorageSize/hrStorageUsed directamente na raiz da coluna, sem sufixo de
+	// índice de linha (ao contrário da RAM, que precisa do índice — ver memory_total/memory_used
+	// abaixo). Índice de linha (ex.: .65536 ou .131072) só entra se este OID nu não responder.
+	{Key: "disk_total", Section: "system", Label: "Disco total", Description: "Capacidade total de disco/armazenamento (hrStorageSize). Confirmado por snmpget directo (sem índice) — se o seu equipamento não responder assim, tente acrescentar o índice da linha (ex.: …5.65536) via SNMP walk.", Placeholder: "1.3.6.1.2.1.25.2.3.1.5", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
+	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo padrão do «Disco total» — confirmado sem índice de linha.", Placeholder: "1.3.6.1.2.1.25.2.3.1.6", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
 
 	// Health
 	{Key: "cpu_load", Section: "health", Label: "CPU (%)", Description: "Carga CPU MikroTik (mtxrHlCpuLoad em dispositivos reais). Valor SNMP frequentemente ×10 (ex.: 450 → 45% com divisor 10).", Placeholder: "1.3.6.1.4.1.14988.1.1.3.10.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "%", DefaultDivisor: 10, ShowDivisor: true},
