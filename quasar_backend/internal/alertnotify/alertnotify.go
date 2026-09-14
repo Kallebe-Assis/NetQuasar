@@ -292,6 +292,8 @@ func telemetryAlertHeader(metricID, title, message string) string {
 		return "🟡 ALERTA TEMPERATURA"
 	case strings.Contains(hay, "latên") || strings.Contains(hay, "latenc"):
 		return "🟡 ALERTA LATÊNCIA"
+	case strings.Contains(hay, "uptime"):
+		return "🟡 ALERTA REINÍCIO"
 	default:
 		return "🟡 ALERTA TELEMETRIA"
 	}
@@ -612,24 +614,6 @@ func metaString(meta map[string]any, keys ...string) string {
 	return ""
 }
 
-// uptimeRestartTelegramText — mensagem de "possível reinício" pedida pelo utilizador: só o nome
-// do equipamento + o uptime observado, sem menção ao limiar configurado nem ao resto do
-// template de alerta (cabeçalho de nível, IP, rodapé). Ex.: "Mikrotik Miracema reiniciou\n
-// Uptime 5 minutos".
-func uptimeRestartTelegramText(eq string, observedMinutes float64, valueText string) string {
-	equip := strings.TrimSpace(eq)
-	if equip == "" {
-		equip = "Equipamento"
-	}
-	if observedMinutes > 0 {
-		return fmt.Sprintf("%s reiniciou\nUptime %.0f minutos", equip, observedMinutes)
-	}
-	if vt := strings.TrimSpace(valueText); vt != "" {
-		return fmt.Sprintf("%s reiniciou\nUptime %s", equip, vt)
-	}
-	return fmt.Sprintf("%s reiniciou", equip)
-}
-
 func appendOltOnuDeltaTelegramLines(parts []string, alertType string, meta map[string]any, inc string) []string {
 	pon := metaString(meta, "pon")
 	if pon == "" {
@@ -811,12 +795,28 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		ip = strings.TrimSpace(ipFallback)
 	}
 
-	// Possível reinício (uptime baixo) — mensagem minimalista pedida pelo utilizador: só o nome
-	// do equipamento + o uptime observado, sem cabeçalho de nível/emoji, sem linha de IP, sem
-	// menção ao limiar configurado (nem o rodapé "===============" partilhado pelos outros
-	// tipos). Cobre os 2 caminhos que geram este alerta: o tipo dedicado uptime_restart_low e
-	// telemetry_threshold com metric_id=uptime_minutes (via a regra "Limiar global de alertas").
-	if alertType == "uptime_restart_low" {
+	header := monitoringHeader(level, title, message, alertType, meta)
+	parts := []string{header, "", "• " + eq, "• " + ip}
+
+	// uptimeObservedLine formata a linha "• Uptime observado: N min" a partir do meta —
+	// alimenta tanto o tipo dedicado uptime_restart_low quanto telemetry_threshold com
+	// metric_id=uptime_minutes (via a regra "Limiar global de alertas"), que geram o mesmo
+	// alerta de "possível reinício" por dois caminhos diferentes. Antes, este alerta tinha uma
+	// mensagem minimalista sem cabeçalho/emoji nem bolinhas — pedido do utilizador: seguir o
+	// mesmo formato padrão dos outros alertas (cabeçalho com emoji + bolinhas de equipamento/
+	// IP/valor).
+	uptimeObservedLine := func(observed float64) string {
+		if observed > 0 {
+			return fmt.Sprintf("• Uptime observado: %.0f min", observed)
+		}
+		if vt := metaString(meta, "value_text"); vt != "" {
+			return "• Uptime observado: " + vt
+		}
+		return ""
+	}
+
+	switch alertType {
+	case "uptime_restart_low":
 		observed := metaFloat(meta, "observed_uptime_minutes", "uptime_minutes", "value")
 		if observed <= 0 {
 			if m := regexp.MustCompile(`(-?\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?)?`).FindStringSubmatch(inc); len(m) >= 2 {
@@ -825,17 +825,15 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 				}
 			}
 		}
-		return uptimeRestartTelegramText(eq, observed, metaString(meta, "value_text"))
-	}
-
-	header := monitoringHeader(level, title, message, alertType, meta)
-	parts := []string{header, "", "• " + eq, "• " + ip}
-
-	switch alertType {
+		if line := uptimeObservedLine(observed); line != "" {
+			parts = append(parts, line)
+		}
 	case "telemetry_threshold":
 		metricID := metaString(meta, "metric_id")
 		if metricID == "uptime_minutes" {
-			return uptimeRestartTelegramText(eq, metaFloat(meta, "value"), metaString(meta, "value_text"))
+			if line := uptimeObservedLine(metaFloat(meta, "value")); line != "" {
+				parts = append(parts, line)
+			}
 		} else {
 			if tgt := incidentTarget(inc); tgt != "" && !strings.Contains(strings.ToLower(header), "offline") {
 				parts = append(parts, "• "+tgt)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/mailclient"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
@@ -215,6 +216,7 @@ func (s *Server) patchAutomationBngStatsReport(w http.ResponseWriter, r *http.Re
 func (s *Server) runAutomationBngStatsReport(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02")
 	go func() {
+		defer panicguard.Recover("api_run_bng_stats_report")
 		_ = s.executeBngStatsReport(context.Background(), runKey, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "run_key": runKey})

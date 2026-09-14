@@ -1897,6 +1897,27 @@ export function MapPage() {
       <div style={{ marginTop: 12 }}>
         {view === "lista" ? (
             <div className="table-wrap">
+              {displayedPoints.length > MAP_LIST_PAGE_SIZE ? (
+                <div className="row conn-table-pager" style={{ marginBottom: 10, justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    {safeListPage * MAP_LIST_PAGE_SIZE + 1}–{Math.min(displayedPoints.length, (safeListPage + 1) * MAP_LIST_PAGE_SIZE)} de{" "}
+                    {displayedPoints.length}
+                  </span>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn" disabled={safeListPage <= 0} onClick={() => setListPage((p) => Math.max(0, p - 1))}>
+                      Anterior
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={safeListPage >= listPageCount - 1}
+                      onClick={() => setListPage((p) => Math.min(listPageCount - 1, p + 1))}
+                    >
+                      Seguinte
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <table>
                 <thead>
                   <tr>
@@ -1936,27 +1957,6 @@ export function MapPage() {
                   ))}
                 </tbody>
               </table>
-              {displayedPoints.length > MAP_LIST_PAGE_SIZE ? (
-                <div className="row conn-table-pager" style={{ marginTop: 10, justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {safeListPage * MAP_LIST_PAGE_SIZE + 1}–{Math.min(displayedPoints.length, (safeListPage + 1) * MAP_LIST_PAGE_SIZE)} de{" "}
-                    {displayedPoints.length}
-                  </span>
-                  <div className="row" style={{ gap: 6 }}>
-                    <button type="button" className="btn" disabled={safeListPage <= 0} onClick={() => setListPage((p) => Math.max(0, p - 1))}>
-                      Anterior
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={safeListPage >= listPageCount - 1}
-                      onClick={() => setListPage((p) => Math.min(listPageCount - 1, p + 1))}
-                    >
-                      Seguinte
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : (
             <MapSectionErrorBoundary>

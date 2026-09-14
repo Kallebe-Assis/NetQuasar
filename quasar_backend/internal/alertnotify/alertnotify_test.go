@@ -19,15 +19,16 @@ func TestTelegramMonitoringBlocksUptimeRestart(t *testing.T) {
 			"threshold_minutes":       60,
 		},
 	)
-	// Mensagem minimalista pedida pelo utilizador: só "<equipamento> reiniciou" + uptime, sem
-	// menção ao limiar configurado, sem cabeçalho/IP/rodapé do template genérico.
-	want := "OLT Pirapetinga reiniciou\nUptime 12 minutos"
+	// Segue o mesmo template padrão dos outros alertas: cabeçalho com emoji + bolinhas de
+	// equipamento/IP/valor (pedido do utilizador — antes era uma mensagem minimalista sem
+	// nenhum dos dois).
+	want := "🟡 ALERTA REINÍCIO\n\n• OLT Pirapetinga\n• 10.22.25.6\n• Uptime observado: 12 min\n\n==============="
 	if text != want {
 		t.Fatalf("texto = %q, want %q", text, want)
 	}
-	for _, unwanted := range []string{"limite", "Limiar", "===="} {
-		if strings.Contains(text, unwanted) {
-			t.Fatalf("não devia conter %q em:\n%s", unwanted, text)
+	for _, wanted := range []string{"🟡", "• OLT Pirapetinga", "• 10.22.25.6", "• Uptime observado"} {
+		if !strings.Contains(text, wanted) {
+			t.Fatalf("devia conter %q em:\n%s", wanted, text)
 		}
 	}
 }
@@ -216,10 +217,10 @@ func TestTelegramMonitoringBlocksTelemetryUptime(t *testing.T) {
 			"value_text": "12 min",
 		},
 	)
-	// Mesma mensagem minimalista do uptime_restart_low — este é o outro caminho que gera o
-	// mesmo tipo de alerta (via a regra "Limiar global de alertas"), não devia ter um formato
-	// diferente nem mencionar "limiar" na notificação.
-	want := "OLT Pirapetinga reiniciou\nUptime 12 minutos"
+	// Mesmo formato padrão do uptime_restart_low — este é o outro caminho que gera o mesmo tipo
+	// de alerta (via a regra "Limiar global de alertas"); não devia mencionar "limiar" na
+	// notificação nem ter um cabeçalho genérico de telemetria.
+	want := "🟡 ALERTA REINÍCIO\n\n• OLT Pirapetinga\n• 10.22.25.6\n• Uptime observado: 12 min\n\n==============="
 	if text != want {
 		t.Fatalf("texto = %q, want %q", text, want)
 	}

@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // TryStartParallelOltCycle dispara a coleta OLT "leve" (baseline/pon_status/onu_counts —
@@ -76,6 +78,7 @@ func TryStartParallelOltCycle(ctx context.Context, pool *pgxpool.Pool, log *zero
 	}
 
 	go func(oltOpts SweepOpts, budget time.Duration) {
+		defer panicguard.Recover("monitor_worker_olt_parallel")
 		defer UnlockOltPonCycle()
 		l := log.With().Str("cycle", "olt_baseline_parallel").Logger()
 		setActivity(ctx, pool, "Coleta ONUs/PON (ciclo rápido, paralelo)")

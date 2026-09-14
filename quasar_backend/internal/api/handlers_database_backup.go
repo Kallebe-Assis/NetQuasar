@@ -17,6 +17,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/bootstrap"
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
 	"github.com/netquasar/netquasar/quasar_backend/internal/db"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/rs/zerolog"
 )
@@ -373,6 +374,7 @@ func (s *Server) runAutomationDatabaseBackup(w http.ResponseWriter, r *http.Requ
 	runKey := time.Now().Format("2006-01-02") + "-manual"
 	meta := s.automationMetaFromRequest(r)
 	go func() {
+		defer panicguard.Recover("api_run_database_backup")
 		_ = s.executeDatabaseBackup(context.Background(), runKey, meta)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "message": "Backup iniciado"})
@@ -427,6 +429,7 @@ func (s *Server) tryScheduledDatabaseBackup(ctx context.Context, log *zerolog.Lo
 	// Igual ao manual: não herda o WorkerCtx do loop (evita cancel/timeout curto no upload).
 	meta := automationMetaFromActor(auditActorSistema, nil)
 	go func() {
+		defer panicguard.Recover("api_scheduled_database_backup")
 		runCtx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
 		if err := s.executeDatabaseBackup(runCtx, runKey, meta); err != nil && log != nil {
@@ -664,6 +667,7 @@ func (s *Server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	s.dbRestoreJobs[jobID] = job
 	s.dbRestoreMu.Unlock()
 	go func() {
+		defer panicguard.Recover("api_restore_database_backup")
 		tmpDir := filepath.Join(os.TempDir(), "netquasar-restore")
 		_ = os.MkdirAll(tmpDir, 0o755)
 		localPath := filepath.Join(tmpDir, jobID+"-"+filepath.Base(body.FileName))
@@ -773,6 +777,7 @@ func (s *Server) runRestoreJob(jobID, dumpPath string, removeAfter bool) {
 		old := s.DBHolder.Swap(newPool)
 		if old != nil {
 			go func() {
+				defer panicguard.Recover("api_close_old_db_pool")
 				time.Sleep(2 * time.Second)
 				old.Close()
 			}()

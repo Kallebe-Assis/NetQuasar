@@ -292,6 +292,33 @@ export function BngVlansTab({ deviceId }: { deviceId: string | null }) {
         </button>
       </div>
 
+      {filtered.length > 0 ? (
+        <div className="bng-vlans__pager">
+          <span>
+            Mostrando {(pageSafe - 1) * PAGE_SIZE + 1} a {Math.min(pageSafe * PAGE_SIZE, filtered.length)} de {filtered.length}{" "}
+            VLANs
+          </span>
+          <div className="row" style={{ gap: 4 }}>
+            <button type="button" className="btn btn--icon-menu" disabled={pageSafe <= 1} onClick={() => setPage((p) => p - 1)}>
+              <ChevronLeft size={16} />
+            </button>
+            {Array.from({ length: pages }, (_, i) => i + 1)
+              .filter((n) => n === 1 || n === pages || Math.abs(n - pageSafe) <= 2)
+              .map((n, idx, arr) => (
+                <span key={n} className="row" style={{ gap: 4 }}>
+                  {idx > 0 && arr[idx - 1] !== n - 1 ? <span className="muted">…</span> : null}
+                  <button type="button" className={`btn btn--sm${n === pageSafe ? " btn--primary" : ""}`} onClick={() => setPage(n)}>
+                    {n}
+                  </button>
+                </span>
+              ))}
+            <button type="button" className="btn btn--icon-menu" disabled={pageSafe >= pages} onClick={() => setPage((p) => p + 1)}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {listQ.isLoading ? (
         <p style={{ color: "var(--muted)" }}>A carregar VLANs…</p>
       ) : slice.length === 0 ? (
@@ -375,33 +402,6 @@ export function BngVlansTab({ deviceId }: { deviceId: string | null }) {
           </table>
         </div>
       )}
-
-      {filtered.length > 0 ? (
-        <div className="bng-vlans__pager">
-          <span>
-            Mostrando {(pageSafe - 1) * PAGE_SIZE + 1} a {Math.min(pageSafe * PAGE_SIZE, filtered.length)} de {filtered.length}{" "}
-            VLANs
-          </span>
-          <div className="row" style={{ gap: 4 }}>
-            <button type="button" className="btn btn--icon-menu" disabled={pageSafe <= 1} onClick={() => setPage((p) => p - 1)}>
-              <ChevronLeft size={16} />
-            </button>
-            {Array.from({ length: pages }, (_, i) => i + 1)
-              .filter((n) => n === 1 || n === pages || Math.abs(n - pageSafe) <= 2)
-              .map((n, idx, arr) => (
-                <span key={n} className="row" style={{ gap: 4 }}>
-                  {idx > 0 && arr[idx - 1] !== n - 1 ? <span className="muted">…</span> : null}
-                  <button type="button" className={`btn btn--sm${n === pageSafe ? " btn--primary" : ""}`} onClick={() => setPage(n)}>
-                    {n}
-                  </button>
-                </span>
-              ))}
-            <button type="button" className="btn btn--icon-menu" disabled={pageSafe >= pages} onClick={() => setPage((p) => p + 1)}>
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {formOpen
         ? createPortal(

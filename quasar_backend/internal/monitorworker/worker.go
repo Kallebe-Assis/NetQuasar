@@ -21,6 +21,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 const (
@@ -45,9 +47,16 @@ func Run(ctx context.Context, dbHolder *atomic.Pointer[pgxpool.Pool], log zerolo
 			if pool == nil {
 				continue
 			}
-			if err := tick(ctx, pool, &l); err != nil {
-				l.Debug().Err(err).Msg("monitor tick")
-			}
+			// Um tick nunca deve conseguir matar o loop inteiro — um panic sincrono aqui (antes
+			// de qualquer goroutine ser disparada) sem esta rede terminava o processo Go inteiro
+			// (API incluída). Com isto, só este tick fica incompleto; o próximo (1s depois)
+			// tenta de novo — é a "recuperabilidade" pedida: o sistema volta a tentar sozinho.
+			func() {
+				defer panicguard.Recover("monitor_worker_tick")
+				if err := tick(ctx, pool, &l); err != nil {
+					l.Debug().Err(err).Msg("monitor tick")
+				}
+			}()
 		}
 	}
 }
@@ -124,6 +133,7 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 		return nil
 	}
 	go func(mode string, log *zerolog.Logger, skipPing bool, pipelineCtx context.Context) {
+		defer panicguard.Recover("monitor_worker_pipeline")
 		defer UnlockMonitoringPipeline()
 		l := log.With().Str("component", "monitor_worker").Str("cycle", "pipeline").Logger()
 		if err := RunConfiguredPipeline(pipelineCtx, pool, &l, mode, SweepOpts{

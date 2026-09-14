@@ -18,6 +18,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/embedui"
 	"github.com/netquasar/netquasar/quasar_backend/internal/localdbstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/sniffer"
 	"github.com/rs/zerolog"
 )
@@ -81,6 +82,7 @@ func (s *Server) ensureIntegrationPreload() {
 		return
 	}
 	go func() {
+		defer panicguard.Recover("api_integration_preload")
 		ctx, cancel := context.WithTimeout(s.WorkerCtx, 5*time.Minute)
 		defer cancel()
 		rows, err := s.DB().Query(ctx, `SELECT id FROM integrations WHERE slug='hubsoft' AND preload_on_startup=true`)

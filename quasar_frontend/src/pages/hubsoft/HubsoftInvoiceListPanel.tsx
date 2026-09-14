@@ -186,6 +186,25 @@ export function HubsoftInvoiceListPanel() {
         <div className="msg">{d.message || "Nenhuma fatura encontrada."}</div>
       ) : (
         <>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 11, color: "var(--muted)" }}>
+            <span>
+              {d.total_registros.toLocaleString("pt-BR")} fatura(s) · página {d.page + 1} de {Math.max(d.total_pages, 1)}
+            </span>
+            <div className="row" style={{ gap: 4 }}>
+              <button type="button" className="btn btn--sm" disabled={page === 0 || q.isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                <ChevronLeft size={12} />
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={page + 1 >= d.total_pages || q.isFetching}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          </div>
+
           <div className="table-wrap integration-support-table">
             <table className="integration-support-table__grid">
               <thead>
@@ -224,25 +243,6 @@ export function HubsoftInvoiceListPanel() {
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
-            <span>
-              {d.total_registros.toLocaleString("pt-BR")} fatura(s) · página {d.page + 1} de {Math.max(d.total_pages, 1)}
-            </span>
-            <div className="row" style={{ gap: 4 }}>
-              <button type="button" className="btn btn--sm" disabled={page === 0 || q.isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))}>
-                <ChevronLeft size={12} />
-              </button>
-              <button
-                type="button"
-                className="btn btn--sm"
-                disabled={page + 1 >= d.total_pages || q.isFetching}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                <ChevronRight size={12} />
-              </button>
-            </div>
           </div>
         </>
       )}

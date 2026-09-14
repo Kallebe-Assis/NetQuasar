@@ -193,15 +193,22 @@ func EnrichOnuRowsViaTelnet(
 	}
 
 	maxN := cfg.EffectiveMaxOnus()
-	candidates := buildOnuTelnetCandidates(rows, cfg)
-	totalCandidates := len(candidates)
-	batch, nextOffset := selectRotatingOnuBatch(candidates, maxN, opts.RotateOffset)
+	priority, rest := buildOnuTelnetCandidates(rows, cfg)
+	totalCandidates := len(priority) + len(rest)
+	batch, nextOffset := selectOnuTelnetBatch(priority, rest, maxN, opts.RotateOffset)
 	if totalCandidates > maxN {
 		res.Summary["onu_telnet_truncated"] = totalCandidates - len(batch)
 	}
 	res.Summary["onu_telnet_rotate_total"] = totalCandidates
 	res.Summary["onu_telnet_rotate_offset"] = nextOffset
 	res.Summary["onu_telnet_rotate_batch"] = len(batch)
+	if len(priority) > 0 {
+		// Quantas dessas ONUs sem serial entraram neste lote — pedido do utilizador: "filtrar
+		// somente as que não possuem número serial e coletar os dados delas" depois de cada
+		// coleta. Visível no snapshot para diagnóstico (quantos ciclos até zerar).
+		res.Summary["onu_telnet_missing_serial_total"] = len(priority)
+		res.Summary["onu_telnet_missing_serial_batch"] = min(len(priority), maxN)
+	}
 	if totalCandidates > 0 && len(batch) > 0 {
 		res.Summary["onu_telnet_rotate_note"] = fmt.Sprintf(
 			"rodízio: %d/%d ONUs neste ciclo (próximo offset %d)",
@@ -248,9 +255,9 @@ func EnrichOnuRowsViaTelnet(
 		session, err = probing.OpenTelnetSession(telCtx, probing.TelnetRunScriptParams{
 			Host: host, Port: "23", Timeout: telnetTimeout,
 			User: creds.User, Password: creds.Password, Enable: creds.Enable,
-			PreCommands: cfg.RenderPreCommands(firstTarget, secrets),
+			PreCommands:    cfg.RenderPreCommands(firstTarget, secrets),
 			RawPreCommands: cfg.PreCommands,
-			MaxReadBytes: 120000,
+			MaxReadBytes:   120000,
 		})
 		if err != nil {
 			res.Summary["onu_telnet_error"] = err.Error()

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 const bngDeviceSQLFilter = `COALESCE(d.bng_enabled, false) = true`
@@ -670,6 +671,7 @@ func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
 	if totalN == 0 {
 		// Bootstrap único a partir do último snapshot (não bloqueia pedidos seguintes).
 		go func() {
+			defer panicguard.Recover("api_bng_ensure_known_logins")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			if err := bngcollect.EnsureKnownLoginsFromLatestSnapshot(ctx, s.DB(), id, profile.Options.PPPoELoginStripSuffix); err != nil {

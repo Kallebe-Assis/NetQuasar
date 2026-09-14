@@ -12,6 +12,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/mailclient"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
@@ -486,6 +487,7 @@ func (s *Server) patchAutomationAlertsDigest(w http.ResponseWriter, r *http.Requ
 func (s *Server) runAutomationAlertsDigest(w http.ResponseWriter, r *http.Request) {
 	runKey := time.Now().Format("2006-01-02")
 	go func() {
+		defer panicguard.Recover("api_run_alerts_digest")
 		_ = s.executeAlertsDigest(context.Background(), runKey, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "run_key": runKey})
@@ -531,6 +533,7 @@ func (s *Server) runAutomationCommercialReport(w http.ResponseWriter, r *http.Re
 	_ = s.DB().QueryRow(r.Context(), `SELECT timezone FROM automation_commercial_report WHERE id=1`).Scan(&tz)
 	period := onuReportPeriodNow(tz)
 	go func() {
+		defer panicguard.Recover("api_run_commercial_report")
 		_ = s.executeCommercialReportOnly(context.Background(), period, s.automationMetaFromRequest(r))
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "period": period})

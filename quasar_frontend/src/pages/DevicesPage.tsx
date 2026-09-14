@@ -1275,6 +1275,54 @@ export function DevicesPage() {
       </div>
       )}
 
+      {sortedDevices.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
+            Por página
+            <select
+              className="select"
+              style={{ fontSize: 12, padding: "3px 6px" }}
+              value={devicesPageSize}
+              onChange={(e) => changeDevicesPageSize(Number(e.target.value))}
+            >
+              {DEVICES_PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          {sortedDevices.length > devicesPageSize && (
+            <>
+              <button
+                type="button"
+                className="btn btn--icon-menu"
+                disabled={devicesPageClamped <= 0}
+                title="Página anterior"
+                aria-label="Página anterior"
+                onClick={() => setDevicesPage((p) => Math.max(0, p - 1))}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+                {devicesPageClamped * devicesPageSize + 1}–
+                {Math.min((devicesPageClamped + 1) * devicesPageSize, sortedDevices.length)} de {sortedDevices.length}
+              </span>
+              <button
+                type="button"
+                className="btn btn--icon-menu"
+                disabled={devicesPageClamped >= devicesTotalPages - 1}
+                title="Página seguinte"
+                aria-label="Página seguinte"
+                onClick={() => setDevicesPage((p) => Math.min(devicesTotalPages - 1, p + 1))}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="table-wrap devices-overview-table" style={{ overflowX: "auto", overflowY: "visible" }}>
         <table>
           <thead>
@@ -1419,54 +1467,6 @@ export function DevicesPage() {
           </tbody>
         </table>
       </div>
-
-      {sortedDevices.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
-            Por página
-            <select
-              className="select"
-              style={{ fontSize: 12, padding: "3px 6px" }}
-              value={devicesPageSize}
-              onChange={(e) => changeDevicesPageSize(Number(e.target.value))}
-            >
-              {DEVICES_PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          {sortedDevices.length > devicesPageSize && (
-            <>
-              <button
-                type="button"
-                className="btn btn--icon-menu"
-                disabled={devicesPageClamped <= 0}
-                title="Página anterior"
-                aria-label="Página anterior"
-                onClick={() => setDevicesPage((p) => Math.max(0, p - 1))}
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
-                {devicesPageClamped * devicesPageSize + 1}–
-                {Math.min((devicesPageClamped + 1) * devicesPageSize, sortedDevices.length)} de {sortedDevices.length}
-              </span>
-              <button
-                type="button"
-                className="btn btn--icon-menu"
-                disabled={devicesPageClamped >= devicesTotalPages - 1}
-                title="Página seguinte"
-                aria-label="Página seguinte"
-                onClick={() => setDevicesPage((p) => Math.min(devicesTotalPages - 1, p + 1))}
-              >
-                <ChevronRight size={18} />
-              </button>
-            </>
-          )}
-        </div>
-      )}
 
       {modal && canMutate && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModal(null)}>

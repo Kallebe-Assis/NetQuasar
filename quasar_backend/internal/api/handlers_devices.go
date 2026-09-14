@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpcatalog"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
@@ -1249,6 +1250,7 @@ func (s *Server) scheduleSNMPDiscovery(deviceID uuid.UUID) {
 		return
 	}
 	go func() {
+		defer panicguard.Recover("api_schedule_snmp_discovery")
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		l := s.Log.With().Str("device", deviceID.String()).Logger()

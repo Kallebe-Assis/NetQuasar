@@ -1692,24 +1692,25 @@ func asFloat(v any) (float64, bool) {
 	}
 }
 
-const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, funcao, project_id, latitude, longitude, fiber_ports, path, created_at, updated_at`
+const networkCableSelect = `id, display_number, description, cable_type, fiber_count, status, funcao, project_id, latitude, longitude, fiber_ports, path, color, created_at, updated_at`
 
 func scanNetworkCable(s *Server, ctx context.Context, rows interface{ Scan(dest ...any) error }) (map[string]any, error) {
 	var id uuid.UUID
 	var displayNumber int
 	var description, status, funcao string
-	var cableType *string
+	var cableType, color *string
 	var fiberCount *int
 	var projectID *uuid.UUID
 	var lat, lon *float64
 	var fiberPorts, pathRaw []byte
 	var created, updated time.Time
-	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &funcao, &projectID, &lat, &lon, &fiberPorts, &pathRaw, &created, &updated)
+	err := rows.Scan(&id, &displayNumber, &description, &cableType, &fiberCount, &status, &funcao, &projectID, &lat, &lon, &fiberPorts, &pathRaw, &color, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
 	m := map[string]any{"id": id, "display_number": displayNumber, "description": description, "status": status, "funcao": funcao, "created_at": created, "updated_at": updated}
 	setOptionalStr(m, "cable_type", cableType)
+	setOptionalStr(m, "color", color)
 	if fiberCount != nil {
 		m["fiber_count"] = *fiberCount
 	}
@@ -1904,6 +1905,15 @@ func networkCablePatch(body map[string]json.RawMessage) ([]string, []any, int, e
 		}
 		sets = append(sets, "funcao = $"+strconv.Itoa(n))
 		args = append(args, fc)
+		n++
+	}
+	if raw, ok := body["color"]; ok {
+		// Cor própria do cabo — sobrepõe a cor da função no mapa. null/"" volta a usar a cor da
+		// função (pedido do utilizador: poder alterar a cor de um cabo específico).
+		var v *string
+		_ = json.Unmarshal(raw, &v)
+		sets = append(sets, "color = $"+strconv.Itoa(n))
+		args = append(args, trimPtr(v))
 		n++
 	}
 	if raw, ok := body["project_id"]; ok {

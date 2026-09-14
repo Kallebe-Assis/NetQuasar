@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/onumonitor"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // lastOnuMonitorEval — cadência própria (60s) do avaliador de ONUs em monitoramento manual,
@@ -29,6 +30,7 @@ func TryEvaluateOnuMonitors(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 		return
 	}
 	go func() {
+		defer panicguard.Recover("monitor_worker_onu_monitor")
 		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 		defer cancel()
 		l := log.With().Str("cycle", "onu_monitor").Logger()

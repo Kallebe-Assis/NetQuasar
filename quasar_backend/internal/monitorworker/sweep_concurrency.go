@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // DefaultSweepConcurrency: quantos equipamentos podem ser sondados em paralelo
@@ -69,6 +71,13 @@ func stringsTrimEnvInt(key string) int {
 
 // forEachLimited corre fn(i) para i in [0,n) com no máximo limit goroutines.
 // Erros de fn são ignorados (cada equipamento trata o seu); cancela quando ctx acaba.
+//
+// Ponto único de maior alavancagem para "recuperabilidade": este é o primitivo usado por quase
+// todo sweep paralelo do worker (ping, telemetria, interfaces BNG/Mikrotik/switch/OLT, sessões,
+// presença de login…) — um item (equipamento) com dado inesperado que faça fn(i) sofrer panic
+// (ex.: parsing SNMP malformado) NÃO deve derrubar o sweep inteiro nem o processo: errgroup, por
+// si só, não protege contra panic. Cada chamada de fn(i) roda isolada; um panic ali só marca
+// aquele item como falho e os outros continuam.
 func forEachLimited(ctx context.Context, n, limit int, fn func(i int)) {
 	if n <= 0 {
 		return
@@ -81,6 +90,7 @@ func forEachLimited(ctx context.Context, n, limit int, fn func(i int)) {
 	for i := 0; i < n; i++ {
 		i := i
 		g.Go(func() error {
+			defer panicguard.Recover("monitor_worker_sweep_item")
 			if gctx.Err() != nil {
 				return nil
 			}

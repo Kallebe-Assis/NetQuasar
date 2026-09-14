@@ -369,7 +369,7 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 	if kindSet["cables"] {
 		capN := take("cable")
 		if capN > 0 {
-			q := `SELECT id, description, display_number, latitude, longitude, path, funcao
+			q := `SELECT id, description, display_number, latitude, longitude, path, funcao, color
 				FROM network_cables
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL`
 			args := []any{}
@@ -394,7 +394,8 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 				var lat, lon float64
 				var pathRaw []byte
 				var funcao string
-				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &pathRaw, &funcao); err != nil {
+				var color *string
+				if err := rows.Scan(&id, &desc, &displayNum, &lat, &lon, &pathRaw, &funcao, &color); err != nil {
 					rows.Close()
 					writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 					return
@@ -408,6 +409,9 @@ func (s *Server) mapInfrastructurePoints(w http.ResponseWriter, r *http.Request)
 					"point_type":     "cable",
 					"id_prefix":      "Cabo",
 					"funcao":         funcao,
+				}
+				if color != nil && strings.TrimSpace(*color) != "" {
+					pt["color"] = strings.TrimSpace(*color)
 				}
 				if len(pathRaw) > 0 && string(pathRaw) != "null" {
 					var path any

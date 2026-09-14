@@ -17,10 +17,13 @@ import {
   type SplitterPort,
 } from "../lib/fiberSplitter";
 import {
+  CABLE_FUNCOES,
+  CABLE_STATUSES,
   cableFuncaoLabel,
   FIBER_COLORS,
   fmtCoord,
   formatSplitterDisplay,
+  normalizeCableFuncao,
   normalizeSplitterInput,
   parseCoordInput,
   type NetworkCable,
@@ -142,6 +145,23 @@ export function MapInfraSidePanel({
     notes: "",
     needs_maintenance: false,
   });
+  const [cableForm, setCableForm] = useState({
+    description: "",
+    cable_type: "",
+    fiber_count: "",
+    status: "ativo",
+    funcao: "outro" as string,
+    color: "",
+  });
+  const [spliceForm, setSpliceForm] = useState({
+    description: "",
+    box_model: "",
+    fiber_count: "",
+    splitter: "",
+    fiber_color: "",
+    notes: "",
+    needs_maintenance: false,
+  });
   const [err, setErr] = useState<string | null>(null);
   const [descDraft, setDescDraft] = useState("");
 
@@ -221,7 +241,9 @@ export function MapInfraSidePanel({
 
   useEffect(() => {
     if (!open || !autoOpenEdit || !canEdit) return;
-    if (parsed?.kind === "cto" && !mapEditMode) setEditing(true);
+    if (!mapEditMode && (parsed?.kind === "cto" || parsed?.kind === "cable" || parsed?.kind === "splice_box")) {
+      setEditing(true);
+    }
     onEditAutoOpened?.();
   }, [open, autoOpenEdit, mapId, parsed?.kind, canEdit, mapEditMode, onEditAutoOpened]);
 
@@ -275,6 +297,33 @@ export function MapInfraSidePanel({
       needs_maintenance: !!c.needs_maintenance,
     });
   }, [ctoQ.data]);
+
+  useEffect(() => {
+    const c = cableQ.data;
+    if (!c) return;
+    setCableForm({
+      description: c.description ?? "",
+      cable_type: c.cable_type ?? "",
+      fiber_count: c.fiber_count != null ? String(c.fiber_count) : "",
+      status: c.status || "ativo",
+      funcao: normalizeCableFuncao(c.funcao),
+      color: c.color ?? "",
+    });
+  }, [cableQ.data]);
+
+  useEffect(() => {
+    const s = spliceQ.data;
+    if (!s) return;
+    setSpliceForm({
+      description: s.description ?? "",
+      box_model: s.box_model ?? "",
+      fiber_count: s.fiber_count != null ? String(s.fiber_count) : "",
+      splitter: s.splitter ?? "",
+      fiber_color: s.fiber_color?.trim() ? s.fiber_color : "",
+      notes: s.notes ?? "",
+      needs_maintenance: !!s.needs_maintenance,
+    });
+  }, [spliceQ.data]);
 
   useEffect(() => {
     const next =
@@ -335,6 +384,69 @@ export function MapInfraSidePanel({
       await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
       await qc.invalidateQueries({ queryKey: queryKeys.networkCtos });
       onSaved?.(next);
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
+  });
+
+  const saveCableMut = useMutation({
+    mutationFn: async () => {
+      if (!parsed || parsed.kind !== "cable") throw new Error("Só cabos podem ser editados aqui.");
+      const description = cableForm.description.trim();
+      if (!description) throw new Error("Descrição obrigatória.");
+      const fiberCountNum = cableForm.fiber_count.trim() ? Number(cableForm.fiber_count) : null;
+      await apiFetch(`/api/v1/commercial/network/cables/${parsed.id}`, {
+        method: "PATCH",
+        json: {
+          description,
+          cable_type: cableForm.cable_type.trim() || null,
+          fiber_count: fiberCountNum != null && Number.isFinite(fiberCountNum) ? fiberCountNum : null,
+          status: cableForm.status,
+          funcao: cableForm.funcao,
+          color: cableForm.color || null,
+        },
+      });
+      return description;
+    },
+    onSuccess: async (description) => {
+      setEditing(false);
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["map-cable-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      const lat = Number(cableQ.data?.latitude ?? fallback?.lat ?? 0);
+      const lng = Number(cableQ.data?.longitude ?? fallback?.lng ?? 0);
+      onSaved?.({ lat, lng, description });
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
+  });
+
+  const saveSpliceMut = useMutation({
+    mutationFn: async () => {
+      if (!parsed || parsed.kind !== "splice_box") throw new Error("Só caixas de emenda podem ser editadas aqui.");
+      const description = spliceForm.description.trim();
+      if (!description) throw new Error("Descrição obrigatória.");
+      const fiberCountNum = spliceForm.fiber_count.trim() ? Number(spliceForm.fiber_count) : null;
+      await apiFetch(`/api/v1/commercial/network/splice-boxes/${parsed.id}`, {
+        method: "PATCH",
+        json: {
+          description,
+          box_model: spliceForm.box_model || null,
+          fiber_count: fiberCountNum != null && Number.isFinite(fiberCountNum) ? fiberCountNum : null,
+          splitter: normalizeSplitterInput(spliceForm.splitter) || null,
+          fiber_color: spliceForm.fiber_color.trim() || null,
+          notes: spliceForm.notes.trim() || null,
+          needs_maintenance: spliceForm.needs_maintenance,
+        },
+      });
+      return description;
+    },
+    onSuccess: async (description) => {
+      setEditing(false);
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["map-splice-detail", parsed?.id] });
+      await qc.invalidateQueries({ queryKey: ["map-infrastructure-points"] });
+      const lat = Number(spliceQ.data?.latitude ?? fallback?.lat ?? 0);
+      const lng = Number(spliceQ.data?.longitude ?? fallback?.lng ?? 0);
+      onSaved?.({ lat, lng, description });
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao guardar."),
   });
@@ -698,7 +810,7 @@ export function MapInfraSidePanel({
         </form>
       ) : null}
 
-      {parsed.kind === "cable" ? (
+      {parsed.kind === "cable" && !editing ? (
         <div className="map-infra-panel__body">
           {renderMapEditActions()}
           {cableQ.isLoading ? <p className="map-infra-panel__muted">A carregar cabo…</p> : null}
@@ -725,6 +837,29 @@ export function MapInfraSidePanel({
               <dd>{cableFuncaoLabel(cableQ.data?.funcao)}</dd>
             </div>
             <div>
+              <dt>Cor no mapa</dt>
+              <dd style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {cableQ.data?.color ? (
+                  <>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: cableQ.data.color,
+                        display: "inline-block",
+                        flexShrink: 0,
+                      }}
+                    />
+                    {cableQ.data.color}
+                  </>
+                ) : (
+                  "Cor da função"
+                )}
+              </dd>
+            </div>
+            <div>
               <dt>Projeto</dt>
               <dd>{cableQ.data?.project_label || "—"}</dd>
             </div>
@@ -739,11 +874,113 @@ export function MapInfraSidePanel({
             <button type="button" className="btn btn--primary" onClick={() => setCableFibersOpen(true)} disabled={!cableQ.data}>
               Fibras
             </button>
+            {canEdit ? (
+              <button type="button" className="btn" onClick={() => setEditing(true)}>
+                Editar dados
+              </button>
+            ) : null}
             <Link className="btn" to={`${APP_ROUTES.connections}?tab=cables&edit=${parsed.id}`}>
               Abrir em Conexões
             </Link>
           </div>
         </div>
+      ) : null}
+
+      {parsed.kind === "cable" && editing ? (
+        <form
+          className="map-infra-panel__body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveCableMut.mutate();
+          }}
+        >
+          <label className="map-infra-panel__field">
+            <span>Descrição</span>
+            <input
+              className="input"
+              value={cableForm.description}
+              onChange={(e) => setCableForm({ ...cableForm, description: e.target.value })}
+            />
+          </label>
+          <label className="map-infra-panel__field">
+            <span>Tipo</span>
+            <input
+              className="input"
+              value={cableForm.cable_type}
+              onChange={(e) => setCableForm({ ...cableForm, cable_type: e.target.value })}
+              placeholder="Ex.: Drop, AS, ASU…"
+            />
+          </label>
+          <div className="map-infra-panel__grid2">
+            <label className="map-infra-panel__field">
+              <span>Fibras</span>
+              <input
+                className="input mono"
+                type="number"
+                min={1}
+                value={cableForm.fiber_count}
+                onChange={(e) => setCableForm({ ...cableForm, fiber_count: e.target.value })}
+              />
+            </label>
+            <label className="map-infra-panel__field">
+              <span>Status</span>
+              <select
+                className="select"
+                value={cableForm.status}
+                onChange={(e) => setCableForm({ ...cableForm, status: e.target.value })}
+              >
+                {CABLE_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="map-infra-panel__field">
+            <span>Função</span>
+            <select
+              className="select"
+              value={cableForm.funcao}
+              onChange={(e) => setCableForm({ ...cableForm, funcao: e.target.value })}
+            >
+              {CABLE_FUNCOES.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="map-infra-panel__field">
+            <span>Cor no mapa</span>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                className="input"
+                type="color"
+                style={{ width: 56, padding: 2 }}
+                value={cableForm.color || "#64748b"}
+                onChange={(e) => setCableForm({ ...cableForm, color: e.target.value })}
+                title="Cor própria deste cabo — sobrepõe a cor da função"
+              />
+              {cableForm.color ? (
+                <button type="button" className="btn btn--sm" onClick={() => setCableForm({ ...cableForm, color: "" })}>
+                  Usar cor da função
+                </button>
+              ) : (
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>Usando a cor da função</span>
+              )}
+            </div>
+          </div>
+          {err ? <div className="msg msg--err">{err}</div> : null}
+          <div className="map-infra-panel__actions">
+            <button type="submit" className="btn btn--primary" disabled={saveCableMut.isPending}>
+              {saveCableMut.isPending ? "A guardar…" : "Guardar"}
+            </button>
+            <button type="button" className="btn" disabled={saveCableMut.isPending} onClick={() => setEditing(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
       ) : null}
 
       {parsed.kind === "cable" && parsed.id ? (
@@ -758,7 +995,7 @@ export function MapInfraSidePanel({
         />
       ) : null}
 
-      {parsed.kind === "splice_box" ? (
+      {parsed.kind === "splice_box" && !editing ? (
         <div className="map-infra-panel__body">
           {renderMapEditActions()}
           {spliceQ.isLoading ? <p className="map-infra-panel__muted">A carregar caixa…</p> : null}
@@ -783,6 +1020,10 @@ export function MapInfraSidePanel({
               </dd>
             </div>
             <div>
+              <dt>Cor da fibra</dt>
+              <dd>{formatFeedFiberColor(spliceQ.data?.fiber_color)}</dd>
+            </div>
+            <div>
               <dt>Projeto</dt>
               <dd>{spliceQ.data?.project_label || "—"}</dd>
             </div>
@@ -798,16 +1039,117 @@ export function MapInfraSidePanel({
                 <dd>{formatOriginLabel(spliceQ.data.origin_kind, spliceQ.data.origin_label)}</dd>
               </div>
             ) : null}
+            {spliceQ.data?.notes ? (
+              <div>
+                <dt>Notas</dt>
+                <dd>{spliceQ.data.notes}</dd>
+              </div>
+            ) : null}
           </dl>
           <div className="map-infra-panel__actions">
             <button type="button" className="btn btn--primary" onClick={() => setSpliceOpen(true)} disabled={!spliceQ.data}>
               Interior
             </button>
+            {canEdit ? (
+              <button type="button" className="btn" onClick={() => setEditing(true)}>
+                Editar dados
+              </button>
+            ) : null}
             <Link className="btn" to={`${APP_ROUTES.connections}?tab=splice&edit=${parsed.id}`}>
               Abrir em Conexões
             </Link>
           </div>
         </div>
+      ) : null}
+
+      {parsed.kind === "splice_box" && editing ? (
+        <form
+          className="map-infra-panel__body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveSpliceMut.mutate();
+          }}
+        >
+          <label className="map-infra-panel__field">
+            <span>Descrição</span>
+            <input
+              className="input"
+              value={spliceForm.description}
+              onChange={(e) => setSpliceForm({ ...spliceForm, description: e.target.value })}
+            />
+          </label>
+          <label className="map-infra-panel__field">
+            <span>Modelo</span>
+            <select
+              className="select"
+              value={spliceForm.box_model || "emenda"}
+              onChange={(e) => setSpliceForm({ ...spliceForm, box_model: e.target.value })}
+            >
+              <option value="emenda">Emenda</option>
+              <option value="distribuicao">Distribuição</option>
+            </select>
+          </label>
+          {spliceForm.box_model === "distribuicao" ? (
+            <label className="map-infra-panel__field">
+              <span>Splitter</span>
+              <input
+                className="input"
+                value={spliceForm.splitter}
+                onChange={(e) => setSpliceForm({ ...spliceForm, splitter: e.target.value })}
+                placeholder="1x8"
+              />
+            </label>
+          ) : (
+            <label className="map-infra-panel__field">
+              <span>Fibras</span>
+              <input
+                className="input mono"
+                type="number"
+                min={1}
+                value={spliceForm.fiber_count}
+                onChange={(e) => setSpliceForm({ ...spliceForm, fiber_count: e.target.value })}
+              />
+            </label>
+          )}
+          <label className="map-infra-panel__field">
+            <span>Cor da fibra</span>
+            <select
+              className="select"
+              value={spliceForm.fiber_color}
+              onChange={(e) => setSpliceForm({ ...spliceForm, fiber_color: e.target.value })}
+            >
+              <option value="">—</option>
+              {FIBER_COLORS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="map-infra-panel__field">
+            <span>Notas</span>
+            <textarea
+              className="input"
+              rows={3}
+              value={spliceForm.notes}
+              onChange={(e) => setSpliceForm({ ...spliceForm, notes: e.target.value })}
+            />
+          </label>
+          <Switch
+            checked={spliceForm.needs_maintenance}
+            onChange={(v) => setSpliceForm({ ...spliceForm, needs_maintenance: v })}
+            label="Necessita manutenção"
+          />
+          {err ? <div className="msg msg--err">{err}</div> : null}
+          <div className="map-infra-panel__actions">
+            <button type="submit" className="btn btn--primary" disabled={saveSpliceMut.isPending}>
+              {saveSpliceMut.isPending ? "A guardar…" : "Guardar"}
+            </button>
+            <button type="button" className="btn" disabled={saveSpliceMut.isPending} onClick={() => setEditing(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
       ) : null}
 
       {parsed.kind === "splice_box" && parsed.id ? (

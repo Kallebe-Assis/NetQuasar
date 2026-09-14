@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
@@ -118,6 +119,7 @@ func (s *Server) toolsSNMPWalkRun(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := jid
 	go func(in walkReq) {
+		defer panicguard.Recover("api_snmp_bulk_walk")
 		pool := s.DB()
 		if pool == nil {
 			return
@@ -368,6 +370,7 @@ func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := jid
 	go func(host, community, version string, port int, timeoutMs, retries, maxRows int) {
+		defer panicguard.Recover("api_snmp_walk_ifmib")
 		pool := s.DB()
 		if pool == nil {
 			return
@@ -386,17 +389,17 @@ func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 			MaxRows:   maxRows,
 		})
 		out := map[string]any{
-			"status":       "done",
-			"host":         host,
-			"port":         port,
-			"version":      version,
-			"root_oid":     ifMibIfTable,
-			"note":         "Walk IF-MIB ifTable (interfaces); adequado a equipamentos Mikrotik e outros agentes SNMP.",
-			"row_count":    len(rows),
-			"truncated":    truncated,
-			"walk_note":    walkNote,
-			"rows":         rows,
-			"discoveries":  buildToolsWalkDiscoveries(rows),
+			"status":      "done",
+			"host":        host,
+			"port":        port,
+			"version":     version,
+			"root_oid":    ifMibIfTable,
+			"note":        "Walk IF-MIB ifTable (interfaces); adequado a equipamentos Mikrotik e outros agentes SNMP.",
+			"row_count":   len(rows),
+			"truncated":   truncated,
+			"walk_note":   walkNote,
+			"rows":        rows,
+			"discoveries": buildToolsWalkDiscoveries(rows),
 		}
 		if walkNote != "" && len(rows) == 0 {
 			out["status"] = "failed"
@@ -408,8 +411,8 @@ func (s *Server) toolsMikrotikWalk(w http.ResponseWriter, r *http.Request) {
 		_, _ = pool.Exec(ctx, `UPDATE snmp_walk_jobs SET status='done', result=$2::jsonb, error_message=NULL, finished_at=now() WHERE id=$1`, jobID, b)
 	}(body.Host, body.Community, body.Version, body.Port, body.TimeoutMs, body.Retries, body.MaxRows)
 	s.auditNetworkTool(r.Context(), r, "mikrotik_walk", map[string]any{
-		"host":    body.Host,
-		"job_id":  jid.String(),
+		"host":     body.Host,
+		"job_id":   jid.String(),
 		"root_oid": ifMibIfTable,
 	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -668,8 +671,8 @@ func (s *Server) commercialTelegramCompose(ctx context.Context, month string, au
 	defer rows.Close()
 
 	var list []struct {
-		name     string
-		count    int64
+		name      string
+		count     int64
 		prevCount int64
 	}
 	var totalSum int64
@@ -746,7 +749,7 @@ func (s *Server) commercialTelegramCompose(ctx context.Context, month string, au
 }
 
 var (
-	yearMonthCommercialRe        = regexp.MustCompile(`^\d{4}-\d{2}$`)
+	yearMonthCommercialRe      = regexp.MustCompile(`^\d{4}-\d{2}$`)
 	telegramCommercialPlainMax = 3600
 )
 

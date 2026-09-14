@@ -10,6 +10,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 type realtimeEvent struct {
@@ -50,6 +52,7 @@ func (b *realtimeBroker) Start(ctx context.Context) {
 	}
 	sub := b.redis.Subscribe(ctx, b.channel)
 	go func() {
+		defer panicguard.Recover("api_realtime_broker_subscribe")
 		defer func() { _ = sub.Close() }()
 		ch := sub.Channel()
 		for {
@@ -60,7 +63,13 @@ func (b *realtimeBroker) Start(ctx context.Context) {
 				if !ok || strings.TrimSpace(msg.Payload) == "" {
 					continue
 				}
-				b.broadcastRaw([]byte(msg.Payload))
+				// Uma mensagem malformada não deve derrubar o loop inteiro (e com ele o
+				// realtime para todos os clientes até o processo reiniciar) — isola cada
+				// broadcast, o loop segue para a próxima mensagem mesmo se esta falhar.
+				func() {
+					defer panicguard.Recover("api_realtime_broker_broadcast")
+					b.broadcastRaw([]byte(msg.Payload))
+				}()
 			}
 		}
 	}()
@@ -118,4 +127,3 @@ func (b *realtimeBroker) broadcastRaw(raw []byte) {
 		}
 	}
 }
-

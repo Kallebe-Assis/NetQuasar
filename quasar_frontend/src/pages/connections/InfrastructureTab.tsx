@@ -339,7 +339,7 @@ export function InfrastructureTab({
       return { ...base, fiber_count: "12", box_model: "emenda", origin_kind: "", origin_ref_id: "", origin_label: "" };
     }
     if (variant === "cable") {
-      return { ...base, cable_type: "", fiber_count: "", status: "ativo", funcao: "outro" };
+      return { ...base, cable_type: "", fiber_count: "", status: "ativo", funcao: "outro", color: "" };
     }
     return { ...base, pole_type: "", locality_id: "", height_m: "", has_transformer: false, material: "" };
   }
@@ -375,6 +375,7 @@ export function InfrastructureTab({
       f.fiber_count = r.fiber_count != null ? String(r.fiber_count) : "";
       f.status = r.status ? String(r.status) : "ativo";
       f.funcao = r.funcao ? String(r.funcao) : "outro";
+      f.color = r.color ? String(r.color) : "";
     }
     if (variant === "pole") {
       f.pole_type = r.pole_type ? String(r.pole_type) : "";
@@ -444,6 +445,7 @@ export function InfrastructureTab({
       payload.fiber_count = fc ? Number(fc) : null;
       payload.status = String(form.status).trim() || "ativo";
       payload.funcao = String(form.funcao).trim() || "outro";
+      payload.color = String(form.color || "").trim() || null;
     }
     if (variant === "pole") {
       payload.pole_type = String(form.pole_type).trim() || null;
@@ -726,6 +728,16 @@ export function InfrastructureTab({
         )}
       </ConnectionsTabToolbar>
 
+      <ConnectionsPager
+        safePage={safePage}
+        totalPages={totalPages}
+        total={filteredRows.length}
+        rangeFrom={rangeFrom}
+        rangeTo={rangeTo}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
+
       <div className="table-wrap">
         <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
@@ -932,16 +944,6 @@ export function InfrastructureTab({
           </tbody>
         </table>
       </div>
-
-      <ConnectionsPager
-        safePage={safePage}
-        totalPages={totalPages}
-        total={filteredRows.length}
-        rangeFrom={rangeFrom}
-        rangeTo={rangeTo}
-        onPrev={() => setPage((p) => p - 1)}
-        onNext={() => setPage((p) => p + 1)}
-      />
 
       {formOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !saveMut.isPending && setFormOpen(false)}>
@@ -1168,6 +1170,26 @@ export function InfrastructureTab({
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div className="conn-form-modal__field">
+                      <span className="conn-form-modal__field-label">Cor no mapa</span>
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <input
+                          className="input"
+                          type="color"
+                          style={{ width: 56, padding: 2 }}
+                          value={String(form.color || "#64748b")}
+                          onChange={(e) => setForm({ ...form, color: e.target.value })}
+                          title="Cor própria deste cabo — sobrepõe a cor da função"
+                        />
+                        {form.color ? (
+                          <button type="button" className="btn btn--sm" onClick={() => setForm({ ...form, color: "" })}>
+                            Usar cor da função
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "var(--muted)" }}>Usando a cor da função</span>
+                        )}
+                      </div>
                     </div>
                     {editId ? (
                       <div className="conn-form-modal__field field--full">

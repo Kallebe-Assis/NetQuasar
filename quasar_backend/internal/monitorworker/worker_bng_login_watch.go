@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/bngcollect"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 )
 
@@ -54,6 +55,7 @@ func TryStartParallelBngLoginWatchCycle(ctx context.Context, pool *pgxpool.Pool,
 	_ = pool.QueryRow(ctx, `SELECT snmp_community FROM settings_connection_defaults WHERE id=1`).Scan(&defCommunity)
 
 	go func(devices []pingableDeviceRow, defCommunity *string) {
+		defer panicguard.Recover("monitor_worker_bng_login_watch")
 		defer UnlockBngLoginWatchCycle()
 		l := log.With().Str("cycle", "bng_login_watch").Logger()
 		setActivity(ctx, pool, "BNG — presença online/offline (ciclo rápido)")

@@ -68,19 +68,54 @@ func sortOnuRowsByPonOnu(rows []map[string]any) {
 	})
 }
 
-func buildOnuTelnetCandidates(rows []map[string]any, cfg OnuReportConfig) []map[string]any {
-	candidates := make([]map[string]any, 0, len(rows))
+// buildOnuTelnetCandidates separa as ONUs candidatas a enriquecimento telnet em duas listas:
+// `priority` (sem serial identificado no snapshot actual — ver rowHasPlausibleSerial) e `rest`
+// (as demais). Uma ONU sem serial entra sempre em `priority`, mesmo com "só monitorar online"
+// ligado — descobrir a identidade dela não depende de estar online agora (o comando CLI
+// funciona com a ONU offline) e não deve ficar à espera da rotação normal (ver
+// selectOnuTelnetBatch: prioridade nunca é adiada por rodízio). Cada lista vem ordenada por
+// PON/ONU.
+func buildOnuTelnetCandidates(rows []map[string]any, cfg OnuReportConfig) (priority, rest []map[string]any) {
 	for _, row := range rows {
+		if !rowHasPlausibleSerial(row) {
+			priority = append(priority, row)
+			continue
+		}
 		if cfg.MonitorOnlineOnly && !onuRowOnline(row) {
 			continue
 		}
-		candidates = append(candidates, row)
+		rest = append(rest, row)
 	}
-	if len(candidates) == 0 {
-		candidates = append(candidates, rows...)
+	if len(priority) == 0 && len(rest) == 0 {
+		rest = append(rest, rows...)
 	}
-	sortOnuRowsByPonOnu(candidates)
-	return candidates
+	sortOnuRowsByPonOnu(priority)
+	sortOnuRowsByPonOnu(rest)
+	return priority, rest
+}
+
+func rowHasPlausibleSerial(row map[string]any) bool {
+	s, _ := row["serial"].(string)
+	return IsPlausibleOnuSerial(s)
+}
+
+// selectOnuTelnetBatch monta o lote deste ciclo dentro do orçamento `maxN`: as ONUs prioritárias
+// (sem serial) entram sempre primeiro — nunca ficam de fora por causa do rodízio — e o que
+// sobrar do orçamento é preenchido pelo rodízio normal sobre `rest`. Se só as prioritárias já
+// ultrapassam maxN, usa-se apenas as primeiras maxN delas (por PON/ONU) e a rotação sobre `rest`
+// não avança neste ciclo (o offset devolvido é o mesmo recebido).
+func selectOnuTelnetBatch(priority, rest []map[string]any, maxN, offset int) (batch []map[string]any, nextOffset int) {
+	if maxN <= 0 {
+		return nil, offset
+	}
+	if len(priority) >= maxN {
+		return priority[:maxN], offset
+	}
+	restBatch, no := selectRotatingOnuBatch(rest, maxN-len(priority), offset)
+	batch = make([]map[string]any, 0, len(priority)+len(restBatch))
+	batch = append(batch, priority...)
+	batch = append(batch, restBatch...)
+	return batch, no
 }
 
 // selectRotatingOnuBatch escolhe o lote deste ciclo e calcula o offset para o próximo.

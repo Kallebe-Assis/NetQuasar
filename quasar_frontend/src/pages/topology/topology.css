@@ -392,3 +392,46 @@
   border: 1px solid color-mix(in srgb, var(--err, #c44) 45%, var(--border));
   background: color-mix(in srgb, var(--err, #c44) 8%, transparent);
 }
+
+/* ——— Telefone/tablet: o canvas e a lista de equipamentos lado a lado (280px fixos) não cabem
+   numa tela de ~375-414px — empilha, com o canvas primeiro (prioridade) e a lista recolhível
+   abaixo, mesma convenção de breakpoint/topbar do resto da app (responsive.css). ——— */
+@media (max-width: 1023px) {
+  .topo-page {
+    height: calc(100dvh - var(--mobile-topbar-h) - var(--safe-top) - 92px);
+    min-height: 360px;
+  }
+
+  .topo-body {
+    flex-direction: column;
+  }
+
+  .topo-canvas-wrap {
+    min-height: 280px;
+    flex: 1 1 auto;
+  }
+
+  .topo-device-list {
+    width: 100%;
+    max-height: 42vh;
+  }
+
+  .topo-device-list--collapsed {
+    width: 100%;
+    max-height: 40px;
+    padding: 6px 10px;
+  }
+
+  /* Texto dos botões da barra de ferramentas (Salvar, Adicionar POP…) — só o ícone, com o
+     rótulo completo a passar para o title/tooltip, para caber mais linhas de botões sem empurrar
+     o canvas (já baixo de altura no telefone). */
+  .topo-toolbar__btn-label {
+    display: none;
+  }
+
+  /* Handles de ligação (react-flow__handle) ficam pequenos demais para agarrar com o dedo. */
+  .topo-canvas-wrap .react-flow__handle {
+    width: 22px;
+    height: 22px;
+  }
+}

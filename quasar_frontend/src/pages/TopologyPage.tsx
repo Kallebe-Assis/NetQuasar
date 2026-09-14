@@ -214,10 +214,12 @@ function TopologyCanvas() {
   // SIDEBAR_COLLAPSED_KEY): estado lembrado no navegador.
   const [devicePanelCollapsed, setDevicePanelCollapsed] = useState(() => {
     try {
-      return localStorage.getItem(DEVICE_PANEL_COLLAPSED_KEY) === "1";
+      const saved = localStorage.getItem(DEVICE_PANEL_COLLAPSED_KEY);
+      if (saved != null) return saved === "1";
     } catch {
-      return false;
+      /* localStorage indisponível — cai para o padrão abaixo */
     }
+    return typeof window !== "undefined" && window.innerWidth < 768;
   });
   useEffect(() => {
     try {
@@ -775,9 +777,15 @@ function TopologyCanvas() {
           </select>
         ) : null}
         {canMutate && (
-          <button type="button" className="btn btn--primary" disabled={!dirty} onClick={() => void saveMut().catch(() => {})}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={!dirty}
+            title={dirty ? "Salvar" : "Salvo"}
+            onClick={() => void saveMut().catch(() => {})}
+          >
             <Save size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            {dirty ? "Salvar" : "Salvo"}
+            <span className="topo-toolbar__btn-label">{dirty ? "Salvar" : "Salvo"}</span>
           </button>
         )}
         {canMutate && (
@@ -791,15 +799,15 @@ function TopologyCanvas() {
           </button>
         )}
         {canMutate && (
-          <button type="button" className="btn" onClick={() => addGroupNode("rect")}>
+          <button type="button" className="btn" title="Adicionar POP (quadrado)" onClick={() => addGroupNode("rect")}>
             <Square size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            Adicionar POP (quadrado)
+            <span className="topo-toolbar__btn-label">Adicionar POP (quadrado)</span>
           </button>
         )}
         {canMutate && (
-          <button type="button" className="btn" onClick={() => addGroupNode("circle")}>
+          <button type="button" className="btn" title="Adicionar POP (círculo)" onClick={() => addGroupNode("circle")}>
             <Circle size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            Adicionar POP (círculo)
+            <span className="topo-toolbar__btn-label">Adicionar POP (círculo)</span>
           </button>
         )}
         <button type="button" className="btn btn--icon" title="Configurações da topologia" onClick={() => setSettingsOpen(true)}>

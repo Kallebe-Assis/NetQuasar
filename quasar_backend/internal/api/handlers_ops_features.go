@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 func (s *Server) maybeKickNightlyCollection(ctx context.Context) {
@@ -49,6 +50,7 @@ func (s *Server) maybeKickNightlyCollection(ctx context.Context) {
 		return
 	}
 	go func() {
+		defer panicguard.Recover("api_nightly_collection")
 		sum, runErr := s.executeNightlyCollection(context.Background(), auditActorSistema)
 		if runErr != nil {
 			_, _ = s.DB().Exec(context.Background(), `
@@ -441,15 +443,15 @@ func (s *Server) listPopContacts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = append(out, map[string]any{
-			"id":         id,
-			"pop_id":     popID,
-			"name":       name,
-			"contact":    contact,
+			"id":          id,
+			"pop_id":      popID,
+			"name":        name,
+			"contact":     contact,
 			"shift_label": shift,
-			"is_primary": isPrimary,
-			"notes":      notes,
-			"created_at": created,
-			"updated_at": updated,
+			"is_primary":  isPrimary,
+			"notes":       notes,
+			"created_at":  created,
+			"updated_at":  updated,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
@@ -462,11 +464,11 @@ func (s *Server) createPopContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name      string  `json:"name"`
-		Contact   string  `json:"contact"`
+		Name       string  `json:"name"`
+		Contact    string  `json:"contact"`
 		ShiftLabel *string `json:"shift_label"`
-		IsPrimary bool    `json:"is_primary"`
-		Notes     *string `json:"notes"`
+		IsPrimary  bool    `json:"is_primary"`
+		Notes      *string `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Contact) == "" {
 		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "name e contact obrigatórios", nil)
@@ -626,15 +628,15 @@ func (s *Server) dashboardOltCapacity(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type ponRow struct {
-		OLTID       string  `json:"olt_id"`
-		OLT         string  `json:"olt"`
-		PonID       string  `json:"pon_id"`
-		OnuTotal    int     `json:"onu_total"`
-		OnuOnline   int     `json:"onu_online"`
-		OnuOffline  int     `json:"onu_offline"`
-		UsagePct    float64 `json:"usage_percent"`
-		Saturated   bool    `json:"near_saturation"`
-		SnapshotAt  string  `json:"snapshot_at"`
+		OLTID      string  `json:"olt_id"`
+		OLT        string  `json:"olt"`
+		PonID      string  `json:"pon_id"`
+		OnuTotal   int     `json:"onu_total"`
+		OnuOnline  int     `json:"onu_online"`
+		OnuOffline int     `json:"onu_offline"`
+		UsagePct   float64 `json:"usage_percent"`
+		Saturated  bool    `json:"near_saturation"`
+		SnapshotAt string  `json:"snapshot_at"`
 	}
 	pRows := []ponRow{}
 	oltRows := []map[string]any{}
@@ -746,9 +748,9 @@ func (s *Server) getNightlyCollectionSettings(w http.ResponseWriter, r *http.Req
 
 func (s *Server) patchNightlyCollectionSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Enabled      *bool   `json:"enabled"`
-		RunTimeHHMM  *string `json:"run_time_hhmm"`
-		Timezone     *string `json:"timezone"`
+		Enabled     *bool   `json:"enabled"`
+		RunTimeHHMM *string `json:"run_time_hhmm"`
+		Timezone    *string `json:"timezone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -818,13 +820,13 @@ func (s *Server) executeNightlyCollection(ctx context.Context, actor string) (ma
 		}
 	}
 	sum := map[string]any{
-		"status": "done",
-		"olts_snapshot_ok": oltOK,
-		"interfaces_refresh_ok": ifOK,
-		"telemetry_collect_ok": telOK,
+		"status":                  "done",
+		"olts_snapshot_ok":        oltOK,
+		"interfaces_refresh_ok":   ifOK,
+		"telemetry_collect_ok":    telOK,
 		"telemetry_skipped_no_ip": telSkip,
-		"total_devices": len(all),
-		"finished_at": time.Now().UTC().Format(time.RFC3339),
+		"total_devices":           len(all),
+		"finished_at":             time.Now().UTC().Format(time.RFC3339),
 	}
 	sb, _ := json.Marshal(sum)
 	_, _ = s.DB().Exec(ctx, `
@@ -848,4 +850,3 @@ func callInternalDevicePost(ctx context.Context, h func(http.ResponseWriter, *ht
 	}
 	return context.Canceled
 }
-

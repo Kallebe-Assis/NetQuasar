@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,7 +13,24 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
 )
+
+// intFromAnyDash lê um int guardado num map[string]any (ex.: oltparse.SnapshotComputed) sem
+// assumir o tipo concreto exacto.
+func intFromAnyDash(v any) int64 {
+	switch x := v.(type) {
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	default:
+		return 0
+	}
+}
 
 // Filtro alinhado ao monitoramento: só equipamentos em operação «Ativo».
 const sqlDeviceOperationalAtivo = `TRIM(BOTH FROM COALESCE(operational_mode, '')) = 'Ativo'`
@@ -105,7 +123,7 @@ func (s *Server) dashboardAnalytics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) buildDashboardAnalytics(ctx context.Context, pool *pgxpool.Pool, days int, since time.Time) (map[string]any, error) {
 	var (
-		mu sync.Mutex
+		mu  sync.Mutex
 		out = map[string]any{
 			"generated_at": time.Now().UTC().Format(time.RFC3339),
 			"days":         days,
@@ -438,56 +456,63 @@ func (s *Server) buildDashboardAnalytics(ctx context.Context, pool *pgxpool.Pool
 	})
 
 	g.Go(func() error {
+		// Conta ONUs exactamente como a tela OLT (listOLTDevices / oltparse.SnapshotComputed):
+		// deduplica PONs repetidas em o.pons (oltifderive.DedupePonMaps) antes de somar — a soma
+		// directa em SQL sobre jsonb_array_elements(o.pons), sem deduplicar, inflava o total do
+		// dashboard sempre que um snapshot tinha entradas de PON duplicadas/obsoletas (visto ao
+		// vivo: 5210 no dashboard vs 3060 na tela de ONUs, que já deduplicava).
 		rows, err := pool.Query(gctx, `
-			SELECT d.id::text, d.description, d.brand,
-				COALESCE((
-					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_total'), ''))::bigint, 0))
-					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.pons) = 'array' THEN o.pons ELSE '[]'::jsonb END) e
-				), 0)::bigint AS onu_total,
-				COALESCE((
-					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_online'), ''))::bigint, 0))
-					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.pons) = 'array' THEN o.pons ELSE '[]'::jsonb END) e
-				), 0)::bigint AS onu_online,
-				COALESCE((
-					SELECT SUM(COALESCE((NULLIF(trim(e->>'onu_offline'), ''))::bigint, 0))
-					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.pons) = 'array' THEN o.pons ELSE '[]'::jsonb END) e
-				), 0)::bigint AS onu_offline,
-				o.updated_at
+			SELECT d.id::text, d.description, d.brand, COALESCE(o.summary::text,'{}'), COALESCE(o.pons::text,'[]'), o.updated_at
 			FROM devices d
 			JOIN olt_snapshots o ON o.device_id = d.id
 			WHERE lower(trim(d.category)) = 'olt' AND `+sqlDeviceOperationalAtivoD+`
-			ORDER BY onu_total DESC, d.description
-			LIMIT 24`)
+		`)
 		if err != nil {
 			set("olt_onu_by_device", []any{})
 			set("olt_onu_fleet_totals", map[string]any{"onu_count": int64(0), "onu_online": int64(0), "onu_offline": int64(0)})
 			return nil
 		}
-		defer rows.Close()
-		var olts []map[string]any
+		type oltOnuRow struct {
+			id, desc       string
+			brand          *string
+			total, on, off int64
+			upd            time.Time
+		}
+		var all []oltOnuRow
 		var fleetTotal, fleetOn, fleetOff int64
 		for rows.Next() {
-			var id, desc string
+			var id, desc, sum, pons string
 			var brand *string
-			var onuTotal, onuOn, onuOff int64
 			var upd time.Time
-			if rows.Scan(&id, &desc, &brand, &onuTotal, &onuOn, &onuOff, &upd) == nil {
-				m := map[string]any{
-					"device_id":   id,
-					"description": desc,
-					"onu_count":   onuTotal,
-					"onu_online":  onuOn,
-					"onu_offline": onuOff,
-					"snapshot_at": upd.Format(time.RFC3339),
-				}
-				if brand != nil {
-					m["brand"] = *brand
-				}
-				olts = append(olts, m)
-				fleetTotal += onuTotal
-				fleetOn += onuOn
-				fleetOff += onuOff
+			if rows.Scan(&id, &desc, &brand, &sum, &pons, &upd) != nil {
+				continue
 			}
+			comp := oltparse.SnapshotComputed([]byte(sum), []byte(pons))
+			total, on, off := intFromAnyDash(comp["onu_total_sum"]), intFromAnyDash(comp["onu_online_sum"]), intFromAnyDash(comp["onu_offline_sum"])
+			all = append(all, oltOnuRow{id: id, desc: desc, brand: brand, total: total, on: on, off: off, upd: upd})
+			fleetTotal += total
+			fleetOn += on
+			fleetOff += off
+		}
+		rows.Close()
+		sort.Slice(all, func(i, j int) bool { return all[i].total > all[j].total })
+		if len(all) > 24 {
+			all = all[:24]
+		}
+		olts := make([]map[string]any, 0, len(all))
+		for _, r := range all {
+			m := map[string]any{
+				"device_id":   r.id,
+				"description": r.desc,
+				"onu_count":   r.total,
+				"onu_online":  r.on,
+				"onu_offline": r.off,
+				"snapshot_at": r.upd.Format(time.RFC3339),
+			}
+			if r.brand != nil {
+				m["brand"] = *r.brand
+			}
+			olts = append(olts, m)
 		}
 		set("olt_onu_by_device", olts)
 		set("olt_onu_fleet_totals", map[string]any{

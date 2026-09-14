@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltparse"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/scheduleutil"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
@@ -472,6 +473,7 @@ func (s *Server) runAutomationONU(w http.ResponseWriter, r *http.Request) {
 	meta := s.automationMetaFromRequest(r)
 	s.appendAuditLog(r.Context(), "automation_onu_report", "1", "run_manual", meta.Actor, nil, map[string]any{"period": period})
 	go func() {
+		defer panicguard.Recover("api_run_onu_monthly_report")
 		bg := context.Background()
 		if err := s.executeONUMonthlyReport(bg, period, meta, false); err != nil {
 			s.Log.Warn().Err(err).Str("period", period).Msg("relatório ONU manual falhou")

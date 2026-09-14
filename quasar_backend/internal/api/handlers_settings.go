@@ -17,6 +17,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/config"
 	"github.com/netquasar/netquasar/quasar_backend/internal/db"
 	"github.com/netquasar/netquasar/quasar_backend/internal/localdbstore"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -278,6 +279,7 @@ func (s *Server) switchDatabasePool(w http.ResponseWriter, r *http.Request, dsn 
 	s.auditDBConnection(ctx, true, "apply", "pool substituído", host, port, dbname)
 	if old != nil {
 		go func(cl *time.Timer) {
+			defer panicguard.Recover("api_close_old_db_pool_settings")
 			<-cl.C
 			old.Close()
 		}(time.NewTimer(2 * time.Second))
@@ -744,15 +746,15 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type u struct {
-		ID                   uuid.UUID  `json:"id"`
-		DisplayName          string     `json:"display_name"`
-		Email                string     `json:"email"`
-		Phone                *string    `json:"phone"`
-		Role                 string     `json:"role"`
-		IsActive             bool       `json:"is_active"`
-		PermissionProfileID  *uuid.UUID `json:"permission_profile_id,omitempty"`
-		PermissionProfileName *string   `json:"permission_profile_name,omitempty"`
-		PermissionProfileSlug *string   `json:"permission_profile_slug,omitempty"`
+		ID                    uuid.UUID  `json:"id"`
+		DisplayName           string     `json:"display_name"`
+		Email                 string     `json:"email"`
+		Phone                 *string    `json:"phone"`
+		Role                  string     `json:"role"`
+		IsActive              bool       `json:"is_active"`
+		PermissionProfileID   *uuid.UUID `json:"permission_profile_id,omitempty"`
+		PermissionProfileName *string    `json:"permission_profile_name,omitempty"`
+		PermissionProfileSlug *string    `json:"permission_profile_slug,omitempty"`
 	}
 	var list []u
 	for rows.Next() {

@@ -298,6 +298,16 @@ export function ProjectsTab({
         ) : null}
       </ConnectionsTabToolbar>
 
+      <ConnectionsPager
+        safePage={safePage}
+        totalPages={totalPages}
+        total={sorted.length}
+        rangeFrom={rangeFrom}
+        rangeTo={rangeTo}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
+
       <div className="table-wrap">
         <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
@@ -392,16 +402,6 @@ export function ProjectsTab({
           </tbody>
         </table>
       </div>
-
-      <ConnectionsPager
-        safePage={safePage}
-        totalPages={totalPages}
-        total={sorted.length}
-        rangeFrom={rangeFrom}
-        rangeTo={rangeTo}
-        onPrev={() => setPage((p) => p - 1)}
-        onNext={() => setPage((p) => p + 1)}
-      />
 
       {formOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !saveMut.isPending && setFormOpen(false)}>

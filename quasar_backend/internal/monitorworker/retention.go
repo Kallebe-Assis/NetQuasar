@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // TryRunHistoryRetention purga linhas antigas de ping_history, telemetry_samples e
@@ -37,6 +39,7 @@ func TryRunHistoryRetention(ctx context.Context, pool *pgxpool.Pool, log *zerolo
 		return
 	}
 	go func(days int) {
+		defer panicguard.Recover("monitor_worker_retention")
 		defer UnlockRetentionCycle()
 		l := zerolog.Nop()
 		if log != nil {

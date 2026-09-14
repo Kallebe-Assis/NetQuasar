@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // TryStartParallelBngCycle dispara coleta de totais BNG (PPPoE online, IPv4/IPv6) numa goroutine separada.
@@ -43,6 +45,7 @@ func TryStartParallelBngCycle(ctx context.Context, pool *pgxpool.Pool, log *zero
 	}
 
 	go func(mode string, log *zerolog.Logger, bngOpts SweepOpts) {
+		defer panicguard.Recover("monitor_worker_bng")
 		defer UnlockBngCycle()
 		l := log.With().Str("cycle", "bng_parallel").Logger()
 		setActivity(ctx, pool, "BNG — totais PPPoE/logins (paralelo)")

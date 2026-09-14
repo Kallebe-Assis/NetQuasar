@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // TryStartParallelPingCycle dispara ICMP/TCP numa goroutine separada (não bloqueia telemetria/OLT).
@@ -48,6 +50,7 @@ func TryStartParallelPingCycle(ctx context.Context, pool *pgxpool.Pool, log *zer
 	}
 
 	go func(mode string, log *zerolog.Logger, pingOpts SweepOpts) {
+		defer panicguard.Recover("monitor_worker_latency")
 		defer UnlockLatencyCycle()
 		l := log.With().Str("cycle", "latency_parallel").Logger()
 		setActivity(ctx, pool, "Ping (ICMP/TCP) — paralelo")

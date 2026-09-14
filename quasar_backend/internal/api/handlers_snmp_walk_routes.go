@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdevicelock"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpdiscovery"
 )
@@ -49,6 +50,7 @@ func (s *Server) snmpWalkDeviceRun(w http.ResponseWriter, r *http.Request) {
 	devID := id
 	jobID := jid
 	go func() {
+		defer panicguard.Recover("api_snmp_walk_device_run")
 		unlockSNMP := snmpdevicelock.Acquire(devID)
 		defer unlockSNMP()
 		pool := s.DB()

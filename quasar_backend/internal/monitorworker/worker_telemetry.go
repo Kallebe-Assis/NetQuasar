@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/netquasar/netquasar/quasar_backend/internal/panicguard"
 )
 
 // TryStartParallelTelemetryCycle dispara telemetria SNMP (fase health) numa goroutine separada.
@@ -76,6 +78,7 @@ func TryStartParallelTelemetryCycle(ctx context.Context, pool *pgxpool.Pool, log
 	}
 
 	go func(mode string, log *zerolog.Logger, telOpts SweepOpts, budget time.Duration) {
+		defer panicguard.Recover("monitor_worker_telemetry")
 		defer UnlockTelemetryCycle()
 		l := log.With().Str("cycle", "telemetry_health").Logger()
 		setActivity(ctx, pool, "Telemetria SNMP (health) — paralelo")

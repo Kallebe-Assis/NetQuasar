@@ -740,6 +740,16 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
         )}
       </ConnectionsTabToolbar>
 
+      <ConnectionsPager
+        safePage={safePage}
+        totalPages={totalPages}
+        total={sortedConnections.length}
+        rangeFrom={rangeFrom}
+        rangeTo={rangeTo}
+        onPrev={() => setPage((p) => Math.max(0, p - 1))}
+        onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+      />
+
       <div className="table-wrap">
         <table className="conn-table" style={{ fontSize: 12 }}>
           <thead>
@@ -874,15 +884,6 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
             ))}
           </tbody>
         </table>
-        <ConnectionsPager
-          safePage={safePage}
-          totalPages={totalPages}
-          total={sortedConnections.length}
-          rangeFrom={rangeFrom}
-          rangeTo={rangeTo}
-          onPrev={() => setPage((p) => Math.max(0, p - 1))}
-          onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-        />
       </div>
 
       {formOpen && canMutate ? (

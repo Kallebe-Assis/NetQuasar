@@ -161,6 +161,9 @@ export type NetworkCable = {
   status: string;
   /** backbone_link | transporte | backbone_ftth | cto | multipla | outro — ver CABLE_FUNCOES. */
   funcao?: string | null;
+  /** Cor própria deste cabo no mapa — sobrepõe a cor da função (Configurações → Mapa). null =
+   * usa a cor da função, como sempre. */
+  color?: string | null;
   project_id?: string | null;
   project_label?: string | null;
   latitude?: number | null;

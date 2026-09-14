@@ -491,7 +491,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       const { steps } = await fetchOnuTelnetReport(row);
       const updated = applyTelnetFieldsToRow(row, steps);
       setRowOverrides((prev) => ({ ...prev, [key]: updated }));
-      toastOk(pushToast, `ONU ${row.serial ?? key} atualizada.`);
+      const label = updated.serial || row.serial || `PON ${row.pon ?? "?"} / ONU ${row.onu ?? "?"}`;
+      toastOk(pushToast, `ONU ${label} atualizada.`);
     } catch (e) {
       toastErr(pushToast, e);
     } finally {
@@ -764,6 +765,62 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
       {searchMut.isPending && !searchMut.data ? <p>A pesquisar ONUs…</p> : null}
 
+      {enrichedResults.length > 0 ? (
+        <div
+          className="row"
+          style={{
+            marginBottom: 10,
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 12,
+          }}
+        >
+          <label className="row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
+            <span style={{ color: "var(--muted)" }}>Por página</span>
+            <select
+              className="input"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              style={{ width: "auto", minWidth: 72, padding: "4px 8px", fontSize: 12 }}
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "var(--muted)" }}>{pageRangeLabel(safePage, pageSize, enrichedResults.length)}</span>
+          </label>
+          <div className="row" style={{ gap: 6, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn--icon"
+              disabled={safePage <= 1}
+              title="Página anterior"
+              aria-label="Página anterior"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="mono" style={{ minWidth: 64, textAlign: "center" }}>
+              {safePage}/{totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn btn--icon"
+              disabled={safePage >= totalPages}
+              title="Página seguinte"
+              aria-label="Página seguinte"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="table-wrap">
         <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
@@ -872,62 +929,6 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           </div>
         ) : null}
       </div>
-
-      {enrichedResults.length > 0 ? (
-        <div
-          className="row"
-          style={{
-            marginTop: 10,
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontSize: 12,
-          }}
-        >
-          <label className="row" style={{ gap: 6, alignItems: "center", margin: 0 }}>
-            <span style={{ color: "var(--muted)" }}>Por página</span>
-            <select
-              className="input"
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              style={{ width: "auto", minWidth: 72, padding: "4px 8px", fontSize: 12 }}
-            >
-              {PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <span style={{ color: "var(--muted)" }}>{pageRangeLabel(safePage, pageSize, enrichedResults.length)}</span>
-          </label>
-          <div className="row" style={{ gap: 6, alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn btn--icon"
-              disabled={safePage <= 1}
-              title="Página anterior"
-              aria-label="Página anterior"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="mono" style={{ minWidth: 64, textAlign: "center" }}>
-              {safePage}/{totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn btn--icon"
-              disabled={safePage >= totalPages}
-              title="Página seguinte"
-              aria-label="Página seguinte"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {filtersOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setFiltersOpen(false)}>
