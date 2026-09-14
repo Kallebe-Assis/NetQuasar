@@ -199,6 +199,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/database/cleanup/execute", s.databaseCleanupExecute)
 				r.Get("/database/logs", s.settingsDatabaseLogs)
 				r.Get("/database/backups/b2", s.listDatabaseBackupsB2)
+				r.Post("/database/backups/b2/cleanup", s.cleanupDatabaseBackupsB2)
 				r.Post("/database/backups/upload", s.uploadDatabaseBackupRestore)
 				r.Post("/database/backups/restore", s.restoreDatabaseBackup)
 				r.Get("/database/backups/restore/{jobId}", s.getDatabaseRestoreJob)
@@ -557,6 +558,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/reports/history", s.getOLTReportsHistory)
 			r.Get("/reports/pon-history", s.getOLTPonHistory)
 			r.Get("/onu-authorizations/recent", s.recentOnuAuthorizations)
+			r.Get("/onu-monitors", s.listOnuMonitors)
 			r.Post("/onu-search", s.searchOLTOnus)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("olt.collect", "olt.onu_manage", "*"))
@@ -573,6 +575,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/onu-client-links/import", s.importOnuClientLinks)
 				r.Post("/onu-client-links/unlink", s.bulkUnlinkOnuClients)
 				r.Delete("/onu-client-links/{serial}", s.deleteOnuClientLink)
+				r.Post("/onu-monitors", s.upsertOnuMonitor)
+				r.Delete("/onu-monitors/{id}", s.deleteOnuMonitor)
 			})
 		})
 

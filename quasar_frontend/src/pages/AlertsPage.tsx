@@ -4,6 +4,7 @@ import { ActionMenu } from "../components/ActionMenu";
 import { AffectedClientsModal } from "../components/AffectedClientsModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
+import { EmptyState } from "../components/EmptyState";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { flushSync } from "react-dom";
@@ -33,6 +34,35 @@ import {
   formatAlertPopName,
   formatAlertResolvedValue,
 } from "../lib/alertResolution";
+import { toastErr, toastOk } from "../lib/operationToast";
+import {
+  classifyOnuRx,
+  ONU_RX_QUALITY_COLOR,
+  ONU_RX_QUALITY_LABEL,
+  useOnuRxThresholds,
+} from "../lib/onuRxQuality";
+
+type OnuMonitor = {
+  id: string;
+  serial: string;
+  olt_description: string;
+  pon?: number | null;
+  onu?: number | null;
+  client_name: string;
+  watch_status: boolean;
+  watch_rx: boolean;
+  watch_login: boolean;
+  bng_login: string;
+  notify_telegram: boolean;
+  expires_at?: string | null;
+  created_by: string;
+  created_at: string;
+  current_online?: boolean | null;
+  current_rx_dbm?: number | null;
+  current_rx_class?: string | null;
+  login_online?: boolean | null;
+  login_bng?: string | null;
+};
 
 type ActiveAlert = {
   id: string;
@@ -118,7 +148,7 @@ const ALERTS_HISTORY_REFRESH_MS = 45_000;
 export function AlertsPage() {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
-  const [tab, setTab] = useState<"active" | "hist">("active");
+  const [tab, setTab] = useState<"active" | "hist" | "onus">("active");
   const [ignoredOpen, setIgnoredOpen] = useState(false);
   const [ignoredSearch, setIgnoredSearch] = useState("");
   const [ignoredDevice, setIgnoredDevice] = useState("");
@@ -163,6 +193,22 @@ export function AlertsPage() {
     queryKey: queryKeys.monState,
     queryFn: () => apiFetch<MonitoringStateSync>("/api/v1/monitoring/state"),
     staleTime: 1000,
+  });
+
+  const { thresholds: rxThresholds } = useOnuRxThresholds();
+  const onuMonitors = useQuery({
+    queryKey: ["onu-monitors"],
+    queryFn: () => apiFetch<{ monitors: OnuMonitor[] }>("/api/v1/olt/onu-monitors"),
+    enabled: tab === "onus",
+    refetchInterval: tab === "onus" ? 30_000 : false,
+  });
+  const removeMonitor = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/olt/onu-monitors/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["onu-monitors"] });
+      toastOk(pushToast, "Monitoramento da ONU removido.");
+    },
+    onError: (e) => toastErr(pushToast, e, "Falha ao remover monitoramento."),
   });
 
   useMonitoringLiveSync(monState.data, { monitoring: false, alerts: true, olt: false });
@@ -312,7 +358,7 @@ export function AlertsPage() {
         a.type,
         displaySeverity(a.severity),
         displayActiveRowSeverity(a.severity, a.closed_at ?? null),
-        alertProblemTitle(a.type),
+        alertProblemTitle(a.type, a.meta),
       ]
         .join(" ")
         .toLowerCase();
@@ -349,7 +395,7 @@ export function AlertsPage() {
         e.severity,
         e.device_name ?? "",
         e.ip ?? "",
-        alertProblemTitle(e.type),
+        alertProblemTitle(e.type, e.meta),
       ]
         .join(" ")
         .toLowerCase();
@@ -383,7 +429,7 @@ export function AlertsPage() {
         row.device_name ?? "",
         row.ip ?? "",
         equip,
-        alertProblemTitle(row.type),
+        alertProblemTitle(row.type, row.meta),
       ]
         .join(" ")
         .toLowerCase();
@@ -418,6 +464,10 @@ export function AlertsPage() {
         </button>
         <button type="button" className={tab === "hist" ? "active" : ""} onClick={() => setTab("hist")}>
           Histórico
+        </button>
+        <button type="button" className={tab === "onus" ? "active" : ""} onClick={() => setTab("onus")}>
+          ONUs
+          {(onuMonitors.data?.monitors.length ?? 0) > 0 ? ` (${onuMonitors.data!.monitors.length})` : ""}
         </button>
       </div>
 
@@ -649,7 +699,7 @@ export function AlertsPage() {
                             <td>
                               <span className="alerts-cat-badge">{alertCategoryLabel(cat)}</span>
                             </td>
-                            <td className="alerts-problem">{alertProblemTitle(a.type)}</td>
+                            <td className="alerts-problem">{alertProblemTitle(a.type, a.meta)}</td>
                             <td className="alerts-msg">{alertValueText(a.type, a.message, a.meta)}</td>
                             <td>
                               <div className="alerts-dev">
@@ -798,7 +848,7 @@ export function AlertsPage() {
                           <td>
                             <span className={severityPillClass(e.severity)}>{displaySeverity(e.severity)}</span>
                           </td>
-                          <td className="alerts-problem">{alertProblemTitle(e.type)}</td>
+                          <td className="alerts-problem">{alertProblemTitle(e.type, e.meta)}</td>
                           <td className="alerts-msg mono" style={{ fontSize: 12 }}>
                             {e.closed_at ? formatAlertResolvedValue(e.type, e.meta, e.message) : "—"}
                           </td>
@@ -828,6 +878,118 @@ export function AlertsPage() {
             )}
           </div>
         </>
+      )}
+
+      {tab === "onus" && (
+        <div className="card">
+          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
+            ONUs colocadas em monitoramento manual/temporário (tela OLT → ONUs → menu ⋮ → <strong>Monitorar</strong>). Cada
+            uma alarma quando o item degrada e quando normaliza — os alertas de degradação e as normalizações também
+            aparecem em <strong>Ativos</strong> / <strong>Histórico</strong> e no Telegram.
+          </p>
+          {onuMonitors.isLoading ? (
+            <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
+          ) : (onuMonitors.data?.monitors.length ?? 0) === 0 ? (
+            <EmptyState
+              title="Nenhuma ONU em monitoramento."
+              hint='Na tela OLT → aba ONUs, abra o menu de opções (⋮) de uma ONU e escolha "Monitorar".'
+            />
+          ) : (
+            <div className="table-wrap">
+              <table style={{ fontSize: 12, width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Serial</th>
+                    <th>OLT · PON/ONU</th>
+                    <th>Status</th>
+                    <th>RX</th>
+                    <th>Login BNG</th>
+                    <th>Monitorando</th>
+                    <th>Expira</th>
+                    <th style={{ width: 44 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {onuMonitors.data!.monitors.map((m) => {
+                    const rxCls =
+                      typeof m.current_rx_dbm === "number" ? classifyOnuRx(m.current_rx_dbm, rxThresholds) : null;
+                    return (
+                      <tr key={m.id}>
+                        <td>{m.client_name || <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                        <td className="mono">{m.serial}</td>
+                        <td>
+                          {m.olt_description || "—"}
+                          <span style={{ color: "var(--muted)" }}> · {m.pon ?? "?"}/{m.onu ?? "?"}</span>
+                        </td>
+                        <td>
+                          {m.current_online === true ? (
+                            <span className="badge badge--ok">Online</span>
+                          ) : m.current_online === false ? (
+                            <span className="badge badge--err">Offline</span>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td className="mono">
+                          {typeof m.current_rx_dbm === "number" ? (
+                            <span style={{ color: rxCls ? ONU_RX_QUALITY_COLOR[rxCls] : undefined }}>
+                              {m.current_rx_dbm.toFixed(2)}
+                              {rxCls ? ` · ${ONU_RX_QUALITY_LABEL[rxCls]}` : ""}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td>
+                          {m.watch_login && m.bng_login ? (
+                            <span>
+                              <span className="mono">{m.bng_login}</span>{" "}
+                              {m.login_online === true ? (
+                                <span className="badge badge--ok">online</span>
+                              ) : m.login_online === false ? (
+                                <span className="badge badge--err">offline</span>
+                              ) : (
+                                <span style={{ color: "var(--muted)" }}>—</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: 11 }}>
+                          {[
+                            m.watch_status ? "Status" : null,
+                            m.watch_rx ? "RX" : null,
+                            m.watch_login ? "Login" : null,
+                            m.notify_telegram ? "Telegram" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </td>
+                        <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+                          {m.expires_at ? formatAlertDateTimePt(m.expires_at) : "manual"}
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn--icon"
+                            title="Remover monitoramento"
+                            aria-label="Remover monitoramento"
+                            disabled={removeMonitor.isPending}
+                            onClick={() => removeMonitor.mutate(m.id)}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {ignoredOpen
@@ -896,7 +1058,7 @@ export function AlertsPage() {
                         <td>
                           <span className={severityPillClass(row.severity)}>{displaySeverity(row.severity)}</span>
                         </td>
-                        <td className="alerts-problem">{alertProblemTitle(row.type)}</td>
+                        <td className="alerts-problem">{alertProblemTitle(row.type, row.meta)}</td>
                         <td className="alerts-msg">{alertValueText(row.type, row.message ?? "", row.meta)}</td>
                         <td>
                           <div className="alerts-dev">

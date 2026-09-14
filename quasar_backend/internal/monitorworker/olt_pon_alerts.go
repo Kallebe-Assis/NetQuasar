@@ -284,6 +284,7 @@ deriveLoop:
 	for k, v := range stabPatch {
 		summary[k] = v
 	}
+	oltcollect.LoadAndCarryForwardOnuIdentity(ctx, pool, deviceID, summary)
 	oltcollect.SanitizeOnuSerialsMap(summary)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)

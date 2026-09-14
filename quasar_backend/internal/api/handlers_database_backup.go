@@ -498,6 +498,22 @@ func (s *Server) executeDatabaseBackup(ctx context.Context, runKey string, meta 
 		WHERE id = 1
 	`, runKey, objKey, size)
 	sum := map[string]any{"run_key": runKey, "object_key": objKey, "size_bytes": size, "file_id": fileID}
+
+	// Aplica a retenção configurada (keep_last) — sem isto o bucket B2 crescia para sempre, um
+	// backup novo por ciclo, nunca apagado (pedido do utilizador: limpeza no bucket).
+	var keepLast int
+	if err := pool.QueryRow(ctx, `SELECT keep_last FROM automation_database_backup WHERE id=1`).Scan(&keepLast); err == nil && keepLast > 0 {
+		if deleted, pruneErr := cli.PruneDumps(ctx, keepLast); pruneErr != nil {
+			sum["prune_error"] = pruneErr.Error()
+		} else if len(deleted) > 0 {
+			names := make([]string, 0, len(deleted))
+			for _, f := range deleted {
+				names = append(names, f.BaseName)
+			}
+			sum["pruned"] = names
+		}
+	}
+
 	s.recordAutomationExecution(ctx, jobDatabaseBackup, meta, started, true,
 		"Backup enviado ao B2", nil, sum, runKey)
 	s.appendAuditLog(ctx, "automation_database_backup", "1", "run", meta.Actor, nil, sum)
@@ -533,6 +549,53 @@ func (s *Server) listDatabaseBackupsB2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
+// cleanupDatabaseBackupsB2 apaga os backups mais antigos do bucket B2, mantendo só os
+// `keep_last` mais recentes (ex.: 3) — limpeza manual, sob pedido, independente do agendamento
+// automático (que já aplica a mesma retenção a cada execução, ver executeDatabaseBackup).
+func (s *Server) cleanupDatabaseBackupsB2(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		KeepLast int `json:"keep_last"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	if body.KeepLast <= 0 || body.KeepLast > 365 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "keep_last obrigatório, entre 1 e 365", nil)
+		return
+	}
+	ctx := r.Context()
+	creds, err := s.loadB2Creds(ctx)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "B2", err.Error(), nil)
+		return
+	}
+	cli, err := backupb2.NewClient(ctx, creds)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "B2_AUTH", err.Error(), nil)
+		return
+	}
+	deleted, err := cli.PruneDumps(ctx, body.KeepLast)
+	if err != nil && len(deleted) == 0 {
+		writeErr(w, http.StatusBadGateway, "B2_DELETE", err.Error(), nil)
+		return
+	}
+	names := make([]string, 0, len(deleted))
+	var freedBytes int64
+	for _, f := range deleted {
+		names = append(names, f.BaseName)
+		freedBytes += f.ContentLength
+	}
+	s.appendAuditLog(ctx, "automation_database_backup", "1", "cleanup_b2", s.actorFromRequest(r), nil, map[string]any{
+		"keep_last": body.KeepLast, "deleted_count": len(deleted), "deleted": names, "freed_bytes": freedBytes,
+	})
+	out := map[string]any{"deleted_count": len(deleted), "deleted": names, "freed_bytes": freedBytes}
+	if err != nil {
+		out["partial_error"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) uploadDatabaseBackupRestore(w http.ResponseWriter, r *http.Request) {

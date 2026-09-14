@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -202,6 +203,58 @@ func (c *Client) ListDumps(ctx context.Context) ([]FileInfo, error) {
 		start = lr.NextFileName
 	}
 	return out, nil
+}
+
+// DeleteFile apaga uma versão de objecto no B2 (b2_delete_file_version — exige fileName e
+// fileId; a API B2 identifica versões por este par, não só pelo nome).
+func (c *Client) DeleteFile(ctx context.Context, fileID, fileName string) error {
+	payload, _ := json.Marshal(map[string]any{"fileId": fileID, "fileName": fileName})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.auth.APIURL+"/b2api/v2/b2_delete_file_version", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.auth.AuthorizationToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("b2_delete_file_version: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// PruneDumps mantém só os `keepLast` dumps mais recentes (netquasar-full-*.pgdump) no prefixo
+// configurado e apaga o resto. Devolve os ficheiros apagados (o chamador decide o que registar/
+// devolver). keepLast <= 0 não apaga nada (protecção contra apagar tudo por engano de config).
+func (c *Client) PruneDumps(ctx context.Context, keepLast int) ([]FileInfo, error) {
+	if keepLast <= 0 {
+		return nil, nil
+	}
+	files, err := c.ListDumps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].UploadTimestamp > files[j].UploadTimestamp })
+	if len(files) <= keepLast {
+		return nil, nil
+	}
+	toDelete := files[keepLast:]
+	deleted := make([]FileInfo, 0, len(toDelete))
+	var firstErr error
+	for _, f := range toDelete {
+		if err := c.DeleteFile(ctx, f.FileID, f.FileName); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deleted = append(deleted, f)
+	}
+	return deleted, firstErr
 }
 
 // UploadFile envia ficheiro para o prefixo B2 (com retries em 5xx/timeout).

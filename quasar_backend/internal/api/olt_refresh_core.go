@@ -180,6 +180,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 	alertthresholds.EvaluateOltOnuOpticalFromPons(ctx, pool, &s.Log, id, devDesc, host, curMaps)
 	alertthresholds.EvaluateOltPonOpticalFromPons(ctx, pool, &s.Log, id, devDesc, host, curMaps)
 
+	oltcollect.LoadAndCarryForwardOnuIdentity(ctx, pool, id, summary)
 	oltcollect.SanitizeOnuSerialsMap(summary)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)

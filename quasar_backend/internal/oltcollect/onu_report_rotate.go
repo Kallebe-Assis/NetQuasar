@@ -12,8 +12,8 @@ import (
 
 // OnuTelnetEnrichOpts estado opcional para rodízio e preservação de dados CLI anteriores.
 type OnuTelnetEnrichOpts struct {
-	PrevRows      []map[string]any
-	RotateOffset  int
+	PrevRows     []map[string]any
+	RotateOffset int
 }
 
 // LoadPrevOnuTelnetState lê linhas ONU e offset de rodízio do snapshot anterior da OLT.
@@ -35,6 +35,26 @@ func LoadPrevOnuTelnetState(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 
 func onuRowKey(row map[string]any) string {
 	return fmt.Sprintf("%d.%d", intFromRow(row, "pon"), intFromRow(row, "onu"))
+}
+
+// LoadAndCarryForwardOnuIdentity carrega o snapshot anterior da OLT e usa-o para preencher
+// serial/model das ONUs do `summary` novo que a coleta atual não trouxe (ver
+// CarryForwardOnuIdentity). Deve ser chamado imediatamente antes de gravar em olt_snapshots,
+// junto de SanitizeOnuSerialsMap. Devolve quantas linhas ganharam serial.
+func LoadAndCarryForwardOnuIdentity(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, summary map[string]any) int {
+	if pool == nil || deviceID == uuid.Nil || summary == nil {
+		return 0
+	}
+	var raw []byte
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(summary::text, '{}') FROM olt_snapshots WHERE device_id=$1`, deviceID).
+		Scan(&raw); err != nil || len(raw) == 0 {
+		return 0
+	}
+	var prev map[string]any
+	if json.Unmarshal(raw, &prev) != nil {
+		return 0
+	}
+	return CarryForwardOnuIdentity(summary, OnuRowsFromSummary(prev))
 }
 
 func sortOnuRowsByPonOnu(rows []map[string]any) {

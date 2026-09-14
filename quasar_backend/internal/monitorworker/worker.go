@@ -102,6 +102,7 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	TryStartParallelBngLoginWatchCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngInterfaceCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelOltCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+	TryEvaluateOnuMonitors(runCtx, pool, log, SweepOpts{Source: "worker"})
 	TryRunHistoryRetention(runCtx, pool, log, cfg)
 
 	var lastPipeline *time.Time

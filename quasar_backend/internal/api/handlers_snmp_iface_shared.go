@@ -679,6 +679,7 @@ func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.P
 	if err != nil {
 		return err
 	}
+	newSum = oltcollect.CarryForwardOnuIdentityJSON(newSum, []byte(sumT))
 	newSum = oltcollect.SanitizeOnuSerialsJSON(newSum)
 	pb, err := json.Marshal(mergedPons)
 	if err != nil {

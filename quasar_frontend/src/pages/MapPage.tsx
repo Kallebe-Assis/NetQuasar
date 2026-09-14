@@ -264,9 +264,12 @@ export function MapPage() {
   const [flyKey, setFlyKey] = useState(0);
   const [mapToast, setMapToast] = useState<{ ok: boolean; text: string } | null>(null);
   const [showConnections, setShowConnections] = useState(false);
-  const [showCtos, setShowCtos] = useState(true);
-  const [showCables, setShowCables] = useState(true);
-  const [showSpliceBoxes, setShowSpliceBoxes] = useState(true);
+  // CTOs, cabos e caixas de emenda começam desligados: são os elementos mais numerosos do mapa e
+  // deixam o carregamento inicial lento — o utilizador liga-os quando precisar (ver botão de
+  // camadas). Postes/Projetos já seguiam este padrão (useState(false) abaixo).
+  const [showCtos, setShowCtos] = useState(false);
+  const [showCables, setShowCables] = useState(false);
+  const [showSpliceBoxes, setShowSpliceBoxes] = useState(false);
   const [spliceModelFilter, setSpliceModelFilter] = useState<SpliceModelFilter>("all");
   const [cableFuncaoFilter, setCableFuncaoFilter] = useState<Set<CableFuncao> | null>(null);
   const [showPoles, setShowPoles] = useState(false);

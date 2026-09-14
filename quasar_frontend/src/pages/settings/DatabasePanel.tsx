@@ -140,6 +140,7 @@ function RestoreSection() {
   const [job, setJob] = useState<RestoreJob | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  const [keepLast, setKeepLast] = useState("3");
 
   const list = useMutation({
     mutationFn: () => apiFetch<{ files: B2File[] }>("/api/v1/settings/database/backups/b2"),
@@ -148,6 +149,23 @@ function RestoreSection() {
       setListErr(null);
     },
     onError: (e) => setListErr((e as Error).message),
+  });
+
+  const cleanup = useMutation({
+    mutationFn: (n: number) =>
+      apiFetch<{ deleted_count: number; deleted: string[]; freed_bytes: number }>("/api/v1/settings/database/backups/b2/cleanup", {
+        method: "POST",
+        json: { keep_last: n },
+      }),
+    onSuccess: (d) => {
+      setToast(
+        d.deleted_count > 0
+          ? `${d.deleted_count} backup(s) antigo(s) apagado(s) do B2 (${(d.freed_bytes / (1024 * 1024)).toFixed(1)} MB libertados).`
+          : "Nada para apagar — já está dentro do limite.",
+      );
+      list.mutate();
+    },
+    onError: (e) => setToast((e as Error).message),
   });
 
   const restoreB2 = useMutation({
@@ -269,6 +287,39 @@ function RestoreSection() {
               {listErr}
             </div>
           )}
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)" }}>
+              Manter só os
+              <input
+                className="input mono"
+                inputMode="numeric"
+                style={{ width: 56 }}
+                value={keepLast}
+                onChange={(e) => setKeepLast(e.target.value.replace(/[^\d]/g, ""))}
+              />
+              mais recentes no bucket
+            </label>
+            <button
+              type="button"
+              className="btn btn--danger"
+              disabled={cleanup.isPending || !Number(keepLast)}
+              onClick={() => {
+                const n = Number(keepLast) || 0;
+                const knownExtra = files.length > n ? files.length - n : null;
+                const msg =
+                  knownExtra != null
+                    ? `Apagar ${knownExtra} backup(s) mais antigo(s) do bucket B2, mantendo só os ${n} mais recentes? Não pode ser desfeito.`
+                    : `Apagar do bucket B2 todos os backups além dos ${n} mais recentes? Não pode ser desfeito.`;
+                if (!window.confirm(msg)) return;
+                cleanup.mutate(n);
+              }}
+            >
+              {cleanup.isPending ? "A limpar…" : "Limpar backups antigos"}
+            </button>
+            {files.length > 0 ? (
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{files.length} backup(s) no bucket agora.</span>
+            ) : null}
+          </div>
           {files.length > 0 && (
             <ul style={{ marginTop: 12, paddingLeft: 18, fontSize: 13 }}>
               {files

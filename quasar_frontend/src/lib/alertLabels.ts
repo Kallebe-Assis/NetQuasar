@@ -30,6 +30,8 @@ const ALERT_TYPE_PT: Record<string, string> = {
   olt_pon_tx: "PON — potência TX",
   olt_pon_temp: "PON — temperatura",
   bng_subscriber_drop: "Queda de logins (BNG)",
+  onu_monitor_offline: "ONU monitorada — offline",
+  onu_monitor_rx_low: "ONU monitorada — RX baixo",
 };
 
 export function displayAlertType(code: string | null | undefined): string {

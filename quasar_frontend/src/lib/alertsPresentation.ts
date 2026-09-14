@@ -29,6 +29,8 @@ const TYPE_CATEGORY: Record<string, AlertUiCategory> = {
   bng_subscriber_drop: "equipment",
   mikrotik_pppoe_drop: "interface",
   pon_down: "olt",
+  onu_monitor_offline: "olt",
+  onu_monitor_rx_low: "olt",
 };
 
 export function alertCategoryLabel(cat: AlertUiCategory): string {
@@ -53,9 +55,25 @@ export function alertCategoryFromType(type: string | null | undefined): AlertUiC
   return TYPE_CATEGORY[k] ?? "system";
 }
 
-/** Título curto para coluna «Problema» */
-export function alertProblemTitle(type: string | null | undefined): string {
+/** Rótulo específico por métrica para alertas genéricos de "Limiar global" (telemetry_threshold
+ * — cobre CPU, memória, temperatura e uptime, todos com o mesmo alert_type no backend). Sem isto
+ * a coluna «Problema» mostrava sempre "Limiar de métrica", sem dizer qual métrica. */
+const TELEMETRY_THRESHOLD_METRIC_LABEL: Record<string, string> = {
+  uptime_minutes: "Uptime baixo",
+  cpu_usage_pct: "CPU elevada",
+  memory_usage_pct: "Memória elevada",
+  temperature_c: "Temperatura alta",
+  latency_ms: "Latência alta",
+};
+
+/** Título curto para coluna «Problema». `meta` é opcional — quando dado e o tipo for
+ * "telemetry_threshold", refina o título pela métrica real (meta.metric_id). */
+export function alertProblemTitle(type: string | null | undefined, meta?: unknown): string {
   const t = String(type ?? "").trim();
+  if (t === "telemetry_threshold") {
+    const metricID = String(metaObj(meta)?.metric_id ?? "").trim().toLowerCase();
+    return TELEMETRY_THRESHOLD_METRIC_LABEL[metricID] ?? "Limiar de métrica";
+  }
   switch (t) {
     case "ping_unreachable":
       return "Equipamento offline";
@@ -79,8 +97,6 @@ export function alertProblemTitle(type: string | null | undefined): string {
       return "CPU elevada";
     case "memory_high":
       return "Memória elevada";
-    case "telemetry_threshold":
-      return "Limiar de métrica";
     case "olt_onu_drop":
       return "Queda de ONUs";
     case "olt_onu_rise":
@@ -226,6 +242,8 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "pon_down", label: "OLT — PON DOWN" },
   { value: "bng_subscriber_drop", label: "BNG — queda de logins" },
   { value: "mikrotik_pppoe_drop", label: "MikroTik — queda PPPoE" },
+  { value: "onu_monitor_offline", label: "ONU monitorada — offline" },
+  { value: "onu_monitor_rx_low", label: "ONU monitorada — RX baixo" },
 ];
 
 export const ALERT_SEVERITY_FILTER_OPTIONS: { value: string; label: string }[] = [

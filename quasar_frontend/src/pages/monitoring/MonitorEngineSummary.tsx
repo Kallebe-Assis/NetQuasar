@@ -125,61 +125,87 @@ export function MonitorEngineSummary({ state, intervals, agoTick, modeLabel }: P
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "auto 1fr",
-        gap: "10px 14px",
-        alignItems: "start",
-        padding: "12px 14px",
+        display: "flex",
+        alignItems: "center",
+        gap: 18,
+        flexWrap: "wrap",
+        rowGap: 6,
+        padding: "8px 14px",
         borderRadius: 10,
         border: "1px solid var(--border)",
         borderLeft: `4px solid ${color}`,
         background: "color-mix(in srgb, var(--panel2) 55%, transparent)",
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: "50%",
-          background: color,
-          marginTop: 3,
-          boxShadow: `0 0 0 4px color-mix(in srgb, ${color} 22%, transparent)`,
-        }}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
+        <span
+          aria-hidden
+          style={{
+            width: 10,
+            height: 10,
+            flexShrink: 0,
+            borderRadius: "50%",
+            background: color,
+            boxShadow: `0 0 0 3px color-mix(in srgb, ${color} 22%, transparent)`,
+          }}
+        />
+        <strong style={{ fontSize: 13, color: "var(--text)", whiteSpace: "nowrap" }}>{view.title}</strong>
+        <span
+          style={{
+            fontSize: 10.5,
+            padding: "1px 7px",
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            color: "var(--muted)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {modeLabel}
+        </span>
+      </div>
+
+      <MonitorEngineField label="Próxima ação" value={view.nextAction} />
+      <MonitorEngineField
+        label="Último erro"
+        value={view.lastError ?? "Sem erros recentes."}
+        tone={view.lastError ? TONE_COLOR.err : undefined}
       />
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <strong style={{ fontSize: 14, color: "var(--text)" }}>{view.title}</strong>
-          <span
-            style={{
-              fontSize: 11,
-              padding: "1px 7px",
-              borderRadius: 999,
-              border: "1px solid var(--border)",
-              color: "var(--muted)",
-            }}
-          >
-            {modeLabel}
-          </span>
-        </div>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          Último ciclo {fmtAgo(view.lastCycleIso)} · estado no servidor {fmtAgo(state?.runtime_updated_at)}
-        </span>
-      </div>
 
-      <span style={{ fontSize: 11, color: "var(--muted)", gridColumn: "1 / -1", borderTop: "1px dashed var(--border)", paddingTop: 8 }}>
-        Próxima ação
+      <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: "auto", whiteSpace: "nowrap" }}>
+        ciclo {fmtAgo(view.lastCycleIso)} · servidor {fmtAgo(state?.runtime_updated_at)}
       </span>
-      <div style={{ gridColumn: "2", marginTop: -6 }}>
-        <span style={{ fontSize: 13, color: "var(--text)" }}>{view.nextAction}</span>
-      </div>
-
-      <span style={{ fontSize: 11, color: "var(--muted)", gridColumn: "1 / -1" }}>Último erro</span>
-      <div style={{ gridColumn: "2", marginTop: -6 }}>
-        <span style={{ fontSize: 13, color: view.lastError ? TONE_COLOR.err : "var(--muted)" }}>
-          {view.lastError ?? "Sem erros recentes."}
-        </span>
-      </div>
     </div>
+  );
+}
+
+/** Um segmento "rótulo: valor" em linha — mantém o cartão baixo em vez de empilhar rótulo/valor
+ * cada um na sua própria linha. Corta com reticências se não couber, título completo no title. */
+function MonitorEngineField({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <span
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 6,
+        minWidth: 0,
+        flex: "1 1 220px",
+        borderLeft: "1px dashed var(--border)",
+        paddingLeft: 14,
+      }}
+      title={value}
+    >
+      <span style={{ fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{label}:</span>
+      <span
+        style={{
+          fontSize: 12.5,
+          color: tone ?? "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </span>
+    </span>
   );
 }

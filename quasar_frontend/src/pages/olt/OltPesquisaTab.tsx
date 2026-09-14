@@ -13,6 +13,7 @@ import { useAppToast } from "../../lib/appToast";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { OltOnuClientLinkModal } from "./OltOnuClientLinkModal";
+import { OnuMonitorModal } from "../../components/OnuMonitorModal";
 import { OltOnuClientEditModal } from "./OltOnuClientEditModal";
 import { OltOnuTelnetReportModal, type OltOnuReportPonMeta } from "./OltOnuTelnetReportModal";
 import {
@@ -210,6 +211,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const [page, setPage] = useState(1);
   const [clientLinkOpen, setClientLinkOpen] = useState(false);
   const [bulkUnlinkOpen, setBulkUnlinkOpen] = useState(false);
+  const [monitorTarget, setMonitorTarget] = useState<OltOnuSearchResult | null>(null);
   const [clientEditTarget, setClientEditTarget] = useState<OltOnuSearchResult | null>(null);
   const [clientEditBusy, setClientEditBusy] = useState(false);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
@@ -834,6 +836,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                               onClick: () => setClientEditTarget(r),
                             },
                             {
+                              id: "monitor",
+                              label: "Monitorar",
+                              disabled: !r.serial,
+                              onClick: () => setMonitorTarget(r),
+                            },
+                            {
                               id: "deauth",
                               label: "Desautorizar ONU",
                               danger: true,
@@ -1047,6 +1055,23 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         open={clientLinkOpen}
         onClose={() => setClientLinkOpen(false)}
         onImported={() => searchMut.mutate(payload)}
+      />
+
+      <OnuMonitorModal
+        target={
+          monitorTarget
+            ? {
+                serial: monitorTarget.serial,
+                olt_id: monitorTarget.olt_id,
+                olt_description: monitorTarget.olt_description,
+                pon: monitorTarget.pon,
+                onu: monitorTarget.onu,
+                client_name: monitorTarget.client_name,
+              }
+            : null
+        }
+        onClose={() => setMonitorTarget(null)}
+        onSaved={() => toastOk(pushToast, "ONU em monitoramento. Veja a aba ONUs em Alertas.")}
       />
 
       <ConfirmModal

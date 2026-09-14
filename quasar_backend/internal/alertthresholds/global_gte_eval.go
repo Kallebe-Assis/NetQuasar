@@ -162,6 +162,16 @@ func severityGteMetric(v float64, t GteMetricThreshold) string {
 	return "ok"
 }
 
+// capUptimeToWarning: uptime baixo é um sinal de atenção (equipamento provavelmente ainda a
+// estabilizar depois de reiniciar), nunca "crítico" — pedido do utilizador, mesmo padrão de
+// capRxToWarning para potência óptica RX/TX.
+func capUptimeToWarning(metricID, sev string) string {
+	if strings.EqualFold(strings.TrimSpace(metricID), "uptime_minutes") && sev == "critical" {
+		return "warning"
+	}
+	return sev
+}
+
 func capRxToWarning(sev string) string {
 	if sev == "critical" {
 		return "warning"
@@ -220,6 +230,7 @@ func EvaluateNamedGteMetricWithThreshold(
 	th GteMetricThreshold, alertType, metaKey, headline string,
 ) {
 	sev := severityGteMetric(value, th)
+	sev = capUptimeToWarning(metricID, sev)
 	sevPt := strings.ToUpper(sev)
 	if sev == "critical" {
 		sevPt = "Crítico"

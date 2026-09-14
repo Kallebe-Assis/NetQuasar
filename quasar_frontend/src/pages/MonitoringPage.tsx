@@ -680,25 +680,14 @@ export function MonitoringPage() {
 
       {tab === "overview" && (
         <div className="card">
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 16,
-              flexWrap: "wrap",
-              marginBottom: 10,
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Equipamentos monitorados</h2>
-            <div style={{ flex: "1 1 320px", maxWidth: 460, minWidth: 260 }}>
-              <MonitorEngineSummary
-                state={state.data}
-                intervals={intervals.data}
-                agoTick={agoTick}
-                modeLabel={formatMonitoringModeLabel(state.data?.monitoring_mode)}
-              />
-            </div>
+          <h2 style={{ margin: "0 0 10px" }}>Equipamentos monitorados</h2>
+          <div style={{ marginBottom: 10 }}>
+            <MonitorEngineSummary
+              state={state.data}
+              intervals={intervals.data}
+              agoTick={agoTick}
+              modeLabel={formatMonitoringModeLabel(state.data?.monitoring_mode)}
+            />
           </div>
           <div className="row" style={{ margin: "12px 0", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
             {canMutate ? (

@@ -100,6 +100,71 @@ func MergeSerialSearchMatch(summary map[string]any, pon, onu int, serial, model 
 	return changed
 }
 
+// CarryForwardOnuIdentity preenche serial/model das linhas ONU do snapshot NOVO a partir das
+// linhas do snapshot ANTERIOR (casadas por pon+onu), quando a coleta atual não trouxe esses
+// campos. Isto porque a maioria das OLTs deixa de devolver o serial por SNMP assim que a ONU
+// cai — mas o serial é identidade estável, continua válido offline. Uma coleta que TRAZ um
+// serial plausível sempre vence (confirma/atualiza); só se preenche o que veio em falta.
+//
+// Muta as linhas de summary["vsol_onu_rows"] in-place. Devolve quantas linhas ganharam serial.
+func CarryForwardOnuIdentity(summary map[string]any, prevRows []map[string]any) int {
+	if summary == nil || len(prevRows) == 0 {
+		return 0
+	}
+	prevByKey := make(map[string]map[string]any, len(prevRows))
+	for _, r := range prevRows {
+		if r == nil {
+			continue
+		}
+		if k := onuRowKey(r); k != "0.0" {
+			prevByKey[k] = r
+		}
+	}
+	filled := 0
+	for _, row := range OnuRowsFromSummary(summary) {
+		if row == nil {
+			continue
+		}
+		prev, ok := prevByKey[onuRowKey(row)]
+		if !ok {
+			continue
+		}
+		if cur, _ := row["serial"].(string); !IsPlausibleOnuSerial(cur) {
+			if ps, _ := prev["serial"].(string); IsPlausibleOnuSerial(ps) {
+				row["serial"] = strings.ToUpper(strings.TrimSpace(ps))
+				row["serial_source"] = "carried_prev"
+				filled++
+			}
+		}
+		if cur, _ := row["model"].(string); strings.TrimSpace(cur) == "" {
+			if pm, _ := prev["model"].(string); strings.TrimSpace(pm) != "" {
+				row["model"] = strings.TrimSpace(pm)
+			}
+		}
+	}
+	return filled
+}
+
+// CarryForwardOnuIdentityJSON é o equivalente de CarryForwardOnuIdentity para pontos de gravação
+// que lidam com o summary já serializado. `newRaw` é o summary novo; `prevRaw` o anterior.
+func CarryForwardOnuIdentityJSON(newRaw, prevRaw []byte) []byte {
+	if len(newRaw) == 0 || len(prevRaw) == 0 {
+		return newRaw
+	}
+	var newSum, prevSum map[string]any
+	if json.Unmarshal(newRaw, &newSum) != nil || json.Unmarshal(prevRaw, &prevSum) != nil {
+		return newRaw
+	}
+	if CarryForwardOnuIdentity(newSum, OnuRowsFromSummary(prevSum)) == 0 {
+		return newRaw
+	}
+	out, err := json.Marshal(newSum)
+	if err != nil {
+		return newRaw
+	}
+	return out
+}
+
 // SanitizeOnuSerialsJSON é a mesma limpeza que SanitizeOnuSerialsMap, mas para quando só se tem
 // o JSON já serializado (alguns pontos de gravação em olt_snapshots recebem/produzem []byte, não
 // o map[string]any vivo). Devolve o `raw` original sem alterações se não houver nada para limpar

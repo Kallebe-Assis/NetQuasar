@@ -1162,6 +1162,10 @@ func ResolutionHeadlineForAlertType(alertType string) string {
 		return "Contagem de logins BNG normalizada"
 	case "mikrotik_pppoe_drop":
 		return "Contagem de sessões PPPoE MikroTik normalizada"
+	case "onu_monitor_offline":
+		return "ONU monitorada voltou a ficar ONLINE"
+	case "onu_monitor_rx_low":
+		return "RX da ONU monitorada normalizou"
 	case "olt_onu_rise":
 		return "Variação de ONUs online normalizada"
 	case "mikrotik_sfp_tx", "mikrotik_sfp_rx":
