@@ -72,12 +72,14 @@ var MetricCatalog = []CatalogEntry{
 	{Key: "license_level", Section: "system", Label: "Nível licença", Description: "Nível da chave RouterOS.", Placeholder: "1.3.6.1.4.1.14988.1.1.4.3.0", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry},
 	// Mesma secção ("system") do par equivalente por telnet (telnet_sys_free_hdd/telnet_sys_total_hdd
 	// em telnet_metrics.go) — pedido do utilizador: encontrar o Disco no mesmo lugar em SNMP e Telnet.
-	// OID confirmado em produção (snmpget directo, sem índice) — o agente SNMP do RouterOS
-	// testado responde hrStorageSize/hrStorageUsed directamente na raiz da coluna, sem sufixo de
-	// índice de linha (ao contrário da RAM, que precisa do índice — ver memory_total/memory_used
-	// abaixo). Índice de linha (ex.: .65536 ou .131072) só entra se este OID nu não responder.
-	{Key: "disk_total", Section: "system", Label: "Disco total", Description: "Capacidade total de disco/armazenamento (hrStorageSize). Confirmado por snmpget directo (sem índice) — se o seu equipamento não responder assim, tente acrescentar o índice da linha (ex.: …5.65536) via SNMP walk.", Placeholder: "1.3.6.1.2.1.25.2.3.1.5", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
-	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo padrão do «Disco total» — confirmado sem índice de linha.", Placeholder: "1.3.6.1.2.1.25.2.3.1.6", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
+	// CUIDADO — o índice de linha do disco/flash em hrStorageTable VARIA por equipamento: num
+	// RB3011 testado ao vivo, o OID sem índice devolvia a mesma linha da RAM (.65536), não disco;
+	// mas noutro equipamento (snmpwalk confirmado pelo utilizador) a RAM está em .65536 e o disco
+	// numa linha SEPARADA em .131072 — placeholder usa esse índice por ser o mais comum visto até
+	// agora, mas SEMPRE confirme com SNMP Walk no seu próprio equipamento antes de confiar no
+	// valor (senão pode mostrar a memória disfarçada de disco, ou nada).
+	{Key: "disk_total", Section: "system", Label: "Disco total", Description: "Capacidade total de disco/armazenamento (hrStorageSize). O índice de linha (…5.131072 aqui) varia por equipamento — confirme com SNMP Walk no seu antes de confiar no valor.", Placeholder: "1.3.6.1.2.1.25.2.3.1.5.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
+	{Key: "disk_used", Section: "system", Label: "Disco usado", Description: "Espaço de disco/armazenamento em uso (hrStorageUsed). Mesmo aviso do «Disco total» — confirme o índice de linha certo no seu equipamento.", Placeholder: "1.3.6.1.2.1.25.2.3.1.6.131072", CollectModes: []string{ModeSNMPGet}, DefaultMode: ModeSNMPGet, WalkTarget: TargetTelemetry, Unit: "KB"},
 
 	// Health
 	// mtxrHlCpuLoad já vem em percentagem directa (0-100, sem casas decimais) — ao contrário dos
@@ -145,6 +147,9 @@ var MetricCatalog = []CatalogEntry{
 }
 
 func mikrotikDefaultEnabled(key string) bool {
+	// disk_used/disk_total: placeholder aponta para .131072 (índice confirmado ao vivo pelo
+	// utilizador, snmpwalk — linha de disco real, separada da RAM em .65536) — ver aviso em
+	// MetricCatalog sobre variar por equipamento.
 	return key == "cpu_load" || key == "temperature" || key == "sys_uptime" ||
 		key == "memory_used" || key == "memory_total" ||
 		key == "disk_used" || key == "disk_total" ||

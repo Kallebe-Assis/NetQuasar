@@ -75,11 +75,35 @@ func CollectTelnetMetricsWithCatalog(ctx context.Context, host string, creds Tel
 	globalJobs, scopedJobs := buildTelnetJobsFromCatalog(profile, catalog)
 	cmdOutputs := map[string]probing.TelnetRunScriptResult{}
 
+	// connDown — "circuit breaker": quando a PRÓPRIA LIGAÇÃO falha (dial/timeout antes de sequer
+	// autenticar — ver isTelnetConnFailure), todos os comandos seguintes vão falhar exactamente
+	// da mesma forma (é o mesmo host:porta). Sem isto, cada um dos ~10-15 comandos do catálogo
+	// tentava discar de novo e pagava o timeout completo outra vez, gastando o orçamento inteiro
+	// em falhas repetidas e idênticas — confirmado ao vivo (22/22 campos falhos, mesmo erro "dial
+	// tcp ...: i/o timeout" em todos). Uma vez detectada, os campos restantes são marcados como
+	// falhos com o MESMO erro, sem nova tentativa de rede.
+	var connDown *probing.TelnetRunScriptResult
+
 	for _, j := range globalJobs {
-		runTelnetJob(ctx, host, creds, profile, timeout, j, cmdOutputs, &out)
+		if connDown != nil {
+			for _, key := range j.keys {
+				applyTelnetJobResult(&out, key, j.entries[key], j.command, *connDown, profile.Name)
+			}
+			continue
+		}
+		res := runTelnetJob(ctx, host, creds, profile, timeout, j, cmdOutputs, &out)
+		if isTelnetConnFailure(res) {
+			connDown = &res
+		}
 	}
 
-	if len(scopedJobs) > 0 {
+	if len(scopedJobs) > 0 && connDown != nil {
+		for _, j := range scopedJobs {
+			for _, key := range j.keys {
+				applyTelnetJobResult(&out, key, j.entries[key], j.command, *connDown, profile.Name)
+			}
+		}
+	} else if len(scopedJobs) > 0 {
 		ifaces := discoverInterfacesForScope(ctx, host, creds, profile, timeout, scopedJobs, cmdOutputs, &out)
 		for _, j := range scopedJobs {
 			entry0 := j.entries[j.keys[0]]
@@ -206,12 +230,21 @@ func buildTelnetJobsFromCatalog(profile TelnetProfile, catalog []TelnetCatalogEn
 	return global, scoped
 }
 
-func runTelnetJob(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, j telnetJob, cache map[string]probing.TelnetRunScriptResult, out *TelnetCollectOutput) {
+// isTelnetConnFailure distingue uma falha ao nível da LIGAÇÃO (dial/timeout, nunca chegou a
+// autenticar — TelnetRunScript devolve sem Steps quando isto acontece, ver telnet.go) de uma
+// falha de UM comando específico numa sessão que ligou com sucesso — só a primeira justifica
+// desistir dos comandos seguintes sem tentar de novo.
+func isTelnetConnFailure(res probing.TelnetRunScriptResult) bool {
+	return !res.OK && len(res.Steps) == 0
+}
+
+func runTelnetJob(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, j telnetJob, cache map[string]probing.TelnetRunScriptResult, out *TelnetCollectOutput) probing.TelnetRunScriptResult {
 	res := runTelnetCommand(ctx, host, creds, profile, timeout, j.command, cache)
 	for _, key := range j.keys {
 		entry := j.entries[key]
 		applyTelnetJobResult(out, key, entry, j.command, res, profile.Name)
 	}
+	return res
 }
 
 func runTelnetCommand(ctx context.Context, host string, creds TelnetCredentials, profile TelnetProfile, timeout time.Duration, command string, cache map[string]probing.TelnetRunScriptResult) probing.TelnetRunScriptResult {

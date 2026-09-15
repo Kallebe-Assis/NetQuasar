@@ -28,11 +28,16 @@ const (
 // últimos telemetryMergeLookback) que os tinham. Nunca substitui um valor já presente na amostra
 // mais recente — só preenche lacunas. O timestamp devolvido é sempre o da amostra mais recente.
 func LoadLatestMergedTelemetry(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) (collectedAt time.Time, merged json.RawMessage, mergedFrom []time.Time, err error) {
+	// Corte calculado em Go e passado como timestamp (não "$2 || ' seconds'"::interval) — essa
+	// forma de concatenar texto+interval confundia a inferência de tipo do pgx para o parâmetro
+	// (erro visto ao vivo: "unable to encode 1800 into text format for text (OID 25)"), fazendo
+	// este endpoint falhar por completo para alguns equipamentos.
+	cutoff := time.Now().Add(-telemetryMergeLookback)
 	rows, qerr := pool.Query(ctx, `
 		SELECT collected_at, metrics::text FROM telemetry_samples
-		WHERE device_id=$1 AND collected_at >= now() - ($2 || ' seconds')::interval
+		WHERE device_id=$1 AND collected_at >= $2
 		ORDER BY collected_at DESC LIMIT $3
-	`, deviceID, int(telemetryMergeLookback.Seconds()), telemetryMergeMaxRows)
+	`, deviceID, cutoff, telemetryMergeMaxRows)
 	if qerr != nil {
 		err = qerr
 		return

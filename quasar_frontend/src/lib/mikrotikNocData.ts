@@ -110,6 +110,12 @@ const TELNET_RESOURCE_KEYS: Array<{ key: string; field: string }> = [
 
 function num(v: unknown): number | null {
   if (v == null) return null;
+  // "" (comum aqui: String(undefined ?? "").replace(...) quando a fonte telnet não está
+  // configurada) não é zero — é ausência de valor. Number("") === 0 em JS faria isto virar um
+  // "0" válido e, em firstNum(...), esconder para sempre a fonte seguinte (era exactamente o
+  // bug da Voltagem: a tentativa telnet — sempre vazia sem perfil telnet — "ganhava" com 0 antes
+  // de a SNMP, correcta, ser sequer olhada).
+  if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : Number(String(v).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
@@ -370,6 +376,12 @@ export function buildMikrotikNocKpis(metrics: Record<string, unknown> | undefine
     telnetScalar(metrics, "telnet_sys_total_hdd", "total-hdd-space") ??
       mergedTelnetScalar(metrics, "total-hdd-space"),
   );
+  // SNMP (disk_total/disk_used, em KB) — esta era a única fonte que faltava aqui: o painel só
+  // lia o par telnet acima, então um equipamento a coletar disco só por SNMP (caso comum — o
+  // par telnet exige um perfil telnet dedicado) nunca mostrava a percentagem, mesmo com o valor
+  // certo já a chegar em mikrotik_collection.fields.
+  const diskTotalKbSnmp = firstNum(snmpScalar(metrics, "disk_total"));
+  const diskUsedKbSnmp = firstNum(snmpScalar(metrics, "disk_used"));
   let diskPct: number | null = null;
   let diskFree = EM_DASH;
   let diskTotal = EM_DASH;
@@ -379,6 +391,10 @@ export function buildMikrotikNocKpis(metrics: Record<string, unknown> | undefine
     diskTotal = formatBytes(diskTotalBytes);
   } else if (diskFreeBytes != null) {
     diskFree = formatBytes(diskFreeBytes);
+  } else if (diskTotalKbSnmp != null && diskUsedKbSnmp != null && diskTotalKbSnmp > 0) {
+    diskPct = pct(diskUsedKbSnmp, diskTotalKbSnmp);
+    diskFree = formatKilobytes(diskTotalKbSnmp - diskUsedKbSnmp);
+    diskTotal = formatKilobytes(diskTotalKbSnmp);
   }
 
   const tempTelnet = telnetScalar(metrics, "telnet_sys_temperature", "temperature");

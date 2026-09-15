@@ -366,7 +366,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	}
 
 	if mikrotikcollect.IsMikrotikDevice(category, brand, model, description) {
-		return collectMikrotikProfile(ctx, pool, deviceID, host, community, bngEnabled)
+		return collectMikrotikProfile(ctx, pool, deviceID, host, community)
 	}
 
 	profJSON := profileJSONForDevice(ctx, pool, deviceID)
@@ -419,7 +419,7 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	return CollectResult{OK: sn.OK, OIDs: oids, SNMP: sn, Metrics: metrics}, nil
 }
 
-func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string, bngEnabled bool) (CollectResult, error) {
+func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, host, community string) (CollectResult, error) {
 	timeout := 45 * time.Second
 	if dl, ok := ctx.Deadline(); ok {
 		if rem := time.Until(dl) - 3*time.Second; rem > 10*time.Second {
@@ -429,10 +429,15 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 	out, telnetOut, err := mikrotikcollect.CollectAndStore(ctx, pool, deviceID, host, community, timeout)
 	result, resErr := mikrotikResult(out, telnetOut, err)
 
-	// BNG MikroTik: hwAccessTable (Huawei, ver bngcollect/metrics.go) não existe neste hardware —
-	// sessões PPPoE vêm por telnet CLI (/ppp active + /ppp secret) em vez de SNMP. Best-effort:
-	// não falha a coleta principal se isto der erro (ex.: sem credenciais telnet configuradas).
-	if bngEnabled {
+	// Sessões PPPoE por telnet CLI (/ppp active + /ppp secret) — hwAccessTable (Huawei, ver
+	// bngcollect/metrics.go) não existe em hardware MikroTik, por isso não depende de
+	// bng_enabled: corre para QUALQUER MikroTik com credenciais telnet configuradas (mesmo sinal
+	// que já habilita as outras métricas telnet, ver mikrotikcollect.HasEnabledTelnetMetrics) —
+	// um MikroTik "comum" (não marcado como BNG) também é um servidor PPPoE e o utilizador quer
+	// ver as sessões dele na própria tela MikroTik, não só num equipamento marcado bng_enabled=
+	// true para a tela BNG separada. Best-effort: não falha a coleta principal se isto der erro.
+	creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, pool, deviceID)
+	if strings.TrimSpace(creds.User) != "" && strings.TrimSpace(creds.Password) != "" {
 		pppTimeout := 45 * time.Second
 		if dl, ok := ctx.Deadline(); ok {
 			rem := time.Until(dl) - 3*time.Second
@@ -443,7 +448,6 @@ func collectMikrotikProfile(ctx context.Context, pool *pgxpool.Pool, deviceID uu
 			}
 		}
 		if pppTimeout > 0 {
-			creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, pool, deviceID)
 			activeN, knownN, pppErr := bngcollect.CollectAndSyncMikrotikPPPoE(ctx, pool, deviceID, host, creds, pppTimeout)
 			if result.Metrics == nil {
 				result.Metrics = map[string]any{}

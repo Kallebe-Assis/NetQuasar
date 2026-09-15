@@ -550,7 +550,6 @@ export function SwitchPage() {
               metrics={telemetry.data?.metrics}
               ifaces={table}
               ifaceCollectedAt={iface.data?.collected_at}
-              trafficHistory={trafficHistory}
               cpuHistory={cpuHistory}
               memHistory={memHistory}
               canMutate={canMutate}

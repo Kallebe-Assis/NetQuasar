@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
@@ -11,7 +11,8 @@ import { DropdownMenu } from "../components/DropdownMenu";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
-import { formatCollectedPt, parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
+import { parseMikrotikCollectionStatus } from "../lib/deviceReportHelpers";
+import { formatRelativeCompactPt } from "../lib/alertsPresentation";
 import { buildMikrotikNocKpis, ifDisplayName, type MikrotikIfRow } from "../lib/mikrotikNocData";
 import { queryKeys } from "../lib/queryKeys";
 import { isDeviceOnline, trafficHistoryFromInterfaces, useInterfaceMonitorLoop } from "../lib/monitor";
@@ -106,8 +107,6 @@ export function MikrotikPage() {
   const [liveTable, setLiveTable] = useState<MikrotikIfRow[]>([]);
   const [selectedChartIfs, setSelectedChartIfs] = useState<number[]>([]);
   const [trafficHistory, setTrafficHistory] = useState<Record<number, Array<{ ts: number; tx: number; rx: number }>>>({});
-  const [cpuHistory, setCpuHistory] = useState<Array<{ ts: number; v: number }>>([]);
-  const [memHistory, setMemHistory] = useState<Array<{ ts: number; v: number }>>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "Ether" | "Wireless" | "SFP" | "Bridge" | "PPPoE" | "VLAN">("all");
@@ -144,8 +143,11 @@ export function MikrotikPage() {
   const iface = useQuery({
     queryKey: ["mikrotik-if", sel],
     enabled: !!sel,
-    placeholderData: keepPreviousData,
     staleTime: 30_000,
+    // Refresco automático moderado — antes só actualizava no carregamento inicial, no botão
+    // manual "Atualizar interfaces" ou com "Tempo real" ligado, ficando visualmente "presa" o
+    // resto do tempo (relatado: "só as interfaces... que também precisam de revisão").
+    refetchInterval: sel ? 60_000 : false,
     queryFn: () =>
       apiFetch<{
         device_id: string;
@@ -162,16 +164,70 @@ export function MikrotikPage() {
   const telemetry = useQuery({
     queryKey: ["mikrotik-tel", sel],
     enabled: !!sel,
-    placeholderData: keepPreviousData,
     staleTime: 30_000,
     refetchInterval: sel ? 30_000 : false,
-    queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown> }>(`/api/v1/telemetry/devices/${sel}/latest`),
+    queryFn: () => apiFetch<{ collected_at?: string; metrics?: Record<string, unknown>; note?: string }>(`/api/v1/telemetry/devices/${sel}/latest`),
   });
+
+  // Histórico de CPU/memória "das últimas coletas" — amostras já persistidas em
+  // telemetry_samples, não acumulação ao vivo (que começava sempre vazia a cada troca de
+  // equipamento/recarregamento de página e só desenhava algo depois de ficar minutos com a aba
+  // aberta). Mostra logo ao abrir a aba, com dados reais das últimas coletas.
+  const telemetryHistoryQ = useQuery({
+    queryKey: ["mikrotik-tel-history", sel],
+    enabled: !!sel,
+    staleTime: 30_000,
+    queryFn: () =>
+      apiFetch<{ samples: Array<{ collected_at: string; metrics?: Record<string, unknown> }> }>(
+        `/api/v1/telemetry/history?device_id=${sel}&limit=60`,
+      ),
+  });
+
+  const cpuHistory = useMemo(() => {
+    const samples = telemetryHistoryQ.data?.samples ?? [];
+    const out: Array<{ ts: number; v: number }> = [];
+    for (const s of [...samples].reverse()) {
+      const kpis = buildMikrotikNocKpis(s.metrics, "");
+      if (kpis.cpuPct != null) out.push({ ts: new Date(s.collected_at).getTime(), v: kpis.cpuPct });
+    }
+    return out;
+  }, [telemetryHistoryQ.data?.samples]);
+
+  const memHistory = useMemo(() => {
+    const samples = telemetryHistoryQ.data?.samples ?? [];
+    const out: Array<{ ts: number; v: number }> = [];
+    for (const s of [...samples].reverse()) {
+      const kpis = buildMikrotikNocKpis(s.metrics, "");
+      if (kpis.memPct != null) out.push({ ts: new Date(s.collected_at).getTime(), v: kpis.memPct });
+    }
+    return out;
+  }, [telemetryHistoryQ.data?.samples]);
 
   const telnetProfiles = useQuery({
     queryKey: ["mikrotik-telnet-profiles"],
     queryFn: () => apiFetch<{ profiles: Array<{ id: string; name: string; is_default?: boolean }> }>("/api/v1/settings/mikrotik-telnet-profiles"),
     staleTime: 60_000,
+  });
+
+  // Sessões PPPoE por telnet (/ppp active) — carregado só quando a aba PPPoE está aberta (a
+  // consulta ao vivo demora alguns segundos por MikroTik, não vale a pena pedir sempre).
+  const pppoeSessions = useQuery({
+    queryKey: ["mikrotik-pppoe-sessions", sel],
+    enabled: !!sel && section === "pppoe",
+    staleTime: 20_000,
+    queryFn: () =>
+      apiFetch<{ sessions: Array<Record<string, unknown>>; count: number; known_logins?: number }>(
+        `/api/v1/mikrotik/devices/${sel}/pppoe-sessions`,
+      ),
+  });
+
+  const pppoeCollect = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/mikrotik/devices/${id}/pppoe-sessions/collect`, { method: "POST" }),
+    onSuccess: () => {
+      toastOk(pushToast, "Consulta PPPoE iniciada — a lista actualiza em instantes.");
+      setTimeout(() => void qc.invalidateQueries({ queryKey: ["mikrotik-pppoe-sessions", sel] }), 4000);
+    },
+    onError: (err) => toastErr(pushToast, err, "Falha ao iniciar consulta PPPoE."),
   });
 
   const patchTelnetProfile = useMutation({
@@ -262,6 +318,30 @@ export function MikrotikPage() {
     [telemetry.data?.metrics],
   );
 
+  // Distingue "nunca coletado" / "desactualizado" / "sincronização PPPoE falhou" de "valor
+  // genuinamente zero" — antes, qualquer um destes casos mostrava só "—" nos cartões, sem
+  // nenhuma explicação (relatado: "não me mostra uptime, cpu, memória, nada").
+  const dataFreshness = useMemo(() => {
+    if (!sel || telemetry.isLoading) return null;
+    if (!telemetry.data || telemetry.data.note === "sem telemetria persistida") {
+      return { tone: "err" as const, text: "Nunca foi coletada telemetria para este equipamento." };
+    }
+    const collectedAt = telemetry.data.collected_at ? new Date(telemetry.data.collected_at) : null;
+    if (collectedAt && Number.isFinite(collectedAt.getTime())) {
+      const ageMin = (Date.now() - collectedAt.getTime()) / 60_000;
+      if (ageMin > 15) {
+        const ageLabel = ageMin > 120 ? `${Math.round(ageMin / 60)} h` : `${Math.round(ageMin)} min`;
+        return { tone: "warn" as const, text: `Última coleta há ${ageLabel} — os valores abaixo podem estar desactualizados.` };
+      }
+    }
+    const metrics = telemetry.data.metrics as Record<string, unknown> | undefined;
+    const pppoeErr = metrics?.mikrotik_pppoe_sync_error;
+    if (typeof pppoeErr === "string" && pppoeErr) {
+      return { tone: "warn" as const, text: `Sincronização de sessões PPPoE por telnet falhou: ${pppoeErr}` };
+    }
+    return null;
+  }, [sel, telemetry.isLoading, telemetry.data]);
+
   const interfaceRowsFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return table.filter((r) => {
@@ -301,14 +381,6 @@ export function MikrotikPage() {
   });
 
   useEffect(() => {
-    if (!telemetry.data?.metrics) return;
-    const kpis = buildMikrotikNocKpis(telemetry.data.metrics, selectedDevice?.description ?? "");
-    const now = Date.now();
-    if (kpis.cpuPct != null) setCpuHistory((h) => [...h, { ts: now, v: kpis.cpuPct! }].slice(-40));
-    if (kpis.memPct != null) setMemHistory((h) => [...h, { ts: now, v: kpis.memPct! }].slice(-40));
-  }, [telemetry.data?.metrics, telemetry.data?.collected_at, selectedDevice?.description]);
-
-  useEffect(() => {
     if (!realtimeOn || !sel) return;
     const intervalMs = Math.max(1500, Number(realtimeMs) || 3000);
     const timer = window.setInterval(() => {
@@ -320,8 +392,6 @@ export function MikrotikPage() {
   useEffect(() => {
     setRealtimeOn(false);
     setSelectedChartIfs([]);
-    setCpuHistory([]);
-    setMemHistory([]);
     setTrafficHistory({});
   }, [sel]);
 
@@ -377,6 +447,12 @@ export function MikrotikPage() {
         ) : null}
       </div>
     ) : null;
+
+  const dataFreshnessWarning = dataFreshness ? (
+    <div className={`msg msg--${dataFreshness.tone}`} style={{ fontSize: 12, marginBottom: 12 }}>
+      {dataFreshness.text}
+    </div>
+  ) : null;
 
   const interfacesPanel = (
     <div className="mk-noc-panel" style={{ background: "transparent", border: "none", padding: 0 }}>
@@ -535,11 +611,10 @@ export function MikrotikPage() {
               deviceIp={selectedDevice.ip}
               deviceOnline={deviceOnline}
               collectedAt={telemetry.data?.collected_at}
-              formatCollectedAt={formatCollectedPt}
+              formatCollectedAt={formatRelativeCompactPt}
               metrics={telemetry.data?.metrics}
               ifaces={table}
               ifaceCollectedAt={iface.data?.collected_at}
-              trafficHistory={trafficHistory}
               cpuHistory={cpuHistory}
               memHistory={memHistory}
               canMutate={canMutate}
@@ -554,7 +629,14 @@ export function MikrotikPage() {
                 </>
               }
               collectionWarning={collectionWarning}
+              dataFreshnessWarning={dataFreshnessWarning}
               interfacesPanel={interfacesPanel}
+              pppoeSessions={pppoeSessions.data?.sessions}
+              pppoeKnownLogins={pppoeSessions.data?.known_logins}
+              pppoeLoading={pppoeSessions.isLoading || pppoeSessions.isFetching}
+              pppoeError={pppoeSessions.isError ? (pppoeSessions.error as Error)?.message : undefined}
+              pppoeCollecting={pppoeCollect.isPending}
+              onPppoeCollect={() => sel && pppoeCollect.mutate(sel)}
             />
             )
           ) : (

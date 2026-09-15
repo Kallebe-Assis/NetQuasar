@@ -811,6 +811,92 @@ func (s *Server) mikrotikSessionsLiveBatch(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// resolveMikrotikDevice — equivalente a resolveBngDevice, mas SEM exigir bng_enabled=true: usado
+// pela tela MikroTik (não a tela BNG) para mostrar as sessões PPPoE de QUALQUER equipamento
+// MikroTik, já que bng_enabled serve para marcar equipamentos que aparecem na tela BNG separada
+// (agregados de um concentrador dedicado) — um MikroTik "comum" também corre um servidor PPPoE e
+// o utilizador quer ver as sessões dele na própria tela MikroTik, sem precisar marcar esse flag.
+func (s *Server) resolveMikrotikDevice(ctx context.Context, id uuid.UUID) (bngDeviceRow, error) {
+	var row bngDeviceRow
+	err := s.DB().QueryRow(ctx, `
+		SELECT d.id, coalesce(d.description,''), coalesce(host(d.ip)::text,''),
+			coalesce(d.brand,''), coalesce(d.model,''), coalesce(d.category,'')
+		FROM devices d WHERE d.id=$1
+	`, id).Scan(&row.ID, &row.Description, &row.IP, &row.Brand, &row.Model, &row.Category)
+	if err != nil {
+		return row, err
+	}
+	if !mikrotikcollect.IsMikrotikDevice(row.Category, row.Brand, row.Model, row.Description) {
+		return row, fmt.Errorf("equipamento não é MikroTik")
+	}
+	return row, nil
+}
+
+// mikrotikPPPoESessions devolve as sessões PPPoE activas deste MikroTik ao vivo (telnet /ppp
+// active) — usado pela aba PPPoE da tela MikroTik (ver item 8 do plano), independente de
+// bng_enabled. Mesma fonte de dados de mikrotikSessionsLiveBatch, sem o filtro por índices.
+func (s *Server) mikrotikPPPoESessions(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, err := s.resolveMikrotikDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento MikroTik não encontrado", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+	defer cancel()
+	creds := mikrotikcollect.LoadTelnetCredentialsForDevice(ctx, s.DB(), id)
+	active, secrets, err := mikrotikcollect.CollectPPPoESessions(ctx, strings.TrimSpace(dev.IP), creds, 30*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "TELNET", err.Error(), nil)
+		return
+	}
+	out := make([]map[string]any, 0, len(active))
+	for _, e := range active {
+		out = append(out, sessionRowToJSON(bngcollect.SessionRowFromMikrotikActive(e)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":    id,
+		"sessions":     out,
+		"source":       "telnet_live",
+		"count":        len(out),
+		"known_logins": len(secrets),
+	})
+}
+
+// mikrotikPPPoESessionsCollect dispara a consulta completa (telnet /ppp active + /ppp secret,
+// sincroniza bng_known_logins) para um MikroTik qualquer — mesmo job de fundo já usado por
+// bngDeviceSessionsCollect (runMikrotikPPPoECollect), só sem exigir bng_enabled=true.
+func (s *Server) mikrotikPPPoESessionsCollect(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_QUERY", "id inválido", nil)
+		return
+	}
+	dev, err := s.resolveMikrotikDevice(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "equipamento MikroTik não encontrado", nil)
+		return
+	}
+	if !s.bngCollectProgress.start(id) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "already_running",
+			"message": "Já existe uma consulta completa em curso neste equipamento.",
+			"status":  s.bngCollectProgress.get(id),
+		})
+		return
+	}
+	go s.runMikrotikPPPoECollect(id, strings.TrimSpace(dev.IP))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":  true,
+		"device_id": id,
+		"message":   "Consulta iniciada. Acompanhe o progresso em /sessions/collect/status.",
+	})
+}
+
 func (s *Server) loadCachedBngSessions(ctx context.Context, deviceID uuid.UUID) ([]map[string]any, *time.Time, string, string) {
 	var capturedAt time.Time
 	var label string

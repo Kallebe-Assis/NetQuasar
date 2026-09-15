@@ -3,12 +3,10 @@ import {
   Activity,
   Cable,
   Cpu,
-  Gauge,
   HardDrive,
   LayoutDashboard,
   MemoryStick,
   Network,
-  Radio,
   RefreshCw,
   Server,
   Settings,
@@ -17,17 +15,7 @@ import {
   Wifi,
   Zap,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link } from "react-router-dom";
 import { DeviceMonitorShell } from "./DeviceMonitorShell";
 import { KpiCard, RingGauge } from "./DeviceMonitorWidgets";
@@ -35,18 +23,15 @@ import { EM_DASH, formatSnmpDisplayText } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import {
   buildMikrotikNocKpis,
-  buildMikrotikPppoeTop,
   buildMikrotikSfpPanels,
   buildMikrotikSystemInfo,
   ifDisplayName,
   ifOperUp,
   inferIfType,
-  pickPrimaryIface,
   type MikrotikIfRow,
 } from "../lib/mikrotikNocData";
 import {
   buildSwitchNocKpis,
-  buildSwitchPppoeTop,
   buildSwitchSfpPanels,
   buildSwitchSystemInfo,
 } from "../lib/switchNocData";
@@ -68,7 +53,6 @@ type Props = {
   metrics?: Record<string, unknown>;
   ifaces: MikrotikIfRow[];
   ifaceCollectedAt?: string;
-  trafficHistory: Record<number, Array<{ ts: number; tx: number; rx: number }>>;
   cpuHistory: Array<{ ts: number; v: number }>;
   memHistory: Array<{ ts: number; v: number }>;
   canMutate: boolean;
@@ -78,7 +62,14 @@ type Props = {
   onRefreshIf: () => void;
   telnetProfileSelect?: React.ReactNode;
   collectionWarning?: React.ReactNode;
+  dataFreshnessWarning?: React.ReactNode;
   interfacesPanel?: React.ReactNode;
+  pppoeSessions?: Array<Record<string, unknown>>;
+  pppoeKnownLogins?: number;
+  pppoeLoading?: boolean;
+  pppoeError?: string;
+  pppoeCollecting?: boolean;
+  onPppoeCollect?: () => void;
 };
 
 const NAV: Array<{ id: MikrotikNocSection; label: string; icon: typeof LayoutDashboard }> = [
@@ -105,24 +96,10 @@ export function MikrotikNocDashboard(props: Props) {
     () => (isSwitch ? buildSwitchSystemInfo(props.metrics, kpis) : buildMikrotikSystemInfo(props.metrics, kpis)),
     [isSwitch, props.metrics, kpis],
   );
-  const pppoeTop = useMemo(
-    () => (isSwitch ? buildSwitchPppoeTop(props.metrics, 5) : buildMikrotikPppoeTop(props.metrics, 5)),
-    [isSwitch, props.metrics],
-  );
   const sfpPanels = useMemo(
     () => (isSwitch ? buildSwitchSfpPanels(props.metrics, props.ifaces) : buildMikrotikSfpPanels(props.metrics, props.ifaces)),
     [isSwitch, props.metrics, props.ifaces],
   );
-  const primaryIface = useMemo(() => pickPrimaryIface(props.ifaces), [props.ifaces]);
-  const trafficPoints = useMemo(() => {
-    if (!primaryIface) return [];
-    const hist = props.trafficHistory[primaryIface.if_index] ?? [];
-    return hist.map((p) => ({
-      t: new Date(p.ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      rx: p.rx / 1_000_000,
-      tx: p.tx / 1_000_000,
-    }));
-  }, [primaryIface, props.trafficHistory]);
 
   const cpuChart = props.cpuHistory.map((p) => ({
     t: new Date(p.ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -190,6 +167,7 @@ export function MikrotikNocDashboard(props: Props) {
       }
       toolbar={toolbar}
     >
+      {props.dataFreshnessWarning}
       {props.collectionWarning}
 
       {props.section === "overview" && (
@@ -201,83 +179,43 @@ export function MikrotikNocDashboard(props: Props) {
                 <KpiCard icon={Cpu} title="CPU">
                   <RingGauge pct={kpis.cpuPct} label="CPU" sub={kpis.cpuFreq ?? undefined} color="var(--mk-cpu)" />
                 </KpiCard>
+                <KpiCard icon={Thermometer} title="Temperatura CPU">
+                  <div className="mk-noc-kpi__value mk-noc-kpi__value--ok">
+                    {kpis.tempCpu ?? EM_DASH}
+                  </div>
+                </KpiCard>
                 <KpiCard icon={MemoryStick} title="Memória">
                   <RingGauge pct={kpis.memPct} label="RAM" sub={kpis.memFree !== EM_DASH ? `${kpis.memFree} livre` : undefined} color="var(--accent)" />
                 </KpiCard>
                 <KpiCard icon={HardDrive} title="Disco">
-                  <RingGauge pct={kpis.diskPct} label="Disco" sub={kpis.diskFree !== EM_DASH ? kpis.diskFree : undefined} color="var(--mk-disk)" />
+                  <RingGauge pct={kpis.diskPct} label="Disco" sub={kpis.diskFree !== EM_DASH ? `${kpis.diskFree} livre` : undefined} color="var(--mk-disk)" />
                 </KpiCard>
                 <KpiCard icon={Thermometer} title="Temperatura">
                   <div className="mk-noc-kpi__value mk-noc-kpi__value--ok">
                     {kpis.tempC != null ? `${kpis.tempC.toFixed(0)} °C` : EM_DASH}
                   </div>
-                  <div className="mk-noc-kpi__sub">
-                    {kpis.tempCpu ? `CPU ${kpis.tempCpu}` : ""}
-                    {kpis.tempBoard ? ` · Placa ${kpis.tempBoard}` : ""}
-                  </div>
+                  {kpis.tempBoard ? <div className="mk-noc-kpi__sub">Placa {kpis.tempBoard}</div> : null}
                 </KpiCard>
                 <KpiCard icon={Zap} title="Voltagem">
                   <div className="mk-noc-kpi__value mk-noc-kpi__value--ok">
                     {kpis.voltageV != null ? `${kpis.voltageV.toFixed(1)} V` : EM_DASH}
                   </div>
                 </KpiCard>
-                {!isSwitch ? (
-                  <KpiCard icon={Wifi} title="PPPoE activos">
-                    <div className="mk-noc-kpi__value">{kpis.pppoeCount}</div>
-                    <div className="mk-noc-kpi__sub">sessões IF-MIB</div>
-                  </KpiCard>
-                ) : null}
               </div>
 
               <div className="mk-noc-mid">
                 <div className="mk-noc-panel">
                   <h3>
-                    <Gauge size={14} />
-                    Tráfego — {primaryIface ? ifDisplayName(primaryIface) : "interface principal"}
-                  </h3>
-                  <div className="mk-noc-traffic-live">
-                    <span className="down">↓ {formatBitrate(primaryIface?.in_bps)}</span>
-                    <span className="up">↑ {formatBitrate(primaryIface?.out_bps)}</span>
-                  </div>
-                  <div style={{ height: 200 }}>
-                    {trafficPoints.length >= 2 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={trafficPoints}>
-                          <defs>
-                            <linearGradient id="mkRx" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
-                              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="mkTx" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="var(--ok)" stopOpacity={0.35} />
-                              <stop offset="100%" stopColor="var(--ok)" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid stroke="var(--mk-chart-grid)" vertical={false} />
-                          <XAxis dataKey="t" tick={{ fill: "var(--muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                          <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} axisLine={false} tickLine={false} unit=" Mbps" />
-                          <Tooltip wrapperClassName="mk-noc-chart-tooltip" contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11 }} />
-                          <Area type="monotone" dataKey="rx" stroke="var(--mk-rx)" fill="url(#mkRx)" name="Download" />
-                          <Area type="monotone" dataKey="tx" stroke="var(--mk-tx)" fill="url(#mkTx)" name="Upload" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="mk-noc-muted">
-                        Active tempo real ou atualize interfaces para construir o gráfico de tráfego.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mk-noc-panel">
-                  <h3>
                     <Activity size={14} />
-                    CPU &amp; memória
+                    CPU
                   </h3>
                   <div className="mk-noc-chart-mini">
                     {cpuChart.length >= 2 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={cpuChart}>
+                        <LineChart data={cpuChart} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                          <CartesianGrid stroke="var(--mk-chart-grid)" vertical={false} />
+                          <XAxis dataKey="t" tick={{ fill: "var(--muted)", fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis tick={{ fill: "var(--muted)", fontSize: 9 }} axisLine={false} tickLine={false} unit="%" domain={[0, 100]} />
                           <Line type="monotone" dataKey="v" stroke="var(--mk-cpu)" dot={false} strokeWidth={2} name="CPU %" />
                           <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11 }} />
                         </LineChart>
@@ -286,11 +224,22 @@ export function MikrotikNocDashboard(props: Props) {
                       <p className="mk-noc-muted">CPU actual: {kpis.cpuPct != null ? `${kpis.cpuPct.toFixed(0)}%` : EM_DASH}</p>
                     )}
                   </div>
-                  <div className="mk-noc-chart-mini" style={{ marginTop: 8 }}>
+                </div>
+
+                <div className="mk-noc-panel">
+                  <h3>
+                    <MemoryStick size={14} />
+                    Memória
+                  </h3>
+                  <div className="mk-noc-chart-mini">
                     {memChart.length >= 2 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={memChart}>
+                        <LineChart data={memChart} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                          <CartesianGrid stroke="var(--mk-chart-grid)" vertical={false} />
+                          <XAxis dataKey="t" tick={{ fill: "var(--muted)", fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={24} />
+                          <YAxis tick={{ fill: "var(--muted)", fontSize: 9 }} axisLine={false} tickLine={false} unit="%" domain={[0, 100]} />
                           <Line type="monotone" dataKey="v" stroke="var(--mk-mem)" dot={false} strokeWidth={2} name="RAM %" />
+                          <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11 }} />
                         </LineChart>
                       </ResponsiveContainer>
                     ) : (
@@ -298,69 +247,6 @@ export function MikrotikNocDashboard(props: Props) {
                     )}
                   </div>
                 </div>
-
-                {!isSwitch ? (
-                  <div className="mk-noc-panel">
-                    <h3>
-                      <Wifi size={14} />
-                      Sessões PPPoE (top 5)
-                    </h3>
-                    {pppoeTop.length === 0 ? (
-                      <p className="mk-noc-muted">Nenhuma sessão activa detectada.</p>
-                    ) : (
-                      <table className="mk-noc-table">
-                        <thead>
-                          <tr>
-                            <th>Cliente</th>
-                            <th>Uptime</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {pppoeTop.map((p) => (
-                            <tr key={p.ifIndex}>
-                              <td>{p.name}</td>
-                              <td className="mono">{p.uptime}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-
-                    {sfpPanels[0] ? (
-                      <>
-                        <h3 style={{ marginTop: 14 }}>
-                          <Radio size={14} />
-                          {sfpPanels[0].name} — óptico
-                        </h3>
-                        <div className="mk-noc-sfp-card">
-                          <h4>
-                            {sfpPanels[0].name}{" "}
-                            <span className={`mk-noc-badge ${sfpPanels[0].online ? "mk-noc-badge--on" : "mk-noc-badge--off"}`} style={{ fontSize: 9 }}>
-                              {sfpPanels[0].online ? "ONLINE" : "DOWN"}
-                            </span>
-                          </h4>
-                          {(
-                            [
-                              ["Temperatura", sfpPanels[0].temperatureC],
-                              ["Voltagem", sfpPanels[0].voltageV],
-                              ["TX Bias", sfpPanels[0].txBiasMa],
-                              ["TX Power", sfpPanels[0].txDbm],
-                              ["RX Power", sfpPanels[0].rxDbm],
-                              ["Fabricante", sfpPanels[0].vendor],
-                              ["Modelo", sfpPanels[0].model],
-                              ["Serial", sfpPanels[0].serial],
-                            ] as const
-                          ).map(([k, v]) => (
-                            <div key={k} className="mk-noc-sfp-row">
-                              <span>{k}</span>
-                              <strong className="mono">{v}</strong>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
 
               <div className="mk-noc-bottom">
@@ -464,24 +350,51 @@ export function MikrotikNocDashboard(props: Props) {
 
           {!isSwitch && props.section === "pppoe" && (
             <div className="mk-noc-panel">
-              <h2 className="mk-noc-section-title">Sessões PPPoE activas</h2>
-              <p className="mk-noc-muted">{kpis.pppoeCount} sessão(ões) via IF-MIB</p>
-              <table className="mk-noc-table" style={{ marginTop: 12 }}>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Cliente</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {buildMikrotikPppoeTop(props.metrics, 50).map((p, i) => (
-                    <tr key={p.ifIndex}>
-                      <td>{i + 1}</td>
-                      <td>{p.name}</td>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <h2 className="mk-noc-section-title">Sessões PPPoE activas</h2>
+                  <p className="mk-noc-muted">
+                    {(props.pppoeSessions ?? []).length} sessão(ões) ao vivo por telnet (/ppp active)
+                    {props.pppoeKnownLogins ? ` — ${props.pppoeKnownLogins} login(s) conhecido(s)` : ""}
+                  </p>
+                </div>
+                {props.canMutate && props.onPppoeCollect ? (
+                  <button type="button" className="btn btn--sm" disabled={props.pppoeCollecting} onClick={props.onPppoeCollect}>
+                    <RefreshCw size={13} /> {props.pppoeCollecting ? "A consultar…" : "Consulta completa"}
+                  </button>
+                ) : null}
+              </div>
+
+              {props.pppoeError ? (
+                <p className="mk-noc-muted" style={{ color: "var(--err)", marginTop: 10 }}>
+                  Falha ao consultar sessões PPPoE por telnet: {props.pppoeError}
+                </p>
+              ) : props.pppoeLoading && !props.pppoeSessions ? (
+                <p className="mk-noc-muted" style={{ marginTop: 10 }}>A consultar sessões PPPoE ao vivo…</p>
+              ) : (props.pppoeSessions ?? []).length === 0 ? (
+                <p className="mk-noc-muted" style={{ marginTop: 10 }}>Nenhuma sessão PPPoE activa agora.</p>
+              ) : (
+                <table className="mk-noc-table" style={{ marginTop: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Login</th>
+                      <th>IPv4</th>
+                      <th>MAC</th>
+                      <th>Tempo online</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(props.pppoeSessions ?? []).map((s, i) => (
+                      <tr key={String(s.login ?? s.index ?? i)}>
+                        <td>{String(s.login ?? EM_DASH)}</td>
+                        <td className="mono">{String(s.ipv4 ?? EM_DASH) || EM_DASH}</td>
+                        <td className="mono">{String(s.mac ?? EM_DASH) || EM_DASH}</td>
+                        <td>{String(s.online_time ?? EM_DASH) || EM_DASH}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
