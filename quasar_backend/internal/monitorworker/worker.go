@@ -106,6 +106,7 @@ func tick(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger) error {
 	}
 
 	TryStartParallelTelemetryCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
+	TryStartParallelMikrotikFullCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngSessionsCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})
 	TryStartParallelBngLoginWatchCycle(runCtx, pool, log, mode, cfg, SweepOpts{Source: "worker"})

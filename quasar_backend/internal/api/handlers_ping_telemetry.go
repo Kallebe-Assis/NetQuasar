@@ -203,11 +203,7 @@ func (s *Server) telemetryLatest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_ID", "", nil)
 		return
 	}
-	var collected time.Time
-	var metrics []byte
-	err = s.DB().QueryRow(r.Context(), `
-		SELECT collected_at, metrics::text FROM telemetry_samples WHERE device_id=$1 ORDER BY collected_at DESC LIMIT 1
-	`, id).Scan(&collected, &metrics)
+	collected, metrics, mergedFrom, err := telemetryengine.LoadLatestMergedTelemetry(r.Context(), s.DB(), id)
 	if err == pgx.ErrNoRows {
 		writeJSON(w, http.StatusOK, map[string]any{"device_id": id, "note": "sem telemetria persistida"})
 		return
@@ -216,7 +212,11 @@ func (s *Server) telemetryLatest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"device_id": id, "collected_at": collected, "metrics": json.RawMessage(metrics)})
+	resp := map[string]any{"device_id": id, "collected_at": collected, "metrics": metrics}
+	if len(mergedFrom) > 0 {
+		resp["merged_from"] = mergedFrom
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) telemetryHistory(w http.ResponseWriter, r *http.Request) {

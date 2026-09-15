@@ -1203,6 +1203,7 @@ type ReportServiceRow struct {
 	ServiceName  string `json:"service_name,omitempty"`
 	Login        string `json:"login,omitempty"`
 	IPv4         string `json:"ipv4,omitempty"`
+	IPv6         string `json:"ipv6,omitempty"` // prefixo IPv6 (não o IPv6-PD) da última conexão — ver pickIPv6Prefix
 	MAC          string `json:"mac,omitempty"`
 	Status       string `json:"status,omitempty"`
 	StatusPrefix string `json:"status_prefix,omitempty"`
@@ -1346,9 +1347,13 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 			}
 			row := ReportServiceRow{
 				ClientID: clientID, ClientCode: clientCode, ClientName: clientName, Document: doc,
-				ServiceID:    pickStr(sm, "id_cliente_servico"),
-				ServiceName:  pickStr(sm, "nome"),
-				Login:        pickStr(sm, "login"),
+				ServiceID:   pickStr(sm, "id_cliente_servico"),
+				ServiceName: pickStr(sm, "nome"),
+				Login:       pickStr(sm, "login"),
+				// IPv4 estático do plano/serviço — quase sempre vazio; serve só de fallback.
+				// O IP de facto usado para testar acesso remoto é o da última conexão
+				// (ultima_conexao.ultimo_ipv4, sobrescrito abaixo), mesmo campo mostrado como
+				// "Último Ipv4" na consulta de cliente.
 				IPv4:         pickStr(sm, "ipv4"),
 				MAC:          pickStr(sm, "mac_addr", "phy_addr"),
 				Status:       pickStr(sm, "status"),
@@ -1361,6 +1366,10 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 			}
 			if ac, ok := sm["ultima_conexao"].(map[string]any); ok {
 				row.Connected = pickStr(ac, "conectado")
+				if v := pickStr(ac, "ultimo_ipv4"); v != "" {
+					row.IPv4 = v
+				}
+				row.IPv6 = pickIPv6Prefix(ac)
 			}
 			if len(stateWant) > 0 {
 				got := strings.ToLower(strings.TrimSpace(stripAccents(row.State)))
@@ -1686,6 +1695,9 @@ type ConferenceOSItem struct {
 	ClientName  string `json:"client_name,omitempty"`
 	Login       string `json:"login,omitempty"`
 	IPv4        string `json:"ipv4,omitempty"`
+	// IPv6 prefixo da última conexão (não o IPv6-PD) — vem directo da HubSoft, ver
+	// pickIPv6Prefix. Vazio = sem IPv6 atribuído nessa conexão (ou cliente nunca conectou).
+	IPv6 string `json:"ipv6,omitempty"`
 	// Connected vem directo da HubSoft ("true"/"false"/"" sem dado) — mesmo campo do relatório
 	// de Clientes, não é cruzado com dados nossos.
 	Connected string `json:"connected,omitempty"`
@@ -1756,6 +1768,7 @@ func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, 
 			}
 			it.Login = best.Login
 			it.IPv4 = best.IPv4
+			it.IPv6 = best.IPv6
 			it.Connected = best.Connected
 			it.Resolved = true
 			resolved++
@@ -2849,6 +2862,29 @@ func pickStr(m map[string]any, keys ...string) string {
 			if s := scalarToString(v); s != "" {
 				return s
 			}
+		}
+	}
+	return ""
+}
+
+// pickIPv6Prefix extrai o prefixo IPv6 (não o IPv6-PD) do objeto ultima_conexao. A doc da API
+// não deixa 100% claro o nome exacto da chave — tenta os nomes mais prováveis (mesmo padrão
+// ultimo_* de ultimo_ipv4/ultimo_nas_ip) e, se nenhum bater, varre as chaves do objeto por
+// qualquer uma que contenha "ipv6" mas não "pd" (evita pegar o IPv6-PD, que é um prefixo
+// diferente — delegado para a rede do cliente, não o prefixo /64 da própria sessão). O
+// utilizador só quer saber se este primeiro prefixo existe, não o valor em si formatado de
+// alguma forma especial.
+func pickIPv6Prefix(ac map[string]any) string {
+	if v := pickStr(ac, "ultimo_ipv6", "ipv6", "prefixo_ipv6", "ultimo_prefixo_ipv6", "framed_ipv6_prefix"); v != "" {
+		return v
+	}
+	for k, v := range ac {
+		lk := strings.ToLower(k)
+		if !strings.Contains(lk, "ipv6") || strings.Contains(lk, "pd") {
+			continue
+		}
+		if s := scalarToString(v); strings.TrimSpace(s) != "" {
+			return s
 		}
 	}
 	return ""

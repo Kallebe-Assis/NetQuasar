@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhubsoft"
 )
 
 // "Conferência" — botão na aba Ordens de serviço da HubSoft: junta três conferências que já
 // existem em telas separadas (status de conexão — igual ao badge da aba Relatório → Clientes;
-// acesso remoto HTTP/HTTPS — igual à aba Ferramentas → HTTP/HTTPS; IPv6 — bng_known_logins,
-// mesma tabela de sempre) para cada O.S. de um período, com estatística e drill-down.
+// acesso remoto HTTP/HTTPS — igual à aba Ferramentas → HTTP/HTTPS; IPv6 — prefixo da última
+// conexão, direto da própria HubSoft, ver integrationhubsoft.pickIPv6Prefix) para cada O.S. de
+// um período, com estatística e drill-down.
 
 // hubsoftConferenceStandardPorts — mesmas portas por omissão da aba Ferramentas → HTTP/HTTPS
 // (ver ToolsPage.tsx, mxPorts) — "acesso remoto" conta como OK se qualquer uma responder.
@@ -91,13 +91,6 @@ func (s *Server) hubsoftConference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// IPv6 — mesma tabela permanente usada pela aba Sessões PPPoE do BNG, um único SELECT para
-	// todos os logins distintos da leva (em vez de uma consulta por login).
-	var ipv6Set map[string]bool
-	if body.CheckIPv6 {
-		ipv6Set, _ = loadKnownLoginIPv6Set(ctx, s.DB())
-	}
-
 	// Acesso remoto — probe concorrente por IPv4 distinto (dedupe: vários clientes raramente
 	// repetem IP, mas evita trabalho em duplicado quando acontece).
 	var remoteSet map[string]bool
@@ -126,9 +119,9 @@ func (s *Server) hubsoftConference(w http.ResponseWriter, r *http.Request) {
 				connStat.Fail++
 			}
 		}
-		if body.CheckIPv6 && it.Resolved && it.Login != "" {
+		if body.CheckIPv6 && it.Resolved {
 			row.IPv6Checked = true
-			row.IPv6Present = ipv6Set[strings.ToLower(strings.TrimSpace(it.Login))]
+			row.IPv6Present = strings.TrimSpace(it.IPv6) != ""
 			ipv6Stat.Checked++
 			if row.IPv6Present {
 				ipv6Stat.OK++
@@ -157,33 +150,6 @@ func (s *Server) hubsoftConference(w http.ResponseWriter, r *http.Request) {
 		},
 		Items: out,
 	})
-}
-
-// loadKnownLoginIPv6Set devolve, por login (lower/trim), se alguma vez foi visto com um IPv6
-// atribuído em bng_known_logins — mesma tabela/convenção de loadKnownLoginStatusSet
-// (handlers_client_connections.go), só que para a coluna ipv6 em vez de is_online.
-func loadKnownLoginIPv6Set(ctx context.Context, db *pgxpool.Pool) (map[string]bool, error) {
-	rows, err := db.Query(ctx, `
-		SELECT lower(trim(login)), bool_or(coalesce(nullif(trim(ipv6), ''), '') <> '')
-		FROM bng_known_logins
-		GROUP BY lower(trim(login))
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make(map[string]bool)
-	for rows.Next() {
-		var login string
-		var has bool
-		if err := rows.Scan(&login, &has); err != nil {
-			return nil, err
-		}
-		if login != "" {
-			out[login] = has
-		}
-	}
-	return out, rows.Err()
 }
 
 const hubsoftConferenceProbeConcurrency = 24

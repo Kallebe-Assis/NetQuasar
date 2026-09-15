@@ -81,13 +81,21 @@ func sectionAllowed(section string, sections []string) bool {
 	return false
 }
 
+// getOIDTimeout devolve o timeout por-OID (não o total do ciclo) — limita quanto uma única
+// métrica pode consumir do orçamento total quando há várias por coletar em sequência. O teto de
+// 4s era baixo demais para equipamentos ligados por um link lento/instável (ex.: VPN L2TP): uma
+// única resposta atrasada já falhava a métrica, e como snmpGetScalar não fazia retry (Retries:0),
+// uma perda de pacote isolada — comum em VPN — também. Com o teto maior e 1 retry (abaixo), o
+// GET ainda respeita o orçamento total do ciclo (ctx.Err() é verificado a cada campo em
+// CollectMetrics — nunca ultrapassa o deadline do chamador), só fica mais tolerante quando há
+// folga.
 func getOIDTimeout(total time.Duration) time.Duration {
 	t := total
 	if t <= 0 {
 		t = 12 * time.Second
 	}
-	if t > 4*time.Second {
-		return 4 * time.Second
+	if t > 8*time.Second {
+		return 8 * time.Second
 	}
 	if t < 2*time.Second {
 		return 2 * time.Second
@@ -99,10 +107,16 @@ func getOIDTimeout(total time.Duration) time.Duration {
 func snmpGetScalar(ctx context.Context, host, community, oid string, timeout time.Duration) (probing.SNMPGetResult, string) {
 	oid = strings.TrimSpace(strings.TrimPrefix(oid, "."))
 	to := getOIDTimeout(timeout)
+	// 1 retry: absorve uma perda de pacote UDP isolada (frequente em VPN) sem falhar a métrica
+	// inteira; o próprio gosnmp já limita isto ao timeout `to` por tentativa.
+	retries := 1
+	if to <= 2*time.Second {
+		retries = 0
+	}
 	try := func(o string) probing.SNMPGetResult {
 		return probing.SNMPGet(ctx, probing.SNMPGetParams{
 			Host: host, Community: community, OIDs: []string{o},
-			Version: "2c", Timeout: to, Retries: 0,
+			Version: "2c", Timeout: to, Retries: retries,
 		})
 	}
 	res := try(oid)

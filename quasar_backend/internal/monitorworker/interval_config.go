@@ -47,6 +47,10 @@ type intervalConfig struct {
 	// BngLoginWatchSeconds — intervalo do ciclo rápido de presença online/offline (só walk de
 	// access_login, sem detalhe de sessão) — ver TryStartParallelBngLoginWatchCycle.
 	BngLoginWatchSeconds int
+	// MikrotikFullParallelSeconds — intervalo do ciclo dedicado de coleta MikroTik completa
+	// (disco/óptica/telnet/PPPoE), separado do ciclo rápido de saúde — ver
+	// TryStartParallelMikrotikFullCycle.
+	MikrotikFullParallelSeconds int
 }
 
 // ResolveTelemetrySeconds devolve segundos de telemetria a usar (evita COALESCE em SQL por compatibilidade).
@@ -85,7 +89,8 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 			COALESCE(history_retention_days, 90),
 			COALESCE(olt_baseline_parallel_seconds, 30),
 			COALESCE(bng_sessions_parallel_seconds, 1800),
-			COALESCE(bng_login_watch_seconds, 90)
+			COALESCE(bng_login_watch_seconds, 90),
+			COALESCE(mikrotik_full_parallel_seconds, 900)
 		FROM monitoring_intervals WHERE id=1
 	`).Scan(&c.PingTimeoutMs, &c.ICMPPayloadBytes, &c.OfflineThreshold, &c.PingSeconds,
 		&telSecRaw, &telMin, &c.IfaceSeconds, &c.OltDerivedSeconds,
@@ -94,7 +99,7 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		&c.PipelineCycleSeconds, &c.MikrotikTimeoutMs, &c.BngTimeoutMs, &c.PingParallel,
 		&c.OltPonStatusSeconds, &c.OltOnuCountsSeconds, &c.OltFullCollectSeconds, &c.OltFullCollectSchedule,
 		&c.SweepConcurrency, &c.HistoryRetentionDays, &c.OltBaselineParallelSeconds, &c.BngSessionsParallelSeconds,
-		&c.BngLoginWatchSeconds); err != nil {
+		&c.BngLoginWatchSeconds, &c.MikrotikFullParallelSeconds); err != nil {
 		return intervalConfig{}, err
 	}
 	c.TelemetrySeconds = ResolveTelemetrySeconds(telSecRaw, telMin)
@@ -169,6 +174,11 @@ func loadClampMonitoringIntervals(ctx context.Context, pool *pgxpool.Pool) (inte
 		// Piso de segurança: mesmo sendo só um walk de logins (sem detalhe), evita martelar
 		// o BNG com mais frequência que a cada 30s por um valor digitado por engano.
 		c.BngLoginWatchSeconds = 30
+	}
+	if c.MikrotikFullParallelSeconds < 300 {
+		// Piso de segurança: uma coleta completa (disco/óptica/telnet/PPPoE) é pesada — evita
+		// repeti-la com mais frequência que a cada 5 minutos por um valor digitado por engano.
+		c.MikrotikFullParallelSeconds = 300
 	}
 	return c, nil
 }

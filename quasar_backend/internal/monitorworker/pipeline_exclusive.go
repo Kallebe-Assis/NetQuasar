@@ -139,6 +139,20 @@ func UnlockBngInterfacesCycle() {
 	bngInterfacesCycleMu.Unlock()
 }
 
+// mikrotikFullCycleMu — ciclo dedicado de coleta MikroTik completa (disco/óptica/telnet/PPPoE),
+// separado do ciclo rápido de saúde por ser bem mais pesado. Ver TryStartParallelMikrotikFullCycle.
+var mikrotikFullCycleMu sync.Mutex
+
+// TryLockMikrotikFullCycle tenta adquirir o ciclo MikroTik completo sem bloquear.
+func TryLockMikrotikFullCycle() bool {
+	return mikrotikFullCycleMu.TryLock()
+}
+
+// UnlockMikrotikFullCycle liberta o ciclo MikroTik completo.
+func UnlockMikrotikFullCycle() {
+	mikrotikFullCycleMu.Unlock()
+}
+
 // retentionCycleMu evita duas purgas de histórico simultâneas (TryRunHistoryRetention).
 var retentionCycleMu sync.Mutex
 
