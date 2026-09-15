@@ -110,8 +110,6 @@ export function ToolsPage() {
   const [mxPorts, setMxPorts] = useState("2265\n80\n8080\n8888\n443\n8443");
   const [mxTo, setMxTo] = useState("300");
   const [mxInsecure, setMxInsecure] = useState(true);
-  type HttpMatrixFilter = "all" | "ok" | "blocked";
-  const [httpMatrixFilter, setHttpMatrixFilter] = useState<HttpMatrixFilter>("all");
   const httpMatrixRun = useMutation({
     mutationFn: async () => {
       const ips = splitLinesOrComma(mxIps);
@@ -157,25 +155,23 @@ export function ToolsPage() {
       return { rows, note: "Máx. 64 combinações IP×porta; cada célula envia um teste HTTP/HTTPS ao servidor." };
     },
     onMutate: () => {
-      setHttpMatrixFilter("all");
       show("info", "A executar sondagens HTTP e HTTPS em todas as combinações IP×porta…");
     },
     onSuccess: (data) => {
       const okRows = data.rows.filter((r) => isHttpMatrixRowAnyProbeAccessible(r)).length;
-      show("ok", `Matriz concluída: ${data.rows.length} combinação(ões); ${okRows} com HTTP ou HTTPS acessível.`);
+      if (okRows === 0) show("err", "Sem acesso HTTP/HTTPS em nenhuma combinação testada.");
+      else show("ok", `Acesso HTTP/HTTPS OK: ${okRows} de ${data.rows.length} combinação(ões) acessível(eis).`);
     },
     onError: (e) => {
       show("err", e instanceof Error ? e.message : String(e));
     },
   });
 
-  const httpMatrixRowsFiltered = useMemo(() => {
+  const httpMatrixOkRows = useMemo(() => {
     const rows = httpMatrixRun.data?.rows;
     if (!rows?.length) return [];
-    if (httpMatrixFilter === "all") return rows;
-    if (httpMatrixFilter === "ok") return rows.filter((r) => isHttpMatrixRowAnyProbeAccessible(r));
-    return rows.filter((r) => !isHttpMatrixRowAnyProbeAccessible(r));
-  }, [httpMatrixRun.data?.rows, httpMatrixFilter]);
+    return rows.filter((r) => isHttpMatrixRowAnyProbeAccessible(r));
+  }, [httpMatrixRun.data?.rows]);
 
   const [icmpHost, setIcmpHost] = useState("127.0.0.1");
   const [icmpTo, setIcmpTo] = useState("3000");
@@ -656,65 +652,43 @@ export function ToolsPage() {
               <ToolOutputError err={httpMatrixRun.error as Error | null} />
               {httpMatrixRun.data ? (
                 <>
-                  <p style={{ color: "var(--muted)", fontSize: 11 }}>{httpMatrixRun.data.note}</p>
-                  <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "var(--muted)" }}>Mostrar</span>
-                    {(
-                      [
-                        ["all", "Todos", "Filtro: todas as combinações."],
-                        ["ok", "Acessíveis", "Filtro: HTTP ou HTTPS OK (pelo menos um)."],
-                        ["blocked", "Bloqueados", "Filtro: HTTP e HTTPS falharam (nenhum acessível)."],
-                      ] as const
-                    ).map(([k, lab, hint]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        className={httpMatrixFilter === k ? "btn btn--primary" : "btn"}
-                        style={{ fontSize: 12 }}
-                        onClick={() => {
-                          setHttpMatrixFilter(k);
-                          show("info", hint, 4000);
-                        }}
-                      >
-                        {lab}
-                      </button>
-                    ))}
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {httpMatrixRowsFiltered.length} de {httpMatrixRun.data.rows.length} combinações IP×porta
-                    </span>
-                  </div>
-                  <div className="table-wrap" style={{ marginTop: 8 }}>
-                    {httpMatrixRowsFiltered.length === 0 ? (
-                      <p style={{ padding: 12, margin: 0, color: "var(--muted)", fontSize: 13 }}>
-                        Nenhuma linha corresponde a este filtro.
+                  {httpMatrixOkRows.length === 0 ? (
+                    <p className="msg msg--err" style={{ marginTop: 12 }}>
+                      Sem acesso HTTP/HTTPS ({httpMatrixRun.data.rows.length} combinação(ões) testada(s), nenhuma acessível).
+                    </p>
+                  ) : (
+                    <>
+                      <p className="msg msg--ok" style={{ marginTop: 12 }}>
+                        Acesso HTTP/HTTPS OK — {httpMatrixOkRows.length} de {httpMatrixRun.data.rows.length} combinação(ões) acessível(eis).
                       </p>
-                    ) : (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>IP</th>
-                            <th>Porta</th>
-                            <th>HTTPS</th>
-                            <th>HTTP</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {httpMatrixRowsFiltered.map((r) => (
-                            <tr key={`${r.ip}:${r.port}`}>
-                              <td className="mono">{r.ip}</td>
-                              <td className="mono">{r.port}</td>
-                              <td style={{ fontSize: 11, verticalAlign: "top" }}>
-                                <HttpProbeCellSummary probe={r.https} />
-                              </td>
-                              <td style={{ fontSize: 11, verticalAlign: "top" }}>
-                                <HttpProbeCellSummary probe={r.http} />
-                              </td>
+                      <div className="table-wrap" style={{ marginTop: 8 }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>IP</th>
+                              <th>Porta</th>
+                              <th>HTTPS</th>
+                              <th>HTTP</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
+                          </thead>
+                          <tbody>
+                            {httpMatrixOkRows.map((r) => (
+                              <tr key={`${r.ip}:${r.port}`}>
+                                <td className="mono">{r.ip}</td>
+                                <td className="mono">{r.port}</td>
+                                <td style={{ fontSize: 11, verticalAlign: "top" }}>
+                                  <HttpProbeCellSummary probe={r.https} />
+                                </td>
+                                <td style={{ fontSize: 11, verticalAlign: "top" }}>
+                                  <HttpProbeCellSummary probe={r.http} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : null}
             </>
