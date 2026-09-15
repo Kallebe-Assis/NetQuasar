@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { CircleHelp, ExternalLink, Mail } from "lucide-react";
 import { InstagramIcon } from "../components/icons/InstagramIcon";
 import { ABOUT_FAQ, ABOUT_FAQ_CATEGORIES, type AboutFaqCategory } from "../lib/aboutFaq";
+import { SystemVersionTab } from "./about/SystemVersionTab";
 
 const DEVELOPER = {
   name: "Kallebe Assis Nogueira",
@@ -11,13 +12,14 @@ const DEVELOPER = {
   createdAtLabel: "11 de maio de 2026",
 };
 
-type TabId = "overview" | "developer" | "stack" | "production" | "backups" | "security" | "faq";
+type TabId = "overview" | "developer" | "stack" | "production" | "version" | "backups" | "security" | "faq";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Visão geral" },
   { id: "developer", label: "Desenvolvedor" },
   { id: "stack", label: "Tecnologias" },
   { id: "production", label: "Produção & deploy" },
+  { id: "version", label: "Versão do sistema" },
   { id: "backups", label: "Backups & dados" },
   { id: "security", label: "Segurança" },
   { id: "faq", label: "FAQ" },
@@ -234,6 +236,8 @@ export function AboutPage() {
             <p>API Go local + Vite com proxy; Postgres/Redis via Docker ou instalação nativa. Variáveis em <code>.env</code>.</p>
           </section>
         ) : null}
+
+        {tab === "version" ? <SystemVersionTab /> : null}
 
         {tab === "backups" ? (
           <section className="card about-section about-section--wide">

@@ -1355,11 +1355,13 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 				// (ultima_conexao.ultimo_ipv4, sobrescrito abaixo), mesmo campo mostrado como
 				// "Último Ipv4" na consulta de cliente.
 				IPv4: pickStr(sm, "ipv4"),
-				// IPv6 — ao contrário do IPv4 (dinâmico, vem de ultima_conexao), o prefixo IPv6
-				// é estático por serviço: campo "ipv6" irmão de "ipv4" no próprio objeto do
-				// serviço, não dentro de ultima_conexao. Confirmado com um payload real da API
-				// (servicos[].ipv6 — null quando o cliente não tem IPv6, string do prefixo
-				// quando tem).
+				// IPv6 — servicos[].ipv6 é um campo estático (config manual, raramente preenchido —
+				// confirmado ao vivo: vem null mesmo em clientes com IPv6 activo na conexão).
+				// O IPv6 de facto atribuído por sessão só aparece embutido em texto livre dentro
+				// de ultima_conexao.status_txt (ex.: "...- 45.235.87.49 - 2804:4d68:4df:5e00::/56
+				// (45.235.87.124)" — IPv4, prefixo IPv6, NAS-IP entre parêntesis) — não há campo
+				// estruturado próprio para ele nesta versão da API. Extraído abaixo via regex,
+				// sobrepondo o campo estático quando presente.
 				IPv6:         pickStr(sm, "ipv6"),
 				MAC:          pickStr(sm, "mac_addr", "phy_addr"),
 				Status:       pickStr(sm, "status"),
@@ -1374,6 +1376,9 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 				row.Connected = pickStr(ac, "conectado")
 				if v := pickStr(ac, "ultimo_ipv4"); v != "" {
 					row.IPv4 = v
+				}
+				if row.IPv6 == "" {
+					row.IPv6 = extractIPv6Prefix(pickStr(ac, "status_txt", "status_txt_resumido"))
 				}
 			}
 			if len(stateWant) > 0 {
@@ -1723,13 +1728,27 @@ type WorkOrderConferenceData struct {
 }
 
 // BuildWorkOrderConferenceData faz duas varreduras paginadas (O.S. do período + roster completo
-// de clientes/serviços, este último o MESMO endpoint/parâmetros já usados pelo relatório de
-// Clientes) e junta-as em memória pelo código do cliente — evita N chamadas extra (uma por O.S.)
-// para resolver login/IPv4/estado de conexão.
+// de clientes/serviços) e junta-as em memória — evita N chamadas extra (uma por O.S.) para
+// resolver login/IPv4/IPv6/estado de conexão.
+//
+// Uma primeira tentativa desta função ligava a O.S. a "qualquer serviço do cliente com login
+// preenchido" — errado quando o cliente tem mais de um serviço/login (relatado ao vivo: cliente
+// MARLETE GOMES DOMICIANO, O.S. do login "marlete", sistema a conferir "marletegomes" por
+// engano). Uma segunda tentativa foi buscar o atendimento vinculado à O.S., mas
+// /atendimento/todos?relacoes=cliente_servico voltou 0 resultados úteis em produção (confirmado
+// ao vivo via log) — provavelmente essa relação não é suportada nesse endpoint de listagem em
+// massa. A solução real, também confirmada ao vivo: exibir_atendimento=true no /ordem_servico/
+// todos já embute directamente "dados_servico":{"id_cliente_servico":...} e
+// "dados_cliente":{"codigo_cliente":...,"nome_razaosocial":...} em CADA O.S. — o ID exacto do
+// serviço envolvido naquela O.S. especificamente, sem precisar de nenhuma chamada extra nem de
+// adivinhar por cliente. byServiceID cruza isto directo com ReportServiceRow.ServiceID (o mesmo
+// id_cliente_servico já extraído em reportFromClientsTodos). Só cai para o roster completo do
+// cliente (heurística antiga, "primeiro com login") nos poucos casos em que dados_servico não
+// vem preenchido.
 func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, to string) WorkOrderConferenceData {
 	from, to = defaultPeriod(from, to)
 	osItems, osTotal, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/ordem_servico/todos",
-		map[string]string{"data_inicio": from, "data_fim": to}, maxReportPages, "ordens_servico", "ordem_servico", "ordens")
+		map[string]string{"data_inicio": from, "data_fim": to, "exibir_atendimento": "true"}, maxReportPages, "ordens_servico", "ordem_servico", "ordens")
 	if err != nil {
 		return WorkOrderConferenceData{Message: "Falha ao coletar ordens de serviço: " + err.Error(), From: from, To: to}
 	}
@@ -1737,12 +1756,15 @@ func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, 
 	if svcErr != nil {
 		return WorkOrderConferenceData{Message: "Falha ao coletar clientes/serviços: " + svcErr.Error(), From: from, To: to}
 	}
+	byServiceID := make(map[string]ReportServiceRow, len(svcResult.Rows))
 	byClient := make(map[string][]ReportServiceRow, len(svcResult.Rows))
 	for _, row := range svcResult.Rows {
-		if row.ClientCode == "" {
-			continue
+		if row.ServiceID != "" {
+			byServiceID[row.ServiceID] = row
 		}
-		byClient[row.ClientCode] = append(byClient[row.ClientCode], row)
+		if row.ClientCode != "" {
+			byClient[row.ClientCode] = append(byClient[row.ClientCode], row)
+		}
 	}
 
 	items := make([]ConferenceOSItem, 0, len(osItems))
@@ -1750,6 +1772,19 @@ func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, 
 	for _, m := range osItems {
 		clienteLabel := pickStr(m, "cliente")
 		code := extractClientCodeFromLabel(clienteLabel)
+		clientName := strings.TrimSpace(clienteCodigoRe.ReplaceAllString(clienteLabel, ""))
+		serviceID := ""
+		if dc, ok := m["dados_cliente"].(map[string]any); ok {
+			if v := pickStr(dc, "codigo_cliente"); v != "" {
+				code = v
+			}
+			if v := pickStr(dc, "nome_razaosocial"); v != "" {
+				clientName = v
+			}
+		}
+		if ds, ok := m["dados_servico"].(map[string]any); ok {
+			serviceID = pickStr(ds, "id_cliente_servico")
+		}
 		it := ConferenceOSItem{
 			ID:          pickStr(m, "id_ordem_servico"),
 			Number:      firstNonEmpty(pickStr(m, "numero"), pickStr(m, "id_ordem_servico")),
@@ -1759,22 +1794,36 @@ func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, 
 			CreatedAt:   pickStr(m, "data_cadastro"),
 			ScheduledAt: pickStr(m, "data_inicio_programado"),
 			ClientCode:  code,
-			ClientName:  strings.TrimSpace(clienteCodigoRe.ReplaceAllString(clienteLabel, "")),
+			ClientName:  clientName,
 		}
-		if rows, ok := byClient[code]; code != "" && ok && len(rows) > 0 {
-			// Um cliente pode ter mais do que um serviço — prioriza o primeiro com login
-			// preenchido (caso comum: um só serviço), senão fica com o primeiro da lista.
-			best := rows[0]
-			for _, r := range rows {
-				if strings.TrimSpace(r.Login) != "" {
-					best = r
-					break
-				}
+
+		var svc *ReportServiceRow
+		if serviceID != "" {
+			if row, ok := byServiceID[serviceID]; ok {
+				svc = &row
 			}
-			it.Login = best.Login
-			it.IPv4 = best.IPv4
-			it.IPv6 = best.IPv6
-			it.Connected = best.Connected
+		}
+		if svc == nil {
+			// Rede de segurança: dados_servico não veio preenchido nesta O.S. — mantém o
+			// comportamento anterior em vez de deixar a O.S. sem dado nenhum. Um cliente pode ter
+			// mais de um serviço; sem saber qual é o certo, prioriza o primeiro com login
+			// preenchido (caso comum: um só serviço).
+			if rows, ok := byClient[code]; code != "" && ok && len(rows) > 0 {
+				best := rows[0]
+				for _, r := range rows {
+					if strings.TrimSpace(r.Login) != "" {
+						best = r
+						break
+					}
+				}
+				svc = &best
+			}
+		}
+		if svc != nil {
+			it.Login = svc.Login
+			it.IPv4 = svc.IPv4
+			it.IPv6 = svc.IPv6
+			it.Connected = svc.Connected
 			it.Resolved = true
 			resolved++
 		}
@@ -2859,6 +2908,18 @@ func formatPhoneBR(raw string) string {
 	default:
 		return raw
 	}
+}
+
+// ipv6PrefixRe casa um prefixo IPv6 em notação CIDR (ex.: "2804:4d68:4df:5e00::/56") — usado para
+// extrair o IPv6 de dentro do texto livre de ultima_conexao.status_txt (ver extractIPv6Prefix).
+var ipv6PrefixRe = regexp.MustCompile(`[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7}/\d{1,3}`)
+
+// extractIPv6Prefix tira o prefixo IPv6 embutido em ultima_conexao.status_txt/status_txt_resumido
+// — a única forma que esta versão da API expõe o IPv6 realmente atribuído à conexão (o campo
+// estruturado servicos[].ipv6 é estático/manual e normalmente vem vazio). Formato confirmado ao
+// vivo: "...HÁ ... - <ipv4> - <prefixo_ipv6>(<nas_ip>)". Devolve "" quando não há IPv6 na sessão.
+func extractIPv6Prefix(statusText string) string {
+	return ipv6PrefixRe.FindString(statusText)
 }
 
 func pickStr(m map[string]any, keys ...string) string {

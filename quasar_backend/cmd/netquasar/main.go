@@ -99,6 +99,9 @@ func main() {
 		if err := bootstrap.EnsureDatabaseMetaRow(ctx, pool, cfg); err != nil {
 			log.Fatal().Err(err).Msg("database meta")
 		}
+		if err := bootstrap.ResumeAfterUpdate(ctx, pool); err != nil {
+			log.Warn().Err(err).Msg("retomar monitoramento após atualização")
+		}
 	} else {
 		log.Warn().Msg("sem ligação PostgreSQL: configure em /api/v1/setup ou defina NETQUASAR_DATABASE_URL / credenciais NETQUASAR_DB_*")
 	}

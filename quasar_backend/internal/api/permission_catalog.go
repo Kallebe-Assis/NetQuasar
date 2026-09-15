@@ -66,6 +66,7 @@ var permissionCatalog = []permissionDefinition{
 	{Key: "settings.notifications", Module: "settings", ModuleLabel: "Configurações", Label: "Notificações e automações"},
 	{Key: "settings.users", Module: "settings", ModuleLabel: "Configurações", Label: "Gerir usuários"},
 	{Key: "settings.permissions", Module: "settings", ModuleLabel: "Configurações", Label: "Gerir perfis de permissão"},
+	{Key: "settings.system_update", Module: "settings", ModuleLabel: "Configurações", Label: "Verificar e aplicar atualizações do sistema"},
 }
 
 var validPermissionKeys = func() map[string]struct{} {

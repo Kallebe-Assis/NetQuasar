@@ -12,6 +12,13 @@ services:
       args:
         # Ex.: PowerShell: $env:CACHEBUST = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); docker compose build netquasar
         CACHEBUST: ${CACHEBUST:-0}
+        # Versão exibida em Sobre → Versão do sistema — exportar antes do build (o serviço
+        # `updater` já faz isto sozinho quando actualiza a partir do GitHub):
+        #   GIT_COMMIT=$(git rev-parse HEAD) GIT_COMMIT_SHORT=$(git rev-parse --short HEAD) \
+        #   BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) docker compose build netquasar
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_COMMIT_SHORT: ${GIT_COMMIT_SHORT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     init: true
     restart: unless-stopped
     ports:
@@ -67,6 +74,33 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    networks:
+      - netquasar_net
+
+  # updater — único serviço com acesso ao socket do Docker e ao checkout do repositório do host;
+  # o netquasar nunca fala com Docker/git directamente (superfície de ataque menor, já que é ele
+  # que fica exposto à internet). Faz polling de system_update_state (Postgres) e executa
+  # git pull + docker compose build/up quando a aba Sobre → Versão do sistema pede uma
+  # atualização. Ver deploy/updater/entrypoint.sh.
+  updater:
+    build:
+      context: ./deploy/updater
+    restart: unless-stopped
+    working_dir: /workspace
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
+    env_file:
+      - .env
+    environment:
+      NETQUASAR_DB_HOST: postgres
+      NETQUASAR_DB_PORT: "5432"
+      NETQUASAR_DB_USER: ${POSTGRES_USER}
+      NETQUASAR_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      NETQUASAR_DB_NAME: ${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - netquasar_net
 

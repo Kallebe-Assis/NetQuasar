@@ -32,7 +32,8 @@ const CHECK_LABELS: Record<CheckKey, { title: string; okLabel: string; failLabel
   ipv6: { title: "IPv6", okLabel: "Com IPv6", failLabel: "Sem IPv6" },
 };
 
-function itemPassesFilter(item: HubsoftConferenceItem, filter: FilterState): boolean {
+function itemPassesFilter(item: HubsoftConferenceItem, filter: FilterState, statusFilter: Set<string>): boolean {
+  if (statusFilter.size > 0 && !statusFilter.has(item.status || "—")) return false;
   if (!filter) return true;
   if (filter.check === "connection") {
     if (!item.connection_checked) return false;
@@ -53,6 +54,7 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
   const [checkRemoteAccess, setCheckRemoteAccess] = useState(true);
   const [checkIPv6, setCheckIPv6] = useState(true);
   const [filter, setFilter] = useState<FilterState>(null);
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
 
   const run = useMutation({
     mutationFn: () =>
@@ -67,18 +69,37 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
         },
         timeoutMs: 3 * 60_000,
       }),
-    onSuccess: () => setFilter(null),
+    onSuccess: () => {
+      setFilter(null);
+      setStatusFilter(new Set());
+    },
   });
 
   const d = run.data;
 
+  const availableStatuses = useMemo(() => {
+    if (!d?.items) return [];
+    const set = new Set<string>();
+    for (const it of d.items) set.add(it.status || "—");
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [d?.items]);
+
   const filteredItems = useMemo(() => {
     if (!d?.items) return [];
-    return d.items.filter((it) => itemPassesFilter(it, filter));
-  }, [d?.items, filter]);
+    return d.items.filter((it) => itemPassesFilter(it, filter, statusFilter));
+  }, [d?.items, filter, statusFilter]);
 
   function toggleFilter(check: CheckKey, value: "ok" | "fail") {
     setFilter((cur) => (cur && cur.check === check && cur.value === value ? null : { check, value }));
+  }
+
+  function toggleStatus(status: string) {
+    setStatusFilter((cur) => {
+      const next = new Set(cur);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
   }
 
   function StatTile({ check }: { check: CheckKey }) {
@@ -196,11 +217,33 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
               {checkIPv6 ? <StatTile check="ipv6" /> : null}
             </div>
 
+            {availableStatuses.length > 1 ? (
+              <div className="row" style={{ gap: 6, flexWrap: "wrap", margin: "14px 0 0", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Status da O.S.:</span>
+                {availableStatuses.map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    className={`btn btn--sm${statusFilter.has(st) ? " btn--primary" : ""}`}
+                    onClick={() => toggleStatus(st)}
+                  >
+                    {st}
+                  </button>
+                ))}
+                {statusFilter.size > 0 ? (
+                  <button type="button" className="btn btn--sm" onClick={() => setStatusFilter(new Set())}>
+                    Limpar status
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center", margin: "16px 0 6px" }}>
               <h4 style={{ margin: 0, fontSize: 13 }}>
                 {filter
                   ? `${CHECK_LABELS[filter.check].title} — ${filter.value === "ok" ? CHECK_LABELS[filter.check].okLabel : CHECK_LABELS[filter.check].failLabel}`
-                  : "Todas as O.S. do período"}{" "}
+                  : "Todas as O.S. do período"}
+                {statusFilter.size > 0 ? ` · status: ${Array.from(statusFilter).join(", ")}` : ""}{" "}
                 ({fmtInt(filteredItems.length)})
               </h4>
               {filter ? (

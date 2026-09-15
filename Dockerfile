@@ -17,7 +17,17 @@ WORKDIR /app
 COPY quasar_backend/ ./
 COPY --from=frontend /build/dist ./internal/embedui/dist
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/netquasar ./cmd/netquasar
+# Versão exibida em Sobre → Versão do sistema (internal/buildinfo). Sem --build-arg (build manual
+# sem passar por docker compose com essas variáveis exportadas) fica "unknown" — degrada com
+# graça, só desliga a comparação com o GitHub nessa aba.
+ARG GIT_COMMIT=unknown
+ARG GIT_COMMIT_SHORT=unknown
+ARG BUILD_TIME=unknown
+RUN go build -trimpath -ldflags="-s -w \
+    -X github.com/netquasar/netquasar/quasar_backend/internal/buildinfo.GitCommit=${GIT_COMMIT} \
+    -X github.com/netquasar/netquasar/quasar_backend/internal/buildinfo.GitCommitShort=${GIT_COMMIT_SHORT} \
+    -X github.com/netquasar/netquasar/quasar_backend/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+    -o /out/netquasar ./cmd/netquasar
 
 FROM debian:bookworm-slim
 RUN apt-get update \

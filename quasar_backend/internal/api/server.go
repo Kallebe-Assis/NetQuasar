@@ -180,6 +180,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			})
 		})
 
+		r.Route("/system", func(r chi.Router) {
+			r.Get("/version", s.systemVersion)
+			r.Post("/version/check", s.systemVersionCheck)
+			r.Post("/update", s.systemUpdate)
+		})
+
 		r.Route("/settings", func(r chi.Router) {
 			r.Get("/monitoring-intervals", s.getMonitoringIntervals)
 			r.Get("/monitoring", s.getMonitoringSettings)
