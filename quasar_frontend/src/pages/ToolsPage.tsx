@@ -52,6 +52,13 @@ function splitLinesOrComma(s: string): string[] {
 
 type HostPingRow = { host: string; ok: boolean; rtt_ms?: number; error?: string; note?: string };
 
+// Antes era um limite fixo de 100, sem ligação a nenhuma restrição real do backend (o endpoint
+// /tools/icmp/ping recebe UM host por pedido — não há tamanho de lote no servidor). Subido bem
+// acima disso, agora com pedidos em paralelo (ver HOST_PING_CONCURRENCY) para manter o tempo
+// total razoável — o teto que resta é só para não travar a aba com uma tabela gigante.
+const HOST_PING_MAX_TARGETS = 1000;
+const HOST_PING_CONCURRENCY = 10;
+
 type Tab =
   | "host_ping"
   | "http_matrix"
@@ -73,37 +80,52 @@ export function ToolsPage() {
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");
   const [hostPingTimeout, setHostPingTimeout] = useState("4000");
   // Preenchido aos poucos durante a execução (a cada 25 resultados — ver mutationFn abaixo), não
-  // só no fim: com até 100 alvos a até 15s de timeout cada, esperar tudo terminar antes de
-  // mostrar qualquer coisa podia levar minutos com a tela parada.
+  // só no fim: com até HOST_PING_MAX_TARGETS alvos a até 15s de timeout cada, esperar tudo
+  // terminar antes de mostrar qualquer coisa podia levar minutos com a tela parada.
   const [hostPingLive, setHostPingLive] = useState<HostPingRow[]>([]);
+  // Progresso real (não estimado): actualizado a cada resultado individual, em separado de
+  // hostPingLive (que só actualiza a cada 25 para não redesenhar a tabela inteira 1000 vezes).
+  const [hostPingProgress, setHostPingProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const hostPingRun = useMutation({
     mutationFn: async () => {
-      const hosts = splitLinesOrComma(hostPingText).slice(0, 100);
+      const hosts = splitLinesOrComma(hostPingText).slice(0, HOST_PING_MAX_TARGETS);
       const timeout_ms = Math.min(15000, Math.max(500, Number(hostPingTimeout) || 4000));
+      setHostPingProgress({ done: 0, total: hosts.length });
       const rows: HostPingRow[] = [];
-      for (const host of hosts) {
-        try {
-          const r = await apiFetch<{ ok?: boolean; rtt_ms?: number; error?: string; note?: string }>("/api/v1/tools/icmp/ping", {
-            method: "POST",
-            json: { host, timeout_ms },
-          });
-          rows.push({
-            host,
-            ok: !!r.ok,
-            rtt_ms: typeof r.rtt_ms === "number" ? r.rtt_ms : undefined,
-            error: r.error,
-            note: r.note,
-          });
-        } catch (e) {
-          rows.push({ host, ok: false, error: e instanceof Error ? e.message : String(e) });
+      // Antes disto corria um a um (sequencial) — com centenas de alvos e timeouts de até 15s
+      // isso podia levar dezenas de minutos. Um pool de HOST_PING_CONCURRENCY pedidos em
+      // paralelo (mesmo host:porta nunca se repete, então não há problema de sobrecarregar um
+      // único alvo) mantém o tempo total razoável mesmo com o limite bem mais alto.
+      let next = 0;
+      async function worker() {
+        while (next < hosts.length) {
+          const host = hosts[next++];
+          try {
+            const r = await apiFetch<{ ok?: boolean; rtt_ms?: number; error?: string; note?: string }>("/api/v1/tools/icmp/ping", {
+              method: "POST",
+              json: { host, timeout_ms },
+            });
+            rows.push({
+              host,
+              ok: !!r.ok,
+              rtt_ms: typeof r.rtt_ms === "number" ? r.rtt_ms : undefined,
+              error: r.error,
+              note: r.note,
+            });
+          } catch (e) {
+            rows.push({ host, ok: false, error: e instanceof Error ? e.message : String(e) });
+          }
+          setHostPingProgress({ done: rows.length, total: hosts.length });
+          if (rows.length % 25 === 0) setHostPingLive([...rows]);
         }
-        if (rows.length % 25 === 0) setHostPingLive([...rows]);
       }
+      await Promise.all(Array.from({ length: Math.min(HOST_PING_CONCURRENCY, hosts.length) }, () => worker()));
       setHostPingLive([...rows]);
-      return { rows, note: "Até 100 nomes por execução; ICMP echo via servidor (resolução DNS + ping)." };
+      return { rows, note: `Até ${HOST_PING_MAX_TARGETS} nomes por execução (${HOST_PING_CONCURRENCY} em paralelo); ICMP echo via servidor (resolução DNS + ping).` };
     },
     onMutate: () => {
       setHostPingLive([]);
+      setHostPingProgress({ done: 0, total: 0 });
       show("info", "A executar ping ICMP em lote no servidor…");
     },
     onSuccess: (data) => {
@@ -601,14 +623,31 @@ export function ToolsPage() {
       {tab === "host_ping" && (
         <ToolsPanel
           title="Ping a hosts ou domínios"
-          description="Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até 100 por execução). Timeout por requisição: 500–15000 ms."
+          description={`Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até ${HOST_PING_MAX_TARGETS} por execução, ${HOST_PING_CONCURRENCY} em paralelo). Timeout por requisição: 500–15000 ms.`}
           results={
             <>
               <ToolOutputError err={hostPingRun.error as Error | null} />
-              {hostPingRun.isPending ? (
-                <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
-                  A processar… {hostPingLive.length} resultado(s) já recebido(s) (a lista abaixo atualiza a cada 25).
-                </p>
+              {hostPingRun.isPending && hostPingProgress.total > 0 ? (
+                <div className="conn-import-progress" style={{ marginTop: 8 }}>
+                  <div
+                    className="conn-import-progress__bar"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={hostPingProgress.total}
+                    aria-valuenow={hostPingProgress.done}
+                  >
+                    <div
+                      className="conn-import-progress__fill"
+                      style={{ width: `${Math.round((hostPingProgress.done / hostPingProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                  <div className="conn-import-progress__meta">
+                    <span>
+                      {hostPingProgress.done} / {hostPingProgress.total} alvo(s)
+                    </span>
+                    <span>{Math.round((hostPingProgress.done / hostPingProgress.total) * 100)}%</span>
+                  </div>
+                </div>
               ) : null}
               {hostPingLive.length > 0 ? (
                 <div className="row" style={{ gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
