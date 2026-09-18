@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { CheckCircle2, XCircle } from "lucide-react";
 import {
   HttpProbeCellSummary,
   isHttpMatrixRowAnyProbeAccessible,
@@ -18,6 +19,7 @@ import { InfoHint } from "../components/InfoHint";
 import { LatencyLiveChart } from "../components/LatencyLiveChart";
 import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { buildSnmpBulkResult, exportSnmpBulkCsv, flattenSnmpBulkRows } from "../lib/toolsSnmpBulk";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
 import { SnifferTab } from "./tools/SnifferTab";
@@ -48,6 +50,8 @@ function splitLinesOrComma(s: string): string[] {
     .filter(Boolean);
 }
 
+type HostPingRow = { host: string; ok: boolean; rtt_ms?: number; error?: string; note?: string };
+
 type Tab =
   | "host_ping"
   | "http_matrix"
@@ -68,12 +72,15 @@ export function ToolsPage() {
 
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");
   const [hostPingTimeout, setHostPingTimeout] = useState("4000");
+  // Preenchido aos poucos durante a execução (a cada 25 resultados — ver mutationFn abaixo), não
+  // só no fim: com até 100 alvos a até 15s de timeout cada, esperar tudo terminar antes de
+  // mostrar qualquer coisa podia levar minutos com a tela parada.
+  const [hostPingLive, setHostPingLive] = useState<HostPingRow[]>([]);
   const hostPingRun = useMutation({
     mutationFn: async () => {
       const hosts = splitLinesOrComma(hostPingText).slice(0, 100);
       const timeout_ms = Math.min(15000, Math.max(500, Number(hostPingTimeout) || 4000));
-      type Row = { host: string; ok: boolean; rtt_ms?: number; error?: string; note?: string };
-      const rows: Row[] = [];
+      const rows: HostPingRow[] = [];
       for (const host of hosts) {
         try {
           const r = await apiFetch<{ ok?: boolean; rtt_ms?: number; error?: string; note?: string }>("/api/v1/tools/icmp/ping", {
@@ -90,10 +97,13 @@ export function ToolsPage() {
         } catch (e) {
           rows.push({ host, ok: false, error: e instanceof Error ? e.message : String(e) });
         }
+        if (rows.length % 25 === 0) setHostPingLive([...rows]);
       }
+      setHostPingLive([...rows]);
       return { rows, note: "Até 100 nomes por execução; ICMP echo via servidor (resolução DNS + ping)." };
     },
     onMutate: () => {
+      setHostPingLive([]);
       show("info", "A executar ping ICMP em lote no servidor…");
     },
     onSuccess: (data) => {
@@ -105,6 +115,15 @@ export function ToolsPage() {
       show("err", e instanceof Error ? e.message : String(e));
     },
   });
+
+  const hostPingAccessible = useMemo(() => hostPingLive.filter((r) => r.ok), [hostPingLive]);
+  const hostPingInaccessible = useMemo(() => hostPingLive.filter((r) => !r.ok), [hostPingLive]);
+
+  async function copyHostList(rows: Array<{ host: string }>, label: string) {
+    const ok = await copyTextToClipboard(rows.map((r) => r.host).join("\n"));
+    if (ok) show("ok", `${rows.length} host(s) ${label} copiado(s).`, 3000);
+    else show("err", "Não foi possível copiar — copie manualmente.");
+  }
 
   const [mxIps, setMxIps] = useState("");
   const [mxPorts, setMxPorts] = useState("2265\n80\n8080\n8888\n443\n8443");
@@ -586,31 +605,94 @@ export function ToolsPage() {
           results={
             <>
               <ToolOutputError err={hostPingRun.error as Error | null} />
-              {hostPingRun.data ? (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Host / domínio</th>
-                        <th>Estado</th>
-                        <th>Latência (ms)</th>
-                        <th>Detalhe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {hostPingRun.data.rows.map((r) => (
-                        <tr key={r.host}>
-                          <td className="mono">{r.host}</td>
-                          <td>{r.ok ? <span className="badge badge--ok">Acessível</span> : <span className="badge badge--off">Inacessível</span>}</td>
-                          <td className="mono">{r.ok && r.rtt_ms != null ? String(r.rtt_ms) : "—"}</td>
-                          <td style={{ fontSize: 11, color: "var(--muted)", maxWidth: 320 }}>
-                            {[r.error, r.note].filter(Boolean).join(" · ") || "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p style={{ color: "var(--muted)", fontSize: 11, marginTop: 8 }}>{hostPingRun.data.note}</p>
+              {hostPingRun.isPending ? (
+                <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
+                  A processar… {hostPingLive.length} resultado(s) já recebido(s) (a lista abaixo atualiza a cada 25).
+                </p>
+              ) : null}
+              {hostPingLive.length > 0 ? (
+                <div className="row" style={{ gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                  <div style={{ flex: "1 1 260px", minWidth: 240 }}>
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <h4 style={{ margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                        <CheckCircle2 size={15} color="var(--ok)" /> Acessíveis ({hostPingAccessible.length})
+                      </h4>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        disabled={hostPingAccessible.length === 0}
+                        onClick={() => void copyHostList(hostPingAccessible, "acessíveis")}
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                    <div className="table-wrap">
+                      {hostPingAccessible.length === 0 ? (
+                        <p style={{ padding: 10, margin: 0, color: "var(--muted)", fontSize: 12 }}>Nenhum host acessível.</p>
+                      ) : (
+                        <table>
+                          <thead>
+                            <tr>
+                              <th />
+                              <th>Host / domínio</th>
+                              <th>Latência (ms)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {hostPingAccessible.map((r) => (
+                              <tr key={r.host}>
+                                <td>
+                                  <CheckCircle2 size={13} color="var(--ok)" aria-label="Acessível" />
+                                </td>
+                                <td className="mono">{r.host}</td>
+                                <td className="mono">{r.rtt_ms != null ? String(r.rtt_ms) : "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ flex: "1 1 260px", minWidth: 240 }}>
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <h4 style={{ margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                        <XCircle size={15} color="var(--err)" /> Inacessíveis ({hostPingInaccessible.length})
+                      </h4>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        disabled={hostPingInaccessible.length === 0}
+                        onClick={() => void copyHostList(hostPingInaccessible, "inacessíveis")}
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                    <div className="table-wrap">
+                      {hostPingInaccessible.length === 0 ? (
+                        <p style={{ padding: 10, margin: 0, color: "var(--muted)", fontSize: 12 }}>Nenhum host inacessível.</p>
+                      ) : (
+                        <table>
+                          <thead>
+                            <tr>
+                              <th />
+                              <th>Host / domínio</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {hostPingInaccessible.map((r) => (
+                              <tr key={r.host}>
+                                <td>
+                                  <XCircle size={13} color="var(--err)" aria-label="Inacessível" />
+                                </td>
+                                <td className="mono">{r.host}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </>
