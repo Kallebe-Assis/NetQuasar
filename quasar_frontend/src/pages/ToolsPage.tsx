@@ -56,8 +56,9 @@ type HostPingRow = { host: string; ok: boolean; rtt_ms?: number; error?: string;
 // /tools/icmp/ping recebe UM host por pedido — não há tamanho de lote no servidor). Subido bem
 // acima disso, agora com pedidos em paralelo (ver HOST_PING_CONCURRENCY) para manter o tempo
 // total razoável — o teto que resta é só para não travar a aba com uma tabela gigante.
-const HOST_PING_MAX_TARGETS = 1000;
+const HOST_PING_MAX_TARGETS = 2000;
 const HOST_PING_CONCURRENCY = 10;
+const HOST_PING_DNS_SERVERS_KEY = "netquasar_tools_host_ping_dns_servers";
 
 type Tab =
   | "host_ping"
@@ -78,7 +79,25 @@ export function ToolsPage() {
   const { toast, leaving, show, dismiss } = useToolsPageToast();
 
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");
-  const [hostPingTimeout, setHostPingTimeout] = useState("4000");
+  const [hostPingTimeout, setHostPingTimeout] = useState("2000");
+  // Servidor(es) DNS opcionais para resolver os hosts — sem isto, a resolução usa o resolver do
+  // SO do container (via Docker), que pode acabar a sair por uma rede/adaptador diferente do DNS
+  // que o utilizador realmente quer verificar (ex.: um DNS com bloqueio de domínios). Lembrado no
+  // navegador para não ter de digitar de novo a cada visita.
+  const [hostPingDnsServers, setHostPingDnsServers] = useState(() => {
+    try {
+      return localStorage.getItem(HOST_PING_DNS_SERVERS_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(HOST_PING_DNS_SERVERS_KEY, hostPingDnsServers);
+    } catch {
+      /* localStorage indisponível — só perde a conveniência de lembrar os servidores DNS */
+    }
+  }, [hostPingDnsServers]);
   // Preenchido aos poucos durante a execução (a cada 25 resultados — ver mutationFn abaixo), não
   // só no fim: com até HOST_PING_MAX_TARGETS alvos a até 15s de timeout cada, esperar tudo
   // terminar antes de mostrar qualquer coisa podia levar minutos com a tela parada.
@@ -89,7 +108,8 @@ export function ToolsPage() {
   const hostPingRun = useMutation({
     mutationFn: async () => {
       const hosts = splitLinesOrComma(hostPingText).slice(0, HOST_PING_MAX_TARGETS);
-      const timeout_ms = Math.min(15000, Math.max(500, Number(hostPingTimeout) || 4000));
+      const timeout_ms = Math.min(15000, Math.max(500, Number(hostPingTimeout) || 2000));
+      const dns_servers = splitLinesOrComma(hostPingDnsServers);
       setHostPingProgress({ done: 0, total: hosts.length });
       const rows: HostPingRow[] = [];
       // Antes disto corria um a um (sequencial) — com centenas de alvos e timeouts de até 15s
@@ -103,7 +123,7 @@ export function ToolsPage() {
           try {
             const r = await apiFetch<{ ok?: boolean; rtt_ms?: number; error?: string; note?: string }>("/api/v1/tools/icmp/ping", {
               method: "POST",
-              json: { host, timeout_ms },
+              json: dns_servers.length > 0 ? { host, timeout_ms, dns_servers } : { host, timeout_ms },
             });
             rows.push({
               host,
@@ -623,7 +643,7 @@ export function ToolsPage() {
       {tab === "host_ping" && (
         <ToolsPanel
           title="Ping a hosts ou domínios"
-          description={`Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até ${HOST_PING_MAX_TARGETS} por execução, ${HOST_PING_CONCURRENCY} em paralelo). Timeout por requisição: 500–15000 ms.`}
+          description={`Um nome por linha ou separados por vírgula. O servidor resolve DNS e envia ICMP por alvo (até ${HOST_PING_MAX_TARGETS} por execução, ${HOST_PING_CONCURRENCY} em paralelo). Timeout por requisição: 500–15000 ms. Informe servidor(es) DNS para resolver contra eles especificamente (útil para confirmar bloqueios), em vez do resolver padrão do servidor.`}
           results={
             <>
               <ToolOutputError err={hostPingRun.error as Error | null} />
@@ -746,6 +766,17 @@ export function ToolsPage() {
                 value={hostPingTimeout}
                 onChange={(e) => setHostPingTimeout(e.target.value)}
                 title="500–15000 ms por requisição ICMP"
+              />
+            </label>
+            <label className="row" style={{ gap: 6, alignItems: "center", flex: "1 1 220px" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>Servidor(es) DNS (opcional)</span>
+              <input
+                className="input mono"
+                style={{ flex: 1, minWidth: 160 }}
+                value={hostPingDnsServers}
+                onChange={(e) => setHostPingDnsServers(e.target.value)}
+                placeholder="ex.: 192.168.10.1, 1.1.1.1"
+                title="Resolve os hosts contra este(s) servidor(es) em vez do resolver padrão do servidor. Fica guardado neste navegador."
               />
             </label>
           </div>

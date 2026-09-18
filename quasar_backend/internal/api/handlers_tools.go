@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -139,6 +140,63 @@ func normalizeDNSServers(in []string) []string {
 	return out
 }
 
+// resolveHostViaDNSServers resolve host contra uma lista de servidores DNS específicos, em vez do
+// resolver do SO do container (que via Docker pode acabar a sair por uma rede/adaptador diferente
+// do que o utilizador usa na sua própria máquina). Tenta cada servidor em ordem: NXDOMAIN é uma
+// resposta definitiva desse servidor (é exactamente o que se quer verificar, ex. bloqueio) e não
+// avança para o próximo; só avança em caso de falha de rede/timeout do próprio servidor.
+func resolveHostViaDNSServers(ctx context.Context, host string, dnsServers []string, timeout time.Duration) (ip string, usedServer string, err error) {
+	if net.ParseIP(host) != nil {
+		return host, "", nil
+	}
+	servers := normalizeDNSServers(dnsServers)
+	if len(servers) == 0 {
+		return "", "", fmt.Errorf("nenhum servidor DNS válido informado")
+	}
+	client := &dns.Client{Net: "udp", Timeout: timeout}
+	fqdn := dns.Fqdn(host)
+	var lastErr error
+	for _, srv := range servers {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", "", ctxErr
+		}
+		answered := false
+		for _, qt := range [...]uint16{dns.TypeA, dns.TypeAAAA} {
+			msg := new(dns.Msg)
+			msg.SetQuestion(fqdn, qt)
+			msg.RecursionDesired = true
+			in, _, exErr := client.ExchangeContext(ctx, msg, srv)
+			if exErr != nil {
+				lastErr = exErr
+				continue
+			}
+			answered = true
+			if in.Rcode == dns.RcodeNameError {
+				return "", srv, fmt.Errorf("NXDOMAIN (domínio não encontrado)")
+			}
+			for _, a := range in.Answer {
+				switch rr := a.(type) {
+				case *dns.A:
+					return rr.A.String(), srv, nil
+				case *dns.AAAA:
+					return rr.AAAA.String(), srv, nil
+				}
+			}
+		}
+		// O servidor respondeu sem erro de rede a pelo menos uma consulta, mas nenhuma devolveu
+		// endereço — resposta definitiva deste servidor (ex.: bloqueio via CNAME para "." ou
+		// NODATA, padrão comum de DNS com filtro tipo AdGuard/Pi-hole), não uma falha de rede a
+		// contornar tentando o próximo servidor.
+		if answered {
+			return "", srv, fmt.Errorf("sem registo A/AAAA (bloqueado ou domínio sem endereço)")
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("nenhum servidor DNS respondeu")
+	}
+	return "", "", lastErr
+}
+
 func (s *Server) toolsHTTPProbeStub(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL                string `json:"url"`
@@ -235,8 +293,9 @@ func (s *Server) toolsHTTPProbeStub(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) toolsICMPPing(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Host      string `json:"host"`
-		TimeoutMs int    `json:"timeout_ms"`
+		Host       string   `json:"host"`
+		TimeoutMs  int      `json:"timeout_ms"`
+		DNSServers []string `json:"dns_servers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
@@ -251,8 +310,28 @@ func (s *Server) toolsICMPPing(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), to+200*time.Millisecond)
 	defer cancel()
-	out := probing.ICMPPing(ctx, body.Host, to, 32)
-	s.auditNetworkTool(r.Context(), r, "icmp_ping", map[string]any{"host": body.Host, "ok": out.OK})
+
+	target := body.Host
+	// Por omissão a resolução usa o resolver do SO do container (via Docker), que não está
+	// necessariamente ligado ao mesmo DNS que o utilizador usa na sua máquina — daí o suporte a
+	// servidores DNS explícitos: resolve-se aqui contra ELES antes do ping, e passa-se o IP já
+	// resolvido ao pinger (que assim não volta a resolver pelo resolver do SO).
+	if len(body.DNSServers) > 0 {
+		ip, usedServer, rerr := resolveHostViaDNSServers(ctx, body.Host, body.DNSServers, to)
+		if rerr != nil {
+			out := probing.ICMPOutcome{Error: rerr.Error()}
+			if usedServer != "" {
+				out.Error = fmt.Sprintf("%s (via DNS %s)", rerr.Error(), usedServer)
+			}
+			s.auditNetworkTool(r.Context(), r, "icmp_ping", map[string]any{"host": body.Host, "ok": false, "dns_servers": body.DNSServers})
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		target = ip
+	}
+
+	out := probing.ICMPPing(ctx, target, to, 32)
+	s.auditNetworkTool(r.Context(), r, "icmp_ping", map[string]any{"host": body.Host, "ok": out.OK, "dns_servers": body.DNSServers})
 	writeJSON(w, http.StatusOK, out)
 }
 
