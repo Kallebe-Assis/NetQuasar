@@ -296,7 +296,7 @@ func applyMonitoringIntervalsImport(ctx context.Context, s *Server, sections map
 			mikrotik_timeout_ms = COALESCE($16::int, mikrotik_timeout_ms),
 			ping_parallel = COALESCE($17::boolean, ping_parallel),
 			pipeline_steps = COALESCE($18::jsonb, pipeline_steps), updated_at = now()
-		WHERE id=1`,
+		WHERE id=$1`,
 		1, intField(m, "ping_seconds"), intField(m, "telemetry_minutes"), intField(m, "ping_timeout_ms"),
 		intField(m, "telemetry_seconds"), intField(m, "interface_snapshot_seconds"), intField(m, "olt_if_derived_pon_seconds"),
 		intField(m, "telemetry_timeout_ms"), intField(m, "interface_snapshot_timeout_ms"), intField(m, "olt_if_derived_pon_timeout_ms"),
