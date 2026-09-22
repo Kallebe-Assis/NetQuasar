@@ -49,6 +49,14 @@
   --mono: ui-monospace, "Cascadia Code", monospace;
   --radius: 6px;
   --sidebar-w: 232px;
+
+  /* Acentos dos 5 cartões da aba Serviços (modal Hubsoft) — cores decorativas distintas,
+     separadas de --ok/--warn/--err (que têm significado de estado noutros sítios da app). */
+  --hubsoft-c-conexao: #22d3ee;
+  --hubsoft-c-endereco: #34d399;
+  --hubsoft-c-cadastro: #a78bfa;
+  --hubsoft-c-historico: #fbbf24;
+  --hubsoft-c-vendedor: #f472b6;
 }
 
 [data-theme="light"] {
@@ -102,4 +110,10 @@
 
   --font: "Segoe UI", "Helvetica Neue", system-ui, -apple-system, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+
+  --hubsoft-c-conexao: #0e7490;
+  --hubsoft-c-endereco: #047857;
+  --hubsoft-c-cadastro: #6d28d9;
+  --hubsoft-c-historico: #b45309;
+  --hubsoft-c-vendedor: #be185d;
 }

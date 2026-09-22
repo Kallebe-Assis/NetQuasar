@@ -90,7 +90,6 @@ export function LoginPage() {
             ? data.email.trim()
             : "";
       saveUserDisplayLabel(display);
-      markSessionReady();
       if (!isClientConfigured()) {
         markClientConfigured();
       }
@@ -113,6 +112,15 @@ export function LoginPage() {
         from && from !== APP_ROUTES.login && from.startsWith("/") && !from.startsWith("//")
           ? from
           : APP_ROUTES.dashboard;
+      // markSessionReady() só agora, imediatamente antes do nav(): antes ficava logo no início
+      // deste onSuccess, o que tornava isSessionReady() verdadeiro ~2s antes deste nav() correr —
+      // qualquer re-render do LoginPage nesse intervalo (ex.: o próprio setPostLoginNavPending)
+      // batia na guarda "if (getAuthToken() && isSessionReady()) return <Navigate .../>" no topo
+      // do componente e navegava para o dashboard de imediato, ANTES do ecrã de carregamento
+      // terminar. O utilizador já podia estar noutra página quando este nav() atrasado disparava
+      // por fim, e ele "puxava" o utilizador de volta ao destino de login — daí o "o sistema volta
+      // sozinho para o dashboard quando termina de carregar" ao trocar de ecrã rápido após entrar.
+      markSessionReady();
       nav(dest, { replace: true });
     },
     onError: (e) => {

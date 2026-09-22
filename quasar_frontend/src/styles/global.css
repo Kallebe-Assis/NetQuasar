@@ -4460,6 +4460,16 @@ h3 .info-hint {
   background: color-mix(in srgb, var(--accent) 12%, var(--panel));
   box-shadow: 0 0 0 1px var(--accent-dim);
 }
+/* Conectado/desconectado — sutil, só quando o login não é o selecionado no momento (selecção
+   continua a "ganhar" visualmente, ver .active acima). */
+.integration-consult-card__login-tab.is-online:not(.active) {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+  background: color-mix(in srgb, var(--ok) 8%, var(--panel));
+}
+.integration-consult-card__login-tab.is-offline:not(.active) {
+  border-color: color-mix(in srgb, var(--err) 55%, var(--border));
+  background: color-mix(in srgb, var(--err) 8%, var(--panel));
+}
 .integration-consult-card__service {
   font-size: 12px;
   padding: 10px 12px;
@@ -4493,9 +4503,12 @@ h3 .info-hint {
   align-items: center;
 }
 .integration-detail-modal {
-  max-width: min(94vw, 1240px);
-  width: 94vw;
-  max-height: 90vh;
+  /* Ocupa toda a largura/altura disponíveis dentro do backdrop — a exclusão do menu lateral é
+     feita pelo padding-left do próprio backdrop (.hubsoft-detail-backdrop), não aqui. */
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4645,6 +4658,361 @@ h3 .info-hint {
   white-space: nowrap;
   width: fit-content;
 }
+/* Aba "Serviços" do modal HubSoft — layout em cartões (ver ServicesTabContent). Classes próprias
+   (hubsoft-*), não reaproveitam .integration-detail__row/__label/__value — para poder ajustar
+   este ecrã livremente sem mexer nas outras abas do mesmo modal (Identificação, Financeiro, …). */
+.hubsoft-services-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.hubsoft-services-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.hubsoft-services-picker__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--hover-transition);
+}
+.hubsoft-services-picker__tab:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.hubsoft-services-picker__tab.active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel2));
+  border-color: var(--accent);
+  color: var(--text);
+}
+.hubsoft-services-picker__tab.is-online:not(.active) {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+  background: color-mix(in srgb, var(--ok) 10%, var(--panel2));
+}
+.hubsoft-services-picker__tab.is-offline:not(.active) {
+  border-color: color-mix(in srgb, var(--err) 55%, var(--border));
+  background: color-mix(in srgb, var(--err) 10%, var(--panel2));
+}
+
+.hubsoft-service-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .hubsoft-service-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .hubsoft-service-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.hubsoft-service-card {
+  --card-accent: var(--accent);
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--card-accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  min-width: 0;
+  font-size: 12.5px;
+  box-shadow: var(--shadow-lg);
+}
+.hubsoft-service-card--conexao { --card-accent: var(--hubsoft-c-conexao); }
+.hubsoft-service-card--endereco { --card-accent: var(--hubsoft-c-endereco); }
+.hubsoft-service-card--cadastro { --card-accent: var(--hubsoft-c-cadastro); }
+.hubsoft-service-card--historico { --card-accent: var(--hubsoft-c-historico); }
+.hubsoft-service-card--vendedor { --card-accent: var(--hubsoft-c-vendedor); }
+.hubsoft-service-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.hubsoft-service-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-accent) 20%, transparent);
+  color: var(--card-accent);
+  flex-shrink: 0;
+}
+.hubsoft-service-card__head h5 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.hubsoft-service-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hubsoft-service-status-text {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.hubsoft-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 42%) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.hubsoft-row:last-child {
+  border-bottom: none;
+}
+.hubsoft-row__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.hubsoft-row__label svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.hubsoft-row__value {
+  word-break: break-word;
+  min-width: 0;
+}
+
+.hubsoft-tech-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.hubsoft-tech-badge--fibra { background: color-mix(in srgb, var(--hubsoft-c-conexao) 22%, transparent); color: var(--hubsoft-c-conexao); }
+.hubsoft-tech-badge--radio { background: color-mix(in srgb, var(--hubsoft-c-historico) 22%, transparent); color: var(--hubsoft-c-historico); }
+.hubsoft-tech-badge--cabo { background: color-mix(in srgb, var(--hubsoft-c-vendedor) 22%, transparent); color: var(--hubsoft-c-vendedor); }
+.hubsoft-tech-badge--outro { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+
+.hubsoft-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hubsoft-speed__value {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.hubsoft-speed__bar {
+  flex: 1 1 auto;
+  height: 6px;
+  min-width: 40px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.hubsoft-speed__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--hubsoft-c-conexao), var(--accent));
+}
+
+.hubsoft-status-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  border: 1px solid var(--border);
+}
+.hubsoft-status-box--on {
+  background: color-mix(in srgb, var(--ok) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
+  color: var(--text);
+}
+.hubsoft-status-box--off {
+  background: color-mix(in srgb, var(--err) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--err) 35%, var(--border));
+  color: var(--text);
+}
+.hubsoft-status-box__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 3px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.hubsoft-status-box__dot--live {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent);
+  animation: hubsoft-pulse 1.8s ease-out infinite;
+}
+.hubsoft-status-box__dot--down {
+  background: var(--err);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hubsoft-status-box__dot--live {
+    animation: none;
+  }
+}
+@keyframes hubsoft-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ok) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent); }
+}
+
+.hubsoft-map-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+/* Modal maior (Ver dados completos) — ocupa a tela toda menos a faixa do menu lateral. */
+.hubsoft-detail-backdrop {
+  padding-left: calc(var(--sidebar-w) + 20px);
+  padding-right: 20px;
+  padding-top: 20px;
+  padding-bottom: 20px;
+  /* Modal bem maior agora — sobe o tamanho base do texto de todas as abas (lido via var() no
+     fontSize inline de cada aba, ver DETAIL_FONT). */
+  --integration-detail-font-size: 12.5px;
+}
+@media (max-width: 900px) {
+  .hubsoft-detail-backdrop {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* Cliente inativo (cadastro) — X vermelho sutil junto ao nome. */
+.hubsoft-inactive-mark {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 7px;
+  color: var(--err);
+  vertical-align: -2px;
+}
+/* Serviço cancelado/inativo — texto tachado onde o serviço é identificado (seletor de login,
+   campo "Plano"). Opacidade reduzida reforça a leitura de "não está mais activo" sem apagar
+   a informação. */
+.hubsoft-service-inactive {
+  text-decoration: line-through;
+  text-decoration-color: var(--err);
+  opacity: 0.65;
+}
+
+/* Mesma linguagem visual (cartões + ícones + cor) aplicada às outras abas do modal — pedido
+   explícito de estender o ajuste da aba Serviços ao resto do modal. */
+.hubsoft-tab-body {
+  padding-top: 2px;
+}
+/* Ícone dentro de um título de secção (Atendimentos/Ordens/Logins/Faturas/genérico) — regra só
+   actua quando há mesmo um svg lá dentro, headings sem ícone ficam exactamente como antes. */
+.integration-detail__section-title svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+.hubsoft-generic-card {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+.hubsoft-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.hubsoft-stat-tile {
+  --card-accent: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--card-accent);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-lg);
+  min-width: 0;
+}
+.hubsoft-stat-tile--conexao { --card-accent: var(--hubsoft-c-conexao); }
+.hubsoft-stat-tile--endereco { --card-accent: var(--hubsoft-c-endereco); }
+.hubsoft-stat-tile--cadastro { --card-accent: var(--hubsoft-c-cadastro); }
+.hubsoft-stat-tile--historico { --card-accent: var(--hubsoft-c-historico); }
+.hubsoft-stat-tile--vendedor { --card-accent: var(--hubsoft-c-vendedor); }
+.hubsoft-stat-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-accent) 20%, transparent);
+  color: var(--card-accent);
+  flex-shrink: 0;
+}
+.hubsoft-stat-tile__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hubsoft-stat-tile__label {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.hubsoft-stat-tile__value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.hubsoft-stat-tile__sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .integration-detail__attachment {
   display: flex;
   align-items: center;

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -140,6 +141,27 @@ func normalizeDNSServers(in []string) []string {
 	return out
 }
 
+// maxConcurrentQueriesPerDNSServer limita quantas consultas concorrentes esta instância envia a UM
+// MESMO servidor DNS (ex.: quando um lote de centenas/milhares de domínios usa dns_servers para
+// apontar ao roteador do próprio utilizador). O ICMP em si não tem este risco (cada alvo é um IP
+// diferente), mas a resolução DNS converge sempre no(s) mesmo(s) servidor(es) informado(s) —
+// equipamento doméstico/appliance de filtro (AdGuard/Pi-hole) pode sofrer com rajadas grandes e
+// isso eleva a latência de TUDO que passa por ele, não só do teste em curso.
+const maxConcurrentQueriesPerDNSServer = 3
+
+var dnsServerSemaphores sync.Map // map[string]chan struct{}
+
+func acquireDNSServerSlot(ctx context.Context, srv string) (func(), error) {
+	v, _ := dnsServerSemaphores.LoadOrStore(srv, make(chan struct{}, maxConcurrentQueriesPerDNSServer))
+	sem := v.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // resolveHostViaDNSServers resolve host contra uma lista de servidores DNS específicos, em vez do
 // resolver do SO do container (que via Docker pode acabar a sair por uma rede/adaptador diferente
 // do que o utilizador usa na sua própria máquina). Tenta cada servidor em ordem: NXDOMAIN é uma
@@ -162,10 +184,15 @@ func resolveHostViaDNSServers(ctx context.Context, host string, dnsServers []str
 		}
 		answered := false
 		for _, qt := range [...]uint16{dns.TypeA, dns.TypeAAAA} {
+			release, semErr := acquireDNSServerSlot(ctx, srv)
+			if semErr != nil {
+				return "", "", semErr
+			}
 			msg := new(dns.Msg)
 			msg.SetQuestion(fqdn, qt)
 			msg.RecursionDesired = true
 			in, _, exErr := client.ExchangeContext(ctx, msg, srv)
+			release()
 			if exErr != nil {
 				lastErr = exErr
 				continue

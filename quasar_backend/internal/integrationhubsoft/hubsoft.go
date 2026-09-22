@@ -923,6 +923,77 @@ func ResendInvoiceEmail(ctx context.Context, cfg Config, token, idFatura string,
 	return nil
 }
 
+// hubsoftActionMessage extrai a "msg" de sucesso/erro do formato padrão HubSoft
+// ({"status":"success"/"error","msg":"..."}), usado por habilitar/suspender abaixo (mesmo
+// formato documentado em desbloqueio_confianca.rst/desconexao.rst — não é específico desta acção).
+func hubsoftActionMessage(body []byte) string {
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return ""
+	}
+	return pickStr(doc, "msg", "message")
+}
+
+// EnableClientService habilita o serviço do cliente (POST .../cliente_servico/habilitar/:id) —
+// documentado em docs.hubsoft.com.br > Clientes > Cliente Serviço > Habilitar Cliente Serviço.
+// A própria HubSoft só permite esta transição quando o serviço está em Suspenso por Débito,
+// Suspenso Parcialmente ou Suspenso Pedido Cliente — qualquer outro estado devolve erro próprio
+// da HubSoft (relançado tal-qual, para o operador perceber a razão exacta).
+func EnableClientService(ctx context.Context, cfg Config, token, idClienteServico, motivo string) error {
+	idClienteServico = strings.TrimSpace(idClienteServico)
+	if idClienteServico == "" {
+		return fmt.Errorf("id_cliente_servico obrigatório")
+	}
+	motivo = strings.TrimSpace(motivo)
+	if motivo == "" {
+		motivo = "Habilitado via NetQuasar"
+	}
+	bodyJSON, _ := json.Marshal(map[string]any{"motivo_habilitacao": motivo})
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "POST", Path: "/api/v1/integracao/cliente/cliente_servico/habilitar/" + idClienteServico,
+		BodyTemplate: string(bodyJSON), BodyType: "json",
+	})
+	if !res.OK {
+		if msg := hubsoftActionMessage(ResponseBodyBytes(res)); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		return fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao habilitar serviço"))
+	}
+	return nil
+}
+
+// HubsoftSuspendReason — valores aceites por tipo_suspensao (únicos documentados pela HubSoft).
+type HubsoftSuspendReason string
+
+const (
+	SuspendReasonDebito        HubsoftSuspendReason = "suspenso_debito"
+	SuspendReasonPedidoCliente HubsoftSuspendReason = "suspenso_pedido_cliente"
+)
+
+// SuspendClientService suspende o serviço do cliente (POST .../cliente_servico/suspender/:id) —
+// documentado em docs.hubsoft.com.br > Clientes > Cliente Serviço > Suspender Cliente Serviço.
+func SuspendClientService(ctx context.Context, cfg Config, token, idClienteServico string, reason HubsoftSuspendReason) error {
+	idClienteServico = strings.TrimSpace(idClienteServico)
+	if idClienteServico == "" {
+		return fmt.Errorf("id_cliente_servico obrigatório")
+	}
+	if reason != SuspendReasonDebito && reason != SuspendReasonPedidoCliente {
+		return fmt.Errorf("tipo_suspensao inválido: %q", reason)
+	}
+	bodyJSON, _ := json.Marshal(map[string]any{"tipo_suspensao": reason})
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "POST", Path: "/api/v1/integracao/cliente/cliente_servico/suspender/" + idClienteServico,
+		BodyTemplate: string(bodyJSON), BodyType: "json",
+	})
+	if !res.OK {
+		if msg := hubsoftActionMessage(ResponseBodyBytes(res)); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		return fmt.Errorf("hubsoft: %s", firstNonEmpty(res.ErrorMessage, "falha ao suspender serviço"))
+	}
+	return nil
+}
+
 // --- Resumo financeiro agregado (amostra) ---------------------------------------------------
 //
 // Mesma limitação: /cliente/financeiro só existe por cliente, não há "todas as faturas da
@@ -2347,18 +2418,23 @@ func TestConnection(ctx context.Context, cfg Config) TestResult {
 
 // ClientCard dados normalizados de um cliente para a UI.
 type ClientCard struct {
-	ID        string            `json:"id,omitempty"`
-	Code      string            `json:"code,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	TradeName string            `json:"trade_name,omitempty"`
-	Document  string            `json:"document,omitempty"`
-	Email     string            `json:"email,omitempty"`
-	Phone     string            `json:"phone,omitempty"`
-	Status    string            `json:"status,omitempty"`
-	Address   string            `json:"address,omitempty"`
-	Services  []ServiceSummary  `json:"services,omitempty"`
-	Details   map[string]string `json:"details,omitempty"`
-	Raw       map[string]any    `json:"raw,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Name      string `json:"name,omitempty"`
+	TradeName string `json:"trade_name,omitempty"`
+	Document  string `json:"document,omitempty"`
+	Email     string `json:"email,omitempty"`
+	Phone     string `json:"phone,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Address   string `json:"address,omitempty"`
+	// Inactive — cadastro do cliente marcado como inativo na HubSoft (campo raw "ativo"==false;
+	// não confundir com o serviço estar cancelado/suspenso — um cliente pode ficar inativo mesmo
+	// com serviços que ainda aparecem no histórico). Usado no frontend para o ícone de "cliente
+	// inativo" (X vermelho) na lista de resultados e no modal de detalhe.
+	Inactive bool              `json:"inactive,omitempty"`
+	Services []ServiceSummary  `json:"services,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
+	Raw      map[string]any    `json:"raw,omitempty"`
 }
 
 // ServiceSummary um serviço/plano/login do cliente — inclui os campos ricos do payload
@@ -2386,6 +2462,43 @@ type ServiceSummary struct {
 	Latitude           string `json:"latitude,omitempty"`
 	Longitude          string `json:"longitude,omitempty"`
 	City               string `json:"city,omitempty"`
+
+	// Campos abaixo alimentam o layout em cartões do modal "Ver dados completos" (aba Serviços —
+	// ver docs.hubsoft.com.br, espelha o próprio painel da HubSoft). Todos vêm do mesmo objeto
+	// servicos[i] já lido acima, só que ainda não estavam a ser extraídos.
+	StatusPrefix        string `json:"status_prefix,omitempty"`     // status_prefixo (ex.: "servico_habilitado")
+	StatusTextFull      string `json:"status_text_full,omitempty"`  // ultima_conexao.status_txt (versão longa, com IPs)
+	PhyAddr             string `json:"phy_addr,omitempty"`          // phy_addr — pode divergir de mac_addr
+	DownloadSpeed       string `json:"download_speed,omitempty"`    // velocidade_download
+	UploadSpeed         string `json:"upload_speed,omitempty"`      // velocidade_upload
+	PlanNumber          string `json:"plan_number,omitempty"`       // numero_plano
+	Password            string `json:"password,omitempty"`          // senha (texto simples na origem — mostrado mascarado no frontend)
+	OldServiceID        string `json:"old_service_id,omitempty"`    // id_cliente_servico_antigo (migração de outro sistema)
+	UUID                string `json:"uuid,omitempty"`              // uuid_cliente_servico
+	Carne               string `json:"carne,omitempty"`             // carne ("Sim"/"Não")
+	BillingType         string `json:"billing_type,omitempty"`      // tipo_cobranca_formatada
+	Notes               string `json:"notes,omitempty"`             // anotacoes
+	RegisteredAt        string `json:"registered_at,omitempty"`     // data_cadastro (do serviço, BR)
+	EnabledAt           string `json:"enabled_at,omitempty"`        // data_habilitacao_br
+	SoldAt              string `json:"sold_at,omitempty"`           // data_venda
+	ContractStartAt     string `json:"contract_start_at,omitempty"` // data_inicio_contrato
+	ContractEndAt       string `json:"contract_end_at,omitempty"`   // data_fim_contrato
+	ContractMonths      string `json:"contract_months,omitempty"`   // vigencia_meses
+	PendingContracts    string `json:"pending_contracts,omitempty"` // contratos_pendentes
+	UpdatedAt           string `json:"updated_at,omitempty"`        // data_atualizacao (do serviço)
+	AddressStreet       string `json:"address_street,omitempty"`
+	AddressNumber       string `json:"address_number,omitempty"`
+	AddressComplement   string `json:"address_complement,omitempty"`
+	AddressNeighborhood string `json:"address_neighborhood,omitempty"`
+	AddressState        string `json:"address_state,omitempty"`
+	AddressUF           string `json:"address_uf,omitempty"`
+	AddressCEP          string `json:"address_cep,omitempty"`
+	AddressCountry      string `json:"address_country,omitempty"`
+	AddressIBGE         string `json:"address_ibge,omitempty"`
+	AddressReference    string `json:"address_reference,omitempty"`
+	SellerName          string `json:"seller_name,omitempty"`
+	SellerID            string `json:"seller_id,omitempty"`
+	SellerEmail         string `json:"seller_email,omitempty"`
 }
 
 type ClientSearchResult struct {
@@ -2458,6 +2571,9 @@ func mapClientItem(it any) (ClientCard, bool) {
 		Status:    pickStr(m, "status_cadastro", "status"),
 		Details:   map[string]string{},
 	}
+	if av, ok := m["ativo"].(bool); ok {
+		card.Inactive = !av
+	}
 	if card.Name == "" && card.Code == "" && card.Document == "" {
 		return ClientCard{}, false
 	}
@@ -2494,6 +2610,26 @@ func mapServices(m map[string]any) []ServiceSummary {
 			MAC:        pickStr(sm, "mac_addr", "phy_addr"),
 			Technology: pickStr(sm, "tecnologia"),
 			PlanValue:  pickStr(sm, "valor"),
+
+			StatusPrefix:     pickStr(sm, "status_prefixo"),
+			PhyAddr:          pickStr(sm, "phy_addr"),
+			DownloadSpeed:    pickStr(sm, "velocidade_download"),
+			UploadSpeed:      pickStr(sm, "velocidade_upload"),
+			PlanNumber:       pickStr(sm, "numero_plano"),
+			Password:         pickStr(sm, "senha"),
+			OldServiceID:     pickStr(sm, "id_cliente_servico_antigo"),
+			UUID:             pickStr(sm, "uuid_cliente_servico"),
+			Carne:            pickStr(sm, "carne"),
+			BillingType:      pickStr(sm, "tipo_cobranca_formatada"),
+			Notes:            pickStr(sm, "anotacoes"),
+			RegisteredAt:     pickStr(sm, "data_cadastro"),
+			EnabledAt:        pickStr(sm, "data_habilitacao_br", "data_habilitacao"),
+			SoldAt:           pickStr(sm, "data_venda"),
+			ContractStartAt:  pickStr(sm, "data_inicio_contrato"),
+			ContractEndAt:    pickStr(sm, "data_fim_contrato"),
+			ContractMonths:   pickStr(sm, "vigencia_meses"),
+			PendingContracts: pickStr(sm, "contratos_pendentes"),
+			UpdatedAt:        pickStr(sm, "data_atualizacao"),
 		}
 		if ac, ok := sm["ultima_conexao"].(map[string]any); ok {
 			svc.Connected = pickStr(ac, "conectado")
@@ -2502,6 +2638,7 @@ func mapServices(m map[string]any) []ServiceSummary {
 			svc.LastIPv4 = pickStr(ac, "ultimo_ipv4")
 			svc.LastNasIP = pickStr(ac, "ultimo_nas_ip")
 			svc.StatusText = pickStr(ac, "status_txt_resumido", "status_txt")
+			svc.StatusTextFull = pickStr(ac, "status_txt")
 		}
 		if eq, ok := sm["equipamento_conexao"].(map[string]any); ok {
 			svc.OLT = pickStr(eq, "nome")
@@ -2515,10 +2652,25 @@ func mapServices(m map[string]any) []ServiceSummary {
 		if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {
 			svc.InstallAddress = pickStr(addr, "completo")
 			svc.City = pickStr(addr, "cidade")
+			svc.AddressStreet = pickStr(addr, "endereco")
+			svc.AddressNumber = pickStr(addr, "numero")
+			svc.AddressComplement = pickStr(addr, "complemento")
+			svc.AddressNeighborhood = pickStr(addr, "bairro")
+			svc.AddressState = pickStr(addr, "estado")
+			svc.AddressUF = pickStr(addr, "uf")
+			svc.AddressCEP = pickStr(addr, "cep")
+			svc.AddressCountry = pickStr(addr, "pais")
+			svc.AddressIBGE = pickStr(addr, "ibge_cidade")
+			svc.AddressReference = pickStr(addr, "referencia")
 			if coord, ok := addr["coordenadas"].(map[string]any); ok {
 				svc.Latitude = pickStr(coord, "latitude")
 				svc.Longitude = pickStr(coord, "longitude")
 			}
+		}
+		if vend, ok := sm["vendedor"].(map[string]any); ok {
+			svc.SellerName = pickStr(vend, "nome")
+			svc.SellerID = pickStr(vend, "id_vendedor")
+			svc.SellerEmail = pickStr(vend, "email")
 		}
 		if svc.Name == "" && svc.Login == "" && svc.ID == "" {
 			continue

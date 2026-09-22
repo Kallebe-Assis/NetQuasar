@@ -135,6 +135,42 @@ export type ClientServiceSummary = {
   install_address?: string;
   latitude?: string;
   longitude?: string;
+  city?: string;
+  // Campos abaixo alimentam o modal "Ver dados completos" > aba Serviços (layout em cartões,
+  // espelha o painel da própria HubSoft) — ver internal/integrationhubsoft ServiceSummary.
+  status_prefix?: string;
+  status_text_full?: string;
+  phy_addr?: string;
+  download_speed?: string;
+  upload_speed?: string;
+  plan_number?: string;
+  password?: string;
+  old_service_id?: string;
+  uuid?: string;
+  carne?: string;
+  billing_type?: string;
+  notes?: string;
+  registered_at?: string;
+  enabled_at?: string;
+  sold_at?: string;
+  contract_start_at?: string;
+  contract_end_at?: string;
+  contract_months?: string;
+  pending_contracts?: string;
+  updated_at?: string;
+  address_street?: string;
+  address_number?: string;
+  address_complement?: string;
+  address_neighborhood?: string;
+  address_state?: string;
+  address_uf?: string;
+  address_cep?: string;
+  address_country?: string;
+  address_ibge?: string;
+  address_reference?: string;
+  seller_name?: string;
+  seller_id?: string;
+  seller_email?: string;
 };
 
 export type ClientCard = {
@@ -148,6 +184,9 @@ export type ClientCard = {
   ipv4?: string;
   status?: string;
   address?: string;
+  // Cadastro marcado como inativo na HubSoft (raw "ativo"==false) — ver internal/integrationhubsoft
+  // ClientCard.Inactive. Só a HubSoft popula isto por enquanto.
+  inactive?: boolean;
   services?: ClientServiceSummary[];
   details?: Record<string, string>;
   raw?: Record<string, unknown>;

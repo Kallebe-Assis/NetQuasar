@@ -1,6 +1,34 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileText,
+  Gauge,
+  Headset,
+  IdCard,
+  KeyRound,
+  ClipboardList,
+  LogIn,
+  MapPin,
+  Phone,
+  Receipt,
+  RefreshCw,
+  Router,
+  User,
+  UserRound,
+  Wallet,
+  X,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
 import type {
   AttendanceItem,
@@ -37,6 +65,43 @@ function labelStatus(s?: string) {
     return "badge badge--err";
   if (low.includes("cancel") || low.includes("sem status")) return "badge badge--off";
   return "badge";
+}
+
+// Serviço cancelado/inativo — mesmo léxico de labelStatus acima (a HubSoft não expõe um booleano
+// dedicado por serviço, só o texto/prefixo de status — "cancelado" é o valor real confirmado
+// ao vivo, ver status_prefixo). Usado para riscar o texto do serviço (tachado), não o status dele
+// (que já tem badge próprio) — dois sinais visuais complementares, não redundantes.
+function isServiceInactive(s: ClientServiceSummary): boolean {
+  const t = `${s.status ?? ""} ${s.status_prefix ?? ""}`.toLowerCase();
+  return t.includes("cancel") || t.includes("inativ");
+}
+
+// Conectividade do login — Hubsoft usa `connected` ("true"/"false", ver ultima_conexao.conectado),
+// IXC usa `online` ("S"/"N"). null = sem dado (não pinta nada, evita sugerir um estado que não
+// temos certeza).
+function isServiceOnline(s: ClientServiceSummary): boolean | null {
+  const c = (s.connected ?? "").trim().toLowerCase();
+  if (c === "true") return true;
+  if (c === "false") return false;
+  const o = (s.online ?? "").trim().toUpperCase();
+  if (o === "S") return true;
+  if (o === "N") return false;
+  return null;
+}
+
+function onlineTabModifier(s: ClientServiceSummary): string {
+  const online = isServiceOnline(s);
+  if (online === true) return " is-online";
+  if (online === false) return " is-offline";
+  return "";
+}
+
+function InactiveClientMark() {
+  return (
+    <span className="hubsoft-inactive-mark" title="Cliente inativo" aria-label="Cliente inativo">
+      <XCircle size={14} />
+    </span>
+  );
 }
 
 function serviceStableKey(s: ClientServiceSummary, index: number): string {
@@ -254,10 +319,13 @@ function ClientCardSummary({
                     type="button"
                     role="tab"
                     aria-selected={si === safeIdx}
-                    className={si === safeIdx ? "integration-consult-card__login-tab active" : "integration-consult-card__login-tab"}
+                    className={
+                      (si === safeIdx ? "integration-consult-card__login-tab active" : "integration-consult-card__login-tab") +
+                      onlineTabModifier(s)
+                    }
                     onClick={() => onSelectService(si)}
                   >
-                    {label}
+                    <span className={isServiceInactive(s) ? "hubsoft-service-inactive" : undefined}>{label}</span>
                   </button>
                 );
               })}
@@ -271,6 +339,98 @@ function ClientCardSummary({
         </div>
       ) : null}
     </>
+  );
+}
+
+type ServiceActionTarget = { client: ClientCard; service: ClientServiceSummary; mode: "enable" | "suspend" };
+type ServiceActionResult = { ok: boolean; message?: string };
+
+// Confirmação antes de habilitar/suspender — acção real contra a HubSoft, afecta o acesso à
+// internet do cliente na hora, por isso não dispara direto no clique do botão do cartão.
+function ServiceActionModal({
+  target,
+  onCancel,
+  onConfirm,
+}: {
+  target: ServiceActionTarget;
+  onCancel: () => void;
+  onConfirm: (value: string) => Promise<ServiceActionResult>;
+}) {
+  const { client, service, mode } = target;
+  const [motivo, setMotivo] = useState("");
+  const [tipoSuspensao, setTipoSuspensao] = useState<"suspenso_debito" | "suspenso_pedido_cliente">("suspenso_debito");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const label = service.login?.trim() || service.name?.trim() || client.name || "este serviço";
+
+  async function confirm() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await onConfirm(mode === "enable" ? motivo.trim() : tipoSuspensao);
+      if (!r.ok) {
+        setError(r.message || "Não foi possível concluir a operação.");
+        return;
+      }
+      onCancel();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return createPortal(
+    <div className="modal-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+        <h3 style={{ marginTop: 0 }}>{mode === "enable" ? "Habilitar serviço" : "Suspender serviço"}</h3>
+        <p style={{ fontSize: 13, color: "var(--muted)" }}>
+          {mode === "enable" ? "Habilitar" : "Suspender"} <strong>{label}</strong>
+          {mode === "suspend" ? " — o cliente perde acesso à internet imediatamente." : "."}
+        </p>
+        {mode === "enable" ? (
+          <div className="field">
+            <label htmlFor="hubsoft-enable-motivo">Motivo</label>
+            <input
+              id="hubsoft-enable-motivo"
+              className="input"
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ex.: Pagamento confirmado"
+              disabled={busy}
+            />
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor="hubsoft-suspend-tipo">Motivo da suspensão</label>
+            <select
+              id="hubsoft-suspend-tipo"
+              className="input"
+              value={tipoSuspensao}
+              onChange={(e) => setTipoSuspensao(e.target.value as typeof tipoSuspensao)}
+              disabled={busy}
+            >
+              <option value="suspenso_debito">Suspenso por débito</option>
+              <option value="suspenso_pedido_cliente">Suspenso a pedido do cliente</option>
+            </select>
+          </div>
+        )}
+        {error ? <div className="msg msg--err" style={{ marginTop: 8 }}>{error}</div> : null}
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className={mode === "suspend" ? "btn btn--danger" : "btn btn--primary"}
+            onClick={() => void confirm()}
+            disabled={busy}
+          >
+            {busy ? "A processar…" : "Confirmar"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -358,28 +518,25 @@ function AttachmentItem({ obj }: { obj: Record<string, unknown> }) {
   );
 }
 
-function DetailObjectBlock({ title, data }: { title: string; data: Record<string, unknown> }) {
+function DetailObjectBlock({ title, data, accentIndex = 0 }: { title: string; data: Record<string, unknown>; accentIndex?: number }) {
   const rows = Object.entries(data).filter(([, v]) => formatScalar(v) !== "");
   if (rows.length === 0) return null;
   return (
-    <section className="integration-detail__section">
-      <h4 className="integration-detail__section-title">{title}</h4>
-      <div className="integration-detail__rows">
-        {rows.map(([k, v]) => {
-          if (v !== null && typeof v === "object") return null;
-          return <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />;
-        })}
-      </div>
-    </section>
+    <ServiceCard icon={Building2} title={title} accent={ACCENT_CYCLE[accentIndex % ACCENT_CYCLE.length]}>
+      {rows.map(([k, v]) => {
+        if (v !== null && typeof v === "object") return null;
+        return <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />;
+      })}
+    </ServiceCard>
   );
 }
 
 function DetailArrayBlock({ title, items }: { title: string; items: unknown[] }) {
   if (items.length === 0) return null;
   return (
-    <section className="integration-detail__section">
+    <section className="integration-detail__section hubsoft-generic-card">
       <h4 className="integration-detail__section-title">
-        {title} <span className="integration-detail__count">({items.length})</span>
+        <Building2 size={13} /> {title} <span className="integration-detail__count">({items.length})</span>
       </h4>
       <div className="integration-detail__array">
         {items.map((item, i) => {
@@ -439,114 +596,317 @@ function DetailArrayBlock({ title, items }: { title: string; items: unknown[] })
   );
 }
 
-// Renderização dedicada da aba "Serviços" (raw.servicos, HubSoft) — os campos mais úteis
-// (login, MAC, senha, status, tecnologia, cobrança, velocidades, valor) ganham destaque num
-// grid de no máximo 3 colunas no topo do cartão; o resto continua a render genérica
-// (scalars + sub-secções) usada nas outras abas. "status_txt_resumido" (duplicado de
-// "status_text" já mostrado no cartão resumido) é removido — não é útil aqui.
-const SERVICE_PRIORITY_KEYS = [
-  "login",
-  "mac_addr",
-  "nome",
-  "senha",
-  "status",
-  "status_prefixo",
-  "status_txt",
-  "tecnologia",
-  "tipo_cobranca",
-  "velocidade_download",
-  "velocidade_upload",
-  "valor",
-];
-const SERVICE_HIDDEN_KEYS = new Set(["status_txt_resumido"]);
+// ---- Aba "Serviços" do modal "Ver dados completos" — layout em cartões, espelha o próprio
+// painel da HubSoft (ver docs.hubsoft.com.br). Alimentado pelos campos tipados de
+// ClientServiceSummary (internal/integrationhubsoft ServiceSummary), não por um dump genérico do
+// JSON bruto — cada cartão só aparece quando tem pelo menos um campo preenchido.
 
-function serviceStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s.includes("habilit")) return "badge badge--ok";
-  if (s.includes("desconect")) return "badge badge--err";
-  return "badge badge--off";
-}
-
-function omitHiddenServiceFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (SERVICE_HIDDEN_KEYS.has(k)) continue;
-    out[k] = v;
-  }
-  return out;
-}
-
-function ServicoItemCard({ obj }: { obj: Record<string, unknown> }) {
-  const clean = omitHiddenServiceFields(obj);
-  const priorityEntries = SERVICE_PRIORITY_KEYS.map((k) => [k, clean[k]] as [string, unknown]).filter(
-    ([, v]) => v !== undefined && v !== null && formatScalar(v) !== "",
-  );
-  const priorityKeys = new Set(priorityEntries.map(([k]) => k));
-
-  const restEntries = Object.entries(clean).filter(([k, v]) => !priorityKeys.has(k) && v !== null && v !== undefined);
-  const restScalars = restEntries.filter(([, v]) => typeof v !== "object");
-  const restSubObjects = restEntries.filter(
-    (entry): entry is [string, Record<string, unknown>] =>
-      !!entry[1] && typeof entry[1] === "object" && !Array.isArray(entry[1]),
-  );
-
+function ServiceInfoRow({
+  icon: Icon,
+  label,
+  value,
+  strike,
+}: {
+  icon?: LucideIcon;
+  label: string;
+  value?: string;
+  // Serviço cancelado/inativo — risca só o valor (o rótulo continua legível).
+  strike?: boolean;
+}) {
+  if (!value?.trim()) return null;
   return (
-    <div className="integration-detail__array-item">
-      <div className="integration-detail__rows integration-detail__rows--service-priority">
-        {priorityEntries.map(([k, v]) => {
-          if (k === "status") {
-            const text = formatScalar(v);
-            if (!text) return null;
-            return (
-              <div key={k} className="integration-detail__row">
-                <span className="integration-detail__label">{formatFieldLabel(k)}</span>
-                <span className={serviceStatusBadgeClass(text)}>{text}</span>
-              </div>
-            );
-          }
-          return <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />;
-        })}
-      </div>
-      {restScalars.length > 0 ? (
-        <div className="integration-detail__rows" style={{ marginTop: 10 }}>
-          {restScalars.map(([k, v]) => (
-            <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
-          ))}
-        </div>
-      ) : null}
-      {restSubObjects.map(([k, sub]) => {
-        const subRows = Object.entries(omitHiddenServiceFields(sub)).filter(([, v]) => formatScalar(v) !== "");
-        if (subRows.length === 0) return null;
-        return (
-          <div key={k} className="integration-detail__subsection">
-            <h5 className="integration-detail__subsection-title">{formatFieldLabel(k)}</h5>
-            <div className="integration-detail__rows">
-              {subRows.map(([sk, sv]) => (
-                <DetailScalar key={sk} label={formatFieldLabel(sk)} value={sv} />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div className="hubsoft-row">
+      <span className="hubsoft-row__label">
+        {Icon ? <Icon size={12} /> : null}
+        {label}
+      </span>
+      <span className={strike ? "hubsoft-row__value hubsoft-service-inactive" : "hubsoft-row__value"}>{value}</span>
     </div>
   );
 }
 
-function ServicosTabContent({ items }: { items: unknown[] }) {
-  if (items.length === 0) return null;
+// Senha vem em texto simples da HubSoft (é a credencial PPPoE/autenticação do cliente, não uma
+// senha de conta) — mascarada por omissão com alternância para ver, mesmo padrão do painel deles.
+function ServicePasswordRow({ password }: { password?: string }) {
+  const [visible, setVisible] = useState(false);
+  if (!password?.trim()) return null;
   return (
-    <section className="integration-detail__section">
-      <h4 className="integration-detail__section-title">
-        Serviços <span className="integration-detail__count">({items.length})</span>
-      </h4>
-      <div className="integration-detail__array">
-        {items.map((item, i) =>
-          item && typeof item === "object" && !Array.isArray(item) ? (
-            <ServicoItemCard key={i} obj={item as Record<string, unknown>} />
-          ) : null,
-        )}
+    <div className="hubsoft-row">
+      <span className="hubsoft-row__label">
+        <KeyRound size={12} /> Senha
+      </span>
+      <span className="hubsoft-row__value row" style={{ gap: 6, alignItems: "center" }}>
+        <span className="mono">{visible ? password : "•".repeat(Math.max(6, password.length))}</span>
+        <button
+          type="button"
+          className="btn btn--icon btn--sm"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? "Ocultar senha" : "Mostrar senha"}
+          title={visible ? "Ocultar senha" : "Mostrar senha"}
+        >
+          {visible ? <EyeOff size={13} /> : <Eye size={13} />}
+        </button>
+      </span>
+    </div>
+  );
+}
+
+// Badge colorido em vez de texto simples — dá pra distinguir tecnologias à primeira vista numa
+// lista de clientes com serviços mistos (fibra/rádio/cabo).
+function technologyBadgeModifier(tech: string): string {
+  const t = tech.toLowerCase();
+  if (t.includes("fibra") || t.includes("ftt") || t.includes("gpon") || t.includes("epon")) return "hubsoft-tech-badge--fibra";
+  if (t.includes("radio") || t.includes("rádio") || t.includes("wireless") || t.includes("wifi")) return "hubsoft-tech-badge--radio";
+  if (t.includes("cabo") || t.includes("metal") || t.includes("ethernet")) return "hubsoft-tech-badge--cabo";
+  return "hubsoft-tech-badge--outro";
+}
+
+function ServiceTechnologyRow({ value }: { value?: string }) {
+  if (!value?.trim()) return null;
+  return (
+    <div className="hubsoft-row">
+      <span className="hubsoft-row__label">
+        <Router size={12} /> Tecnologia
+      </span>
+      <span className="hubsoft-row__value">
+        <span className={`hubsoft-tech-badge ${technologyBadgeModifier(value)}`}>{value}</span>
+      </span>
+    </div>
+  );
+}
+
+// Barra de progresso simples (não é medição em tempo real — é o plano/velocidade contratada) para
+// dar uma referência visual de grandeza além do número puro. 1000 Mbits como teto de referência
+// cobre a esmagadora maioria dos planos residenciais/empresariais desta operadora.
+function parseMbits(v: string): number | null {
+  const n = parseFloat(v.replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function ServiceSpeedRow({ label, value }: { label: string; value?: string }) {
+  if (!value?.trim()) return null;
+  const n = parseMbits(value);
+  const pct = n != null ? Math.max(4, Math.min(100, (n / 1000) * 100)) : null;
+  return (
+    <div className="hubsoft-row">
+      <span className="hubsoft-row__label">
+        <Gauge size={12} /> {label}
+      </span>
+      <span className="hubsoft-row__value hubsoft-speed">
+        <span className="hubsoft-speed__value">{value}</span>
+        {pct != null ? (
+          <span className="hubsoft-speed__bar" aria-hidden>
+            <span className="hubsoft-speed__fill" style={{ width: `${pct}%` }} />
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function ServiceConnectionStatusBox({ text, connected }: { text?: string; connected?: string }) {
+  if (!text?.trim()) return null;
+  const isOn = connected === "true";
+  const isOff = connected === "false";
+  return (
+    <div className={`hubsoft-status-box ${isOn ? "hubsoft-status-box--on" : isOff ? "hubsoft-status-box--off" : ""}`}>
+      <span className={`hubsoft-status-box__dot ${isOn ? "hubsoft-status-box__dot--live" : isOff ? "hubsoft-status-box__dot--down" : ""}`} aria-hidden />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function ServiceMapLink({ latitude, longitude }: { latitude?: string; longitude?: string }) {
+  if (!latitude?.trim() || !longitude?.trim()) return null;
+  const url = `https://www.google.com/maps?q=${encodeURIComponent(latitude)},${encodeURIComponent(longitude)}`;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="hubsoft-map-link">
+      <MapPin size={12} /> Ver no mapa
+    </a>
+  );
+}
+
+type ServiceCardAccent = "conexao" | "endereco" | "cadastro" | "historico" | "vendedor";
+// Ordem usada para ciclar cor+ícone entre secções/abas que não têm uma cor "natural" própria
+// (Identificação, Financeiro, Atendimentos, …) — reaproveita as mesmas 5 cores da aba Serviços,
+// nunca aparecem lado a lado então não há confusão de significado entre abas.
+const ACCENT_CYCLE: ServiceCardAccent[] = ["conexao", "cadastro", "historico", "endereco", "vendedor"];
+
+function ServiceCard({
+  icon: Icon,
+  title,
+  accent,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  accent: ServiceCardAccent;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`hubsoft-service-card hubsoft-service-card--${accent}`}>
+      <div className="hubsoft-service-card__head">
+        <span className="hubsoft-service-card__icon">
+          <Icon size={14} />
+        </span>
+        <h5>{title}</h5>
       </div>
-    </section>
+      <div className="hubsoft-service-card__body">{children}</div>
+    </div>
+  );
+}
+
+function ServicesTabContent({
+  services,
+  onEnableClick,
+  onSuspendClick,
+}: {
+  services: ClientServiceSummary[];
+  onEnableClick?: (s: ClientServiceSummary) => void;
+  onSuspendClick?: (s: ClientServiceSummary) => void;
+}) {
+  const [idx, setIdx] = useState(0);
+  if (services.length === 0) {
+    return <div className="msg">Nenhum serviço encontrado.</div>;
+  }
+  const safeIdx = Math.min(idx, services.length - 1);
+  const s = services[safeIdx];
+  const pending = Number(s.pending_contracts ?? "");
+  const hasSeller = !!(s.seller_name || s.seller_id || s.seller_email);
+
+  return (
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+      <div className="hubsoft-services-head">
+        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <h4 className="integration-detail__section-title" style={{ margin: 0 }}>
+            Serviços <span className="integration-detail__count">({services.length})</span>
+            {s.login ? <span style={{ fontWeight: 400, textTransform: "none" }}> — Login: {s.login}</span> : null}
+          </h4>
+          {s.status ? <span className={labelStatus(s.status) ?? "badge"}>{s.status}</span> : null}
+        </div>
+        {(onEnableClick || onSuspendClick) && s.id ? (
+          <div className="row" style={{ gap: 8 }}>
+            {onEnableClick ? (
+              <button type="button" className="btn btn--sm" onClick={() => onEnableClick(s)}>
+                Habilitar serviço
+              </button>
+            ) : null}
+            {onSuspendClick ? (
+              <button type="button" className="btn btn--sm btn--danger" onClick={() => onSuspendClick(s)}>
+                Suspender serviço
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {services.length > 1 ? (
+        <div className="hubsoft-services-picker" role="tablist" aria-label="Logins do cliente">
+          {services.map((svc, si) => (
+            <button
+              key={svc.id ?? si}
+              type="button"
+              role="tab"
+              aria-selected={si === safeIdx}
+              className={
+                (si === safeIdx ? "hubsoft-services-picker__tab active" : "hubsoft-services-picker__tab") + onlineTabModifier(svc)
+              }
+              onClick={() => setIdx(si)}
+            >
+              <User size={12} />
+              <span className={isServiceInactive(svc) ? "hubsoft-service-inactive" : undefined}>
+                {svc.login?.trim() || svc.name?.trim() || `Serviço ${si + 1}`}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="hubsoft-service-grid">
+        <ServiceCard icon={RefreshCw} title="Conexão Atual" accent="conexao">
+          {s.status_prefix ? (
+            <div className="hubsoft-row">
+              <span className="hubsoft-row__label">Status</span>
+              <span className="hubsoft-row__value">
+                <span className={labelStatus(s.status_prefix) ?? "badge"}>{s.status_prefix}</span>
+              </span>
+            </div>
+          ) : null}
+          <ServiceInfoRow label="MAC Addr" value={s.mac} />
+          <ServiceInfoRow label="Phy Addr" value={s.phy_addr} />
+          <ServiceTechnologyRow value={s.technology} />
+          <ServiceInfoRow label="Ipv4" value={s.ipv4} />
+          <ServiceInfoRow label="Último Ipv4" value={s.last_ipv4} />
+          <ServiceSpeedRow label="Vel. Download" value={s.download_speed} />
+          <ServiceSpeedRow label="Vel. Upload" value={s.upload_speed} />
+          <ServiceInfoRow label="Última Conexão" value={s.last_connected_at} />
+          <ServiceConnectionStatusBox text={s.status_text_full} connected={s.connected} />
+        </ServiceCard>
+
+        <ServiceCard icon={MapPin} title="Endereço de Instalação" accent="endereco">
+          <ServiceInfoRow label="Completo" value={s.install_address} />
+          <ServiceInfoRow label="CEP" value={s.address_cep} />
+          <ServiceInfoRow label="Complemento" value={s.address_complement} />
+          <ServiceInfoRow label="Bairro" value={s.address_neighborhood} />
+          <ServiceInfoRow label="Cidade" value={s.city} />
+          <ServiceInfoRow label="Estado" value={s.address_state} />
+          <ServiceInfoRow label="Número" value={s.address_number} />
+          <ServiceInfoRow label="País" value={s.address_country} />
+          <ServiceInfoRow label="UF" value={s.address_uf} />
+          <ServiceInfoRow label="Ibge Cidade" value={s.address_ibge} />
+          <ServiceMapLink latitude={s.latitude} longitude={s.longitude} />
+        </ServiceCard>
+
+        <ServiceCard icon={KeyRound} title="Cadastro & Autenticação" accent="cadastro">
+          <ServiceInfoRow label="Plano" value={s.name} strike={isServiceInactive(s)} />
+          <ServiceInfoRow label="Plano Número" value={s.plan_number} />
+          <ServiceInfoRow label="Valor" value={s.plan_value ? formatCurrencyBRL(s.plan_value) : undefined} />
+          <ServiceInfoRow icon={User} label="Login PPPoE" value={s.login} />
+          <ServicePasswordRow password={s.password} />
+          <ServiceInfoRow label="Id Cliente Serviço" value={s.id} />
+          <ServiceInfoRow label="Id Serviço Antigo" value={s.old_service_id} />
+          <ServiceInfoRow label="Uuid" value={s.uuid} />
+          <ServiceInfoRow label="Carnê" value={s.carne} />
+          <ServiceInfoRow label="Tipo de Cobrança" value={s.billing_type} />
+          {s.notes?.trim() ? (
+            <div className="hubsoft-row">
+              <span className="hubsoft-row__label">Anotações</span>
+              <span className="hubsoft-row__value">
+                <TableCellExpandableText text={s.notes} />
+              </span>
+            </div>
+          ) : null}
+        </ServiceCard>
+
+        <ServiceCard icon={CalendarClock} title="Histórico & Prazos" accent="historico">
+          <ServiceInfoRow label="Data Cadastro" value={s.registered_at} />
+          <ServiceInfoRow label="Data Habilitação" value={s.enabled_at} />
+          <ServiceInfoRow label="Data Venda" value={s.sold_at} />
+          <ServiceInfoRow label="Início Contrato" value={s.contract_start_at} />
+          <ServiceInfoRow label="Fim Contrato" value={s.contract_end_at} />
+          <ServiceInfoRow label="Vigência (meses)" value={s.contract_months} />
+          {s.pending_contracts ? (
+            <div className="hubsoft-row">
+              <span className="hubsoft-row__label">Contratos Pendentes</span>
+              <span className="hubsoft-row__value">
+                <span className={pending > 0 ? "badge badge--err" : "badge badge--ok"}>
+                  {pending > 0 ? <AlertTriangle size={11} style={{ verticalAlign: "-2px" }} /> : null} {s.pending_contracts}
+                </span>
+              </span>
+            </div>
+          ) : null}
+          <ServiceInfoRow label="Última Atualização" value={s.updated_at} />
+        </ServiceCard>
+
+        {hasSeller ? (
+          <ServiceCard icon={UserRound} title="Vendedor" accent="vendedor">
+            <ServiceInfoRow label="Nome" value={s.seller_name} />
+            <ServiceInfoRow label="Id Vendedor" value={s.seller_id} />
+            <ServiceInfoRow label="E-mail" value={s.seller_email} />
+          </ServiceCard>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -598,57 +958,48 @@ function buildDetailTabs(raw?: Record<string, unknown>): DetailTabDef[] {
 
   const tabs: DetailTabDef[] = [];
 
+  // Ícone + cor por secção — mesma linguagem visual da aba Serviços, ciclando pelas 5 cores já
+  // definidas (não há problema em repetir entre abas, nunca aparecem lado a lado).
+  const IDENT_ICONS: LucideIcon[] = [IdCard, Phone, CalendarDays, FileText];
+
   tabs.push({
     id: "identificacao",
     label: "Identificação",
     content: (
-      <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-        {grouped.map((g) => (
-          <section key={g.title} className="integration-detail__section">
-            <h4 className="integration-detail__section-title">{g.title}</h4>
-            <div className="integration-detail__rows">
+      <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+        <div className="hubsoft-service-grid">
+          {grouped.map((g, i) => (
+            <ServiceCard key={g.title} icon={IDENT_ICONS[i % IDENT_ICONS.length]} title={g.title} accent={ACCENT_CYCLE[i % ACCENT_CYCLE.length]}>
               {g.rows.map(([k, v]) => (
                 <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
               ))}
-            </div>
-          </section>
-        ))}
-        {otherRows.length > 0 ? (
-          <section className="integration-detail__section">
-            <h4 className="integration-detail__section-title">Outros</h4>
-            <div className="integration-detail__rows">
+            </ServiceCard>
+          ))}
+          {otherRows.length > 0 ? (
+            <ServiceCard icon={FileText} title="Outros" accent={ACCENT_CYCLE[grouped.length % ACCENT_CYCLE.length]}>
               {otherRows.map(([k, v]) => (
                 <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
               ))}
-            </div>
-          </section>
-        ) : null}
-        {objectSections.map(({ key, data }) => (
-          <DetailObjectBlock key={key} title={formatFieldLabel(key)} data={data} />
-        ))}
+            </ServiceCard>
+          ) : null}
+          {objectSections.map(({ key, data }, i) => (
+            <DetailObjectBlock key={key} title={formatFieldLabel(key)} data={data} accentIndex={grouped.length + 1 + i} />
+          ))}
+        </div>
       </div>
     ),
   });
 
   for (const { key, items } of arraySections) {
     if (items.length === 0) continue;
-    if (key === "servicos") {
-      tabs.push({
-        id: `array:${key}`,
-        label: "Serviços",
-        content: (
-          <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-            <ServicosTabContent items={items} />
-          </div>
-        ),
-      });
-      continue;
-    }
+    // "servicos" ganhou aba dedicada própria (ServicesTabContent, cartões tipados) — ver
+    // ClientDetailModal, injectada directamente ali a partir de client.services, não daqui.
+    if (key === "servicos") continue;
     tabs.push({
       id: `array:${key}`,
       label: formatFieldLabel(key),
       content: (
-        <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+        <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
           <DetailArrayBlock title={formatFieldLabel(key)} items={items} />
         </div>
       ),
@@ -677,18 +1028,42 @@ function invoiceStatusLabel(inv: InvoiceItem): string {
   return inv.status?.trim() || "Pendente";
 }
 
+function StatTile({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  sub?: string;
+  accent: ServiceCardAccent;
+}) {
+  return (
+    <div className={`hubsoft-stat-tile hubsoft-stat-tile--${accent}`}>
+      <span className="hubsoft-stat-tile__icon">
+        <Icon size={16} />
+      </span>
+      <div className="hubsoft-stat-tile__body">
+        <span className="hubsoft-stat-tile__label">{label}</span>
+        <span className="hubsoft-stat-tile__value">{value}</span>
+        {sub ? <span className="hubsoft-stat-tile__sub">{sub}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function FinancialSummaryPanel({ summary }: { summary: FinancialSummary }) {
   return (
-    <section className="integration-detail__section">
-      <h4 className="integration-detail__section-title">Resumo</h4>
-      <div className="integration-detail__rows">
-        <DetailScalar label="Total de faturas" value={summary.total} />
-        <DetailScalar label="Valor total" value={formatCurrencyBRL(summary.total_value)} />
-        <DetailScalar label="Vencidas" value={`${summary.overdue_count} · ${formatCurrencyBRL(summary.overdue_value)}`} />
-        <DetailScalar label="Pendentes" value={`${summary.pending_count} · ${formatCurrencyBRL(summary.pending_value)}`} />
-        <DetailScalar label="Pagas" value={`${summary.paid_count} · ${formatCurrencyBRL(summary.paid_value)}`} />
-      </div>
-    </section>
+    <div className="hubsoft-stat-grid">
+      <StatTile icon={Receipt} label="Total de faturas" value={String(summary.total)} accent="conexao" />
+      <StatTile icon={Wallet} label="Valor total" value={formatCurrencyBRL(summary.total_value)} accent="cadastro" />
+      <StatTile icon={AlertTriangle} label="Vencidas" value={String(summary.overdue_count)} sub={formatCurrencyBRL(summary.overdue_value)} accent="historico" />
+      <StatTile icon={Clock} label="Pendentes" value={String(summary.pending_count)} sub={formatCurrencyBRL(summary.pending_value)} accent="vendedor" />
+      <StatTile icon={CheckCircle2} label="Pagas" value={String(summary.paid_count)} sub={formatCurrencyBRL(summary.paid_value)} accent="endereco" />
+    </div>
   );
 }
 
@@ -698,13 +1073,28 @@ export function FinancialTabContent({
   message,
   invoices,
   summary,
+  onDownloadSelected,
 }: {
   loading: boolean;
   ok: boolean;
   message?: string;
   invoices: InvoiceItem[];
   summary?: FinancialSummary;
+  // Ausente (ex.: aba Relatório) esconde a coluna de checkbox e o botão — mesmo padrão opt-in de
+  // onFetchLogins etc. acima.
+  onDownloadSelected?: (invoiceIds: string[]) => Promise<void>;
 }) {
+  const downloadable = useMemo(() => invoices.filter((inv) => !!inv.id && !!inv.boleto_link?.trim()), [invoices]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+
+  // Faturas mudam (troca de cliente, novo fetch) — não manter uma selecção de outra pessoa.
+  useEffect(() => {
+    setSelected(new Set());
+    setDownloadError("");
+  }, [invoices]);
+
   if (loading) {
     return <p className="integration-detail__empty">A carregar faturas…</p>;
   }
@@ -714,17 +1104,67 @@ export function FinancialTabContent({
   if (invoices.length === 0) {
     return <div className="msg">{message || "Nenhuma fatura encontrada."}</div>;
   }
+
+  const allSelected = downloadable.length > 0 && downloadable.every((inv) => selected.has(inv.id!));
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(downloadable.map((inv) => inv.id!)));
+  }
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  async function download() {
+    if (!onDownloadSelected || selected.size === 0) return;
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      await onDownloadSelected([...selected]);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
-    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
       {summary ? <FinancialSummaryPanel summary={summary} /> : null}
-      <section className="integration-detail__section">
-        <h4 className="integration-detail__section-title">
-          Faturas <span className="integration-detail__count">({invoices.length})</span>
-        </h4>
+      <section className="integration-detail__section hubsoft-generic-card">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <h4 className="integration-detail__section-title" style={{ margin: 0 }}>
+            <Receipt size={13} /> Faturas <span className="integration-detail__count">({invoices.length})</span>
+          </h4>
+          {onDownloadSelected ? (
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={selected.size === 0 || downloading}
+              onClick={() => void download()}
+            >
+              {downloading ? "A gerar PDF…" : `Baixar selecionados (${selected.size})`}
+            </button>
+          ) : null}
+        </div>
+        {downloadError ? <div className="msg msg--err" style={{ marginTop: 6 }}>{downloadError}</div> : null}
         <div className="table-wrap integration-support-table">
           <table className="integration-support-table__grid">
             <thead>
               <tr>
+                {onDownloadSelected ? (
+                  <th style={{ width: 28 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      disabled={downloadable.length === 0}
+                      onChange={toggleAll}
+                      aria-label="Selecionar todos os boletos"
+                    />
+                  </th>
+                ) : null}
                 <th>Vencimento</th>
                 <th>Valor</th>
                 <th>Status</th>
@@ -736,6 +1176,18 @@ export function FinancialTabContent({
             <tbody>
               {invoices.map((inv, i) => (
                 <tr key={inv.id ?? i}>
+                  {onDownloadSelected ? (
+                    <td className="integration-support-table__cell">
+                      {inv.id && inv.boleto_link ? (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(inv.id)}
+                          onChange={() => toggleOne(inv.id!)}
+                          aria-label={`Selecionar boleto de ${inv.due_date || inv.id}`}
+                        />
+                      ) : null}
+                    </td>
+                  ) : null}
                   <td className="integration-support-table__cell integration-support-table__cell--date">{inv.due_date || "—"}</td>
                   <td className="mono integration-support-table__cell">{formatCurrencyBRL(inv.value)}</td>
                   <td className="integration-support-table__cell">
@@ -790,10 +1242,10 @@ export function AttendanceTabContent({
   if (items.length === 0) return <div className="msg">{message || "Nenhum atendimento encontrado."}</div>;
   const showClient = items.some((a) => a.client_name || a.client_code);
   return (
-    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-      <section className="integration-detail__section">
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section hubsoft-generic-card">
         <h4 className="integration-detail__section-title">
-          Atendimentos <span className="integration-detail__count">({items.length})</span>
+          <Headset size={13} /> Atendimentos <span className="integration-detail__count">({items.length})</span>
         </h4>
         <div className="table-wrap integration-support-table">
           <table className="integration-support-table__grid integration-support-table__grid--att">
@@ -874,10 +1326,10 @@ export function WorkOrdersTabContent({
   if (items.length === 0) return <div className="msg">{message || "Nenhuma ordem de serviço encontrada."}</div>;
   const showClient = items.some((o) => o.client_name || o.client_code);
   return (
-    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-      <section className="integration-detail__section">
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section hubsoft-generic-card">
         <h4 className="integration-detail__section-title">
-          Ordens de serviço <span className="integration-detail__count">({items.length})</span>
+          <ClipboardList size={13} /> Ordens de serviço <span className="integration-detail__count">({items.length})</span>
         </h4>
         <div className="table-wrap integration-support-table">
           <table className="integration-support-table__grid integration-support-table__grid--os">
@@ -956,10 +1408,10 @@ export function LoginsTabContent({
   if (!ok && message) return <div className="msg msg--err">{message}</div>;
   if (items.length === 0) return <div className="msg">{message || "Nenhum login encontrado."}</div>;
   return (
-    <div className="integration-detail" style={{ fontSize: DETAIL_FONT }}>
-      <section className="integration-detail__section">
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+      <section className="integration-detail__section hubsoft-generic-card">
         <h4 className="integration-detail__section-title">
-          Logins <span className="integration-detail__count">({items.length})</span>
+          <LogIn size={13} /> Logins <span className="integration-detail__count">({items.length})</span>
         </h4>
         <div className="table-wrap integration-support-table">
           <table className="integration-support-table__grid integration-support-table__grid--login">
@@ -1012,6 +1464,9 @@ export function ClientDetailModal({
   onFetchAttendance,
   onFetchWorkOrders,
   onFetchLogins,
+  onDownloadBoletos,
+  onEnableService,
+  onSuspendService,
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
@@ -1024,6 +1479,14 @@ export function ClientDetailModal({
   onFetchAttendance?: (client: ClientCard) => Promise<AttendanceState>;
   onFetchWorkOrders?: (client: ClientCard) => Promise<WorkOrderState>;
   onFetchLogins?: (client: ClientCard) => Promise<LoginState>;
+  onDownloadBoletos?: (client: ClientCard, invoiceIds: string[]) => Promise<void>;
+  // Só a HubSoft tem estas duas acções (ver docs.hubsoft.com.br > Clientes > Cliente Serviço).
+  onEnableService?: (client: ClientCard, service: ClientServiceSummary, motivo: string) => Promise<ServiceActionResult>;
+  onSuspendService?: (
+    client: ClientCard,
+    service: ClientServiceSummary,
+    tipo: "suspenso_debito" | "suspenso_pedido_cliente",
+  ) => Promise<ServiceActionResult>;
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
@@ -1033,16 +1496,26 @@ export function ClientDetailModal({
   prefetchExtras?: boolean;
 }) {
   const detailTabs = useMemo(() => buildDetailTabs(client.raw), [client.raw]);
+  const services = client.services ?? [];
   const tabs = useMemo(() => {
+    // "identificacao" é sempre a primeira (buildDetailTabs) — "Serviços" entra logo a seguir,
+    // antes de Financeiro/Atendimentos/Ordens, mesma ordem do painel da própria HubSoft.
+    const [identificacao, ...rest] = detailTabs;
+    const withServices: DetailTabDef[] = identificacao ? [identificacao] : [];
+    if (services.length > 0) {
+      withServices.push({ id: "servicos", label: `Serviços (${services.length})`, content: null });
+    }
+    withServices.push(...rest);
     const extra: DetailTabDef[] = [];
     if (onFetchFinancial) extra.push({ id: "financeiro", label: "Financeiro", content: null });
     if (onFetchAttendance && attendanceEnabled !== false) extra.push({ id: "atendimentos", label: "Atendimentos", content: null });
     if (onFetchWorkOrders && workOrderEnabled !== false) extra.push({ id: "ordens", label: "Ordens de serviço", content: null });
     if (onFetchLogins && loginEnabled !== false) extra.push({ id: "logins", label: "Logins", content: null });
-    return [...detailTabs, ...extra];
-  }, [detailTabs, onFetchFinancial, onFetchAttendance, onFetchWorkOrders, onFetchLogins, attendanceEnabled, workOrderEnabled, loginEnabled]);
+    return [...withServices, ...extra];
+  }, [detailTabs, services.length, onFetchFinancial, onFetchAttendance, onFetchWorkOrders, onFetchLogins, attendanceEnabled, workOrderEnabled, loginEnabled]);
 
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? "identificacao");
+  const [serviceAction, setServiceAction] = useState<ServiceActionTarget | null>(null);
   const [financial, setFinancial] = useState<FinancialState | null>(null);
   const [financialLoading, setFinancialLoading] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceState | null>(null);
@@ -1064,6 +1537,7 @@ export function ClientDetailModal({
     setLogins(null);
     setLoginLoading(false);
     setDetailTarget(null);
+    setServiceAction(null);
   }, [client.id, client.code, tabs]);
 
   useEffect(() => {
@@ -1105,7 +1579,15 @@ export function ClientDetailModal({
   }, [activeTab, onFetchLogins, logins, loginLoading, client]);
 
   let activeContent: ReactNode;
-  if (activeTab === "financeiro") {
+  if (activeTab === "servicos") {
+    activeContent = (
+      <ServicesTabContent
+        services={services}
+        onEnableClick={onEnableService ? (s) => setServiceAction({ client, service: s, mode: "enable" }) : undefined}
+        onSuspendClick={onSuspendService ? (s) => setServiceAction({ client, service: s, mode: "suspend" }) : undefined}
+      />
+    );
+  } else if (activeTab === "financeiro") {
     activeContent = (
       <FinancialTabContent
         loading={financialLoading}
@@ -1113,6 +1595,7 @@ export function ClientDetailModal({
         message={financial?.message}
         invoices={financial?.invoices ?? []}
         summary={financial?.summary}
+        onDownloadSelected={onDownloadBoletos ? (ids) => onDownloadBoletos(client, ids) : undefined}
       />
     );
   } else if (activeTab === "atendimentos") {
@@ -1144,7 +1627,7 @@ export function ClientDetailModal({
   }
 
   return createPortal(
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="modal-backdrop hubsoft-detail-backdrop" role="presentation" onMouseDown={onClose}>
       <div
         className="modal integration-detail-modal"
         role="dialog"
@@ -1155,6 +1638,7 @@ export function ClientDetailModal({
           <div style={{ minWidth: 0 }}>
             <h3 id="client-detail-title" className="integration-detail-modal__title">
               {client.name || "Cliente"}
+              {client.inactive ? <InactiveClientMark /> : null}
             </h3>
             {client.trade_name ? <p className="integration-detail-modal__subtitle">{client.trade_name}</p> : null}
           </div>
@@ -1185,6 +1669,24 @@ export function ClientDetailModal({
         )}
       </div>
       {detailTarget ? <SupportItemDetailModal target={detailTarget} onClose={() => setDetailTarget(null)} /> : null}
+      {serviceAction ? (
+        <ServiceActionModal
+          target={serviceAction}
+          onCancel={() => setServiceAction(null)}
+          onConfirm={(value) => {
+            if (serviceAction.mode === "enable") {
+              if (!onEnableService) return Promise.resolve({ ok: false, message: "Ação indisponível." });
+              return onEnableService(serviceAction.client, serviceAction.service, value);
+            }
+            if (!onSuspendService) return Promise.resolve({ ok: false, message: "Ação indisponível." });
+            return onSuspendService(
+              serviceAction.client,
+              serviceAction.service,
+              value as "suspenso_debito" | "suspenso_pedido_cliente",
+            );
+          }}
+        />
+      ) : null}
     </div>,
     document.body,
   );
@@ -1200,6 +1702,9 @@ export function HubsoftClientResults({
   onFetchWorkOrders,
   onFetchLogins,
   onFetchFinancial,
+  onEnableService,
+  onSuspendService,
+  onDownloadBoletos,
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
@@ -1214,6 +1719,13 @@ export function HubsoftClientResults({
   onFetchWorkOrders?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: WorkOrderItem[] }>;
   onFetchLogins?: (client: ClientCard) => Promise<{ ok: boolean; message?: string; items: ClientServiceSummary[] }>;
   onFetchFinancial?: (client: ClientCard) => Promise<FinancialState>;
+  onEnableService?: (client: ClientCard, service: ClientServiceSummary, motivo: string) => Promise<ServiceActionResult>;
+  onSuspendService?: (
+    client: ClientCard,
+    service: ClientServiceSummary,
+    tipo: "suspenso_debito" | "suspenso_pedido_cliente",
+  ) => Promise<ServiceActionResult>;
+  onDownloadBoletos?: (client: ClientCard, invoiceIds: string[]) => Promise<void>;
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
@@ -1276,6 +1788,7 @@ export function HubsoftClientResults({
                   onClick={() => void openDetail(c)}
                 >
                   {c.name || "—"}
+                  {c.inactive ? <InactiveClientMark /> : null}
                 </button>
                 {c.trade_name ? <div className="integration-consult-card__subtitle">{c.trade_name}</div> : null}
               </div>
@@ -1312,6 +1825,9 @@ export function HubsoftClientResults({
           onFetchAttendance={onFetchAttendance}
           onFetchWorkOrders={onFetchWorkOrders}
           onFetchLogins={onFetchLogins}
+          onDownloadBoletos={onDownloadBoletos}
+          onEnableService={onEnableService}
+          onSuspendService={onSuspendService}
           attendanceEnabled={attendanceEnabled}
           workOrderEnabled={workOrderEnabled}
           loginEnabled={loginEnabled}

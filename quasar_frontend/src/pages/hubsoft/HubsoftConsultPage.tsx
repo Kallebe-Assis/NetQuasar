@@ -10,9 +10,10 @@ import type {
   ClientCard,
   ClientFinancialResponse,
   ClientSearchResponse,
+  ClientServiceSummary,
   ClientWorkOrderResponse,
 } from "../../integrations/types";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, apiFetchBlob, downloadBlob, ApiError } from "../../lib/api";
 import { PageToastHost, usePageToast } from "../../lib/pageToast";
 
 /**
@@ -109,6 +110,60 @@ export function HubsoftConsultPage() {
     });
     return { ok: !!r.ok, message: r.message, invoices: r.invoices ?? [], summary: r.summary };
   }, []);
+
+  // "Habilitar serviço" / "Suspender serviço" (cartão da Consulta) — POST directo na HubSoft (ver
+  // docs.hubsoft.com.br > Clientes > Cliente Serviço). O erro da própria HubSoft (ex.: "serviço
+  // não está suspenso por débito") volta tal-qual em e.message, mostrado no modal de confirmação.
+  const enableClientService = useCallback(async (_client: ClientCard, service: ClientServiceSummary, motivo: string) => {
+    if (!service.id) return { ok: false, message: "Serviço sem identificador." };
+    try {
+      await apiFetch(`/api/v1/integrations/${slug}/hubsoft/service/${encodeURIComponent(service.id)}/enable`, {
+        method: "POST",
+        json: { motivo_habilitacao: motivo },
+      });
+      showToast("ok", "Serviço habilitado com sucesso.");
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }, [showToast]);
+
+  const suspendClientService = useCallback(
+    async (_client: ClientCard, service: ClientServiceSummary, tipo: "suspenso_debito" | "suspenso_pedido_cliente") => {
+      if (!service.id) return { ok: false, message: "Serviço sem identificador." };
+      try {
+        await apiFetch(`/api/v1/integrations/${slug}/hubsoft/service/${encodeURIComponent(service.id)}/suspend`, {
+          method: "POST",
+          json: { tipo_suspensao: tipo },
+        });
+        showToast("ok", "Serviço suspenso com sucesso.");
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    [showToast],
+  );
+
+  // "Baixar selecionados" (aba Financeiro) — o backend busca de novo os boleto_link na HubSoft
+  // (não confia nos que já estão na tela) e devolve um único PDF já juntado.
+  const downloadBoletos = useCallback(async (client: ClientCard, invoiceIds: string[]) => {
+    const codigo = client.code?.trim() || client.id?.trim();
+    if (!codigo) throw new Error("Código do cliente não encontrado no cartão.");
+    try {
+      const blob = await apiFetchBlob(`/api/v1/integrations/${slug}/hubsoft/financial/boletos/merge`, {
+        method: "POST",
+        json: { codigo_cliente: codigo, invoice_ids: invoiceIds },
+      });
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      downloadBlob(`boletos_${codigo}_${today}.pdf`, blob);
+      showToast("ok", `${invoiceIds.length} boleto(s) baixado(s) em um único PDF.`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+      showToast("err", msg);
+      throw e;
+    }
+  }, [showToast]);
 
   const result = searchM.data;
   const allClients = result?.clients ?? [];
@@ -224,6 +279,9 @@ export function HubsoftConsultPage() {
               onFetchAttendance={fetchClientAttendance}
               onFetchWorkOrders={fetchClientWorkOrders}
               onFetchFinancial={fetchClientFinancial}
+              onEnableService={enableClientService}
+              onSuspendService={suspendClientService}
+              onDownloadBoletos={downloadBoletos}
               attendanceEnabled
               workOrderEnabled
               prefetchExtras

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhubsoft"
 	"github.com/netquasar/netquasar/quasar_backend/internal/reporttelegram"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
+	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 // persistHubsoftToken grava o token/expiração obtidos por integrationhubsoft.Login
@@ -458,6 +461,259 @@ func (s *Server) hubsoftResendInvoiceEmail(w http.ResponseWriter, r *http.Reques
 	}
 	s.appendAuditLog(ctx, "hubsoft_invoice", invoiceID, "resend_email", s.actorFromRequest(r), nil, map[string]any{"integration_id": integID.String()})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type hubsoftEnableServiceBody struct {
+	MotivoHabilitacao string `json:"motivo_habilitacao"`
+}
+
+// hubsoftEnableClientService — "Habilitar serviço" (aba Consulta/serviços do cliente): acção
+// manual, disparada só quando o operador clica. A HubSoft só aceita esta transição quando o
+// serviço está Suspenso por Débito, Suspenso Parcialmente ou Suspenso Pedido Cliente — qualquer
+// outro estado actual devolve o erro da própria HubSoft, relançado tal-qual em HUBSOFT.
+func (s *Server) hubsoftEnableClientService(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	serviceID := strings.TrimSpace(chi.URLParam(r, "serviceId"))
+	if serviceID == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "id do serviço é obrigatório", nil)
+		return
+	}
+	var body hubsoftEnableServiceBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	if err := integrationhubsoft.EnableClientService(ctx, cfg, token, serviceID, body.MotivoHabilitacao); err != nil {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(ctx, "hubsoft_client_service", serviceID, "enable", s.actorFromRequest(r), nil, map[string]any{"integration_id": integID.String(), "motivo_habilitacao": body.MotivoHabilitacao})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type hubsoftSuspendServiceBody struct {
+	TipoSuspensao string `json:"tipo_suspensao"`
+}
+
+// hubsoftSuspendClientService — "Suspender serviço" (aba Consulta/serviços do cliente). A HubSoft
+// só aceita tipo_suspensao "suspenso_debito" ou "suspenso_pedido_cliente" (únicos documentados).
+func (s *Server) hubsoftSuspendClientService(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	serviceID := strings.TrimSpace(chi.URLParam(r, "serviceId"))
+	if serviceID == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "id do serviço é obrigatório", nil)
+		return
+	}
+	var body hubsoftSuspendServiceBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	reason := integrationhubsoft.HubsoftSuspendReason(strings.TrimSpace(body.TipoSuspensao))
+	if reason != integrationhubsoft.SuspendReasonDebito && reason != integrationhubsoft.SuspendReasonPedidoCliente {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "tipo_suspensao deve ser suspenso_debito ou suspenso_pedido_cliente", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	if err := integrationhubsoft.SuspendClientService(ctx, cfg, token, serviceID, reason); err != nil {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(ctx, "hubsoft_client_service", serviceID, "suspend", s.actorFromRequest(r), nil, map[string]any{"integration_id": integID.String(), "tipo_suspensao": string(reason)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+const (
+	hubsoftMaxBoletosPerMerge = 50
+	hubsoftMaxBoletoBytes     = 25 << 20 // 25MB por boleto — generoso para um PDF de fatura, evita abuso
+)
+
+type hubsoftMergeBoletosBody struct {
+	CodigoCliente string   `json:"codigo_cliente"`
+	InvoiceIDs    []string `json:"invoice_ids"`
+}
+
+// fetchPDFBytes baixa um PDF por HTTP simples (não via integrationhttp.Execute — esse capa a
+// pré-visualização em 2MB e ANEXA texto ao corpo quando corta, o que corromperia o PDF; ver
+// internal/integrationhttp/client.go). Valida o cabeçalho mágico "%PDF" para não juntar lixo
+// (ex.: uma página de erro HTML da HubSoft) no ficheiro final.
+func fetchPDFBytes(ctx context.Context, client *http.Client, url string, maxBytes int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("boleto excede o tamanho máximo permitido")
+	}
+	if len(data) < 4 || string(data[:4]) != "%PDF" {
+		return nil, fmt.Errorf("resposta não é um PDF válido")
+	}
+	return data, nil
+}
+
+func sanitizeFilenamePart(s string) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, s)
+	if safe == "" {
+		return "cliente"
+	}
+	return safe
+}
+
+// hubsoftMergeBoletos — "Baixar selecionados" (aba Financeiro do cliente): junta N boletos
+// escolhidos pelo operador num único PDF para download. Recebe só os invoice_ids escolhidos e
+// busca de novo o financeiro do cliente na HubSoft para obter os boleto_link ACTUAIS — evita
+// confiar em URLs vindas do pedido do browser (o link vem sempre de uma resposta fresca e
+// autenticada da própria HubSoft, nunca de entrada do utilizador).
+func (s *Server) hubsoftMergeBoletos(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body hubsoftMergeBoletosBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_JSON", err.Error(), nil)
+		return
+	}
+	codigo := strings.TrimSpace(body.CodigoCliente)
+	if codigo == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "codigo_cliente é obrigatório", nil)
+		return
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, id := range body.InvoiceIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "selecione pelo menos um boleto", nil)
+		return
+	}
+	if len(ids) > hubsoftMaxBoletosPerMerge {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", fmt.Sprintf("máximo de %d boletos por download", hubsoftMaxBoletosPerMerge), nil)
+		return
+	}
+
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+
+	result, runRes := integrationhubsoft.SearchFinancial(ctx, cfg, token, "codigo_cliente", codigo)
+	s.logIntegrationRun(ctx, integID, nil, "request", runRes)
+
+	linkByID := make(map[string]string, len(result.Invoices))
+	for _, inv := range result.Invoices {
+		if inv.ID != "" {
+			linkByID[inv.ID] = strings.TrimSpace(inv.BoletoLink)
+		}
+	}
+
+	type fetched struct {
+		id   string
+		data []byte
+	}
+	var pdfs []fetched
+	var missing []string
+	httpClient := &http.Client{Timeout: 20 * time.Second}
+	for _, id := range ids {
+		link := linkByID[id]
+		if link == "" {
+			missing = append(missing, id)
+			continue
+		}
+		data, ferr := fetchPDFBytes(ctx, httpClient, link, hubsoftMaxBoletoBytes)
+		if ferr != nil {
+			missing = append(missing, id)
+			continue
+		}
+		pdfs = append(pdfs, fetched{id: id, data: data})
+	}
+	if len(pdfs) == 0 {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", "não foi possível obter nenhum dos boletos selecionados", nil)
+		return
+	}
+
+	readers := make([]io.ReadSeeker, len(pdfs))
+	for i, p := range pdfs {
+		readers[i] = bytes.NewReader(p.data)
+	}
+	var out bytes.Buffer
+	if err := pdfapi.MergeRaw(readers, &out, false, nil); err != nil {
+		writeErr(w, http.StatusInternalServerError, "PDF_MERGE", "falha ao juntar os boletos num único PDF: "+err.Error(), nil)
+		return
+	}
+
+	s.appendAuditLog(ctx, "hubsoft_invoice", codigo, "merge_boletos_download", s.actorFromRequest(r), nil, map[string]any{
+		"integration_id": integID.String(), "invoice_ids": ids, "merged_count": len(pdfs), "missing": missing,
+	})
+
+	filename := fmt.Sprintf("boletos_%s_%s.pdf", sanitizeFilenamePart(codigo), time.Now().Format("20060102"))
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if len(missing) > 0 {
+		w.Header().Set("X-Hubsoft-Missing-Invoices", strings.Join(missing, ","))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out.Bytes())
 }
 
 // hubsoftPreloadBody corpo do PATCH .../hubsoft/preload — liga/desliga o pré-aquecimento desta

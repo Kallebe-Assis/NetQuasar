@@ -86,6 +86,48 @@ export async function apiFetch<T = unknown>(path: string, opts: Opt = {}): Promi
   return data as T;
 }
 
+/**
+ * Como apiFetch, mas para endpoints que respondem um binário (ex.: PDF) em vez de JSON — apiFetch
+ * faria res.text() num content-type não-JSON, corrompendo o binário. Em erro, o backend continua
+ * a responder JSON (writeErr), por isso o tratamento de erro é igual ao de apiFetch.
+ */
+export async function apiFetchBlob(path: string, opts: Opt = {}): Promise<Blob> {
+  const { json, skipAuth, timeoutMs, headers: hIn, ...rest } = opts;
+  const headers = new Headers(hIn);
+  if (json !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!skipAuth) {
+    const token = getAuthToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+  const key = getStoredApiKey();
+  if (key) headers.set("X-API-Key", key);
+
+  const signal = timeoutMs != null && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : rest.signal;
+
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      ...rest,
+      headers,
+      signal,
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new ApiError(msg.toLowerCase().includes("failed to fetch") ? "Sem ligação ao servidor." : msg, 0, "NETWORK");
+  }
+
+  if (!res.ok) {
+    const ct = res.headers.get("content-type") ?? "";
+    const data = ct.includes("application/json") ? await res.json().catch(() => ({})) : await res.text();
+    const errObj = data as { error?: string; code?: string };
+    throw new ApiError(errObj?.error ?? res.statusText, res.status, errObj?.code, data);
+  }
+  return res.blob();
+}
+
 export function downloadBlob(filename: string, blob: Blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

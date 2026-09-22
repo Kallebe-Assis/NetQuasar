@@ -485,6 +485,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Post("/{id}/hubsoft/report/work-orders/telegram", s.hubsoftReportWorkOrdersTelegram)
 			r.Post("/{id}/hubsoft/report/financial/telegram", s.hubsoftReportFinancialTelegram)
 			r.Post("/{id}/hubsoft/financial/invoice/{invoiceId}/resend", s.hubsoftResendInvoiceEmail)
+			r.Post("/{id}/hubsoft/service/{serviceId}/enable", s.hubsoftEnableClientService)
+			r.Post("/{id}/hubsoft/service/{serviceId}/suspend", s.hubsoftSuspendClientService)
+			r.Post("/{id}/hubsoft/financial/boletos/merge", s.hubsoftMergeBoletos)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("integrations.manage", "*"))
 				r.Post("/", s.createIntegration)
