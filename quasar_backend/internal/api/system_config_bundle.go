@@ -245,6 +245,12 @@ func updateSingletonFromJSON(ctx context.Context, pool *pgxpool.Pool, table stri
 	if len(setParts) == 0 {
 		return nil
 	}
+	// Garante que a linha singleton (id=1) existe antes do UPDATE — sem isto, um
+	// import contra uma linha ausente (ex.: perdida num restore) "sucede" sem
+	// alterar nada, porque o UPDATE simplesmente não afeta nenhuma linha.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (id) VALUES (1) ON CONFLICT (id) DO NOTHING`, table)); err != nil {
+		return err
+	}
 	q := fmt.Sprintf(`
 		UPDATE %s AS t SET %s
 		FROM (SELECT * FROM json_populate_record(NULL::%s, $1::json)) AS s
