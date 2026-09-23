@@ -3,7 +3,7 @@
  * (aba Base de dados em Configurações).
  */
 import { useEffect, useRef, useState } from "react";
-import { Download, Upload } from "lucide-react";
+import { Download, FileJson, Upload } from "lucide-react";
 import { apiFetch, ApiError } from "../../lib/api";
 import { apiUrl, getAuthToken, getStoredApiKey } from "../../lib/auth";
 import { toastErr, toastOk } from "../../lib/operationToast";
@@ -157,6 +157,7 @@ export function SystemConfigBackupPanel() {
   return (
     <div className="card" style={{ marginTop: 0 }}>
       <h2 style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 0, marginBottom: 6 }}>
+        <FileJson size={18} aria-hidden />
         Backup de configuração (JSON)
         <InfoHint label="Exportar / importar definições">
           <p>
@@ -234,7 +235,7 @@ export function SystemConfigBackupPanel() {
       </fieldset>
 
       {importing && (
-        <div className="conn-import-modal__loading" role="status" style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--surface-2, rgba(0,0,0,.04))" }}>
+        <div className="conn-import-modal__loading" role="status" style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--panel2)" }}>
           <span className="page-toast__spinner" aria-hidden />
           <div style={{ flex: 1, minWidth: 0 }}>
             <strong>A importar configurações…</strong>
@@ -271,7 +272,7 @@ export function SystemConfigBackupPanel() {
               padding: 12,
               margin: 0,
               borderRadius: 6,
-              background: "var(--surface-2, rgba(0,0,0,.04))",
+              background: "var(--panel2)",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
             }}
@@ -279,7 +280,7 @@ export function SystemConfigBackupPanel() {
             {job.logs.join("\n")}
           </pre>
           {job.errors.length > 0 && (
-            <ul style={{ color: "var(--danger, #c44)", fontSize: 12, marginTop: 8 }}>
+            <ul style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>
               {job.errors.map((err, i) => (
                 <li key={i}>{err}</li>
               ))}

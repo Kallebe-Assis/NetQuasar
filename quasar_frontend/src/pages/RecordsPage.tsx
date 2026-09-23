@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CirclePlus, Copy, Eye, EyeOff, KeyRound } from "lucide-react";
+import { CirclePlus, Copy, Download, Eye, EyeOff, KeyRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ActionMenu } from "../components/ActionMenu";
@@ -109,6 +109,43 @@ function targetOf(it: RecordItem): string {
   return it.domain || it.title || "Site";
 }
 
+function csvCell(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** Exporta em CSV as colunas já visíveis na tabela — a senha só entra se `passwords` for
+ * passado (o chamador decide isso via o modal de confirmação, nunca por omissão), usando o
+ * mesmo valor já revelado registo a registo (com o seu rasto de auditoria normal). */
+function exportRecordsCsv(items: RecordItem[], admin: boolean, passwords?: Record<string, string>) {
+  const headers = ["Tipo", "Destino", "Acesso", ...(admin ? ["Usuário"] : []), ...(passwords ? ["Senha"] : []), "Atualizado"];
+  const lines = [headers.map(csvCell).join(",")];
+  for (const it of items) {
+    const acesso = isTextKind(it.kind)
+      ? contentPreview(it.content)
+      : it.has_username
+        ? (it.username ?? "")
+        : "somente senha";
+    const senha = isTextKind(it.kind) ? "" : (passwords?.[it.id] ?? "");
+    const cols = [
+      KIND_LABEL[it.kind],
+      it.title || targetOf(it),
+      acesso,
+      ...(admin ? [it.owner_name] : []),
+      ...(passwords ? [senha] : []),
+      formatWhen(it.updated_at),
+    ];
+    lines.push(cols.map((c) => csvCell(String(c ?? ""))).join(","));
+  }
+  const csv = lines.join("\r\n");
+  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `registros-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -139,6 +176,17 @@ export function RecordsPage() {
     | null
   >(null);
   const [showPass, setShowPass] = useState(false);
+
+  // Coluna "Senha" da tabela — sempre começa oculta (sem persistência) a cada entrada/refresh da
+  // tela, como pedido. O cache guarda o que já foi revelado nesta sessão para não repetir chamadas
+  // de "reveal" (cada uma já fica registada em auditoria) ao alternar mostrar/ocultar.
+  const [passwordsVisible, setPasswordsVisible] = useState(false);
+  const [passwordCache, setPasswordCache] = useState<Record<string, string>>({});
+  const [revealingAll, setRevealingAll] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportIncludePasswords, setExportIncludePasswords] = useState(false);
+  const [exportAware, setExportAware] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const lookupsQ = useQuery({
     queryKey: queryKeys.credentialLookups,
@@ -297,7 +345,63 @@ export function RecordsPage() {
     onError: (e) => toastErr(push, e),
   });
 
-  const colSpan = admin ? 6 : 5;
+  /** Revela (e guarda em cache) a senha dos registos de credenciais na lista — pula os que já
+   * estão em cache e os de tipo texto (não têm senha). Cada chamada é a mesma rota de "Ver
+   * senha" de sempre, uma por registo, com o mesmo rasto de auditoria — só automatizada aqui
+   * para não obrigar a abrir um a um. */
+  async function revealPasswordsFor(list: RecordItem[]): Promise<Record<string, string>> {
+    const targets = list.filter((it) => !isTextKind(it.kind) && it.has_password && !(it.id in passwordCache));
+    if (targets.length === 0) return passwordCache;
+    const results = await Promise.allSettled(
+      targets.map((it) =>
+        apiFetch<{ password?: string }>(`/api/v1/credential-records/${it.id}/reveal`, { method: "POST" }),
+      ),
+    );
+    const next = { ...passwordCache };
+    targets.forEach((it, i) => {
+      const r = results[i];
+      if (r.status === "fulfilled") next[it.id] = r.value.password ?? "";
+    });
+    setPasswordCache(next);
+    return next;
+  }
+
+  async function togglePasswordsVisible() {
+    if (passwordsVisible) {
+      setPasswordsVisible(false);
+      return;
+    }
+    setRevealingAll(true);
+    try {
+      await revealPasswordsFor(items);
+      setPasswordsVisible(true);
+    } catch (e) {
+      toastErr(push, e as Error);
+    } finally {
+      setRevealingAll(false);
+    }
+  }
+
+  function openExportModal() {
+    setExportIncludePasswords(false);
+    setExportAware(false);
+    setExportModalOpen(true);
+  }
+
+  async function confirmExport() {
+    setExporting(true);
+    try {
+      const pwMap = exportIncludePasswords ? await revealPasswordsFor(items) : undefined;
+      exportRecordsCsv(items, admin, pwMap);
+      setExportModalOpen(false);
+    } catch (e) {
+      toastErr(push, e as Error);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const colSpan = admin ? 7 : 6;
 
   return (
     <div className="vault-page">
@@ -342,6 +446,26 @@ export function RecordsPage() {
         ) : null}
         <button
           type="button"
+          className="btn btn--icon btn--icon-menu"
+          title={passwordsVisible ? "Ocultar senhas" : "Mostrar senhas"}
+          aria-label={passwordsVisible ? "Ocultar senhas" : "Mostrar senhas"}
+          disabled={revealingAll}
+          onClick={() => void togglePasswordsVisible()}
+        >
+          {passwordsVisible ? <EyeOff size={18} aria-hidden /> : <Eye size={18} aria-hidden />}
+        </button>
+        <button
+          type="button"
+          className="btn btn--icon btn--icon-menu"
+          title="Exportar CSV (respeita os filtros aplicados)"
+          aria-label="Exportar CSV"
+          disabled={items.length === 0}
+          onClick={openExportModal}
+        >
+          <Download size={18} aria-hidden />
+        </button>
+        <button
+          type="button"
           className="btn btn--icon btn--icon-menu btn--primary"
           title="Novo registo"
           aria-label="Novo registo"
@@ -358,6 +482,7 @@ export function RecordsPage() {
               <th>Tipo</th>
               <th>Destino</th>
               <th>Acesso</th>
+              <th>Senha</th>
               {admin ? <th>Usuário</th> : null}
               <th>Atualizado</th>
               <th />
@@ -397,6 +522,17 @@ export function RecordsPage() {
                       it.username
                     ) : (
                       <span className="muted">somente senha</span>
+                    )}
+                  </td>
+                  <td className="mono">
+                    {isTextKind(it.kind) ? (
+                      <span className="muted">—</span>
+                    ) : !it.has_password ? (
+                      <span className="muted">—</span>
+                    ) : passwordsVisible && it.id in passwordCache ? (
+                      passwordCache[it.id]
+                    ) : (
+                      <span className="muted">••••••••</span>
                     )}
                   </td>
                   {admin ? <td>{it.owner_name}</td> : null}
@@ -689,6 +825,61 @@ export function RecordsPage() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
       />
+
+      {exportModalOpen
+        ? createPortal(
+            <div className="modal-backdrop" role="presentation" onMouseDown={() => !exporting && setExportModalOpen(false)}>
+              <div className="modal" style={{ maxWidth: 480 }} role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+                <h3>Exportar registos (CSV)</h3>
+                <div className="msg msg--warn" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                  Este ficheiro pode conter <strong>dados sensíveis</strong> (senhas, strings de autenticação) se optar por
+                  incluir as senhas abaixo. Guarde-o em local seguro e não o partilhe por canais inseguros — o sistema não
+                  se responsabiliza por vazamento de dados a partir de um ficheiro exportado.
+                </div>
+
+                <label className="row" style={{ gap: 8, marginTop: 14, alignItems: "flex-start", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={exportIncludePasswords}
+                    onChange={(e) => setExportIncludePasswords(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span style={{ fontSize: 13, lineHeight: 1.4 }}>
+                    Incluir as senhas numa coluna do CSV (senão, exporta só tipo/destino/acesso/data, como hoje).
+                  </span>
+                </label>
+
+                <label className="row" style={{ gap: 8, marginTop: 10, alignItems: "flex-start", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={exportAware}
+                    onChange={(e) => setExportAware(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span style={{ fontSize: 13, lineHeight: 1.4 }}>
+                    Estou ciente de que este ficheiro pode conter dados sensíveis e assumo a responsabilidade pela sua
+                    guarda e partilha.
+                  </span>
+                </label>
+
+                <div className="row" style={{ justifyContent: "flex-end", marginTop: 16, gap: 8 }}>
+                  <button type="button" className="btn" disabled={exporting} onClick={() => setExportModalOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={exporting || !exportAware}
+                    onClick={() => void confirmExport()}
+                  >
+                    {exporting ? "A exportar…" : "Exportar"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

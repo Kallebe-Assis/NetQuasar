@@ -5,6 +5,7 @@ import { Filter } from "lucide-react";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch } from "../lib/api";
+import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { can, isAdminUser } from "../lib/auth";
 import { EM_DASH, format1f, formatNum } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
@@ -319,8 +320,10 @@ function OltPageTabs({ active, onChange }: { active: OltPageTab; onChange: (t: O
   );
 }
 
+const OLT_PAGE_TABS: OltPageTab[] = ["equipamentos", "pesquisa", "nao_autorizadas", "relatorios"];
+
 export function OltPage() {
-  const [pageTab, setPageTab] = useState<OltPageTab>("equipamentos");
+  const [pageTab, setPageTab] = useTabSearchParam<OltPageTab>(OLT_PAGE_TABS, "equipamentos");
   const canMutate = isAdminUser() || can("olt.collect") || can("olt.onu_manage");
   const qc = useQueryClient();
   const bulkMonthChoices = useMemo(() => recentYearMonthChoices(72), []);

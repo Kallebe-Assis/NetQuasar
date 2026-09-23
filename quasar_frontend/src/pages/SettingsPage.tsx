@@ -1,5 +1,24 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { OverflowTabs } from "../components/OverflowTabs";
+import {
+  Activity,
+  Bell,
+  CalendarClock,
+  Cpu,
+  Database,
+  History,
+  type LucideIcon,
+  Network,
+  Palette,
+  Send,
+  Truck,
+  Users,
+  UserRoundKey,
+  Waypoints,
+  Wifi,
+  Zap,
+} from "lucide-react";
 import { can, isAdminUser } from "../lib/auth";
 
 // Cada aba é um chunk próprio — abrir Configurações não baixa o código das 15 abas de uma vez.
@@ -70,7 +89,7 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   alerts: "Alertas",
   monitoring: "Monitoramento",
   appearance: "Aparência",
-  connection: "Rede e SNMP",
+  connection: "SNMP",
   telegram: "Telegram",
   olt: "OLT",
   mikrotik: "MikroTik",
@@ -79,6 +98,24 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   bgp: "BGP",
   fleet: "Frota",
   automation: "Automações",
+};
+
+const SETTINGS_TAB_ICONS: Record<SettingsTab, LucideIcon> = {
+  database: Database,
+  logs: History,
+  users: Users,
+  alerts: Bell,
+  monitoring: Activity,
+  appearance: Palette,
+  connection: Wifi,
+  telegram: Send,
+  olt: Zap,
+  mikrotik: Cpu,
+  switch: Network,
+  bng: UserRoundKey,
+  bgp: Waypoints,
+  fleet: Truck,
+  automation: CalendarClock,
 };
 
 function canSeeSettingsTab(tab: SettingsTab): boolean {
@@ -174,13 +211,11 @@ export function SettingsPage() {
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
         Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/Switch/BNG e relatórios automáticos.
       </p>
-      <div className="tabs" style={{ flexWrap: "wrap" }}>
-        {visibleTabs.map((k) => (
-          <button key={k} type="button" className={tab === k ? "active" : ""} onClick={() => selectTab(k)}>
-            {SETTINGS_TAB_LABELS[k]}
-          </button>
-        ))}
-      </div>
+      <OverflowTabs
+        items={visibleTabs.map((k) => ({ key: k, label: SETTINGS_TAB_LABELS[k], icon: SETTINGS_TAB_ICONS[k] }))}
+        active={tab}
+        onSelect={selectTab}
+      />
       <Suspense fallback={<p style={{ color: "var(--muted)" }}>A carregar…</p>}>
         <TabContent tab={tab} />
       </Suspense>

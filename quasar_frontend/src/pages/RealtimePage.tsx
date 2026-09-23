@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Filter, Search } from "lucide-react";
 import { LatencyLiveChart } from "../components/LatencyLiveChart";
 import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
@@ -9,6 +10,7 @@ type DeviceRow = {
   description: string;
   ip?: string | null;
   network_status?: string | null;
+  category?: string | null;
 };
 
 function isNormalNetworkStatus(ns: string | null | undefined): boolean {
@@ -25,6 +27,38 @@ export function RealtimePage() {
     () => (devices.data?.devices ?? []).filter((d) => isNormalNetworkStatus(d.network_status)),
     [devices.data?.devices],
   );
+
+  const [search, setSearch] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of normalDevices) {
+      const c = String(d.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [normalDevices]);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [filterOpen]);
+
+  const visibleDevices = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return normalDevices.filter((d) => {
+      if (categoryFilter && String(d.category ?? "").trim() !== categoryFilter) return false;
+      if (!q) return true;
+      return d.description.toLowerCase().includes(q) || (d.ip ?? "").toLowerCase().includes(q);
+    });
+  }, [normalDevices, search, categoryFilter]);
 
   const deviceById = useMemo(() => {
     const m = new Map<string, DeviceRow>();
@@ -88,6 +122,50 @@ export function RealtimePage() {
             </p>
           ) : (
             <>
+              <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 360 }}>
+                  <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} aria-hidden />
+                  <input
+                    className="input"
+                    style={{ paddingLeft: 30, width: "100%" }}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Pesquisar por descrição ou IP…"
+                    aria-label="Pesquisar equipamentos"
+                  />
+                </div>
+                <div ref={filterRef} style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    className={`btn${categoryFilter ? " btn--primary" : ""}`}
+                    onClick={() => setFilterOpen((v) => !v)}
+                    aria-expanded={filterOpen}
+                  >
+                    <Filter size={14} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+                    Filtro{categoryFilter ? `: ${categoryFilter}` : ""}
+                  </button>
+                  {filterOpen ? (
+                    <div
+                      className="card"
+                      style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, minWidth: 200, zIndex: 30, padding: 10 }}
+                    >
+                      <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Categoria</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <label className="row" style={{ gap: 6, fontSize: 12, cursor: "pointer" }}>
+                          <input type="radio" checked={categoryFilter === ""} onChange={() => setCategoryFilter("")} />
+                          Todas
+                        </label>
+                        {categories.map((c) => (
+                          <label key={c} className="row" style={{ gap: 6, fontSize: 12, cursor: "pointer" }}>
+                            <input type="radio" checked={categoryFilter === c} onChange={() => setCategoryFilter(c)} />
+                            {c}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
               <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 0 }}>
                 Selecionados: <strong>{picked.length}</strong> de 3 máximo
                 {ping.running ? " · ping contínuo activo" : ""}.
@@ -103,7 +181,14 @@ export function RealtimePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {normalDevices.map((d) => (
+                    {visibleDevices.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 12 }}>
+                          Nenhum equipamento corresponde à pesquisa/filtro.
+                        </td>
+                      </tr>
+                    ) : null}
+                    {visibleDevices.map((d) => (
                       <tr key={d.id}>
                         <td>
                           <input type="checkbox" checked={picked.includes(d.id)} onChange={() => toggle(d.id)} />

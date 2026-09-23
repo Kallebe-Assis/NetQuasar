@@ -552,6 +552,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 		})
 
 		r.Route("/mikrotik", func(r chi.Router) {
+			r.Get("/devices", s.listMikrotikDevices)
 			r.Get("/devices/{id}/pppoe-sessions", s.mikrotikPPPoESessions)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("devices.collect", "mikrotik.collect", "*"))

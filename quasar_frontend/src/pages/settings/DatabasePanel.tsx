@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useEffect, useState } from "react";
+import { Database, RotateCcw } from "lucide-react";
 import { InfoHint } from "../../components/InfoHint";
+import { DbSyncIllustration } from "../../components/DbSyncIllustration";
 import { ApiError, apiFetch } from "../../lib/api";
 import { PAGE_TOAST_AUTO_MS } from "../../lib/pageToast";
 import { DatabaseCleanupButton } from "./DatabaseCleanupModal";
@@ -231,6 +233,7 @@ function RestoreSection() {
     <div style={sectionStyle}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <h3 style={{ fontSize: 14, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+          <RotateCcw size={14} aria-hidden />
           Recuperação de dump
           <InfoHint label="Restore de dump">
             <p>
@@ -468,13 +471,14 @@ export function DatabasePanel() {
   };
 
   const sslChoice = sslMode.trim().toLowerCase() === "disable" ? "disable" : "require";
-  const sourceLabel =
-    meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL" ? "variável de ambiente" : "definições salvas";
+  const sourceIsEnv = meta.data?.active_dsn_source === "env_NETQUASAR_DATABASE_URL";
+  const sourceLabel = sourceIsEnv ? "variável de ambiente" : "definições salvas";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="card">
         <h2 style={{ marginTop: 0, marginBottom: 6, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          <Database size={18} aria-hidden />
           Ligação PostgreSQL
           <InfoHint label="Ligação à base de dados">
             <p>
@@ -486,28 +490,28 @@ export function DatabasePanel() {
             </p>
           </InfoHint>
         </h2>
-        <p style={{ color: "var(--muted)", fontSize: 12, margin: "0 0 14px" }}>
-          Em uso: <strong>{sourceLabel}</strong>
-          {" · "}
-          Palavra-passe: <strong>{meta.data?.password_configured ? "salva" : "não salva"}</strong>
+        <div className="row" style={{ gap: 8, margin: "0 0 14px", flexWrap: "wrap", alignItems: "center" }}>
+          <span className={`db-status-pill db-status-pill--${sourceIsEnv ? "ok" : "muted"}`}>
+            Em uso: {sourceLabel}
+          </span>
+          <span className={`db-status-pill db-status-pill--${meta.data?.password_configured ? "warn" : "ok"}`}>
+            Palavra-passe: {meta.data?.password_configured ? "salva" : "não salva"}
+          </span>
           {meta.data?.host ? (
-            <>
-              {" · "}
-              <span className="mono">
-                {meta.data.host}
-                {meta.data.port != null ? `:${meta.data.port}` : ""}
-                {meta.data.db_name ? `/${meta.data.db_name}` : ""}
-              </span>
-            </>
+            <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+              {meta.data.host}
+              {meta.data.port != null ? `:${meta.data.port}` : ""}
+              {meta.data.db_name ? `/${meta.data.db_name}` : ""}
+            </span>
           ) : null}
-        </p>
+        </div>
 
+        <div className="db-connection-layout">
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
             gap: "12px 16px",
-            maxWidth: 720,
           }}
         >
           <div className="field" style={{ margin: 0, gridColumn: "1 / -1", maxWidth: 420 }}>
@@ -616,6 +620,11 @@ export function DatabasePanel() {
               />
             </div>
           )}
+        </div>
+
+        <div className="db-connection-illustration">
+          <DbSyncIllustration />
+        </div>
         </div>
 
         <label className="row" style={{ gap: 10, marginTop: 14, alignItems: "flex-start", maxWidth: 560 }}>

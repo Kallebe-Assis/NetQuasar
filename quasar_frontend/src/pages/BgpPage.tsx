@@ -19,6 +19,7 @@ import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
 import { useAppToast } from "../lib/appToast";
 import { toastErr, toastOk } from "../lib/operationToast";
+import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { APP_ROUTES } from "../app/routes";
 import { formatDateTime, formatDuration } from "./bgp/bgpFormat";
 import type { Report } from "./bgp/bgpTypes";
@@ -60,6 +61,7 @@ const BGP_TABS: Array<{ id: BgpTab; label: string; icon: typeof LayoutDashboard 
   { id: "radius", label: "RADIUS", icon: KeyRound },
   { id: "lldp", label: "LLDP", icon: Waypoints },
 ];
+const BGP_TAB_IDS: BgpTab[] = BGP_TABS.map((t) => t.id);
 
 function peerStateBadge(label?: string) {
   const established = label === "established";
@@ -97,7 +99,7 @@ export function BgpPage() {
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
   const [sel, setSel] = useState<string | null>(null);
-  const [tab, setTab] = useState<BgpTab>("overview");
+  const [tab, setTab] = useTabSearchParam<BgpTab>(BGP_TAB_IDS, "overview");
 
   const devices = useQuery({
     queryKey: ["bgp-devices"],

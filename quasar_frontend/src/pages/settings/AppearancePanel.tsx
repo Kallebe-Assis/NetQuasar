@@ -42,7 +42,7 @@ export function AppearancePanel() {
   ];
 
   return (
-    <div className="panel" style={{ maxWidth: 560 }}>
+    <div className="card" style={{ maxWidth: 560 }}>
       <h2 style={{ marginTop: 0, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
         Tema da interface
         <InfoHint label="Tema claro e escuro">

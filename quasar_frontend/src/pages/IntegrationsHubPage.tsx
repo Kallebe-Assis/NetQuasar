@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CheckCircle2, EyeOff, Plug, Plus, Search, Settings, SlidersHorizontal } from "lucide-react";
 import { ActionMenu, type ActionMenuItem } from "../components/ActionMenu";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
@@ -41,6 +42,8 @@ function IntegrationCard({
         gap: 16,
         border: "1px solid var(--border)",
         borderRadius: "var(--radius)",
+        boxShadow: "var(--shadow-lg)",
+        background: "var(--panel)",
         opacity: it.enabled ? 1 : 0.6,
       }}
     >
@@ -73,16 +76,9 @@ function IntegrationCard({
           >
             {it.name}
           </Link>
-          {it.description ? (
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>{it.description}</p>
-          ) : null}
-          <p className="mono" style={{ margin: "6px 0 0", fontSize: 11, color: "var(--muted)", wordBreak: "break-all" }}>
-            {it.base_url}
-          </p>
         </div>
         <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Ativa" : "Inativa"}</span>
-          <span className="badge">{it.request_count} requisição(ões)</span>
           {it.last_test_ok === true ? <span className="badge badge--ok">Teste OK</span> : null}
           {it.last_test_ok === false ? <span className="badge badge--err">Teste falhou</span> : null}
         </div>
@@ -134,6 +130,7 @@ export function IntegrationsHubPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [testingAll, setTestingAll] = useState(false);
+  const [hideTarget, setHideTarget] = useState<IntegrationSummary | null>(null);
 
   const listQ = useQuery({
     queryKey: queryKeys.integrations,
@@ -172,6 +169,14 @@ export function IntegrationsHubPage() {
       );
     });
   }, [allItems, search, showInactive]);
+
+  function requestToggleEnabled(it: IntegrationSummary) {
+    if (it.enabled) {
+      setHideTarget(it);
+      return;
+    }
+    void toggleEnabled(it);
+  }
 
   async function toggleEnabled(it: IntegrationSummary) {
     setTogglingId(it.id);
@@ -284,7 +289,7 @@ export function IntegrationsHubPage() {
         }}
       >
         {items.map((it) => (
-          <IntegrationCard key={it.id} it={it} admin={admin} onToggleEnabled={(x) => void toggleEnabled(x)} togglingId={togglingId} />
+          <IntegrationCard key={it.id} it={it} admin={admin} onToggleEnabled={requestToggleEnabled} togglingId={togglingId} />
         ))}
       </div>
 
@@ -329,6 +334,20 @@ export function IntegrationsHubPage() {
           </div>
         </div>
       ) : null}
+
+      <ConfirmModal
+        open={!!hideTarget}
+        title="Ocultar integração"
+        message={hideTarget ? `Inativar «${hideTarget.name}»? Deixa de aparecer nas consultas até ser reativada — a configuração fica guardada.` : ""}
+        confirmLabel="Ocultar"
+        danger
+        busy={togglingId === hideTarget?.id}
+        onCancel={() => setHideTarget(null)}
+        onConfirm={() => {
+          if (hideTarget) void toggleEnabled(hideTarget);
+          setHideTarget(null);
+        }}
+      />
     </div>
   );
 }

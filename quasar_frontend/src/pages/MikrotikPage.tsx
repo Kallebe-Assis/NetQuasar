@@ -30,6 +30,73 @@ type DeviceRow = {
 
 type SensorRow = { oid?: string; value?: string; type?: string };
 
+type MikrotikOverviewRow = {
+  id: string;
+  description?: string | null;
+  ip?: string | null;
+  locality_name?: string | null;
+  online?: boolean | null;
+  snmp_health_status?: string | null;
+  metrics?: Record<string, unknown> | null;
+  telemetry_collected_at?: string | null;
+};
+
+function MikrotikOverviewTable({
+  rows,
+  loading,
+  onSelect,
+}: {
+  rows: MikrotikOverviewRow[];
+  loading: boolean;
+  onSelect: (id: string) => void;
+}) {
+  if (loading) return <p style={{ color: "var(--muted)" }}>A carregar equipamentos…</p>;
+  if (rows.length === 0) return <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>;
+  return (
+    <div className="table-wrap" style={{ maxWidth: "100%", overflowX: "auto" }}>
+    <table style={{ fontSize: 12 }}>
+      <thead>
+        <tr>
+          <th>Descrição</th>
+          <th>IP</th>
+          <th>Localidade</th>
+          <th>CPU</th>
+          <th>Memória</th>
+          <th>Uptime</th>
+          <th>Estado</th>
+          <th>Última coleta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => {
+          const kpis = buildMikrotikNocKpis(r.metrics ?? undefined, r.description ?? "");
+          return (
+            <tr key={r.id} onClick={() => onSelect(r.id)} style={{ cursor: "pointer" }}>
+              <td>{r.description ?? EM_DASH}</td>
+              <td className="mono">{r.ip ?? EM_DASH}</td>
+              <td>{r.locality_name ?? EM_DASH}</td>
+              <td>{kpis.cpuPct != null ? `${kpis.cpuPct.toFixed(0)}%` : EM_DASH}</td>
+              <td>{kpis.memPct != null ? `${kpis.memPct.toFixed(0)}%` : EM_DASH}</td>
+              <td>{kpis.uptime}</td>
+              <td>
+                {r.online === true ? (
+                  <span className="db-status-pill db-status-pill--ok">Online</span>
+                ) : r.online === false ? (
+                  <span className="db-status-pill db-status-pill--err">Offline</span>
+                ) : (
+                  <span className="db-status-pill db-status-pill--muted">—</span>
+                )}
+              </td>
+              <td style={{ color: "var(--muted)", fontSize: 12 }}>{formatRelativeCompactPt(r.telemetry_collected_at)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+    </div>
+  );
+}
+
 function isMikrotik(d: DeviceRow): boolean {
   if (String(d.category ?? "").trim().toLowerCase() === "switch") return false;
   const c = String(d.category ?? "").toLowerCase();
@@ -395,9 +462,12 @@ export function MikrotikPage() {
     setTrafficHistory({});
   }, [sel]);
 
-  useEffect(() => {
-    if (!sel && rows.length > 0) setSel(rows[0].id);
-  }, [rows, sel]);
+  const overviewQ = useQuery({
+    queryKey: ["mikrotik-devices-overview"],
+    queryFn: () => apiFetch<{ mikrotiks: MikrotikOverviewRow[] }>("/api/v1/mikrotik/devices"),
+    enabled: !sel,
+    refetchInterval: sel ? false : 30_000,
+  });
 
   const initialDataLoading =
     !!sel && !iface.data && !telemetry.data && (iface.isLoading || telemetry.isLoading);
@@ -599,10 +669,16 @@ export function MikrotikPage() {
           </div>
           {rows.length === 0 ? (
             <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>
+          ) : !sel ? (
+            <MikrotikOverviewTable rows={overviewQ.data?.mikrotiks ?? []} loading={overviewQ.isLoading} onSelect={setSel} />
           ) : selectedDevice ? (
             initialDataLoading ? (
               <p style={{ color: "var(--muted)" }}>A carregar últimos dados coletados…</p>
             ) : (
+            <>
+            <button type="button" className="btn" style={{ marginBottom: 12 }} onClick={() => setSel(null)}>
+              ← Todos os MikroTiks
+            </button>
             <MikrotikNocDashboard
               section={section}
               onSection={setSection}
@@ -638,6 +714,7 @@ export function MikrotikPage() {
               pppoeCollecting={pppoeCollect.isPending}
               onPppoeCollect={() => sel && pppoeCollect.mutate(sel)}
             />
+            </>
             )
           ) : (
             <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>

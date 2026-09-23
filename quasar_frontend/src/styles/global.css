@@ -81,12 +81,21 @@ h2 {
 }
 
 .sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 1rem;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.sidebar__brand-logo {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 
 .sidebar--collapsed .sidebar__brand {
@@ -125,6 +134,56 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+.sidebar-search {
+  position: relative;
+  padding: 0 0.75rem 0.5rem;
+}
+.sidebar-search__box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.55rem;
+}
+.sidebar-search__icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.sidebar-search__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.sidebar-search__input::placeholder {
+  color: var(--muted);
+}
+.sidebar-search__clear {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.sidebar-search__clear:hover {
+  background: var(--hover-bg-sidebar);
+  color: var(--text);
+}
+.sidebar--collapsed .sidebar-search {
+  display: none;
 }
 
 .sidebar__nav-scroll {
@@ -230,6 +289,35 @@ h2 {
 .sidebar__group-btn.is-open .sidebar__group-chevron {
   transform: rotate(180deg);
 }
+.sidebar__group-chevron.is-open {
+  transform: rotate(180deg);
+}
+.sidebar__group-row {
+  display: flex;
+  align-items: stretch;
+}
+.sidebar__group-row > a {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar__group-chevron-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  margin: 2px 4px 2px 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: var(--hover-transition);
+}
+.sidebar__group-chevron-btn:hover {
+  background: var(--hover-bg-sidebar);
+  color: var(--text);
+}
 .sidebar__submenu {
   display: grid;
   grid-template-rows: 0fr;
@@ -290,8 +378,13 @@ h2 {
   border-left-color: var(--accent);
   color: var(--accent);
 }
-.sidebar--collapsed .sidebar__group-chevron,
-.sidebar--collapsed .sidebar__submenu {
+/* Recolhido (ícones apenas): esconde chevrons/submenus — não há espaço para eles. Mas a sidebar
+   já espicha para a largura cheia ao passar o mouse (regra .sidebar--collapsed:hover acima); essa
+   mesma janela de hover também deve revelar os submódulos, exatamente como no menu expandido —
+   por isso a regra só se aplica quando NÃO está em hover. */
+.sidebar--collapsed:not(:hover) .sidebar__group-chevron,
+.sidebar--collapsed:not(:hover) .sidebar__group-chevron-btn,
+.sidebar--collapsed:not(:hover) .sidebar__submenu {
   display: none;
 }
 
@@ -1676,6 +1769,7 @@ h2 {
   border-radius: var(--radius);
   padding: 0.75rem 1rem;
   margin-bottom: 0.75rem;
+  box-shadow: var(--shadow-lg);
 }
 
 .row {
@@ -2578,6 +2672,53 @@ h2 {
   background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 
+/* Configurações — Base de dados: pills de estado da ligação */
+.db-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.db-status-pill--ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.db-status-pill--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.db-status-pill--err {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.db-status-pill--muted {
+  color: var(--muted);
+  background: var(--pill-muted-bg);
+}
+
+.db-connection-layout {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 24px;
+  align-items: start;
+}
+.db-connection-illustration {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+@media (max-width: 900px) {
+  .db-connection-layout {
+    grid-template-columns: 1fr;
+  }
+  .db-connection-illustration {
+    display: none;
+  }
+}
+
 /* Configurações — cartões de critérios de alerta */
 .alert-criterion-card {
   border: 1px solid var(--border);
@@ -2679,6 +2820,7 @@ h2 {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
 }
 table {
   width: 100%;
@@ -2849,6 +2991,47 @@ tr:hover td {
 .tabs button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.tabs-overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 170px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tabs-overflow-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tabs-overflow-menu__item:hover {
+  background: var(--hover-bg-subtle);
+}
+.tabs-overflow-menu__item.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .modal-backdrop {

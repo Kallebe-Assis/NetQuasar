@@ -64,6 +64,7 @@ import {
   type BngSessionSearchField,
 } from "../lib/bngSessionFilters";
 import { toastErr, toastOk } from "../lib/operationToast";
+import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { APP_ROUTES } from "../app/routes";
 import { BngVlansTab } from "./bng/BngVlansTab";
 
@@ -354,6 +355,7 @@ const BNG_TABS: Array<{ id: BngTab; label: string; icon: typeof LayoutDashboard 
   { id: "auth", label: "Autenticações", icon: KeyRound },
   { id: "sessions", label: "Sessões PPPoE", icon: Users },
 ];
+const BNG_TAB_IDS: BngTab[] = BNG_TABS.map((t) => t.id);
 
 function bngIfaceStatus(r: MikrotikIfRow): "up" | "down" | "other" {
   const s = String(r.oper_status ?? "").toLowerCase();
@@ -1332,7 +1334,7 @@ export function BngPage() {
   const canMutate = isAdminUser() || can("bng.collect");
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
-  const [tab, setTab] = useState<BngTab>("overview");
+  const [tab, setTab] = useTabSearchParam<BngTab>(BNG_TAB_IDS, "overview");
   const [sel, setSel] = useState<string | null>(null);
   const [searchField, setSearchField] = useState<BngSessionSearchField>("login");
   const [searchQuery, setSearchQuery] = useState("");

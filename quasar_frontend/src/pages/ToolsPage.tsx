@@ -21,6 +21,7 @@ import { useContinuousIcmpPing } from "../hooks/useContinuousIcmpPing";
 import { apiFetch } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { buildSnmpBulkResult, exportSnmpBulkCsv, flattenSnmpBulkRows } from "../lib/toolsSnmpBulk";
+import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { ToolsPageToastHost, useToolsPageToast } from "./toolsPageToast";
 import { SnifferTab } from "./tools/SnifferTab";
 
@@ -74,8 +75,13 @@ type Tab =
   | "nmap"
   | "sniffer";
 
+const TOOLS_TAB_IDS: Tab[] = [
+  "http_matrix", "host_ping", "icmp", "tracert", "nmap", "sniffer",
+  "snmp", "snmp_bulk", "telnet", "ssh", "snmp_walk", "mikrotik",
+];
+
 export function ToolsPage() {
-  const [tab, setTab] = useState<Tab>("http_matrix");
+  const [tab, setTab] = useTabSearchParam<Tab>(TOOLS_TAB_IDS, "http_matrix");
   const { toast, leaving, show, dismiss } = useToolsPageToast();
 
   const [hostPingText, setHostPingText] = useState("example.com\ngoogle.com\ncloudflare.com");

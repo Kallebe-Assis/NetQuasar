@@ -313,7 +313,7 @@ export function IntegrationDetailPage() {
       </div>
 
       {tab === "operacao" && (
-        <section className="panel" style={{ marginTop: 16, padding: 16 }}>
+        <section className="card" style={{ marginTop: 16, padding: 16 }}>
           <h2 style={{ marginTop: 0, fontSize: 16 }}>Operação para usuários</h2>
           <p style={{ fontSize: 12, color: "var(--muted)" }}>
             Define o que aparece no separador <strong>Consulta</strong>. O NetQuasar adapta parâmetros e parser conforme o{" "}
@@ -624,7 +624,7 @@ export function IntegrationDetailPage() {
       )}
 
       {tab === "geral" && (
-        <section className="panel" style={{ marginTop: 16, padding: 16 }}>
+        <section className="card" style={{ marginTop: 16, padding: 16 }}>
           <h2 style={{ marginTop: 0, fontSize: 16 }}>Configuração geral</h2>
           <div className="field">
             <label>Nome</label>
@@ -690,7 +690,7 @@ export function IntegrationDetailPage() {
       )}
 
       {tab === "auth" && (
-        <section className="panel" style={{ marginTop: 16, padding: 16 }}>
+        <section className="card" style={{ marginTop: 16, padding: 16 }}>
           <h2 style={{ marginTop: 0, fontSize: 16 }}>Autenticação</h2>
           <div className="field" style={{ maxWidth: 360 }}>
             <label>Tipo</label>
@@ -1105,7 +1105,7 @@ export function IntegrationDetailPage() {
 
       {tab === "testes" && (
         <section style={{ marginTop: 16 }}>
-          <div className="panel" style={{ padding: 16 }}>
+          <div className="card" style={{ padding: 16 }}>
             <h2 style={{ marginTop: 0, fontSize: 16 }}>Testes rápidos</h2>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" disabled={testM.isPending} onClick={() => testM.mutate()}>
@@ -1132,7 +1132,7 @@ export function IntegrationDetailPage() {
               </div>
             ) : null}
           </div>
-          <div className="panel" style={{ padding: 16, marginTop: 16 }}>
+          <div className="card" style={{ padding: 16, marginTop: 16 }}>
             <h3 style={{ marginTop: 0, fontSize: 14 }}>Histórico (últimas 50)</h3>
             <div className="table-wrap">
               <table>

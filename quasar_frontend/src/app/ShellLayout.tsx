@@ -1,117 +1,26 @@
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { LucideIcon } from "lucide-react";
-import {
-  Bolt,
-  CircleHelp,
-  FileBarChart,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Menu,
-  Plug,
-  CalendarClock,
-  ChartPie,
-  ClockCheck,
-  Component,
-  Cpu,
-  BanknoteArrowDown,
-  KeySquare,
-  Layers,
-  MapPin,
-  MonitorSmartphone,
-  Network,
-  ShieldCheck,
-  Share2,
-  TriangleAlert,
-  Truck,
-  UserRoundKey,
-  UsersRound,
-  Warehouse,
-  Waypoints,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Menu, X } from "lucide-react";
 import { clearSession, getAuthToken, getStoredUserDisplayLabel, getStoredUserPermissionsKey, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { apiFetch } from "../lib/api";
 import { AlertNotificationWatcher } from "../components/AlertNotificationWatcher";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { SidebarSearch } from "../components/SidebarSearch";
 import { AppToastProvider } from "../lib/appToast";
 import { queryKeys } from "../lib/queryKeys";
 import { ROUTE_VIEW_PERMISSION } from "../lib/permissions";
 import { getUnsavedGuard } from "../lib/unsavedChangesGuard";
 import { APP_ROUTES } from "./routes";
+import { NAV_CONFIG, type NavEntryConfig, type SubmoduleEntry } from "./navConfig";
 
 const SIDEBAR_COLLAPSED_KEY = "netquasar.sidebar.collapsed";
 const MOBILE_NAV_MQ = "(max-width: 1023px)";
 
-type NavLeaf = { kind: "link"; to: string; label: string; icons: LucideIcon[] };
-type NavGroup = {
-  kind: "group";
-  id: string;
-  label: string;
-  icons: LucideIcon[];
-  children: Array<{ to: string; label: string; icons: LucideIcon[] }>;
-};
-type NavEntry = NavLeaf | NavGroup;
-
-const nav: NavEntry[] = [
-  { kind: "link", to: APP_ROUTES.dashboard, label: "Dashboard", icons: [ChartPie] },
-  { kind: "link", to: APP_ROUTES.monitoring, label: "Monitoramento", icons: [ShieldCheck] },
-  { kind: "link", to: APP_ROUTES.realtime, label: "Tempo real", icons: [ClockCheck] },
-  { kind: "link", to: APP_ROUTES.integrations, label: "Integrações", icons: [Plug] },
-  { kind: "link", to: APP_ROUTES.pops, label: "Localidades", icons: [Warehouse] },
-  {
-    kind: "group",
-    id: "equipamentos",
-    label: "Equipamentos",
-    icons: [MonitorSmartphone],
-    children: [
-      { to: APP_ROUTES.devices, label: "Geral", icons: [MonitorSmartphone] },
-      { to: APP_ROUTES.mikrotik, label: "Mikrotik", icons: [Cpu] },
-      { to: APP_ROUTES.olt, label: "OLT", icons: [Zap] },
-      { to: APP_ROUTES.bng, label: "BNG", icons: [UserRoundKey] },
-      { to: APP_ROUTES.bgp, label: "BGP", icons: [Waypoints] },
-      { to: APP_ROUTES.switch, label: "Switch", icons: [Network] },
-    ],
-  },
-  { kind: "link", to: APP_ROUTES.commercial, label: "Clientes", icons: [UsersRound] },
-  {
-    kind: "group",
-    id: "mapa",
-    label: "Mapa",
-    icons: [MapPin],
-    children: [
-      { to: APP_ROUTES.map, label: "Mapa", icons: [MapPin] },
-      { to: APP_ROUTES.connections, label: "Elementos", icons: [Component] },
-      { to: APP_ROUTES.topology, label: "Topologia", icons: [Share2] },
-    ],
-  },
-  { kind: "link", to: APP_ROUTES.alerts, label: "Alertas", icons: [TriangleAlert] },
-  { kind: "link", to: APP_ROUTES.events, label: "Eventos", icons: [CalendarClock] },
-  { kind: "link", to: APP_ROUTES.registros, label: "Registros", icons: [KeySquare] },
-  { kind: "link", to: APP_ROUTES.tools, label: "Ferramentas", icons: [Wrench] },
-  {
-    kind: "group",
-    id: "frota",
-    label: "Frota",
-    icons: [Truck],
-    children: [
-      { to: APP_ROUTES.fleetDashboard, label: "Dashboard", icons: [ChartPie] },
-      { to: APP_ROUTES.fleetVehicles, label: "Veículos", icons: [Truck] },
-      { to: APP_ROUTES.fleetFuelings, label: "Despesas", icons: [BanknoteArrowDown] },
-      { to: APP_ROUTES.fleetElements, label: "Elementos", icons: [Layers] },
-      { to: APP_ROUTES.fleetAlerts, label: "Alertas", icons: [TriangleAlert] },
-      { to: APP_ROUTES.fleetReports, label: "Relatórios", icons: [FileBarChart] },
-    ],
-  },
-  { kind: "link", to: APP_ROUTES.reports, label: "Relatórios", icons: [FileBarChart] },
-  { kind: "link", to: APP_ROUTES.settings, label: "Configurações", icons: [Bolt] },
-];
+const nav: NavEntryConfig[] = NAV_CONFIG;
 
 const ICON_SZ = 16;
 const ICON_SZ_MOBILE = 14;
@@ -142,8 +51,8 @@ function canViewRoute(to: string): boolean {
   return can(perm) || isAdminUser();
 }
 
-function filterNav(entries: NavEntry[]): NavEntry[] {
-  const out: NavEntry[] = [];
+function filterNav(entries: NavEntryConfig[]): NavEntryConfig[] {
+  const out: NavEntryConfig[] = [];
   for (const n of entries) {
     if (n.kind === "link") {
       if (canViewRoute(n.to)) out.push(n);
@@ -155,7 +64,54 @@ function filterNav(entries: NavEntry[]): NavEntry[] {
   return out;
 }
 
-function pageTitleForPath(pathname: string, items: NavEntry[]): string {
+function normalizeSearchText(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+}
+
+function labelMatches(label: string, query: string): boolean {
+  return normalizeSearchText(label).includes(query);
+}
+
+/**
+ * Filtra a árvore de navegação por texto — oculta o que não corresponde ao nome do módulo nem de
+ * nenhum dos seus submódulos. Quando só um submódulo corresponde, mantém o módulo/grupo pai
+ * (para dar contexto) mas restringe a lista de submódulos mostrados aos que correspondem.
+ */
+function filterNavByQuery(entries: NavEntryConfig[], rawQuery: string): NavEntryConfig[] {
+  const query = normalizeSearchText(rawQuery.trim());
+  if (!query) return entries;
+  const out: NavEntryConfig[] = [];
+  for (const n of entries) {
+    if (n.kind === "link") {
+      const selfMatch = labelMatches(n.label, query);
+      const matchedSubs = (n.submodules ?? []).filter((sm) => labelMatches(sm.label, query));
+      if (selfMatch || matchedSubs.length > 0) {
+        out.push({ ...n, submodules: selfMatch ? n.submodules : matchedSubs });
+      }
+      continue;
+    }
+    const groupSelfMatch = labelMatches(n.label, query);
+    const filteredChildren = n.children
+      .map((c) => {
+        const childSelfMatch = labelMatches(c.label, query);
+        const matchedSubs = (c.submodules ?? []).filter((sm) => labelMatches(sm.label, query));
+        if (groupSelfMatch || childSelfMatch || matchedSubs.length > 0) {
+          return { ...c, submodules: childSelfMatch || groupSelfMatch ? c.submodules : matchedSubs };
+        }
+        return null;
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    if (groupSelfMatch || filteredChildren.length > 0) {
+      out.push({ ...n, children: filteredChildren });
+    }
+  }
+  return out;
+}
+
+function pageTitleForPath(pathname: string, items: NavEntryConfig[]): string {
   for (const n of items) {
     if (n.kind === "link" && n.to === pathname) return n.label;
     if (n.kind === "group") {
@@ -176,6 +132,108 @@ function NavIcons({ icons, mobile }: { icons: LucideIcon[]; mobile: boolean }) {
         <Icon key={i} size={mobile ? ICON_SZ_MOBILE : ICON_SZ} strokeWidth={ICON_STROKE} className="sidebar__nav-icon__svg" />
       ))}
     </span>
+  );
+}
+
+/**
+ * Uma linha do menu (link normal ou grupo) — se tiver `submodules`, o clique no texto continua a
+ * navegar para `to` (abre na primeira aba, comportamento igual a antes); um chevron separado
+ * expande/recolhe a lista de submódulos (?tab=<valor> na mesma rota). Reaproveitada tanto para
+ * entradas de topo (ex.: Localidades) como para filhos de um NavGroup (ex.: OLT dentro de
+ * "Equipamentos") — por isso os submódulos ficam um nível mais indentados nesse segundo caso via
+ * o mesmo `.sidebar__submenu`/`.sidebar__sublink` reaplicado.
+ */
+function NavRow({
+  to,
+  label,
+  icons,
+  submodules,
+  isMobileNav,
+  closeMobileNav,
+  location,
+  openGroups,
+  setOpenGroups,
+  asSubItem,
+  forceExpanded,
+}: {
+  to: string;
+  label: string;
+  icons: LucideIcon[];
+  submodules?: SubmoduleEntry[];
+  isMobileNav: boolean;
+  closeMobileNav: () => void;
+  location: { pathname: string; search: string };
+  openGroups: Record<string, boolean>;
+  setOpenGroups: (fn: (p: Record<string, boolean>) => Record<string, boolean>) => void;
+  /** true quando é filho de um NavGroup (ex.: OLT dentro de "Equipamentos") — usa o mesmo
+   * `.sidebar__sublink` dos irmãos sem submódulos, em vez do `.sidebar a` de topo, senão a lista
+   * fica desalinhada (padding/indentação diferentes entre irmãos no mesmo nível). */
+  asSubItem?: boolean;
+  /** true durante uma pesquisa activa no menu — mostra os submódulos já expandidos, para que os
+   * que sobreviveram ao filtro fiquem visíveis sem precisar de mais um clique. */
+  forceExpanded?: boolean;
+}) {
+  const baseLinkClass = asSubItem ? "sidebar__sublink" : "";
+  if (!submodules || submodules.length === 0) {
+    return (
+      <NavLink
+        to={to}
+        className={({ isActive }) => `${baseLinkClass}${isActive ? `${baseLinkClass ? " " : ""}active` : ""}`}
+        title={label}
+        onClick={closeMobileNav}
+      >
+        <NavIcons icons={icons} mobile={isMobileNav} />
+        <span className="sidebar__nav-label">{label}</span>
+      </NavLink>
+    );
+  }
+
+  const onThisPage = location.pathname === to;
+  const expanded = !!openGroups[to] || onThisPage || !!forceExpanded;
+  const curTab = onThisPage ? new URLSearchParams(location.search).get("tab") : null;
+
+  return (
+    <div className={`sidebar__group${onThisPage ? " sidebar__group--active" : ""}${expanded ? " is-expanded" : ""}`}>
+      <div className={`sidebar__group-row${asSubItem ? " sidebar__group-row--sub" : ""}`}>
+        <NavLink
+          to={to}
+          end
+          className={({ isActive }) => `${baseLinkClass}${isActive ? `${baseLinkClass ? " " : ""}active` : ""}`}
+          title={label}
+          onClick={closeMobileNav}
+        >
+          <NavIcons icons={icons} mobile={isMobileNav} />
+          <span className="sidebar__nav-label">{label}</span>
+        </NavLink>
+        <button
+          type="button"
+          className="sidebar__group-chevron-btn"
+          aria-label={expanded ? "Recolher submódulos" : "Expandir submódulos"}
+          aria-expanded={expanded}
+          onClick={() => setOpenGroups((p) => ({ ...p, [to]: !expanded }))}
+        >
+          <ChevronDown size={14} className={`sidebar__group-chevron${expanded ? " is-open" : ""}`} aria-hidden />
+        </button>
+      </div>
+      <div className={`sidebar__submenu${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
+        <div className="sidebar__submenu-inner">
+          {submodules.map((sm, i) => {
+            const active = onThisPage && (curTab ? curTab === sm.tab : i === 0);
+            return (
+              <Link
+                key={sm.tab}
+                to={`${to}?tab=${sm.tab}`}
+                className={active ? "sidebar__sublink active" : "sidebar__sublink"}
+                title={sm.label}
+                onClick={closeMobileNav}
+              >
+                <span className="sidebar__nav-label">{sm.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -289,8 +347,11 @@ export function ShellLayout() {
   }
 
   const permissionsKey = getStoredUserPermissionsKey();
-  const navItems = useMemo(() => filterNav(nav), [permissionsKey]);
-  const pageTitle = useMemo(() => pageTitleForPath(location.pathname, navItems), [location.pathname, navItems]);
+  const [navQuery, setNavQuery] = useState("");
+  const navItemsAll = useMemo(() => filterNav(nav), [permissionsKey]);
+  const navItems = useMemo(() => filterNavByQuery(navItemsAll, navQuery), [navItemsAll, navQuery]);
+  const searching = normalizeSearchText(navQuery.trim()).length > 0;
+  const pageTitle = useMemo(() => pageTitleForPath(location.pathname, navItemsAll), [location.pathname, navItemsAll]);
 
   useEffect(() => {
     setOpenGroups((prev) => {
@@ -345,7 +406,10 @@ export function ShellLayout() {
         ) : null}
         <aside className={sidebarClass} aria-label="Menu principal">
           <div className="sidebar__head">
-            <div className="sidebar__brand">NetQuasar</div>
+            <div className="sidebar__brand">
+              <img src="/Logo-NetQuasar II.png" alt="" className="sidebar__brand-logo" aria-hidden />
+              <span>NetQuasar</span>
+            </div>
             {!isMobileNav ? (
               <button
                 type="button"
@@ -358,29 +422,49 @@ export function ShellLayout() {
               </button>
             ) : null}
           </div>
+          {!isMobileNav && sidebarCollapsed ? null : <SidebarSearch query={navQuery} onQueryChange={setNavQuery} />}
           <div className="sidebar__nav-scroll">
             <nav>
               {navItems.map((n) => {
                 if (n.kind === "link") {
+                  if (n.to === APP_ROUTES.integrations && !n.submodules) {
+                    // Único caso a precisar de `end` explícito sem NavRow (Integrações tem sub-rotas
+                    // próprias, não `?tab=`, e não deve marcar-se activo para elas).
+                    return (
+                      <NavLink
+                        key={n.to}
+                        to={n.to}
+                        end
+                        className={({ isActive }) => (isActive ? "active" : "")}
+                        title={n.label}
+                        onClick={closeMobileNav}
+                      >
+                        <NavIcons icons={n.icons} mobile={isMobileNav} />
+                        <span className="sidebar__nav-label">{n.label}</span>
+                      </NavLink>
+                    );
+                  }
                   return (
-                    <NavLink
+                    <NavRow
                       key={n.to}
                       to={n.to}
-                      end={n.to === APP_ROUTES.integrations}
-                      className={({ isActive }) => (isActive ? "active" : "")}
-                      title={n.label}
-                      onClick={closeMobileNav}
-                    >
-                      <NavIcons icons={n.icons} mobile={isMobileNav} />
-                      <span className="sidebar__nav-label">{n.label}</span>
-                    </NavLink>
+                      label={n.label}
+                      icons={n.icons}
+                      submodules={n.submodules}
+                      isMobileNav={isMobileNav}
+                      closeMobileNav={closeMobileNav}
+                      location={location}
+                      openGroups={openGroups}
+                      setOpenGroups={setOpenGroups}
+                      forceExpanded={searching}
+                    />
                   );
                 }
 
                 const groupActive = n.children.some(
                   (c) => location.pathname === c.to || location.pathname.startsWith(c.to + "/"),
                 );
-                const expanded = !!openGroups[n.id] || groupActive;
+                const expanded = !!openGroups[n.id] || groupActive || searching;
 
                 return (
                   <div
@@ -409,17 +493,20 @@ export function ShellLayout() {
                       <div className={`sidebar__submenu${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
                         <div className="sidebar__submenu-inner">
                           {n.children.map((c) => (
-                            <NavLink
+                            <NavRow
                               key={c.to}
                               to={c.to}
-                              tabIndex={expanded ? undefined : -1}
-                              className={({ isActive }) => `sidebar__sublink${isActive ? " active" : ""}`}
-                              title={c.label}
-                              onClick={closeMobileNav}
-                            >
-                              <NavIcons icons={c.icons} mobile={isMobileNav} />
-                              <span className="sidebar__nav-label">{c.label}</span>
-                            </NavLink>
+                              label={c.label}
+                              icons={c.icons}
+                              submodules={c.submodules}
+                              isMobileNav={isMobileNav}
+                              closeMobileNav={closeMobileNav}
+                              location={location}
+                              openGroups={openGroups}
+                              setOpenGroups={setOpenGroups}
+                              asSubItem
+                              forceExpanded={searching}
+                            />
                           ))}
                         </div>
                       </div>

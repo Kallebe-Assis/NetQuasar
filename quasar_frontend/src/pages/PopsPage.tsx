@@ -10,6 +10,7 @@ import { formatLatLng, googleMapsUrl } from "../lib/geoClipboard";
 import { toastErr, toastInfo, toastOk } from "../lib/operationToast";
 import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../lib/pageDataCache";
 import { queryKeys } from "../lib/queryKeys";
+import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { ActionMenu } from "../components/ActionMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DropdownMenu } from "../components/DropdownMenu";
@@ -70,6 +71,7 @@ type PopForm = {
 };
 
 type Tab = "localidades" | "pops";
+const POPS_PAGE_TABS: Tab[] = ["localidades", "pops"];
 
 const emptyLocForm = (): LocForm => ({
   name: "",
@@ -127,7 +129,7 @@ export function PopsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { push: pushToast } = useAppToast();
-  const [tab, setTab] = useState<Tab>("localidades");
+  const [tab, setTab] = useTabSearchParam<Tab>(POPS_PAGE_TABS, "localidades");
   const [q, setQ] = useState("");
 
   const list = useQuery({
