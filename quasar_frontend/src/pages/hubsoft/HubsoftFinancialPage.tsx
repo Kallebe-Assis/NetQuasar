@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Users } from "lucide-react";
+import { useState } from "react";
 import { HubsoftHeader } from "./HubsoftHeader";
-import { HubsoftFinancialSummaryView } from "./HubsoftFinancialSummaryView";
+import { HubsoftFinancialSummaryView, HubsoftTopDebtorsTable } from "./HubsoftFinancialSummaryView";
 import { HubsoftInvoiceListPanel } from "./HubsoftInvoiceListPanel";
 import type { HubsoftFinancialSummaryResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
@@ -25,6 +26,7 @@ export function HubsoftFinancialPage() {
   });
 
   const d = q.data;
+  const [debtorsOpen, setDebtorsOpen] = useState(false);
 
   return (
     <div className="integration-consult">
@@ -39,14 +41,25 @@ export function HubsoftFinancialPage() {
                 : "Soma as faturas dos últimos 6 meses — total a receber, vencido, pendente e pago."}
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn--sm"
-            disabled={q.isFetching}
-            onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftFinancialSummary })}
-          >
-            <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
-          </button>
+          <div className="row" style={{ gap: 6 }}>
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={!d?.ok}
+              onClick={() => setDebtorsOpen(true)}
+            >
+              <Users size={13} style={{ marginRight: 4, verticalAlign: -2 }} aria-hidden />
+              Maiores devedores (amostra)
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={q.isFetching}
+              onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftFinancialSummary })}
+            >
+              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
+            </button>
+          </div>
         </div>
 
         {q.isLoading ? (
@@ -59,11 +72,33 @@ export function HubsoftFinancialPage() {
         ) : !d?.ok ? (
           <div className="msg msg--err">{d?.message || "Falha ao calcular o resumo financeiro."}</div>
         ) : (
-          <HubsoftFinancialSummaryView d={d} />
+          <HubsoftFinancialSummaryView d={d} hideDebtors />
         )}
 
         <HubsoftInvoiceListPanel />
       </div>
+
+      {debtorsOpen && d?.ok ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setDebtorsOpen(false)}>
+          <div
+            className="modal modal--wide"
+            style={{ maxWidth: 820, width: "100%", maxHeight: "85vh", overflow: "auto" }}
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 style={{ margin: 0 }}>
+                Maiores devedores (amostra) <span className="integration-detail__count">({d.top_debtors.length})</span>
+              </h3>
+              <button type="button" className="btn btn--sm" onClick={() => setDebtorsOpen(false)}>
+                Fechar
+              </button>
+            </div>
+            <HubsoftTopDebtorsTable d={d} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

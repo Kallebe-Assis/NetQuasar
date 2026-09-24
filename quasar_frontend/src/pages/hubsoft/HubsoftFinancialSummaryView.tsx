@@ -7,8 +7,46 @@ function fmtCurrency(n?: number): string {
   return (n ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-/** KPIs + maiores devedores — usado pela aba Financeiro e pelo modo "Financeiro" do Dashboard. */
-export function HubsoftFinancialSummaryView({ d }: { d: HubsoftFinancialSummaryResponse }) {
+/** Tabela dos maiores devedores da amostra — usada inline no Dashboard e num modal na aba Financeiro. */
+export function HubsoftTopDebtorsTable({ d }: { d: HubsoftFinancialSummaryResponse }) {
+  return d.top_debtors.length === 0 ? (
+    <div className="msg">Nenhum cliente com pendência encontrado na amostra.</div>
+  ) : (
+    <div className="table-wrap integration-support-table">
+      <table className="integration-support-table__grid">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Faturas em aberto</th>
+            <th>Vencido</th>
+            <th>Pendente</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {d.top_debtors.map((c, i) => (
+            <tr key={c.client_code || i}>
+              <td className="integration-support-table__cell">
+                {c.client_name || "—"}
+                {c.client_code ? <span className="mono integration-support-table__meta"> · {c.client_code}</span> : null}
+              </td>
+              <td className="integration-support-table__cell">{fmtInt(c.invoice_count)}</td>
+              <td className="mono integration-support-table__cell" style={{ color: "var(--err)" }}>
+                {fmtCurrency(c.overdue_value)}
+              </td>
+              <td className="mono integration-support-table__cell">{fmtCurrency(c.pending_value)}</td>
+              <td className="mono integration-support-table__cell">{fmtCurrency(c.pending_value + c.overdue_value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** KPIs + maiores devedores — usado pela aba Financeiro (com `hideDebtors`, os devedores vão para
+ * um modal) e pelo modo "Financeiro" do Dashboard. */
+export function HubsoftFinancialSummaryView({ d, hideDebtors }: { d: HubsoftFinancialSummaryResponse; hideDebtors?: boolean }) {
   return (
     <>
       <div className="dashboard-kpi-row" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
@@ -42,44 +80,14 @@ export function HubsoftFinancialSummaryView({ d }: { d: HubsoftFinancialSummaryR
         </div>
       </div>
 
-      <section className="integration-detail__section" style={{ marginTop: 16 }}>
-        <h4 className="integration-detail__section-title">
-          Maiores devedores (amostra) <span className="integration-detail__count">({d.top_debtors.length})</span>
-        </h4>
-        {d.top_debtors.length === 0 ? (
-          <div className="msg">Nenhum cliente com pendência encontrado na amostra.</div>
-        ) : (
-          <div className="table-wrap integration-support-table">
-            <table className="integration-support-table__grid">
-              <thead>
-                <tr>
-                  <th>Cliente</th>
-                  <th>Faturas em aberto</th>
-                  <th>Vencido</th>
-                  <th>Pendente</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.top_debtors.map((c, i) => (
-                  <tr key={c.client_code || i}>
-                    <td className="integration-support-table__cell">
-                      {c.client_name || "—"}
-                      {c.client_code ? <span className="mono integration-support-table__meta"> · {c.client_code}</span> : null}
-                    </td>
-                    <td className="integration-support-table__cell">{fmtInt(c.invoice_count)}</td>
-                    <td className="mono integration-support-table__cell" style={{ color: "var(--err)" }}>
-                      {fmtCurrency(c.overdue_value)}
-                    </td>
-                    <td className="mono integration-support-table__cell">{fmtCurrency(c.pending_value)}</td>
-                    <td className="mono integration-support-table__cell">{fmtCurrency(c.pending_value + c.overdue_value)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {hideDebtors ? null : (
+        <section className="integration-detail__section" style={{ marginTop: 16 }}>
+          <h4 className="integration-detail__section-title">
+            Maiores devedores (amostra) <span className="integration-detail__count">({d.top_debtors.length})</span>
+          </h4>
+          <HubsoftTopDebtorsTable d={d} />
+        </section>
+      )}
     </>
   );
 }

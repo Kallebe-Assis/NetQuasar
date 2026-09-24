@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  BarChart3,
   Building2,
   CalendarClock,
   CalendarDays,
@@ -1067,6 +1068,88 @@ function FinancialSummaryPanel({ summary }: { summary: FinancialSummary }) {
   );
 }
 
+/** "dd/mm/yyyy[ hh:mm:ss]" ou ISO → dia (sem hora) em UTC, para comparar só as datas. */
+function parseInvoiceDay(v?: string): number | null {
+  const s = (v ?? "").trim();
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s);
+  if (m) return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return null;
+}
+
+type PunctualityStats = {
+  total: number;
+  paidOnTime: number;
+  paidLate: number;
+  avgDaysLate: number;
+  maxDaysLate: number;
+  openOverdue: number;
+  openUpcoming: number;
+  unknown: number;
+};
+
+/** Compara, fatura a fatura, data de pagamento × vencimento (só datas, sem hora). */
+function computePunctuality(invoices: InvoiceItem[]): PunctualityStats {
+  const st: PunctualityStats = { total: invoices.length, paidOnTime: 0, paidLate: 0, avgDaysLate: 0, maxDaysLate: 0, openOverdue: 0, openUpcoming: 0, unknown: 0 };
+  const today = parseInvoiceDay(new Date().toISOString());
+  let lateDaysSum = 0;
+  for (const inv of invoices) {
+    const due = parseInvoiceDay(inv.due_date);
+    const paid = parseInvoiceDay(inv.payment_date);
+    if (paid != null && due != null) {
+      const diff = Math.round((paid - due) / 86_400_000);
+      if (diff > 0) {
+        st.paidLate++;
+        lateDaysSum += diff;
+        st.maxDaysLate = Math.max(st.maxDaysLate, diff);
+      } else {
+        st.paidOnTime++;
+      }
+    } else if (paid == null && due != null && !inv.paid) {
+      if (today != null && due < today) st.openOverdue++;
+      else st.openUpcoming++;
+    } else {
+      st.unknown++;
+    }
+  }
+  st.avgDaysLate = st.paidLate > 0 ? lateDaysSum / st.paidLate : 0;
+  return st;
+}
+
+function FinancialPunctualityPanel({ invoices }: { invoices: InvoiceItem[] }) {
+  const st = useMemo(() => computePunctuality(invoices), [invoices]);
+  const paidTotal = st.paidOnTime + st.paidLate;
+  const pct = (n: number) => (paidTotal > 0 ? ` (${Math.round((n / paidTotal) * 100)}% das pagas)` : "");
+  return (
+    <section className="integration-detail__section hubsoft-generic-card">
+      <h4 className="integration-detail__section-title" style={{ margin: "0 0 6px" }}>
+        <BarChart3 size={13} /> Análise do financeiro
+      </h4>
+      <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--muted)" }}>
+        De {st.total} fatura(s) retornada(s) pela HubSoft ({paidTotal} paga(s)), comparando a data de pagamento com o vencimento de cada uma:
+      </p>
+      <div className="hubsoft-stat-grid">
+        <StatTile icon={CheckCircle2} label="Pagas em dia" value={String(st.paidOnTime)} sub={pct(st.paidOnTime).trim()} accent="endereco" />
+        <StatTile
+          icon={AlertTriangle}
+          label="Pagas atrasadas"
+          value={String(st.paidLate)}
+          sub={st.paidLate > 0 ? `${pct(st.paidLate).trim()} · média ${st.avgDaysLate.toFixed(1)} dia(s), máx. ${st.maxDaysLate}` : undefined}
+          accent="historico"
+        />
+        <StatTile icon={Clock} label="Em aberto vencidas" value={String(st.openOverdue)} accent="vendedor" />
+        <StatTile icon={Receipt} label="Em aberto a vencer" value={String(st.openUpcoming)} accent="conexao" />
+      </div>
+      {st.total >= 100 ? (
+        <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
+          A HubSoft devolve no máximo 100 faturas por consulta de cliente — a análise cobre só essas.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 export function FinancialTabContent({
   loading,
   ok,
@@ -1088,6 +1171,7 @@ export function FinancialTabContent({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   // Faturas mudam (troca de cliente, novo fetch) — não manter uma selecção de outra pessoa.
   useEffect(() => {
@@ -1133,6 +1217,13 @@ export function FinancialTabContent({
   return (
     <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
       {summary ? <FinancialSummaryPanel summary={summary} /> : null}
+      <div className="row" style={{ justifyContent: "flex-end", margin: "6px 0" }}>
+        <button type="button" className={`btn btn--sm${analysisOpen ? " btn--primary" : ""}`} onClick={() => setAnalysisOpen((v) => !v)}>
+          <BarChart3 size={13} style={{ marginRight: 4, verticalAlign: -2 }} aria-hidden />
+          Análise do financeiro
+        </button>
+      </div>
+      {analysisOpen ? <FinancialPunctualityPanel invoices={invoices} /> : null}
       <section className="integration-detail__section hubsoft-generic-card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
           <h4 className="integration-detail__section-title" style={{ margin: 0 }}>

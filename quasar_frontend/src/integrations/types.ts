@@ -420,6 +420,9 @@ export type HubsoftInvoiceRow = {
   digitable_line?: string;
   bar_code?: string;
   link?: string;
+  plan?: string;
+  city?: string;
+  phone?: string;
 };
 
 export type HubsoftInvoiceListResponse = {

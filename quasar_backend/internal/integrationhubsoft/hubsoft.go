@@ -1997,6 +1997,80 @@ type InvoiceRow struct {
 	DigitableLine string `json:"digitable_line,omitempty"`
 	BarCode       string `json:"bar_code,omitempty"`
 	Link          string `json:"link,omitempty"`
+	// Plan/City/Phone não vêm em /financeiro/fatura (modo "simplificado") — preenchidos por
+	// enrichInvoiceClients com uma consulta leve por cliente (cache em memória).
+	Plan  string `json:"plan,omitempty"`
+	City  string `json:"city,omitempty"`
+	Phone string `json:"phone,omitempty"`
+}
+
+type invoiceClientInfo struct {
+	plan, city, phone string
+	at                time.Time
+}
+
+var (
+	invoiceClientCache   sync.Map // codigo_cliente -> invoiceClientInfo
+	invoiceClientCacheTT = 30 * time.Minute
+)
+
+const enrichInvoiceClientConcurrency = 6
+
+// enrichInvoiceClients preenche plano/cidade/telefone das faturas da página — 1 pedido por
+// cliente distinto (paralelo, limitado), com cache por código para não repetir entre páginas.
+// Falhas são silenciosas: a fatura continua a aparecer, só sem esses campos.
+func enrichInvoiceClients(ctx context.Context, cfg Config, token string, rows []InvoiceRow) {
+	codes := map[string]bool{}
+	for _, r := range rows {
+		if r.ClientCode != "" {
+			codes[r.ClientCode] = true
+		}
+	}
+	sem := make(chan struct{}, enrichInvoiceClientConcurrency)
+	var wg sync.WaitGroup
+	for code := range codes {
+		if v, ok := invoiceClientCache.Load(code); ok && time.Since(v.(invoiceClientInfo).at) < invoiceClientCacheTT {
+			continue
+		}
+		wg.Add(1)
+		go func(code string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			res, _ := SearchClients(ctx, cfg, token, "codigo_cliente", code, false)
+			if !res.OK || len(res.Clients) == 0 {
+				return
+			}
+			c := res.Clients[0]
+			info := invoiceClientInfo{phone: c.Phone, at: time.Now()}
+			var pick *ServiceSummary
+			for i := range c.Services {
+				if pick == nil {
+					pick = &c.Services[i]
+				}
+				if c.Services[i].StatusPrefix == "servico_habilitado" {
+					pick = &c.Services[i]
+					break
+				}
+			}
+			if pick != nil {
+				info.plan = pick.Name
+				info.city = pick.City
+			}
+			invoiceClientCache.Store(code, info)
+		}(code)
+	}
+	wg.Wait()
+	for i := range rows {
+		if v, ok := invoiceClientCache.Load(rows[i].ClientCode); ok {
+			info := v.(invoiceClientInfo)
+			rows[i].Plan, rows[i].City, rows[i].Phone = info.plan, info.city, info.phone
+		}
+	}
 }
 
 func deriveInvoiceStatus(m map[string]any) string {
@@ -2097,6 +2171,8 @@ func ListInvoices(ctx context.Context, cfg Config, token string, filter InvoiceL
 	}
 	if len(out.Invoices) == 0 {
 		out.Message = "Nenhuma fatura encontrada para o período/filtro."
+	} else {
+		enrichInvoiceClients(ctx, cfg, token, out.Invoices)
 	}
 	return out, nil
 }

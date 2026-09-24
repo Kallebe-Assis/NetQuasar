@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Mail, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Mail, RefreshCw } from "lucide-react";
 import type { HubsoftInvoiceListResponse, HubsoftInvoiceRow } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
@@ -24,6 +24,40 @@ function fmtDateStr(v?: string): string {
 
 const STATUS_LABEL: Record<string, string> = { paid: "Pago", overdue: "Vencido", pending: "Pendente" };
 const STATUS_CLASS: Record<string, string> = { paid: "badge badge--ok", overdue: "badge badge--err", pending: "badge" };
+
+const EXPORT_PER_PAGE = 100;
+const EXPORT_MAX_PAGES = 50; // teto de 5000 faturas por exportação
+
+function csvCell(v: string): string {
+  return /[",\n;]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+function downloadInvoicesCsv(rows: HubsoftInvoiceRow[]) {
+  const headers = ["Cliente", "Código", "Plano", "Cidade", "Telefone", "Vencimento", "Pagamento", "Valor", "Valor pago", "Estado"];
+  const lines = [headers.join(",")];
+  for (const inv of rows) {
+    const cols = [
+      inv.client_name ?? "",
+      inv.client_code ?? "",
+      inv.plan ?? "",
+      inv.city ?? "",
+      inv.phone ?? "",
+      fmtDateStr(inv.due_date) === "—" ? "" : fmtDateStr(inv.due_date),
+      fmtDateStr(inv.payment_date) === "—" ? "" : fmtDateStr(inv.payment_date),
+      inv.value ?? "",
+      inv.value_paid ?? "",
+      (inv.status && STATUS_LABEL[inv.status]) || "",
+    ];
+    lines.push(cols.map(csvCell).join(","));
+  }
+  const blob = new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `faturas-hubsoft-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function todayISO(offsetDays = 0): string {
   const d = new Date();
@@ -74,6 +108,36 @@ export function HubsoftInvoiceListPanel() {
   }
 
   const { push: pushToast } = useAppToast();
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
+
+  /** Exporta TODAS as páginas do período/filtros aplicados (não só a página visível). */
+  async function exportCsv() {
+    const base = new URLSearchParams(params);
+    base.set("per_page", String(EXPORT_PER_PAGE));
+    const all: HubsoftInvoiceRow[] = [];
+    try {
+      let totalPages = 1;
+      for (let p = 0; p < Math.min(totalPages, EXPORT_MAX_PAGES); p++) {
+        base.set("page", String(p));
+        setExportProgress(`A exportar… página ${p + 1}${totalPages > 1 ? ` de ${Math.min(totalPages, EXPORT_MAX_PAGES)}` : ""}`);
+        const res = await apiFetch<HubsoftInvoiceListResponse>(`/api/v1/integrations/hubsoft/hubsoft/financial/list?${base.toString()}`);
+        if (!res.ok) throw new Error(res.message || "Falha ao consultar faturas.");
+        all.push(...(res.invoices ?? []));
+        totalPages = Math.max(res.total_pages, 1);
+      }
+      if (all.length === 0) {
+        toastErr(pushToast, new Error("Nenhuma fatura para exportar."));
+        return;
+      }
+      downloadInvoicesCsv(all);
+      toastOk(pushToast, `${all.length.toLocaleString("pt-BR")} fatura(s) exportada(s).`);
+    } catch (e) {
+      toastErr(pushToast, e, "Falha ao exportar faturas.");
+    } finally {
+      setExportProgress(null);
+    }
+  }
+
   const [resendTarget, setResendTarget] = useState<HubsoftInvoiceRow | null>(null);
   const resendM = useMutation({
     mutationFn: (inv: HubsoftInvoiceRow) =>
@@ -167,7 +231,18 @@ export function HubsoftInvoiceListPanel() {
         >
           Buscar
         </button>
-        <button type="button" className="btn btn--sm" disabled={q.isFetching} onClick={() => void q.refetch()} style={{ marginLeft: "auto" }}>
+        <button
+          type="button"
+          className="btn btn--sm"
+          disabled={exportProgress != null || invoices.length === 0}
+          onClick={() => void exportCsv()}
+          title="Exporta todas as páginas do período/filtros aplicados"
+          style={{ marginLeft: "auto" }}
+        >
+          <Download size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
+          {exportProgress ?? "Exportar CSV"}
+        </button>
+        <button type="button" className="btn btn--sm" disabled={q.isFetching} onClick={() => void q.refetch()}>
           <RefreshCw size={12} className={q.isFetching ? "map-refresh-spin" : undefined} style={{ marginRight: 4, verticalAlign: -2 }} />
           Atualizar
         </button>
@@ -210,6 +285,9 @@ export function HubsoftInvoiceListPanel() {
               <thead>
                 <tr>
                   <th>Cliente</th>
+                  <th>Plano</th>
+                  <th>Cidade</th>
+                  <th>Telefone</th>
                   <th>Vencimento</th>
                   <th>Pagamento</th>
                   <th>Valor</th>
@@ -224,6 +302,9 @@ export function HubsoftInvoiceListPanel() {
                       {inv.client_name || "—"}
                       {inv.client_code ? <span className="mono integration-support-table__meta"> · {inv.client_code}</span> : null}
                     </td>
+                    <td className="integration-support-table__cell">{inv.plan || "—"}</td>
+                    <td className="integration-support-table__cell">{inv.city || "—"}</td>
+                    <td className="mono integration-support-table__cell">{inv.phone || "—"}</td>
                     <td className="mono integration-support-table__cell">{fmtDateStr(inv.due_date)}</td>
                     <td className="mono integration-support-table__cell">{fmtDateStr(inv.payment_date)}</td>
                     <td className="mono integration-support-table__cell">{fmtCurrencyStr(inv.value)}</td>
