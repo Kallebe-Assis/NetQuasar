@@ -115,7 +115,11 @@ export function OverflowTabs<T extends string>({
             >
               <MoreHorizontal size={16} aria-hidden />
             </button>
-            {moreOpen ? (
+          </div>
+        ) : null}
+      </div>
+      {/* O menu fica FORA do container (overflow:hidden cortaria o dropdown). */}
+      {moreOpen ? (
               <div className="tabs-overflow-menu" role="menu">
                 {overflowItems.map((it) => (
                   <button
@@ -134,9 +138,6 @@ export function OverflowTabs<T extends string>({
                 ))}
               </div>
             ) : null}
-          </div>
-        ) : null}
-      </div>
     </div>
   );
 }

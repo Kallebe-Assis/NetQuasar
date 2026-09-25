@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { PeriodPicker } from "./HubsoftReportPage";
+import { useConsultaToast } from "./hubsoftConsulta";
+import { ConsultaLoading } from "./ConsultaLoading";
 import { Switch } from "../../components/Switch";
 import { apiFetch } from "../../lib/api";
 import type { HubsoftConferenceItem, HubsoftConferenceResponse } from "../../integrations/types";
@@ -56,6 +58,7 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<FilterState>(null);
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
 
+  const { notify, missing } = useConsultaToast();
   const run = useMutation({
     mutationFn: () =>
       apiFetch<HubsoftConferenceResponse>(`/api/v1/integrations/${SLUG}/hubsoft/conference`, {
@@ -69,11 +72,22 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
         },
         timeoutMs: 3 * 60_000,
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       setFilter(null);
       setStatusFilter(new Set());
+      notify(r, null);
+    },
+    onError: (e) => {
+      notify(null, e);
     },
   });
+
+  function consult() {
+    if (!from || !to) return missing("informe o período (De / Até).");
+    if (from > to) return missing("o período está invertido (a data inicial é maior que a final).");
+    if (!checkConnection && !checkRemoteAccess && !checkIPv6) return missing("ligue pelo menos uma verificação (conexão, acesso remoto ou IPv6).");
+    run.mutate();
+  }
 
   const d = run.data;
 
@@ -174,17 +188,16 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             className="btn btn--primary"
-            disabled={run.isPending || (!checkConnection && !checkRemoteAccess && !checkIPv6)}
-            onClick={() => run.mutate()}
+            disabled={run.isPending}
+            onClick={consult}
           >
-            {run.isPending ? "A conferir…" : "Executar conferência"}
+            {run.isPending ? "A consultar…" : "Consultar"}
           </button>
-          {run.isPending ? (
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              Pode demorar — depende de quantas O.S. o período tem (testa acesso remoto de cada cliente, se activado).
-            </span>
-          ) : null}
         </div>
+
+        {run.isPending ? (
+          <ConsultaLoading text="Consultando… pode demorar, depende de quantas O.S. o período tem (testa o acesso remoto de cada cliente, se ativado)." />
+        ) : null}
 
         {run.isError ? <div className="msg msg--err">{(run.error as Error).message}</div> : null}
         {d && !d.ok ? <div className="msg msg--err">{d.message || "Falha ao executar a conferência."}</div> : null}

@@ -471,6 +471,12 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}/hubsoft/financial-summary", s.hubsoftFinancialSummary)
 			r.Get("/{id}/hubsoft/report/clients", s.hubsoftReportClients)
 			r.Get("/{id}/hubsoft/report/services", s.hubsoftReportServices)
+			r.Get("/{id}/hubsoft/report/blocked", s.hubsoftReportBlocked)
+			r.Post("/{id}/hubsoft/report/clients/bulk", s.hubsoftBulkClients)
+			r.Get("/{id}/hubsoft/report/tenure", s.hubsoftReportTenure)
+			r.Get("/{id}/hubsoft/report/preventive/base", s.hubsoftPreventiveBase)
+			r.Post("/{id}/hubsoft/report/preventive/chunk", s.hubsoftPreventiveChunk)
+			r.Get("/{id}/hubsoft/report/tenure/detail", s.hubsoftReportTenureDetail)
 			r.Get("/{id}/hubsoft/report/attendance", s.hubsoftReportAttendance)
 			r.Get("/{id}/hubsoft/report/work-orders", s.hubsoftReportWorkOrders)
 			r.Post("/{id}/hubsoft/conference", s.hubsoftConference)
@@ -488,6 +494,13 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Post("/{id}/hubsoft/service/{serviceId}/enable", s.hubsoftEnableClientService)
 			r.Post("/{id}/hubsoft/service/{serviceId}/suspend", s.hubsoftSuspendClientService)
 			r.Post("/{id}/hubsoft/financial/boletos/merge", s.hubsoftMergeBoletos)
+			// PROVISÓRIO: correção em lote da data de venda — apenas administradores.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdminMiddleware)
+				r.Get("/{id}/hubsoft/data-venda/export", s.hubsoftDataVendaExport)
+				r.Post("/{id}/hubsoft/data-venda/preview", s.hubsoftDataVendaPreview)
+				r.Post("/{id}/hubsoft/data-venda/apply", s.hubsoftDataVendaApply)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.requirePermissionMiddleware("integrations.manage", "*"))
 				r.Post("/", s.createIntegration)

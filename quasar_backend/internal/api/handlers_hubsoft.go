@@ -161,6 +161,7 @@ func (s *Server) hubsoftSearch(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadGateway, "HUBSOFT", serr.Error(), nil)
 			return
 		}
+		integrationhubsoft.EnrichSuspendedSince(ctx, cfg, token, &result)
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
@@ -174,6 +175,7 @@ func (s *Server) hubsoftSearch(w http.ResponseWriter, r *http.Request) {
 	// SearchClientsQueryOverrides) e rejeita limit acima de 100: bater exactamente nesse teto é o
 	// único sinal de que pode haver mais resultados não mostrados — avisa em vez de dar a entender
 	// silenciosamente que a lista está completa.
+	integrationhubsoft.EnrichSuspendedSince(ctx, cfg, token, &result)
 	if result.OK && len(result.Clients) == 100 {
 		result.Message = "Mostrando os 100 primeiros resultados (limite da API HubSoft para esta consulta) — pode haver mais; refine o termo de busca para ver os demais."
 	}
@@ -833,6 +835,286 @@ func (s *Server) hubsoftReportServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, integrationhubsoft.BuildServicesReport(ctx, cfg, token))
+}
+
+// hubsoftDataVendaExport — PROVISÓRIO (só administradores). Todos os serviços, para montar o CSV.
+func (s *Server) hubsoftDataVendaExport(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 6*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	rows, msg := integrationhubsoft.ExportDataVendaBase(ctx, cfg, token, r.URL.Query().Get("include_cancelled") == "1")
+	if msg != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": msg, "rows": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rows": rows})
+}
+
+type hubsoftDataVendaPreviewBody struct {
+	Rows             []integrationhubsoft.DataVendaInputRow `json:"rows"`
+	IncludeCancelled bool                                   `json:"include_cancelled"`
+}
+
+// hubsoftDataVendaPreview — PROVISÓRIO (só administradores). Cruza o CSV com a base viva da HubSoft
+// por login PPPoE + id + código + nome e devolve o que seria alterado. Não altera nada.
+func (s *Server) hubsoftDataVendaPreview(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body hubsoftDataVendaPreviewBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_BODY", "corpo inválido", nil)
+		return
+	}
+	if len(body.Rows) > 2000 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "máximo de 2000 linhas por pré-visualização", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 6*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.PreviewDataVenda(ctx, cfg, token, body.Rows, body.IncludeCancelled))
+}
+
+type hubsoftDataVendaApplyBody struct {
+	Rows []integrationhubsoft.DataVendaApplyInput `json:"rows"`
+}
+
+// hubsoftDataVendaApply — PROVISÓRIO (só administradores). Aplica um LOTE PEQUENO (≤ 20 linhas por
+// chamada; o front encadeia os lotes). Cada linha é revalidada e conferida; ao primeiro sinal de
+// inconsistência grave (halt) o servidor interrompe o lote e o front deve parar tudo.
+func (s *Server) hubsoftDataVendaApply(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body hubsoftDataVendaApplyBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_BODY", "corpo inválido", nil)
+		return
+	}
+	if len(body.Rows) == 0 || len(body.Rows) > 20 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "envie de 1 a 20 linhas por chamada", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	actor := s.actorFromRequest(r)
+	results := make([]integrationhubsoft.DataVendaApplyResult, 0, len(body.Rows))
+	halted := false
+	for i, row := range body.Rows {
+		if i > 0 {
+			time.Sleep(350 * time.Millisecond) // folga sob o limite de 20 req/s da HubSoft (cada linha faz ~4 chamadas)
+		}
+		res := integrationhubsoft.ApplyDataVendaRow(ctx, cfg, token, row)
+		results = append(results, res)
+		s.appendAuditLog(ctx, "hubsoft_client_service", res.ServiceID, "set_data_venda", actor,
+			map[string]any{"data_venda": res.DateBefore},
+			map[string]any{"integration_id": integID.String(), "login": res.Login, "data_venda": row.NewDate, "ok": res.OK, "mensagem": res.Message})
+		if res.Halt {
+			halted = true
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results, "halted": halted})
+}
+
+// hubsoftReportTenure — aba Relatório → Tempo de cliente: totais de clientes ativos por faixa de
+// data da venda (ver BuildTenureReport). Só números, sem lista.
+func (s *Server) hubsoftReportTenure(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 6*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildTenureReport(ctx, cfg, token))
+}
+
+// hubsoftReportTenureDetail — modal de uma faixa de "Tempo de cliente": serviços ativos da faixa por
+// localidade e por plano (from/to = limites da faixa, devolvidos por report/tenure).
+func (s *Server) hubsoftReportTenureDetail(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	q := r.URL.Query()
+	extendWriteDeadline(w, 4*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildTenureBandDetail(ctx, cfg, token, q.Get("from"), q.Get("to")))
+}
+
+// hubsoftPreventiveBase — relatório "Desbloqueio preventivo", fase 1: clientes/serviços não cancelados.
+func (s *Server) hubsoftPreventiveBase(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 6*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildPreventiveBase(ctx, cfg, token))
+}
+
+// hubsoftPreventiveChunk — fase 2: conta os desbloqueios (preventivos e totais) de um lote de clientes.
+func (s *Server) hubsoftPreventiveChunk(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body struct {
+		ClientIDs []string `json:"client_ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || len(body.ClientIDs) == 0 || len(body.ClientIDs) > 100 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "envie de 1 a 100 client_ids", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildPreventiveChunk(ctx, cfg, token, body.ClientIDs))
+}
+
+// hubsoftBulkClients — "Consulta em massa" (aba Relatório → Clientes): lista de nomes → ID, nome,
+// telefone, serviços com plano, cidade e data da venda. Lotes de até 25 nomes por chamada.
+func (s *Server) hubsoftBulkClients(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	var body struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || len(body.Names) == 0 || len(body.Names) > 25 {
+		writeErr(w, http.StatusUnprocessableEntity, "VALIDATION", "envie de 1 a 25 nomes por chamada", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	extendWriteDeadline(w, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": integrationhubsoft.BuildBulkClientLookup(ctx, cfg, token, body.Names)})
+}
+
+// hubsoftReportBlocked — aba Relatório → Bloqueios: serviços suspensos por débito numa janela
+// de datas (ver BuildBlockedServicesReport — a API não expõe a data exacta da suspensão).
+func (s *Server) hubsoftReportBlocked(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	q := r.URL.Query()
+	extendWriteDeadline(w, 4*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildBlockedServicesReport(ctx, cfg, token,
+		strings.TrimSpace(q.Get("from")), strings.TrimSpace(q.Get("to")), strings.TrimSpace(q.Get("status"))))
 }
 
 // hubsoftServicesTelegramRequest — o frontend já tem o relatório carregado (cacheado até 5min,

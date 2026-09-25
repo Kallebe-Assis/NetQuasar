@@ -10048,3 +10048,103 @@ details.collapsible-section .collapsible-section__body {
 }
 
 
+
+.hubsoft-empty {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.hubsoft-consulta-loading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 14px 30px;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.hubsoft-consulta-loading__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 35%;
+  background: var(--accent);
+  border-radius: 3px;
+  animation: hubsoft-consulta-bar 1.3s ease-in-out infinite;
+}
+@keyframes hubsoft-consulta-bar {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hubsoft-consulta-loading__bar { animation: none; width: 100%; opacity: 0.4; }
+}
+
+/* Abas grandes da tela de Relatório da integração */
+.hubsoft-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.hubsoft-tabs__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.hubsoft-tabs__btn:hover {
+  border-color: var(--accent);
+}
+.hubsoft-tabs__btn--active {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.hubsoft-tabs__btn svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+/* Bloco de opções de um filtro */
+.hubsoft-filter-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hubsoft-filter-box__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.hubsoft-filter-box__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}

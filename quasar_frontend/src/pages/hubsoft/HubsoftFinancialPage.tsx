@@ -1,28 +1,33 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Users } from "lucide-react";
 import { useState } from "react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { HubsoftFinancialSummaryView, HubsoftTopDebtorsTable } from "./HubsoftFinancialSummaryView";
 import { HubsoftInvoiceListPanel } from "./HubsoftInvoiceListPanel";
+import { InfoHint } from "../../components/InfoHint";
 import type { HubsoftFinancialSummaryResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { useConsultaToast } from "./hubsoftConsulta";
 
+import { ConsultaLoading } from "./ConsultaLoading";
 /**
- * Resumo financeiro agregado — total a receber (pendente + vencido) e pago, somado numa
- * amostra de clientes (mesma técnica do Dashboard: /cliente/financeiro só existe por
- * cliente, não há "todas as faturas da operadora"). A API da HubSoft, sendo o faturamento do
- * próprio provedor aos seus clientes, só expõe contas A RECEBER — não há "contas a pagar"
- * (despesas a fornecedores) nesta integração.
+ * Financeiro da integração HubSoft — dois blocos independentes, cada um com o seu botão Consultar
+ * (nada é buscado sozinho):
+ *  1. Resumo dos últimos 6 meses: soma uma amostra de clientes (/cliente/financeiro só existe por
+ *     cliente, não há "todas as faturas da operadora").
+ *  2. Faturas: lista paginada com filtros de período/status/cliente e exportação CSV.
+ * A HubSoft só expõe contas A RECEBER — não há "contas a pagar" (despesas a fornecedores).
  */
 export function HubsoftFinancialPage() {
-  const qc = useQueryClient();
+  const { runRefetch } = useConsultaToast();
 
   const q = useQuery({
     queryKey: queryKeys.hubsoftFinancialSummary,
     queryFn: () => apiFetch<HubsoftFinancialSummaryResponse>("/api/v1/integrations/hubsoft/hubsoft/financial-summary"),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
+    enabled: false, // só consulta ao clicar em "Consultar"
   });
 
   const d = q.data;
@@ -31,52 +36,49 @@ export function HubsoftFinancialPage() {
   return (
     <div className="integration-consult">
       <HubsoftHeader />
+
       <div className="card">
-        <div className="hubsoft-page-head">
+        <div className="hubsoft-page-head" style={{ marginBottom: 10 }}>
           <div>
-            <h2 style={{ margin: 0 }}>Financeiro</h2>
+            <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+              Resumo financeiro
+              <InfoHint label="Sobre o resumo">
+                <p>
+                  Soma as faturas com vencimento nos últimos 6 meses de uma amostra de clientes (total a receber, vencido, pendente e pago).
+                  A HubSoft só expõe contas a receber — não existe “contas a pagar” (despesas a fornecedores) nesta integração.
+                </p>
+              </InfoHint>
+            </h2>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>
-              {d
-                ? `${d.total_invoices.toLocaleString("pt-BR")} fatura(s) com vencimento nos últimos 6 meses. A HubSoft só expõe contas a receber (faturas de clientes) nesta integração — não existe "contas a pagar" (despesas a fornecedores) aqui.`
-                : "Soma as faturas dos últimos 6 meses — total a receber, vencido, pendente e pago."}
+              {d?.ok ? `${d.total_invoices.toLocaleString("pt-BR")} fatura(s) com vencimento nos últimos 6 meses.` : "Últimos 6 meses — amostra de clientes."}
             </p>
           </div>
-          <div className="row" style={{ gap: 6 }}>
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={!d?.ok}
-              onClick={() => setDebtorsOpen(true)}
-            >
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn--sm" disabled={!d?.ok} onClick={() => setDebtorsOpen(true)}>
               <Users size={13} style={{ marginRight: 4, verticalAlign: -2 }} aria-hidden />
-              Maiores devedores (amostra)
+              Maiores devedores
             </button>
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={q.isFetching}
-              onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftFinancialSummary })}
-            >
-              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
+            <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={() => void runRefetch(q.refetch)}>
+              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} style={{ marginRight: 4, verticalAlign: -2 }} />
+              {q.isFetching ? "A consultar…" : "Consultar resumo"}
             </button>
           </div>
         </div>
 
-        {q.isLoading ? (
-          <div className="hubsoft-loading">
-            <RefreshCw size={18} className="map-refresh-spin" />
-            <span>A coletar amostra da HubSoft — isto pode demorar até alguns minutos…</span>
-          </div>
+        {q.isFetching && !d ? (
+          <ConsultaLoading text="A coletar amostra da HubSoft — pode demorar até alguns minutos…" />
         ) : q.isError ? (
           <div className="msg msg--err">{(q.error as Error).message}</div>
-        ) : !d?.ok ? (
-          <div className="msg msg--err">{d?.message || "Falha ao calcular o resumo financeiro."}</div>
-        ) : (
+        ) : d && !d.ok ? (
+          <div className="msg msg--err">{d.message || "Falha ao calcular o resumo financeiro."}</div>
+        ) : d ? (
           <HubsoftFinancialSummaryView d={d} hideDebtors />
+        ) : (
+          <div className="hubsoft-empty">Nenhuma consulta feita ainda.</div>
         )}
-
-        <HubsoftInvoiceListPanel />
       </div>
+
+      <HubsoftInvoiceListPanel />
 
       {debtorsOpen && d?.ok ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setDebtorsOpen(false)}>

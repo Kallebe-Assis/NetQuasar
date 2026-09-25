@@ -31,6 +31,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
+import { useConsultaToast } from "../pages/hubsoft/hubsoftConsulta";
 import type {
   AttendanceItem,
   ClientCard,
@@ -49,6 +50,7 @@ import {
 import { TableCellExpandableText } from "./TableCellExpandableText";
 import { SupportItemDetailModal, type SupportDetailTarget } from "./SupportItemDetailModal";
 
+import { ConsultaLoading } from "../pages/hubsoft/ConsultaLoading";
 const DETAIL_FONT = "var(--integration-detail-font-size, 11px)";
 
 function labelStatus(s?: string) {
@@ -119,6 +121,16 @@ function resolveContractStatus(s: ClientServiceSummary): string {
   return (s.status ?? "").trim();
 }
 
+/** Dias corridos desde uma data DD/MM/AAAA (null se não der para ler). */
+function daysSinceBR(d: string): number | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(d);
+  if (!m) return null;
+  const t = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((today.getTime() - t.getTime()) / 86400000));
+}
+
 function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
   const plan = s.plano_venda || s.name || s.login || "—";
   const online = formatIXCOnline(s.online, s.online_label);
@@ -176,6 +188,15 @@ function ServiceSummaryCells({ s }: { s: ClientServiceSummary }) {
         <div className="integration-consult-card__service-cell">
           <span className="integration-consult-card__label">Situação da conexão</span>
           <span className="integration-consult-card__value">{s.status_text}</span>
+        </div>
+      ) : null}
+      {s.suspended_at ? (
+        <div className="integration-consult-card__service-cell">
+          <span className="integration-consult-card__label">Bloqueado desde</span>
+          <span className="mono integration-consult-card__value" style={{ color: "var(--err)" }}>
+            {s.suspended_at}
+            {daysSinceBR(s.suspended_at) != null ? ` (há ${daysSinceBR(s.suspended_at)} dia(s))` : ""}
+          </span>
         </div>
       ) : null}
       {s.last_disconnected_at ? (
@@ -1180,7 +1201,7 @@ export function FinancialTabContent({
   }, [invoices]);
 
   if (loading) {
-    return <p className="integration-detail__empty">A carregar faturas…</p>;
+    return <ConsultaLoading text="A carregar faturas…" />;
   }
   if (!ok && message) {
     return <div className="msg msg--err">{message}</div>;
@@ -1328,7 +1349,7 @@ export function AttendanceTabContent({
   items: AttendanceItem[];
   onShowDetail: (t: SupportDetailTarget) => void;
 }) {
-  if (loading) return <p className="integration-detail__empty">A carregar atendimentos…</p>;
+  if (loading) return <ConsultaLoading text="A carregar atendimentos…" />;
   if (!ok && message) return <div className="msg msg--err">{message}</div>;
   if (items.length === 0) return <div className="msg">{message || "Nenhum atendimento encontrado."}</div>;
   const showClient = items.some((a) => a.client_name || a.client_code);
@@ -1412,7 +1433,7 @@ export function WorkOrdersTabContent({
   items: WorkOrderItem[];
   onShowDetail: (t: SupportDetailTarget) => void;
 }) {
-  if (loading) return <p className="integration-detail__empty">A carregar ordens de serviço…</p>;
+  if (loading) return <ConsultaLoading text="A carregar ordens de serviço…" />;
   if (!ok && message) return <div className="msg msg--err">{message}</div>;
   if (items.length === 0) return <div className="msg">{message || "Nenhuma ordem de serviço encontrada."}</div>;
   const showClient = items.some((o) => o.client_name || o.client_code);
@@ -1495,7 +1516,7 @@ export function LoginsTabContent({
   message?: string;
   items: ClientServiceSummary[];
 }) {
-  if (loading) return <p className="integration-detail__empty">A carregar logins…</p>;
+  if (loading) return <ConsultaLoading text="A carregar logins…" />;
   if (!ok && message) return <div className="msg msg--err">{message}</div>;
   if (items.length === 0) return <div className="msg">{message || "Nenhum login encontrado."}</div>;
   return (
@@ -1561,7 +1582,6 @@ export function ClientDetailModal({
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
-  prefetchExtras,
 }: {
   client: ClientCard;
   loading?: boolean;
@@ -1584,7 +1604,6 @@ export function ClientDetailModal({
   // Busca atendimentos/ordens de serviço em paralelo assim que o modal abre, em vez de só ao
   // clicar na aba — reduz a espera percebida ao trocar de aba. Opt-in (default false) para não
   // mudar o comportamento do IXC, que continua a buscar só ao clicar na aba.
-  prefetchExtras?: boolean;
 }) {
   const detailTabs = useMemo(() => buildDetailTabs(client.raw), [client.raw]);
   const services = client.services ?? [];
@@ -1631,43 +1650,60 @@ export function ClientDetailModal({
     setServiceAction(null);
   }, [client.id, client.code, tabs]);
 
-  useEffect(() => {
-    if (activeTab !== "financeiro" || !onFetchFinancial || financial || financialLoading) return;
-    setFinancialLoading(true);
-    onFetchFinancial(client)
-      .then((r) => setFinancial(r))
-      .catch((e) => setFinancial({ ok: false, message: e instanceof Error ? e.message : String(e), invoices: [] }))
-      .finally(() => setFinancialLoading(false));
-  }, [activeTab, onFetchFinancial, financial, financialLoading, client]);
-
-  useEffect(() => {
-    if (!onFetchAttendance || attendance || attendanceLoading) return;
-    if (!prefetchExtras && activeTab !== "atendimentos") return;
-    setAttendanceLoading(true);
-    onFetchAttendance(client)
-      .then((r) => setAttendance(r))
-      .catch((e) => setAttendance({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
-      .finally(() => setAttendanceLoading(false));
-  }, [activeTab, onFetchAttendance, attendance, attendanceLoading, client, prefetchExtras]);
-
-  useEffect(() => {
-    if (!onFetchWorkOrders || workOrders || workOrderLoading) return;
-    if (!prefetchExtras && activeTab !== "ordens") return;
-    setWorkOrderLoading(true);
-    onFetchWorkOrders(client)
-      .then((r) => setWorkOrders(r))
-      .catch((e) => setWorkOrders({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
-      .finally(() => setWorkOrderLoading(false));
-  }, [activeTab, onFetchWorkOrders, workOrders, workOrderLoading, client, prefetchExtras]);
-
-  useEffect(() => {
-    if (activeTab !== "logins" || !onFetchLogins || logins || loginLoading) return;
-    setLoginLoading(true);
-    onFetchLogins(client)
-      .then((r) => setLogins(r))
-      .catch((e) => setLogins({ ok: false, message: e instanceof Error ? e.message : String(e), items: [] }))
-      .finally(() => setLoginLoading(false));
-  }, [activeTab, onFetchLogins, logins, loginLoading, client]);
+  // Nada é consultado ao abrir a aba: só o botão "Consultar" chama a HubSoft (evita sobrecarregar a API).
+  const { notify } = useConsultaToast();
+  async function consultTab(tab: "financeiro" | "atendimentos" | "ordens" | "logins") {
+    const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    if (tab === "financeiro" && onFetchFinancial) {
+      setFinancialLoading(true);
+      try {
+        const r = await onFetchFinancial(client);
+        setFinancial(r);
+        notify(r, null);
+      } catch (e) {
+        setFinancial({ ok: false, message: errMsg(e), invoices: [] });
+        notify(null, e);
+      } finally {
+        setFinancialLoading(false);
+      }
+    } else if (tab === "atendimentos" && onFetchAttendance) {
+      setAttendanceLoading(true);
+      try {
+        const r = await onFetchAttendance(client);
+        setAttendance(r);
+        notify(r, null);
+      } catch (e) {
+        setAttendance({ ok: false, message: errMsg(e), items: [] });
+        notify(null, e);
+      } finally {
+        setAttendanceLoading(false);
+      }
+    } else if (tab === "ordens" && onFetchWorkOrders) {
+      setWorkOrderLoading(true);
+      try {
+        const r = await onFetchWorkOrders(client);
+        setWorkOrders(r);
+        notify(r, null);
+      } catch (e) {
+        setWorkOrders({ ok: false, message: errMsg(e), items: [] });
+        notify(null, e);
+      } finally {
+        setWorkOrderLoading(false);
+      }
+    } else if (tab === "logins" && onFetchLogins) {
+      setLoginLoading(true);
+      try {
+        const r = await onFetchLogins(client);
+        setLogins(r);
+        notify(r, null);
+      } catch (e) {
+        setLogins({ ok: false, message: errMsg(e), items: [] });
+        notify(null, e);
+      } finally {
+        setLoginLoading(false);
+      }
+    }
+  }
 
   let activeContent: ReactNode;
   if (activeTab === "servicos") {
@@ -1717,6 +1753,35 @@ export function ClientDetailModal({
     activeContent = tabs.find((t) => t.id === activeTab)?.content ?? null;
   }
 
+  const consultState: Record<string, { loaded: boolean; loading: boolean; what: string }> = {
+    financeiro: { loaded: !!financial, loading: financialLoading, what: "o financeiro" },
+    atendimentos: { loaded: !!attendance, loading: attendanceLoading, what: "os atendimentos" },
+    ordens: { loaded: !!workOrders, loading: workOrderLoading, what: "as ordens de serviço" },
+    logins: { loaded: !!logins, loading: loginLoading, what: "os logins" },
+  };
+  const consultTabState = consultState[activeTab];
+  if (consultTabState) {
+    const showBody = consultTabState.loaded || consultTabState.loading;
+    activeContent = (
+      <>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            {showBody ? "" : `Clique em Consultar para carregar ${consultTabState.what}. Nada é buscado automaticamente.`}
+          </span>
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            disabled={consultTabState.loading}
+            onClick={() => void consultTab(activeTab as "financeiro" | "atendimentos" | "ordens" | "logins")}
+          >
+            {consultTabState.loading ? "A consultar…" : "Consultar"}
+          </button>
+        </div>
+        {showBody ? activeContent : null}
+      </>
+    );
+  }
+
   return createPortal(
     <div className="modal-backdrop hubsoft-detail-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -1743,7 +1808,7 @@ export function ClientDetailModal({
           </div>
         ) : null}
         {loading ? (
-          <p className="integration-detail__empty">A carregar detalhes…</p>
+          <ConsultaLoading text="A carregar detalhes…" />
         ) : tabs.length === 0 ? (
           <p className="integration-detail__empty">Sem dados detalhados disponíveis.</p>
         ) : (
@@ -1799,7 +1864,6 @@ export function HubsoftClientResults({
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
-  prefetchExtras,
 }: {
   clients: ClientCard[];
   message?: string;
@@ -1820,7 +1884,6 @@ export function HubsoftClientResults({
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
-  prefetchExtras?: boolean;
 }) {
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1922,7 +1985,6 @@ export function HubsoftClientResults({
           attendanceEnabled={attendanceEnabled}
           workOrderEnabled={workOrderEnabled}
           loginEnabled={loginEnabled}
-          prefetchExtras={prefetchExtras}
         />
       ) : null}
     </>

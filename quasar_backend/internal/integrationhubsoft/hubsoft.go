@@ -2562,6 +2562,7 @@ type ServiceSummary struct {
 	ContractMonths      string `json:"contract_months,omitempty"`   // vigencia_meses
 	PendingContracts    string `json:"pending_contracts,omitempty"` // contratos_pendentes
 	UpdatedAt           string `json:"updated_at,omitempty"`        // data_atualizacao (do serviço)
+	SuspendedAt         string `json:"suspended_at,omitempty"`      // data da última suspensão (DD/MM/YYYY) — só serviços suspensos por débito
 	AddressStreet       string `json:"address_street,omitempty"`
 	AddressNumber       string `json:"address_number,omitempty"`
 	AddressComplement   string `json:"address_complement,omitempty"`
@@ -3064,6 +3065,7 @@ func parseBRDate(s string) time.Time {
 	s = strings.TrimSpace(s)
 	layouts := []string{
 		"02/01/2006 15:04:05",
+		"02/01/2006 15:04",
 		"02/01/2006",
 		"2006-01-02 15:04:05",
 		"2006-01-02T15:04:05",

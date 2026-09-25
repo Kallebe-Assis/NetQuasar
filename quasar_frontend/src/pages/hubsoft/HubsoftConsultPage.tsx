@@ -14,6 +14,8 @@ import type {
   ClientWorkOrderResponse,
 } from "../../integrations/types";
 import { apiFetch, apiFetchBlob, downloadBlob, ApiError } from "../../lib/api";
+import { describeConsultaError } from "./hubsoftConsulta";
+import { ConsultaLoading } from "./ConsultaLoading";
 import { PageToastHost, usePageToast } from "../../lib/pageToast";
 
 /**
@@ -48,17 +50,20 @@ export function HubsoftConsultPage() {
     onSuccess: (r) => {
       setResultFilter("");
       if (r.ok) {
-        showToast("ok", `${r.clients?.length ?? 0} resultado(s).`);
+        showToast("ok", `Consulta realizada com sucesso — ${r.clients?.length ?? 0} resultado(s).`);
       } else {
-        showToast("err", r.message || "Consulta falhou.");
+        showToast("err", `Erro na consulta: ${r.message || "a HubSoft não devolveu dados"}`);
       }
     },
-    onError: (e) => showToast("err", e instanceof Error ? e.message : String(e)),
+    onError: (e) => showToast("err", describeConsultaError(e)),
   });
 
   const runSearch = useCallback(() => {
     const t = termo.trim();
-    if (!t) return;
+    if (!t) {
+      showToast("warn", "Faltando informação: preencha o termo da consulta.");
+      return;
+    }
     searchM.mutate({ busca, termo: t });
   }, [busca, termo, searchM]);
 
@@ -245,8 +250,8 @@ export function HubsoftConsultPage() {
             />
           </div>
           <div className="integration-consult-search__actions">
-            <button type="button" className="btn btn--primary" disabled={searchM.isPending || !termo.trim()} onClick={runSearch}>
-              {searchM.isPending ? "A pesquisar…" : "Pesquisar"}
+            <button type="button" className="btn btn--primary" disabled={searchM.isPending} onClick={runSearch}>
+              {searchM.isPending ? "A consultar…" : "Consultar"}
             </button>
           </div>
         </div>
@@ -259,7 +264,9 @@ export function HubsoftConsultPage() {
       </div>
 
       <section className="integration-consult-results">
-        {hasResults ? (
+        {searchM.isPending ? (
+          <ConsultaLoading text="Consultando a HubSoft…" />
+        ) : hasResults ? (
           <>
             <div className="integration-consult-results__toolbar">
               <span className="integration-consult-results__toolbar-title">
@@ -284,11 +291,10 @@ export function HubsoftConsultPage() {
               onDownloadBoletos={downloadBoletos}
               attendanceEnabled
               workOrderEnabled
-              prefetchExtras
             />
           </>
         ) : (
-          <p className="integration-consult-empty">Preencha o termo e clique em Pesquisar. Os resultados aparecem abaixo.</p>
+          <p className="integration-consult-empty">Preencha o termo e clique em Consultar. Os resultados aparecem abaixo.</p>
         )}
       </section>
     </div>

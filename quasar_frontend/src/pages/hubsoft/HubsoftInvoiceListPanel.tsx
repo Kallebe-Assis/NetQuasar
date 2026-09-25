@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, Mail, RefreshCw } from "lucide-react";
 import type { HubsoftInvoiceListResponse, HubsoftInvoiceRow } from "../../integrations/types";
@@ -6,7 +6,9 @@ import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { useConsultaToast } from "./hubsoftConsulta";
 
+import { ConsultaLoading } from "./ConsultaLoading";
 function fmtCurrencyStr(v?: string): string {
   const n = Number(v);
   if (!v || !Number.isFinite(n)) return v || "—";
@@ -33,7 +35,7 @@ function csvCell(v: string): string {
 }
 
 function downloadInvoicesCsv(rows: HubsoftInvoiceRow[]) {
-  const headers = ["Cliente", "Código", "Plano", "Cidade", "Telefone", "Vencimento", "Pagamento", "Valor", "Valor pago", "Estado"];
+  const headers = ["Cliente", "Código", "Plano", "Cidade", "Telefone", "Vencimento", "Pagamento", "Valor", "Valor pago", "Status"];
   const lines = [headers.join(",")];
   for (const inv of rows) {
     const cols = [
@@ -76,27 +78,55 @@ export function HubsoftInvoiceListPanel() {
   const [to, setTo] = useState(() => todayISO());
   const [status, setStatus] = useState<"" | "aberto" | "quitado">("");
   const [busca, setBusca] = useState("");
-  const [appliedBusca, setAppliedBusca] = useState("");
+  // Só o botão "Consultar" (ou Enter no campo Cliente) busca na HubSoft: os campos acima são rascunho.
+  const [applied, setApplied] = useState<{ from: string; to: string; status: "" | "aberto" | "quitado"; busca: string } | null>(null);
   const [page, setPage] = useState(0);
   const perPage = 25;
+  const qc = useQueryClient();
+  const { notify, missing } = useConsultaToast();
 
-  const params = useMemo(() => {
+  const buildParams = (a: { from: string; to: string; status: "" | "aberto" | "quitado"; busca: string }, pg: number) => {
     const p = new URLSearchParams();
-    p.set("page", String(page));
+    p.set("page", String(pg));
     p.set("per_page", String(perPage));
-    if (from) p.set("data_inicio", from);
-    if (to) p.set("data_fim", to);
-    if (status === "aberto") p.set("apenas_em_aberto", "sim");
-    if (status === "quitado") p.set("apenas_quitado", "sim");
-    if (appliedBusca.trim()) p.set("busca", appliedBusca.trim());
+    if (a.from) p.set("data_inicio", a.from);
+    if (a.to) p.set("data_fim", a.to);
+    if (a.status === "aberto") p.set("apenas_em_aberto", "sim");
+    if (a.status === "quitado") p.set("apenas_quitado", "sim");
+    if (a.busca.trim()) p.set("busca", a.busca.trim());
     return p.toString();
-  }, [page, from, to, status, appliedBusca]);
+  };
+  const fetchList = (qs: string) => apiFetch<HubsoftInvoiceListResponse>(`/api/v1/integrations/hubsoft/hubsoft/financial/list?${qs}`);
+  const params = useMemo(() => (applied ? buildParams(applied, page) : ""), [applied, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = useQuery({
     queryKey: ["hubsoft-financial-list", params],
     placeholderData: keepPreviousData,
-    queryFn: () => apiFetch<HubsoftInvoiceListResponse>(`/api/v1/integrations/hubsoft/hubsoft/financial/list?${params}`),
+    queryFn: () => fetchList(params),
+    enabled: applied !== null,
+    staleTime: 5 * 60_000, // o clique em Consultar já buscou; evita repetir ao aplicar o filtro
   });
+
+  async function consult() {
+    if (!from || !to) {
+      missing("informe o período (vencimento de / até).");
+      return;
+    }
+    if (from > to) {
+      missing("o período está invertido (a data inicial é maior que a final).");
+      return;
+    }
+    const next = { from, to, status, busca };
+    try {
+      const r = await qc.fetchQuery({ queryKey: ["hubsoft-financial-list", buildParams(next, 0)], queryFn: () => fetchList(buildParams(next, 0)), staleTime: 0 });
+      if (!notify(r, null)) return;
+    } catch (e) {
+      notify(null, e);
+      return;
+    }
+    setPage(0);
+    setApplied(next);
+  }
 
   const d = q.data;
   const invoices = d?.invoices ?? [];
@@ -104,7 +134,6 @@ export function HubsoftInvoiceListPanel() {
   function applyPreset(days: number) {
     setFrom(todayISO(-days));
     setTo(todayISO());
-    setPage(0);
   }
 
   const { push: pushToast } = useAppToast();
@@ -149,110 +178,78 @@ export function HubsoftInvoiceListPanel() {
     onError: (e) => toastErr(pushToast, e, "Falha ao reenviar a fatura."),
   });
 
-  return (
-    <section className="integration-detail__section" style={{ marginTop: 16 }}>
-      <h4 className="integration-detail__section-title">Faturas</h4>
+  const fieldStyle = { fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3, minWidth: 0 } as const;
 
-      <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
-        <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
-          Vencimento de
-          <input
-            type="date"
-            className="input"
-            style={{ fontSize: 12 }}
-            value={from}
-            onChange={(e) => {
-              setFrom(e.target.value);
-              setPage(0);
-            }}
-          />
-        </label>
-        <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
-          até
-          <input
-            type="date"
-            className="input"
-            style={{ fontSize: 12 }}
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value);
-              setPage(0);
-            }}
-          />
-        </label>
-        <button type="button" className="btn btn--sm" onClick={() => applyPreset(30)}>
-          30 dias
-        </button>
-        <button type="button" className="btn btn--sm" onClick={() => applyPreset(90)}>
-          90 dias
-        </button>
-        <button type="button" className="btn btn--sm" onClick={() => applyPreset(180)}>
-          180 dias
-        </button>
-        <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
-          Estado
-          <select
-            className="input"
-            style={{ fontSize: 12 }}
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value as "" | "aberto" | "quitado");
-              setPage(0);
-            }}
+  return (
+    <div className="card">
+      <div className="hubsoft-page-head" style={{ marginBottom: 10 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Faturas</h2>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 0" }}>Filtre por vencimento, status ou cliente.</p>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn--sm"
+            disabled={exportProgress != null || invoices.length === 0}
+            onClick={() => void exportCsv()}
+            title="Exporta todas as páginas do período/filtros aplicados"
           >
+            <Download size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
+            {exportProgress ?? "Exportar CSV"}
+          </button>
+          <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={() => void consult()}>
+            <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} style={{ marginRight: 4, verticalAlign: -2 }} />
+            {q.isFetching ? "A consultar…" : "Consultar faturas"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, alignItems: "end", marginBottom: 14 }}>
+        <label style={fieldStyle}>
+          Vencimento de
+          <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label style={fieldStyle}>
+          Até
+          <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <div style={fieldStyle}>
+          Atalho de período
+          <div className="row" style={{ gap: 0 }}>
+            {[30, 90, 180].map((days) => (
+              <button key={days} type="button" className="btn btn--sm" onClick={() => applyPreset(days)}>
+                {days} dias
+              </button>
+            ))}
+          </div>
+        </div>
+        <label style={fieldStyle}>
+          Status
+          <select className="input" value={status} onChange={(e) => setStatus(e.target.value as "" | "aberto" | "quitado")}>
             <option value="">Todas</option>
             <option value="aberto">Em aberto</option>
             <option value="quitado">Quitadas</option>
           </select>
         </label>
-        <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
+        <label style={{ ...fieldStyle, gridColumn: "span 2" }}>
           Cliente
           <input
             className="input"
-            style={{ fontSize: 12 }}
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                setAppliedBusca(busca);
-                setPage(0);
-              }
+              if (e.key === "Enter") void consult();
             }}
             placeholder="Nome ou código"
           />
         </label>
-        <button
-          type="button"
-          className="btn btn--sm"
-          onClick={() => {
-            setAppliedBusca(busca);
-            setPage(0);
-          }}
-        >
-          Buscar
-        </button>
-        <button
-          type="button"
-          className="btn btn--sm"
-          disabled={exportProgress != null || invoices.length === 0}
-          onClick={() => void exportCsv()}
-          title="Exporta todas as páginas do período/filtros aplicados"
-          style={{ marginLeft: "auto" }}
-        >
-          <Download size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
-          {exportProgress ?? "Exportar CSV"}
-        </button>
-        <button type="button" className="btn btn--sm" disabled={q.isFetching} onClick={() => void q.refetch()}>
-          <RefreshCw size={12} className={q.isFetching ? "map-refresh-spin" : undefined} style={{ marginRight: 4, verticalAlign: -2 }} />
-          Atualizar
-        </button>
       </div>
 
-      {q.isLoading ? (
-        <div className="hubsoft-loading">
-          <RefreshCw size={16} className="map-refresh-spin" />
-          <span>A carregar faturas…</span>
-        </div>
+      {!applied ? (
+        <div className="hubsoft-empty">Nenhuma consulta feita ainda.</div>
+      ) : q.isLoading ? (
+        <ConsultaLoading text="A carregar faturas…" />
       ) : q.isError ? (
         <div className="msg msg--err">{(q.error as Error).message}</div>
       ) : !d?.ok ? (
@@ -291,7 +288,7 @@ export function HubsoftInvoiceListPanel() {
                   <th>Vencimento</th>
                   <th>Pagamento</th>
                   <th>Valor</th>
-                  <th>Estado</th>
+                  <th>Status</th>
                   <th style={{ width: 40 }} />
                 </tr>
               </thead>
@@ -341,6 +338,6 @@ export function HubsoftInvoiceListPanel() {
         onCancel={() => !resendM.isPending && setResendTarget(null)}
         onConfirm={() => resendTarget && resendM.mutate(resendTarget)}
       />
-    </section>
+    </div>
   );
 }

@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
+import { HubsoftDataVendaSection } from "./HubsoftDataVendaSection";
+import { isAdminUser } from "../../lib/auth";
 import { IntegrationLogoField } from "../../components/IntegrationLogoField";
 import type { IntegrationDetail } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
@@ -209,6 +211,18 @@ export function HubsoftConfigPage() {
           </div>
         ) : null}
       </div>
+
+      {isAdminUser() ? (
+        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18 }}>Edição em massa</h2>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--muted)" }}>
+              Ferramentas provisórias, só para administradores. Alteram dados de produção na HubSoft.
+            </p>
+          </div>
+          <HubsoftDataVendaSection />
+        </div>
+      ) : null}
     </div>
   );
 }

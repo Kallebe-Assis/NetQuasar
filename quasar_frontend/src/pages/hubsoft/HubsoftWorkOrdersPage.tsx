@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ClipboardCheck, RefreshCw } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
@@ -9,7 +9,9 @@ import { HubsoftSupportDetailModal, type HubsoftDetailTarget } from "../../integ
 import type { RecentActivityResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { useConsultaToast } from "./hubsoftConsulta";
 
+import { ConsultaLoading } from "./ConsultaLoading";
 /**
  * Ordens de serviço recentes de TODOS os clientes — mesma amostra/cache que a aba
  * Atendimentos (ver HubsoftAttendancePage e internal/integrationhubsoft.BuildRecentActivity);
@@ -17,7 +19,7 @@ import { queryKeys } from "../../lib/queryKeys";
  * de novo ao abrir a outra.
  */
 export function HubsoftWorkOrdersPage() {
-  const qc = useQueryClient();
+  const { runRefetch } = useConsultaToast();
   const [detailTarget, setDetailTarget] = useState<HubsoftDetailTarget | null>(null);
   const [conferenceOpen, setConferenceOpen] = useState(false);
 
@@ -33,6 +35,7 @@ export function HubsoftWorkOrdersPage() {
     queryFn: () => apiFetch<RecentActivityResponse>("/api/v1/integrations/hubsoft/hubsoft/recent-activity"),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
+    enabled: false, // só consulta ao clicar em "Consultar"
   });
 
   const d = q.data;
@@ -58,18 +61,17 @@ export function HubsoftWorkOrdersPage() {
               type="button"
               className="btn btn--sm"
               disabled={q.isFetching}
-              onClick={() => void qc.refetchQueries({ queryKey: queryKeys.hubsoftRecentActivity })}
+              onClick={() => void runRefetch(q.refetch)}
             >
-              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Atualizar
+              <RefreshCw size={13} className={q.isFetching ? "map-refresh-spin" : undefined} /> Consultar
             </button>
           </div>
         </div>
 
-        {q.isLoading ? (
-          <div className="hubsoft-loading">
-            <RefreshCw size={18} className="map-refresh-spin" />
-            <span>A coletar amostra da HubSoft — isto pode demorar até alguns minutos…</span>
-          </div>
+        {!d && !q.isFetching && !q.isError ? (
+          <div className="msg" style={{ color: "var(--muted)" }}>Clique em <b>Consultar</b> para carregar os dados. Nada é buscado automaticamente.</div>
+        ) : q.isFetching && !d ? (
+          <ConsultaLoading text="A coletar amostra da HubSoft — isto pode demorar até alguns minutos…" />
         ) : q.isError ? (
           <div className="msg msg--err">{(q.error as Error).message}</div>
         ) : !d?.ok ? (

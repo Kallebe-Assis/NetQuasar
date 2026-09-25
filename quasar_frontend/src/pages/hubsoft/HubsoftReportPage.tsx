@@ -1,9 +1,11 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Send } from "lucide-react";
+import { Ban, Headset, Hourglass, Layers, Send, ShieldCheck, Users, Wallet, Wrench } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { InfoHint } from "../../components/InfoHint";
+import { Switch } from "../../components/Switch";
 import { EmptyState } from "../../components/EmptyState";
 import { ClientDetailModal } from "../../integrations/HubsoftClientResults";
 import type {
@@ -14,6 +16,7 @@ import type {
   ClientServiceSummary,
   ClientWorkOrderResponse,
   HubsoftAttendanceReportResponse,
+  HubsoftBlockedReportResponse,
   HubsoftFinancialReportResponse,
   HubsoftReportClientsResponse,
   HubsoftReportServiceRow,
@@ -22,7 +25,12 @@ import type {
   HubsoftWorkOrderReportResponse,
 } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
+import { HubsoftPreventiveSection } from "./HubsoftPreventiveSection";
+import { HubsoftBulkClientsModal } from "./HubsoftBulkClientsModal";
+import { HubsoftTenureBandModal, type TenureBand } from "./HubsoftTenureBandModal";
+import { fmtConsultaAt, useConsulta, useConsultaToast } from "./hubsoftConsulta";
 
+import { ConsultaLoading } from "./ConsultaLoading";
 const SLUG = "hubsoft";
 
 const SERVICE_STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -42,7 +50,7 @@ const SERVICE_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "franquia_excedida", label: "Franquia excedida" },
 ];
 
-type Section = "clients" | "services" | "attendance" | "work_orders" | "financial";
+type Section = "clients" | "services" | "blocked" | "preventive" | "tenure" | "attendance" | "work_orders" | "financial";
 
 function fmtInt(n?: number): string {
   return (n ?? 0).toLocaleString("pt-BR");
@@ -208,9 +216,9 @@ function ClientsReportSection() {
   const [ipv4, setIpv4] = useState("");
   const [mac, setMac] = useState("");
   const [login, setLogin] = useState("");
-  const [appliedParams, setAppliedParams] = useState<string | null>(null);
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const buildParams = useCallback(() => {
     const p = new URLSearchParams();
@@ -225,14 +233,12 @@ function ClientsReportSection() {
     return p.toString();
   }, [servicoStatus, cancelado, estado, cidade, bairro, ipv4, mac, login]);
 
-  const reportQ = useQuery({
-    queryKey: ["hubsoft-report-clients", appliedParams],
-    enabled: appliedParams !== null,
-    queryFn: () => apiFetch<HubsoftReportClientsResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/clients?${appliedParams}`),
-  });
+  const reportQ = useConsulta<string, HubsoftReportClientsResponse>("hubsoft-report-clients", (qs) =>
+    apiFetch<HubsoftReportClientsResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/clients?${qs}`, { timeoutMs: 5 * 60_000 }),
+  );
 
   function runFilter() {
-    setAppliedParams(buildParams());
+    void reportQ.run(buildParams());
   }
 
   const fetchClientDetail = useCallback(async (client: ClientCard): Promise<ClientCard> => {
@@ -342,20 +348,25 @@ function ClientsReportSection() {
           <input className="input mono" value={login} onChange={(e) => setLogin(e.target.value)} placeholder="usuario123" />
         </div>
         <div style={{ alignSelf: "flex-end" }}>
-          <button type="button" className="btn btn--primary" disabled={reportQ.isFetching} onClick={runFilter}>
-            {reportQ.isFetching ? "A filtrar…" : "Filtrar"}
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn--primary" disabled={reportQ.isFetching} onClick={runFilter}>
+              {reportQ.isFetching ? "A consultar…" : "Consultar"}
+            </button>
+            <button type="button" className="btn" onClick={() => setBulkOpen(true)}>
+              Consulta em massa
+            </button>
+          </div>
         </div>
       </div>
 
-      {appliedParams === null ? (
+      {!reportQ.consulted ? (
         <EmptyState
           variant="inline"
           title="Sem relatório ainda."
-          hint="Ajuste os filtros acima e clique em Filtrar."
+          hint="Ajuste os filtros acima e clique em Consultar."
         />
       ) : reportQ.isLoading ? (
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
+        <ConsultaLoading text="A carregar…" />
       ) : reportQ.isError ? (
         <div className="msg msg--err">{(reportQ.error as Error).message}</div>
       ) : !reportQ.data?.ok ? (
@@ -407,6 +418,8 @@ function ClientsReportSection() {
         </>
       )}
 
+      {bulkOpen ? <HubsoftBulkClientsModal onClose={() => setBulkOpen(false)} /> : null}
+
       {detailClient ? (
         <ClientDetailModal
           client={detailClient}
@@ -417,7 +430,6 @@ function ClientsReportSection() {
           onFetchWorkOrders={fetchClientWorkOrders}
           attendanceEnabled
           workOrderEnabled
-          prefetchExtras
         />
       ) : null}
     </div>
@@ -664,18 +676,11 @@ function ServicesTelegramButton({ data }: { data: HubsoftServicesReportResponse 
  * actual da base inteira (ver BuildServicesReport no backend), por isso pode demorar mais que os
  * relatórios por período. */
 function ServicesReportSection() {
-  const qc = useQueryClient();
   const [selectedLocality, setSelectedLocality] = useState<HubsoftServiceLocalityBreakdown | null>(null);
-  const q = useQuery({
-    queryKey: ["hubsoft-report-services"],
-    queryFn: () => apiFetch<HubsoftServicesReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/services`),
-    // Pedido explícito: manter sempre em cache, só actualizar sozinho se o utilizador voltar a
-    // esta aba depois de pelo menos 5 minutos — refetchOnWindowFocus já é false globalmente
-    // (main.tsx), staleTime é o que decide se o mount desta secção dispara um refetch ou só
-    // mostra o que já está em cache (React Query mantém o cache entre montagens/desmontagens
-    // da secção enquanto o utilizador troca de aba dentro do relatório).
-    staleTime: 5 * 60 * 1000,
-  });
+  // Só consulta ao clicar em "Consultar" (varre a base inteira — não deve rodar sem querer).
+  const q = useConsulta<true, HubsoftServicesReportResponse>("hubsoft-report-services", () =>
+    apiFetch<HubsoftServicesReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/services`, { timeoutMs: 5 * 60_000 }),
+  );
   const d = q.data;
 
   return (
@@ -689,22 +694,21 @@ function ServicesReportSection() {
             </p>
           </div>
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={q.isFetching}
-              onClick={() => void qc.invalidateQueries({ queryKey: ["hubsoft-report-services"] })}
-            >
-              {q.isFetching ? "A atualizar…" : "Atualizar"}
+            <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={() => void q.run(true)}>
+              {q.isFetching ? "A consultar…" : "Consultar"}
             </button>
             {d?.ok ? <ServicesTelegramButton data={d} /> : null}
           </div>
         </div>
       </div>
 
-      {q.isLoading ? (
+      {!q.consulted ? (
         <div className="card" style={{ padding: 14 }}>
-          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>A carregar (pode demorar — varre a base inteira)…</p>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Clique em <b>Consultar</b> para carregar (varre a base inteira e pode demorar). Nada é buscado automaticamente.</p>
+        </div>
+      ) : q.isLoading ? (
+        <div className="card" style={{ padding: 14 }}>
+          <ConsultaLoading text="A carregar (pode demorar — varre a base inteira)…" />
         </div>
       ) : q.isError ? (
         <div className="card" style={{ padding: 14 }}>
@@ -754,19 +758,289 @@ function ServicesReportSection() {
   );
 }
 
+function fmtDateBR(iso?: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso || "—";
+}
+
+function csvEsc(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** Aba Relatório → Bloqueios: serviços suspensos por débito numa janela de "dias atrás" ou datas.
+ * A HubSoft não expõe a data exacta da suspensão — usa-se a última alteração do serviço
+ * (data_atualizacao), ver BuildBlockedServicesReport no backend. */
+function BlockedReportSection() {
+  // O usuário escolhe UM jeito de definir o período; só os campos do modo escolhido aparecem.
+  const [mode, setMode] = useState<"preset" | "dates" | "daysago">("preset");
+  const [preset, setPreset] = useState<"15" | "30" | "month">("30");
+  const [from, setFrom] = useState(todayISO(-30));
+  const [to, setTo] = useState(todayISO());
+  const [xDays, setXDays] = useState("0");
+  const [yDays, setYDays] = useState("30");
+  const [includePartial, setIncludePartial] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const { missing } = useConsultaToast();
+  const q = useConsulta<{ from: string; to: string; partial: boolean }, HubsoftBlockedReportResponse>("hubsoft-report-blocked", (a) =>
+    apiFetch<HubsoftBlockedReportResponse>(
+      `/api/v1/integrations/${SLUG}/hubsoft/report/blocked?from=${a.from}&to=${a.to}` +
+        `&status=${a.partial ? "suspenso_debito,suspenso_parcialmente" : "suspenso_debito"}`,
+      { timeoutMs: 5 * 60_000 },
+    ),
+  );
+  const d = q.data;
+  const applied = q.applied ?? { from, to, partial: includePartial };
+
+  function consult() {
+    let f = "";
+    let t = "";
+    if (mode === "preset") {
+      t = todayISO();
+      if (preset === "month") {
+        const now = new Date();
+        f = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      } else {
+        f = todayISO(-Number(preset));
+      }
+    } else if (mode === "dates") {
+      if (!from || !to) return missing("informe as duas datas (De / Até).");
+      if (from > to) return missing("o período está invertido (a data inicial é maior que a final).");
+      f = from;
+      t = to;
+    } else {
+      if (xDays.trim() === "" || yDays.trim() === "") return missing("informe os dois valores de dias (de X até Y dias atrás).");
+      const x = Number(xDays);
+      const y = Number(yDays);
+      if (x > y) return missing("“de X dias” não pode ser maior que “até Y dias” (ex.: de 0 a 30).");
+      f = todayISO(-y);
+      t = todayISO(-x);
+    }
+    void q.run({ from: f, to: t, partial: includePartial });
+  }
+
+  const rows = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const all = d?.rows ?? [];
+    if (!s) return all;
+    return all.filter((r) =>
+      [r.client_name, r.client_code, r.login, r.service_name, r.city, r.phone].some((v) => (v ?? "").toLowerCase().includes(s)),
+    );
+  }, [d?.rows, search]);
+
+  function exportCsv() {
+    const head = ["Cliente", "Código", "Telefone", "Serviço", "Login", "Cidade", "Status", "Bloqueado desde", "Dias bloqueado"];
+    const lines = [head.join(",")];
+    for (const r of rows) {
+      lines.push(
+        [r.client_name, r.client_code, r.phone, r.service_name, r.login, r.city, r.status, fmtDateBR(r.blocked_at), String(r.days_blocked)]
+          .map((v) => csvEsc(v ?? ""))
+          .join(","),
+      );
+    }
+    const blob = new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bloqueios-hubsoft-${applied.from}_a_${applied.to}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card" style={{ padding: 14 }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+          Bloqueios por débito — há quantos dias
+          <InfoHint label="Sobre este relatório">
+            <p>
+              Serviços que estão suspensos por débito agora, filtrados pela data do ÚLTIMO bloqueio (se o serviço foi liberado e
+              bloqueado de novo, vale o bloqueio mais recente).
+            </p>
+          </InfoHint>
+        </h3>
+
+        <div className="hubsoft-filter-box">
+          <div className="hubsoft-filter-box__options">
+            <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+              Como definir o período
+              <select className="input" value={mode} onChange={(e) => setMode(e.target.value as "preset" | "dates" | "daysago")}>
+                <option value="preset">Atalho</option>
+                <option value="dates">Datas específicas</option>
+                <option value="daysago">Dias atrás</option>
+              </select>
+            </label>
+            {mode === "preset" ? (
+              <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+                Período
+                <select className="input" value={preset} onChange={(e) => setPreset(e.target.value as "15" | "30" | "month")}>
+                  <option value="15">Últimos 15 dias</option>
+                  <option value="30">Últimos 30 dias</option>
+                  <option value="month">Este mês</option>
+                </select>
+              </label>
+            ) : mode === "dates" ? (
+              <>
+                <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+                  De
+                  <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
+                </label>
+                <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+                  Até
+                  <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+                  Bloqueados há pelo menos (dias)
+                  <input className="input" inputMode="numeric" value={xDays} onChange={(e) => setXDays(e.target.value.replace(/\D/g, ""))} />
+                </label>
+                <label style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 3 }}>
+                  e no máximo (dias)
+                  <input className="input" inputMode="numeric" value={yDays} onChange={(e) => setYDays(e.target.value.replace(/\D/g, ""))} />
+                </label>
+              </>
+            )}
+          </div>
+          {mode === "daysago" ? (
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "-6px 0 0" }}>
+              Ex.: de 0 a 30 = bloqueados nos últimos 30 dias; de 10 a 10 = bloqueados há exatamente 10 dias.
+            </p>
+          ) : null}
+
+          <div className="hubsoft-filter-box__actions">
+            <Switch checked={includePartial} onChange={setIncludePartial} label="Incluir suspensos parcialmente" />
+            <div className="row" style={{ gap: 12, alignItems: "center" }}>
+              {q.consulted ? (
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  Última consulta: {fmtDateBR(applied.from)} a {fmtDateBR(applied.to)}
+                </span>
+              ) : null}
+              <button type="button" className="btn btn--primary" disabled={q.isFetching} onClick={consult}>
+                {q.isFetching ? "A consultar…" : "Consultar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!q.consulted && !q.isFetching ? (
+        <div className="card" style={{ padding: 14 }}>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Escolha o período e clique em <b>Consultar</b>. Nada é buscado automaticamente.</p>
+        </div>
+      ) : q.isLoading || q.isFetching ? (
+        <div className="card" style={{ padding: 14 }}>
+          <ConsultaLoading text="A consultar a HubSoft… (pode demorar em períodos longos)" />
+        </div>
+      ) : q.isError ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{(q.error as Error).message}</div>
+        </div>
+      ) : !d?.ok ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{d?.message || "Falha ao consultar."}</div>
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 14 }}>
+            <div className="dashboard-kpi-row" style={{ gridTemplateColumns: "repeat(2, minmax(0, 200px))" }}>
+              <div className="stat">
+                <div className="stat__k">Serviços bloqueados</div>
+                <div className="stat__v">{fmtInt(d.total)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat__k">Média de dias bloqueado</div>
+                <div className="stat__v">{d.avg_days.toFixed(1)}</div>
+              </div>
+            </div>
+            {d.total > 0 ? (
+              <div style={{ marginTop: 10 }}>
+                <StatusBreakdownTable items={d.buckets.filter((b) => b.count > 0)} labelHeader="Tempo bloqueado" />
+              </div>
+            ) : null}
+            {d.date_source === "mixed" ? (
+              <p style={{ fontSize: 11, color: "var(--warn)", margin: "8px 0 0" }}>
+                Alguns serviços não trazem a data do último bloqueio; para eles usa-se a data da última alteração do cadastro (marcados com “≈”).
+              </p>
+            ) : null}
+            {d.truncated ? (
+              <p style={{ fontSize: 11, color: "var(--warn)", margin: "8px 0 0" }}>
+                Resultado maior que o teto de páginas — a lista pode estar incompleta. Reduza o período.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="card" style={{ padding: 14 }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+              <h4 style={{ margin: 0, fontSize: 13 }}>Serviços ({fmtInt(rows.length)})</h4>
+              <div className="row" style={{ gap: 6 }}>
+                <input className="input" style={{ fontSize: 12 }} placeholder="Filtrar por nome, login, cidade…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <button type="button" className="btn btn--sm" disabled={rows.length === 0} onClick={exportCsv}>
+                  Exportar CSV
+                </button>
+              </div>
+            </div>
+            {rows.length === 0 ? (
+              <div className="msg">{d.message || "Nenhum serviço encontrado."}</div>
+            ) : (
+              <div className="table-wrap integration-support-table" style={{ maxHeight: 520, overflow: "auto" }}>
+                <table className="integration-support-table__grid">
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Serviço</th>
+                      <th>Login</th>
+                      <th>Cidade</th>
+                      <th>Telefone</th>
+                      <th>Bloqueado desde</th>
+                      <th>Dias</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.service_id || i}>
+                        <td className="integration-support-table__cell">
+                          {r.client_name || "—"}
+                          {r.client_code ? <span className="mono integration-support-table__meta"> · {r.client_code}</span> : null}
+                        </td>
+                        <td className="integration-support-table__cell">{r.service_name || "—"}</td>
+                        <td className="mono integration-support-table__cell">{r.login || "—"}</td>
+                        <td className="integration-support-table__cell">{r.city || "—"}</td>
+                        <td className="mono integration-support-table__cell">{r.phone || "—"}</td>
+                        <td className="mono integration-support-table__cell">
+                          {r.date_approx ? "≈ " : ""}
+                          {fmtDateBR(r.blocked_at)}
+                        </td>
+                        <td className="mono integration-support-table__cell" style={{ color: r.days_blocked > 30 ? "var(--err)" : undefined }}>
+                          {r.days_blocked}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AttendanceReportSection() {
   const [from, setFrom] = useState(todayISO(-30));
   const [to, setTo] = useState(todayISO());
-  const qc = useQueryClient();
-
-  const q = useQuery({
-    queryKey: ["hubsoft-report-attendance", from, to],
-    queryFn: () =>
-      apiFetch<HubsoftAttendanceReportResponse>(
-        `/api/v1/integrations/${SLUG}/hubsoft/report/attendance?data_inicio=${from}&data_fim=${to}`,
-      ),
-  });
+  const { missing } = useConsultaToast();
+  const q = useConsulta<{ from: string; to: string }, HubsoftAttendanceReportResponse>("hubsoft-report-attendance", (p) =>
+    apiFetch<HubsoftAttendanceReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/attendance?data_inicio=${p.from}&data_fim=${p.to}`, { timeoutMs: 5 * 60_000 }),
+  );
   const d = q.data;
+  function consult() {
+    if (!from || !to) return missing("informe o período (De / Até).");
+    if (from > to) return missing("o período está invertido (a data inicial é maior que a final).");
+    void q.run({ from, to });
+  }
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -780,18 +1054,17 @@ function AttendanceReportSection() {
         }}
       />
       <div className="row" style={{ marginBottom: 8, gap: 8, alignItems: "center" }}>
-        <button
-          type="button"
-          className="btn btn--sm"
-          disabled={q.isFetching}
-          onClick={() => void qc.invalidateQueries({ queryKey: ["hubsoft-report-attendance", from, to] })}
-        >
-          {q.isFetching ? "A atualizar…" : "Atualizar"}
+        <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={consult}>
+          {q.isFetching ? "A consultar…" : "Consultar"}
         </button>
-        <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/attendance/telegram?data_inicio=${from}&data_fim=${to}`} />
+        {d?.ok && q.applied ? (
+          <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/attendance/telegram?data_inicio=${q.applied.from}&data_fim=${q.applied.to}`} />
+        ) : null}
       </div>
-      {q.isLoading ? (
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
+      {!q.consulted ? (
+        <p style={{ fontSize: 12, color: "var(--muted)" }}>Escolha o período e clique em <b>Consultar</b>. Nada é buscado automaticamente.</p>
+      ) : q.isLoading ? (
+        <ConsultaLoading text="A carregar…" />
       ) : q.isError ? (
         <div className="msg msg--err">{(q.error as Error).message}</div>
       ) : !d?.ok ? (
@@ -827,16 +1100,16 @@ function AttendanceReportSection() {
 function WorkOrderReportSection() {
   const [from, setFrom] = useState(todayISO(-30));
   const [to, setTo] = useState(todayISO());
-  const qc = useQueryClient();
-
-  const q = useQuery({
-    queryKey: ["hubsoft-report-work-orders", from, to],
-    queryFn: () =>
-      apiFetch<HubsoftWorkOrderReportResponse>(
-        `/api/v1/integrations/${SLUG}/hubsoft/report/work-orders?data_inicio=${from}&data_fim=${to}`,
-      ),
-  });
+  const { missing } = useConsultaToast();
+  const q = useConsulta<{ from: string; to: string }, HubsoftWorkOrderReportResponse>("hubsoft-report-work-orders", (p) =>
+    apiFetch<HubsoftWorkOrderReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/work-orders?data_inicio=${p.from}&data_fim=${p.to}`, { timeoutMs: 5 * 60_000 }),
+  );
   const d = q.data;
+  function consult() {
+    if (!from || !to) return missing("informe o período (De / Até).");
+    if (from > to) return missing("o período está invertido (a data inicial é maior que a final).");
+    void q.run({ from, to });
+  }
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -850,18 +1123,17 @@ function WorkOrderReportSection() {
         }}
       />
       <div className="row" style={{ marginBottom: 8, gap: 8, alignItems: "center" }}>
-        <button
-          type="button"
-          className="btn btn--sm"
-          disabled={q.isFetching}
-          onClick={() => void qc.invalidateQueries({ queryKey: ["hubsoft-report-work-orders", from, to] })}
-        >
-          {q.isFetching ? "A atualizar…" : "Atualizar"}
+        <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={consult}>
+          {q.isFetching ? "A consultar…" : "Consultar"}
         </button>
-        <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/work-orders/telegram?data_inicio=${from}&data_fim=${to}`} />
+        {d?.ok && q.applied ? (
+          <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/work-orders/telegram?data_inicio=${q.applied.from}&data_fim=${q.applied.to}`} />
+        ) : null}
       </div>
-      {q.isLoading ? (
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
+      {!q.consulted ? (
+        <p style={{ fontSize: 12, color: "var(--muted)" }}>Escolha o período e clique em <b>Consultar</b>. Nada é buscado automaticamente.</p>
+      ) : q.isLoading ? (
+        <ConsultaLoading text="A carregar…" />
       ) : q.isError ? (
         <div className="msg msg--err">{(q.error as Error).message}</div>
       ) : !d?.ok ? (
@@ -951,23 +1223,31 @@ function FinancialKPIs({ d }: { d: HubsoftFinancialReportResponse }) {
   );
 }
 
-/** Modo "Últimos X meses": 1 pedido por mês (cada um já paginado/limitado ao próprio mês pela
- * API, ver report/financial) em paralelo, agregados aqui em total + média. */
-function FinancialLastNMonths({ months }: { months: number }) {
-  const ranges = useMemo(() => lastNMonths(months), [months]);
-  const results = useQueries({
-    queries: ranges.map((r) => ({
-      queryKey: ["hubsoft-report-financial-month", r.from, r.to],
-      queryFn: () =>
-        apiFetch<HubsoftFinancialReportResponse>(
-          `/api/v1/integrations/${SLUG}/hubsoft/report/financial?data_inicio=${r.from}&data_fim=${r.to}`,
-        ),
-    })),
-  });
+type FinancialMonthRow = { label: string; d: HubsoftFinancialReportResponse };
+type FinancialConsultaParams = { mode: FinancialMode; from: string; to: string; months: number };
+type FinancialConsultaResult =
+  | { ok: true; kind: "single"; report: HubsoftFinancialReportResponse }
+  | { ok: true; kind: "months"; months: number; rows: FinancialMonthRow[] }
+  | { ok: false; message: string };
 
-  const loading = results.some((r) => r.isLoading);
-  const errored = results.find((r) => r.isError);
-  const rows = results.map((r, i) => ({ label: ranges[i].label, d: r.data }));
+async function fetchFinancialConsulta(p: FinancialConsultaParams): Promise<FinancialConsultaResult> {
+  const one = (from: string, to: string) =>
+    apiFetch<HubsoftFinancialReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/financial?data_inicio=${from}&data_fim=${to}`, { timeoutMs: 5 * 60_000 });
+  if (p.mode !== "last_n_months") {
+    const r = await one(p.from, p.to);
+    return r.ok ? { ok: true, kind: "single", report: r } : { ok: false, message: r.message || "Falha ao consultar." };
+  }
+  // "Últimos X meses": 1 pedido por mês (cada um já paginado/limitado ao próprio mês pela API), em paralelo.
+  const ranges = lastNMonths(p.months);
+  const res = await Promise.all(ranges.map((r) => one(r.from, r.to)));
+  const bad = res.find((r) => !r.ok);
+  if (bad) return { ok: false, message: bad.message || "Falha ao consultar um dos meses." };
+  return { ok: true, kind: "months", months: p.months, rows: res.map((d, i) => ({ label: ranges[i].label, d })) };
+}
+
+/** Modo "Últimos X meses": totais + média a partir dos meses já consultados (botão Consultar). */
+function FinancialMonthsView({ months, monthRows }: { months: number; monthRows: FinancialMonthRow[] }) {
+  const rows = monthRows.map((r) => ({ label: r.label, d: r.d as HubsoftFinancialReportResponse | undefined }));
   const okRows = rows.filter((r) => r.d?.ok);
   const n = okRows.length || 1;
   const totals = okRows.reduce(
@@ -979,9 +1259,6 @@ function FinancialLastNMonths({ months }: { months: number }) {
     }),
     { total_value: 0, paid_value: 0, open_value: 0, overdue_value: 0 },
   );
-
-  if (loading) return <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar {months} mês(es)…</p>;
-  if (errored) return <div className="msg msg--err">{(errored.error as Error).message}</div>;
 
   return (
     <>
@@ -1055,21 +1332,24 @@ function FinancialReportSection() {
   const [to, setTo] = useState(todayISO());
   const [month, setMonth] = useState(currentMonthValue());
   const [nMonths, setNMonths] = useState(6);
-  const qc = useQueryClient();
+  const { missing } = useConsultaToast();
 
   const monthPeriod = useMemo(() => monthRange(month), [month]);
   const activeFrom = mode === "month" ? monthPeriod.from : from;
   const activeTo = mode === "month" ? monthPeriod.to : to;
 
-  const q = useQuery({
-    queryKey: ["hubsoft-report-financial", activeFrom, activeTo],
-    enabled: mode !== "last_n_months",
-    queryFn: () =>
-      apiFetch<HubsoftFinancialReportResponse>(
-        `/api/v1/integrations/${SLUG}/hubsoft/report/financial?data_inicio=${activeFrom}&data_fim=${activeTo}`,
-      ),
-  });
-  const d = q.data;
+  const q = useConsulta<FinancialConsultaParams, FinancialConsultaResult>("hubsoft-report-financial", fetchFinancialConsulta);
+  const res = q.data && q.data.ok ? q.data : undefined;
+  const d = res?.kind === "single" ? res.report : undefined;
+
+  function consult() {
+    if (mode !== "last_n_months") {
+      if (mode === "month" && !month) return missing("escolha o mês.");
+      if (!activeFrom || !activeTo) return missing("informe o período (De / Até).");
+      if (activeFrom > activeTo) return missing("o período está invertido (a data inicial é maior que a final).");
+    }
+    void q.run({ mode, from: activeFrom, to: activeTo, months: nMonths });
+  }
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -1121,41 +1401,163 @@ function FinancialReportSection() {
         </div>
       )}
 
-      {mode !== "last_n_months" && (
-        <div className="row" style={{ marginBottom: 8, gap: 8, alignItems: "center" }}>
-          <button
-            type="button"
-            className="btn btn--sm"
-            disabled={q.isFetching}
-            onClick={() => void qc.invalidateQueries({ queryKey: ["hubsoft-report-financial", activeFrom, activeTo] })}
-          >
-            {q.isFetching ? "A atualizar…" : "Atualizar"}
-          </button>
-          <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/financial/telegram?data_inicio=${activeFrom}&data_fim=${activeTo}`} />
-        </div>
-      )}
+      <div className="row" style={{ marginBottom: 8, gap: 8, alignItems: "center" }}>
+        <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={consult}>
+          {q.isFetching ? "A consultar…" : "Consultar"}
+        </button>
+        {d && q.applied && q.applied.mode !== "last_n_months" ? (
+          <TelegramSendButton path={`/api/v1/integrations/${SLUG}/hubsoft/report/financial/telegram?data_inicio=${q.applied.from}&data_fim=${q.applied.to}`} />
+        ) : null}
+      </div>
 
-      {mode === "last_n_months" ? (
-        <FinancialLastNMonths months={nMonths} />
+      {!q.consulted ? (
+        <p style={{ fontSize: 12, color: "var(--muted)" }}>Escolha o período e clique em <b>Consultar</b>. Nada é buscado automaticamente.</p>
       ) : q.isLoading ? (
-        <p style={{ fontSize: 12, color: "var(--muted)" }}>A carregar…</p>
+        <ConsultaLoading text="A carregar…" />
       ) : q.isError ? (
         <div className="msg msg--err">{(q.error as Error).message}</div>
-      ) : !d?.ok ? (
-        <div className="msg msg--err">{d?.message || "Falha ao consultar."}</div>
-      ) : (
+      ) : q.data && !q.data.ok ? (
+        <div className="msg msg--err">{q.data.message || "Falha ao consultar."}</div>
+      ) : res?.kind === "months" ? (
+        <FinancialMonthsView months={res.months} monthRows={res.rows} />
+      ) : d ? (
         <FinancialKPIs d={d} />
-      )}
+      ) : null}
     </div>
   );
 }
 
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "clients", label: "Clientes" },
-  { id: "services", label: "Serviços" },
-  { id: "attendance", label: "Atendimentos" },
-  { id: "work_orders", label: "Ordens de serviço" },
-  { id: "financial", label: "Financeiro" },
+type TenureReportResponse = {
+  ok: boolean;
+  message?: string;
+  total: number;
+  buckets: { name: string; count: number }[];
+  services?: number[];
+  /** Limites (YYYY-MM-DD) de cada faixa, na ordem de `buckets`. */
+  details?: { name: string; from: string; to: string }[];
+  truncated?: boolean;
+};
+
+/** Aba Relatório → Tempo de cliente: clientes ATIVOS por faixa de data da venda. Só totais. */
+function TenureReportSection() {
+  // Muda pouco: o resultado fica salvo (inclusive ao recarregar a página) e só "Atualizar" consulta de novo.
+  const q = useConsulta<true, TenureReportResponse>(
+    "hubsoft-report-tenure",
+    () => apiFetch<TenureReportResponse>(`/api/v1/integrations/${SLUG}/hubsoft/report/tenure`, { timeoutMs: 6 * 60_000 }),
+    { persist: true },
+  );
+  const d = q.data;
+  const max = Math.max(1, ...(d?.buckets ?? []).map((b) => b.count));
+  const [band, setBand] = useState<TenureBand | null>(null);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card" style={{ padding: 14 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+              Tempo de cliente
+              <InfoHint label="Sobre este relatório">
+                <p>
+                  Clientes ativos (serviço habilitado) por tempo desde a data da venda. Cliente com mais de um serviço ativo entra na faixa
+                  do serviço mais antigo.
+                </p>
+              </InfoHint>
+            </h3>
+            {q.at ? (
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>Atualizado em {fmtConsultaAt(q.at)}</p>
+            ) : null}
+          </div>
+          <button type="button" className="btn btn--sm btn--primary" disabled={q.isFetching} onClick={() => void q.run(true)}>
+            {q.isFetching ? "A atualizar…" : q.consulted ? "Atualizar" : "Consultar"}
+          </button>
+        </div>
+      </div>
+
+      {!q.consulted ? (
+        <div className="card" style={{ padding: 14 }}>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>Clique em <b>Consultar</b> (varre a base ativa e pode demorar). Nada é buscado automaticamente.</p>
+        </div>
+      ) : q.isLoading ? (
+        <div className="card" style={{ padding: 14 }}>
+          <ConsultaLoading text="A consultar a HubSoft por faixa de data…" />
+        </div>
+      ) : q.isError ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{(q.error as Error).message}</div>
+        </div>
+      ) : !d?.ok ? (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="msg msg--err">{d?.message || "Falha ao consultar."}</div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="dashboard-kpi-row" style={{ gridTemplateColumns: "repeat(2, minmax(0, 200px))" }}>
+            <div className="stat">
+              <div className="stat__k">Clientes ativos</div>
+              <div className="stat__v">{fmtInt(d.total)}</div>
+            </div>
+            <div className="stat">
+              <div className="stat__k">Serviços ativos</div>
+              <div className="stat__v">{fmtInt((d.services ?? []).reduce((acc, n) => acc + n, 0))}</div>
+            </div>
+          </div>
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table style={{ fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>Tempo de cliente</th>
+                  <th>Clientes</th>
+                  <th>Serviços</th>
+                  <th>% dos ativos</th>
+                  <th style={{ width: "35%" }} />
+                </tr>
+              </thead>
+              <tbody>
+                {d.buckets.map((b, bi) => {
+                  const det = d.details?.find((x) => x.name === b.name);
+                  return (
+                  <tr
+                    key={b.name}
+                    style={det ? { cursor: "pointer" } : undefined}
+                    title={det ? "Ver gráficos por localidade e por plano" : undefined}
+                    onClick={det ? () => setBand({ name: b.name, from: det.from, to: det.to }) : undefined}
+                  >
+                    <td>{b.name}</td>
+                    <td className="mono">{fmtInt(b.count)}</td>
+                    <td className="mono">{d.services ? fmtInt(d.services[bi] ?? 0) : "—"}</td>
+                    <td className="mono">{d.total > 0 ? fmtPct((b.count / d.total) * 100) : "—"}</td>
+                    <td>
+                      <div style={{ height: 8, borderRadius: 4, background: "color-mix(in srgb, var(--accent) 70%, transparent)", width: `${(b.count / max) * 100}%`, minWidth: b.count > 0 ? 2 : 0 }} />
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
+            Clique numa faixa para ver os gráficos por localidade e por plano. “Clientes” conta cada cliente uma vez; “Serviços” conta cada serviço ativo. A tela de filtro da HubSoft costuma listar serviços — compare com a coluna Serviços.
+          </p>
+          {d.truncated ? (
+            <p style={{ fontSize: 11, color: "var(--warn)", margin: "8px 0 0" }}>Alguma faixa passou do teto de páginas — os números dela podem estar incompletos.</p>
+          ) : null}
+        </div>
+      )}
+      {band ? <HubsoftTenureBandModal band={band} onClose={() => setBand(null)} /> : null}
+    </div>
+  );
+}
+
+const SECTIONS: { id: Section; label: string; Icon: LucideIcon }[] = [
+  { id: "clients", label: "Clientes", Icon: Users },
+  { id: "services", label: "Serviços", Icon: Layers },
+  { id: "blocked", label: "Bloqueios", Icon: Ban },
+  { id: "preventive", label: "Desbloqueio preventivo", Icon: ShieldCheck },
+  { id: "tenure", label: "Tempo de cliente", Icon: Hourglass },
+  { id: "attendance", label: "Atendimentos", Icon: Headset },
+  { id: "work_orders", label: "Ordens de serviço", Icon: Wrench },
+  { id: "financial", label: "Financeiro", Icon: Wallet },
 ];
 
 /**
@@ -1171,14 +1573,17 @@ export function HubsoftReportPage() {
   return (
     <div className="integration-consult">
       <HubsoftHeader />
-      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+      <div className="hubsoft-tabs" role="tablist" aria-label="Relatórios da integração">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             type="button"
-            className={`btn btn--sm${section === s.id ? " btn--primary" : ""}`}
+            role="tab"
+            aria-selected={section === s.id}
+            className={`hubsoft-tabs__btn${section === s.id ? " hubsoft-tabs__btn--active" : ""}`}
             onClick={() => setSection(s.id)}
           >
+            <s.Icon size={16} aria-hidden />
             {s.label}
           </button>
         ))}
@@ -1186,6 +1591,9 @@ export function HubsoftReportPage() {
 
       {section === "clients" && <ClientsReportSection />}
       {section === "services" && <ServicesReportSection />}
+      {section === "blocked" && <BlockedReportSection />}
+      {section === "preventive" && <HubsoftPreventiveSection />}
+      {section === "tenure" && <TenureReportSection />}
       {section === "attendance" && <AttendanceReportSection />}
       {section === "work_orders" && <WorkOrderReportSection />}
       {section === "financial" && <FinancialReportSection />}

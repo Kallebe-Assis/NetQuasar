@@ -158,6 +158,8 @@ export type ClientServiceSummary = {
   contract_months?: string;
   pending_contracts?: string;
   updated_at?: string;
+  /** Data da última suspensão (DD/MM/AAAA) — só serviços suspensos por débito. */
+  suspended_at?: string;
   address_street?: string;
   address_number?: string;
   address_complement?: string;
@@ -573,6 +575,34 @@ export type HubsoftServiceLocalityBreakdown = {
   by_plan: NamedCount[];
   /** Só totais (nome do bairro + contagem) — sem repetir status/plano por bairro, de propósito. */
   by_neighborhood: NamedCount[];
+};
+
+export type HubsoftBlockedServiceRow = {
+  client_code?: string;
+  client_name?: string;
+  document?: string;
+  phone?: string;
+  service_id?: string;
+  service_name?: string;
+  login?: string;
+  status?: string;
+  city?: string;
+  blocked_at?: string;
+  days_blocked: number;
+  date_approx?: boolean;
+};
+
+export type HubsoftBlockedReportResponse = {
+  ok: boolean;
+  message?: string;
+  from: string;
+  to: string;
+  rows: HubsoftBlockedServiceRow[];
+  total: number;
+  avg_days: number;
+  buckets: NamedCount[];
+  date_source?: "payload" | "mixed";
+  truncated?: boolean;
 };
 
 export type HubsoftServicesReportResponse = {

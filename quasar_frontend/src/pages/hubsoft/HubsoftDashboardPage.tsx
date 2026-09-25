@@ -7,7 +7,9 @@ import { HubsoftFinancialSummaryView } from "./HubsoftFinancialSummaryView";
 import type { HubsoftDashboardResponse, HubsoftFinancialSummaryResponse, NamedCount, RecentActivityResponse } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
+import { useConsultaToast } from "./hubsoftConsulta";
 
+import { ConsultaLoading } from "./ConsultaLoading";
 type DashboardMode = "clients" | "support" | "financial";
 
 const MODE_OPTIONS: { id: DashboardMode; label: string }[] = [
@@ -177,27 +179,28 @@ function SupportDashboard({ d }: { d: RecentActivityResponse }) {
  */
 export function HubsoftDashboardPage() {
   const [mode, setMode] = useState<DashboardMode>("clients");
+  const { runRefetch } = useConsultaToast();
 
   const dashQ = useQuery({
     queryKey: queryKeys.hubsoftDashboard,
     queryFn: () => apiFetch<HubsoftDashboardResponse>("/api/v1/integrations/hubsoft/hubsoft/dashboard"),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
-    enabled: mode === "clients",
+    enabled: false, // só consulta ao clicar em "Consultar"
   });
   const supportQ = useQuery({
     queryKey: queryKeys.hubsoftRecentActivity,
     queryFn: () => apiFetch<RecentActivityResponse>("/api/v1/integrations/hubsoft/hubsoft/recent-activity"),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
-    enabled: mode === "support",
+    enabled: false,
   });
   const finQ = useQuery({
     queryKey: queryKeys.hubsoftFinancialSummary,
     queryFn: () => apiFetch<HubsoftFinancialSummaryResponse>("/api/v1/integrations/hubsoft/hubsoft/financial-summary"),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
-    enabled: mode === "financial",
+    enabled: false,
   });
 
   const active = mode === "clients" ? dashQ : mode === "support" ? supportQ : finQ;
@@ -230,21 +233,20 @@ export function HubsoftDashboardPage() {
             <button
               type="button"
               className="btn btn--icon hubsoft-refresh-btn"
-              aria-label="Atualizar"
-              title="Atualizar"
+              aria-label="Consultar"
+              title="Consultar"
               disabled={active.isFetching}
-              onClick={() => void active.refetch()}
+              onClick={() => void runRefetch(active.refetch)}
             >
-              <RefreshCw size={16} className={active.isFetching ? "map-refresh-spin" : undefined} />
+              <RefreshCw size={16} className={active.isFetching ? "map-refresh-spin" : undefined} /> Consultar
             </button>
           </div>
         </div>
 
-        {active.isLoading ? (
-          <div className="hubsoft-loading">
-            <RefreshCw size={18} className="map-refresh-spin" />
-            <span>A coletar dados da HubSoft — pode demorar até {mode === "clients" ? "um a dois minutos" : "cerca de um minuto"}…</span>
-          </div>
+        {!active.data && !active.isFetching && !active.isError ? (
+          <div className="msg" style={{ color: "var(--muted)" }}>Clique em <b>Consultar</b> para carregar os dados. Nada é buscado automaticamente.</div>
+        ) : active.isFetching && !active.data ? (
+          <ConsultaLoading text="A coletar dados da HubSoft — pode demorar até {mode === 'clients' ? 'um a dois minutos' : 'cerca de um minuto'}…" />
         ) : active.isError ? (
           <div className="msg msg--err">{(active.error as Error).message}</div>
         ) : mode === "clients" ? (
