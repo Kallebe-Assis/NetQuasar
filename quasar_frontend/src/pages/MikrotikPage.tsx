@@ -50,9 +50,34 @@ function MikrotikOverviewTable({
   loading: boolean;
   onSelect: (id: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const status = r.online === true ? "online" : r.online === false ? "offline" : "";
+      return [r.description, r.ip, r.locality_name, status].some((v) => (v ?? "").toLowerCase().includes(q));
+    });
+  }, [rows, query]);
   if (loading) return <p style={{ color: "var(--muted)" }}>A carregar equipamentos…</p>;
   if (rows.length === 0) return <p style={{ color: "var(--muted)" }}>Nenhum equipamento MikroTik cadastrado.</p>;
   return (
+    <>
+    <div className="row" style={{ gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+      <input
+        className="input"
+        style={{ minWidth: 240, flex: "1 1 240px", maxWidth: 420 }}
+        type="search"
+        placeholder="Buscar por descrição, IP, localidade ou status (online/offline)…"
+        aria-label="Buscar MikroTik"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>
+        {shown.length === rows.length ? `${rows.length} equipamento(s)` : `${shown.length} de ${rows.length}`}
+      </span>
+    </div>
+    {shown.length === 0 ? <p style={{ color: "var(--muted)" }}>Nenhum MikroTik encontrado para “{query.trim()}”.</p> : (
     <div className="table-wrap" style={{ maxWidth: "100%", overflowX: "auto" }}>
     <table style={{ fontSize: 12 }}>
       <thead>
@@ -68,7 +93,7 @@ function MikrotikOverviewTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => {
+        {shown.map((r) => {
           const kpis = buildMikrotikNocKpis(r.metrics ?? undefined, r.description ?? "");
           return (
             <tr key={r.id} onClick={() => onSelect(r.id)} style={{ cursor: "pointer" }}>
@@ -94,6 +119,8 @@ function MikrotikOverviewTable({
       </tbody>
     </table>
     </div>
+    )}
+    </>
   );
 }
 

@@ -1027,7 +1027,7 @@ func (s *Server) hubsoftPreventiveBase(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, integrationhubsoft.BuildPreventiveBase(ctx, cfg, token))
+	writeJSON(w, http.StatusOK, integrationhubsoft.BuildPreventiveBase(ctx, cfg, token, strings.TrimSpace(r.URL.Query().Get("from"))))
 }
 
 // hubsoftPreventiveChunk — fase 2: conta os desbloqueios (preventivos e totais) de um lote de clientes.

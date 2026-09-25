@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Menu, X } from "lucide-react";
 import { clearSession, getAuthToken, getStoredUserDisplayLabel, getStoredUserPermissionsKey, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
+import { installMobileTableCards } from "../lib/mobileTables";
 import { apiFetch } from "../lib/api";
 import { AlertNotificationWatcher } from "../components/AlertNotificationWatcher";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
@@ -372,6 +373,9 @@ export function ShellLayout() {
   ]
     .filter(Boolean)
     .join(" ");
+
+  // Telefone: tabelas com muitas colunas viram cartões (evita rolagem horizontal em todas as telas).
+  useEffect(() => installMobileTableCards(), []);
 
   const sidebarClass = ["sidebar", !isMobileNav && sidebarCollapsed ? "sidebar--collapsed" : ""].filter(Boolean).join(" ");
 

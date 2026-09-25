@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
 )
@@ -43,8 +44,26 @@ type PreventiveBase struct {
 	Truncated bool                  `json:"truncated,omitempty"`
 }
 
-func BuildPreventiveBase(ctx context.Context, cfg Config, token string) PreventiveBase {
-	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/cliente/todos", map[string]string{"cancelado": "nao", "relacoes": "endereco_instalacao"}, 400, "clientes")
+// BuildPreventiveBase lista os clientes/serviços a examinar. Com `from` (YYYY-MM-DD) a própria API já
+// devolve só os serviços ATUALIZADOS desde essa data: registrar um desbloqueio altera o serviço
+// (data_atualizacao passa a ser ≥ a data do desbloqueio, e qualquer alteração posterior só a empurra
+// para frente), então quem não foi atualizado desde `from` não pode ter desbloqueio depois dele. Isso
+// reduz a varredura e as consultas por cliente da fase 2. A data final não filtra na API (uma
+// alteração posterior também move data_atualizacao), por isso o limite superior é aplicado no front.
+func BuildPreventiveBase(ctx context.Context, cfg Config, token, from string) PreventiveBase {
+	params := map[string]string{"cancelado": "nao", "relacoes": "endereco_instalacao"}
+	var fromT time.Time
+	if from != "" {
+		t, perr := time.ParseInLocation("2006-01-02", from, time.Local)
+		if perr != nil {
+			return PreventiveBase{OK: false, Message: "Data inicial inválida (use YYYY-MM-DD)."}
+		}
+		fromT = t
+		params["tipo_data_cliente_servico"] = "data_atualizacao"
+		params["data_inicio_cliente_servico"] = from
+		params["data_fim_cliente_servico"] = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	}
+	items, total, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/cliente/todos", params, 400, "clientes")
 	if err != nil {
 		return PreventiveBase{OK: false, Message: "Falha ao consultar a HubSoft: " + err.Error()}
 	}
@@ -59,6 +78,13 @@ func BuildPreventiveBase(ctx context.Context, cfg Config, token string) Preventi
 			sm, ok := it.(map[string]any)
 			if !ok {
 				continue
+			}
+			if !fromT.IsZero() {
+				// O payload traz data_atualizacao por serviço: descarta os que não foram tocados desde `from`
+				// (o cliente pode ter outros serviços mais antigos que não interessam).
+				if u := parseBRDate(pickStr(sm, "data_atualizacao")); !u.IsZero() && dayStart(u).Before(fromT) {
+					continue
+				}
 			}
 			ref := PreventiveServiceRef{ServiceID: pickStr(sm, "id_cliente_servico"), Login: pickStr(sm, "login"), Plan: pickStr(sm, "nome"), Status: pickStr(sm, "status")}
 			if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {

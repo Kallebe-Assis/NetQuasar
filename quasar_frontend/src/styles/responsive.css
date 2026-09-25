@@ -851,3 +851,255 @@
     display: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   Telefone — redesign de leitura e toque (aplica-se a TODAS as telas)
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  body {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  h1 { font-size: 1.1rem; }
+  h2 { font-size: 1rem; }
+  h3 { font-size: 0.92rem; }
+
+  /* Campos com 16px: o iOS dá zoom na página em campos menores que isso. Altura confortável para o dedo. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  .input {
+    font-size: 16px !important;
+    min-height: 40px;
+  }
+
+  .btn,
+  button.btn {
+    min-height: 40px;
+    font-size: 13px;
+  }
+  .btn--sm {
+    min-height: 36px;
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
+  }
+  .btn--icon {
+    min-width: 40px;
+  }
+
+  /* Abas: rolagem horizontal contida, alvo de toque maior. */
+  .tabs button {
+    min-height: 38px;
+    font-size: 12px;
+    padding: 0.4rem 0.7rem;
+  }
+
+  /* Barras de botões/filtros quebram de linha em vez de estourar a tela. */
+  .main .row,
+  .card .row {
+    flex-wrap: wrap;
+  }
+
+  /* Conteúdo que nunca pode alargar a página. */
+  img,
+  svg,
+  canvas,
+  video {
+    max-width: 100%;
+  }
+  pre,
+  code {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .mono {
+    word-break: break-word;
+  }
+
+  /* Abas de relatório da integração: 2 por linha. */
+  .hubsoft-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .hubsoft-tabs__btn {
+    font-size: 12px;
+    padding: 6px 8px;
+    min-height: 40px;
+  }
+
+  /* Cabeçalhos de página com botões: empilha e ocupa a largura. */
+  .hubsoft-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hubsoft-page-head .row,
+  .hubsoft-page-head__controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .hubsoft-page-head .btn {
+    flex: 1 1 auto;
+  }
+
+  /* Modais em folha inferior, com rolagem interna. */
+  .modal,
+  .modal--wide {
+    max-height: 92dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ——— Tabelas viram cartões (classe aplicada por lib/mobileTables.ts) ——— */
+  .table-wrap:has(> table.tbl-cards) {
+    overflow-x: visible;
+    margin-left: 0;
+    margin-right: 0;
+    max-height: none !important;
+  }
+  table.tbl-cards,
+  table.tbl-cards tbody {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+  /* Cabeçalho escondido (visível para leitores de tela). */
+  table.tbl-cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  table.tbl-cards {
+    font-size: 13px;
+    border: 0;
+    background: transparent;
+  }
+  /* Cartão: grade de 2 colunas; rótulo pequeno em cima, valor embaixo. */
+  table.tbl-cards tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 14px;
+    margin: 0 0 10px;
+    padding: 12px;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: var(--shadow-lg);
+  }
+  table.tbl-cards td {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+  table.tbl-cards td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  /* Valores longos, título e ações ocupam a linha inteira. */
+  table.tbl-cards td[data-card-wide],
+  table.tbl-cards td[data-card-title],
+  table.tbl-cards td[data-label=""] {
+    grid-column: 1 / -1;
+  }
+  /* Primeira coluna com texto = título do cartão. */
+  table.tbl-cards td[data-card-title] {
+    font-size: 15px;
+    font-weight: 600;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.tbl-cards td[data-card-title]::before {
+    display: none;
+  }
+  /* Sem rótulo (ações/seleção): botões lado a lado, sem rótulo. */
+  table.tbl-cards td[data-label=""] {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 2px;
+  }
+  table.tbl-cards td[data-label=""]::before {
+    display: none;
+  }
+  /* Linhas de aviso/"sem dados" (colspan). */
+  table.tbl-cards tr[data-card-span] {
+    display: block;
+    padding: 10px 12px;
+  }
+  table.tbl-cards tr[data-card-span] td {
+    display: block;
+    grid-column: auto;
+  }
+  table.tbl-cards tr[data-card-span] td::before {
+    display: none;
+  }
+  table.tbl-cards td > * {
+    max-width: 100%;
+  }
+
+  /* Tabelas pequenas (poucas colunas) só ganham fonte legível e rolagem contida. */
+  .table-wrap {
+    overflow-x: auto;
+  }
+  table:not(.tbl-cards) {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Abas da integração (Consulta, Atendimentos, …): grade de 3 colunas em vez de uma fila que estoura a tela. */
+  .hubsoft-header {
+    align-items: stretch;
+  }
+  .hubsoft-header__title-row {
+    justify-content: flex-start;
+  }
+  .hubsoft-header__tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    border-bottom: 0;
+    margin-top: 10px;
+  }
+  .hubsoft-header__tabs > a {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: 54px;
+    padding: 6px 4px;
+    margin-bottom: 0;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.15;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  .hubsoft-header__tabs > a.active {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .hubsoft-header__tabs > a.active:hover {
+    color: var(--on-accent);
+  }
+}

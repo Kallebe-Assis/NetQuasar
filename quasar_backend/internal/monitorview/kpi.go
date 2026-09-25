@@ -204,49 +204,7 @@ func extractExtendedMetrics(vars map[string]string, prof metricsProfile) (cpu *f
 			uptimeTicks = strings.TrimSpace(v)
 		}
 	}
-	if mem == nil {
-		if oid := cleanOID(prof.MemoryUsedOID); oid != "" {
-			if usedStr, ok := vars[oid]; ok {
-				sizeOID := cleanOID(prof.MemorySizeOID)
-				if sizeStr, ok2 := vars[sizeOID]; ok2 {
-					used, err1 := strconv.ParseFloat(strings.TrimSpace(usedStr), 64)
-					size, err2 := strconv.ParseFloat(strings.TrimSpace(sizeStr), 64)
-					if err1 == nil && err2 == nil && size > 0 {
-						pct := 100.0 * used / size
-						if pct >= 0 && pct <= 100.0001 {
-							mem = ptrFloat(pct)
-						}
-					}
-				}
-			}
-		}
-	}
-	if mem == nil {
-		for idx, descr := range vars {
-			if !strings.HasPrefix(idx, storDescr) {
-				continue
-			}
-			suffix := strings.TrimPrefix(idx, storDescr)
-			if !strings.Contains(strings.ToLower(descr), "memory") && !strings.Contains(strings.ToLower(descr), "ram") {
-				continue
-			}
-			typeOID := storType + suffix
-			if vars[typeOID] != storRAMTypeOID {
-				continue
-			}
-			usedStr := vars[storUsed+suffix]
-			sizeStr := vars[storSize+suffix]
-			used, err1 := strconv.ParseFloat(strings.TrimSpace(usedStr), 64)
-			size, err2 := strconv.ParseFloat(strings.TrimSpace(sizeStr), 64)
-			if err1 == nil && err2 == nil && size > 0 {
-				pct := 100.0 * used / size
-				if pct >= 0 && pct <= 100.0001 {
-					mem = ptrFloat(pct)
-					break
-				}
-			}
-		}
-	}
+	mem = memoryPercentFromVars(vars, prof)
 	uptime = vsolparse.FormatUptimeDisplay(uptimeTicks)
 	if uptime == "" {
 		for oid, val := range vars {
@@ -262,6 +220,112 @@ func extractExtendedMetrics(vars map[string]string, prof metricsProfile) (cpu *f
 		uptime = "—"
 	}
 	return cpu, mem, uptime, temp
+}
+
+const (
+	hrStorDescr   = "1.3.6.1.2.1.25.2.3.1.3."
+	hrStorType    = "1.3.6.1.2.1.25.2.3.1.2."
+	hrStorSize    = "1.3.6.1.2.1.25.2.3.1.5."
+	hrStorUsed    = "1.3.6.1.2.1.25.2.3.1.6."
+	hrStorRAMType = "1.3.6.1.2.1.25.2.1.2"
+	ucdMemTotal   = "1.3.6.1.4.1.2021.4.5.0"
+	ucdMemAvail   = "1.3.6.1.4.1.2021.4.6.0"
+	hrMemorySize  = "1.3.6.1.2.1.25.2.2.0"
+)
+
+func snmpFloat(vars map[string]string, oid string) (float64, bool) {
+	v, ok := vars[oid]
+	if !ok {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	return f, err == nil
+}
+
+func isHrStorageRAM(v string) bool {
+	v = strings.TrimSpace(v)
+	return cleanOID(v) == hrStorRAMType || strings.EqualFold(v, "hrStorageRam") || strings.HasSuffix(cleanOID(v), "25.2.1.2")
+}
+
+// memoryPercentFromVars devolve a % de memória usada a partir das variáveis SNMP, tentando em ordem:
+//  1. OIDs "usado/tamanho" do perfil do equipamento (UCD memAvailReal conta como "disponível");
+//  2. hrStorage (RAM) — por descrição ("physical/real memory", "ram", "memory") ou pelo tipo hrStorageRam;
+//  3. UCD-SNMP (memTotalReal e memAvailReal) e hrMemorySize + memAvailReal.
+func memoryPercentFromVars(vars map[string]string, prof metricsProfile) *float64 {
+	pct := func(used, size float64) *float64 {
+		if size > 0 && used >= 0 {
+			if p := 100.0 * used / size; p <= 100.0001 {
+				return ptrFloat(p)
+			}
+		}
+		return nil
+	}
+	// Só o OID "usado" configurado (sem tamanho): perfis como o da OLT VSOL expõem a % de memória direto.
+	if mu := cleanOID(prof.MemoryUsedOID); mu != "" && cleanOID(prof.MemorySizeOID) == "" {
+		if v, ok := snmpFloat(vars, mu); ok && v >= 0 && v <= 100 {
+			return ptrFloat(v)
+		}
+	}
+	if mu, ms := cleanOID(prof.MemoryUsedOID), cleanOID(prof.MemorySizeOID); mu != "" && ms != "" {
+		used, okU := snmpFloat(vars, mu)
+		size, okS := snmpFloat(vars, ms)
+		if okU && okS && size > 0 {
+			if mu == ucdMemAvail { // memAvailReal: o valor é o que sobra
+				if used >= 0 && size >= used {
+					return ptrFloat(100.0 * (size - used) / size)
+				}
+			} else if p := pct(used, size); p != nil {
+				return p
+			}
+		}
+	}
+
+	descr := map[string]string{}
+	typ := map[string]string{}
+	for oid, val := range vars {
+		switch {
+		case strings.HasPrefix(oid, hrStorDescr):
+			descr[strings.TrimPrefix(oid, hrStorDescr)] = val
+		case strings.HasPrefix(oid, hrStorType):
+			typ[strings.TrimPrefix(oid, hrStorType)] = val
+		}
+	}
+	tryIdx := func(idx string) *float64 {
+		used, okU := snmpFloat(vars, hrStorUsed+idx)
+		size, okS := snmpFloat(vars, hrStorSize+idx)
+		if okU && okS {
+			return pct(used, size)
+		}
+		return nil
+	}
+	for idx, d := range descr {
+		ld := strings.ToLower(d)
+		if strings.Contains(ld, "physical memory") || strings.Contains(ld, "real memory") || strings.Contains(ld, "main memory") ||
+			ld == "ram" || strings.HasPrefix(ld, "ram ") || strings.Contains(ld, "memory") && isHrStorageRAM(typ[idx]) {
+			if p := tryIdx(idx); p != nil {
+				return p
+			}
+		}
+	}
+	for idx, t := range typ {
+		if isHrStorageRAM(t) {
+			if p := tryIdx(idx); p != nil {
+				return p
+			}
+		}
+	}
+
+	if total, ok := snmpFloat(vars, ucdMemTotal); ok {
+		if avail, ok2 := snmpFloat(vars, ucdMemAvail); ok2 && total > 0 && avail >= 0 && total >= avail {
+			return ptrFloat(100.0 * (total - avail) / total)
+		}
+	}
+	if total, ok := snmpFloat(vars, hrMemorySize); ok {
+		if avail, ok2 := snmpFloat(vars, ucdMemAvail); ok2 && total > 0 && avail >= 0 && total >= avail {
+			return ptrFloat(100.0 * (total - avail) / total)
+		}
+	}
+	return nil
 }
 
 func cpuUsedFromAvailableOID(oid string, f float64) *float64 {
@@ -333,6 +397,39 @@ func mikrotikFieldFloat(fields map[string]any, key string) *float64 {
 	return ptrFloat(f)
 }
 
+// mikrotikFieldBytes lê um campo numérico SEM o teto de 10000 de mikrotikFieldFloat — memória vem em
+// bytes/KiB (centenas de milhões), e esse teto descartava sempre memory_used/memory_total.
+func mikrotikFieldBytes(fields map[string]any, key string) *float64 {
+	fr, _ := fields[key].(map[string]any)
+	if fr == nil {
+		return nil
+	}
+	if ok, _ := fr["ok"].(bool); !ok {
+		return nil
+	}
+	var f float64
+	switch x := fr["value"].(type) {
+	case float64:
+		f = x
+	case int:
+		f = float64(x)
+	case int64:
+		f = float64(x)
+	case string:
+		p, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		if err != nil {
+			return nil
+		}
+		f = p
+	default:
+		return nil
+	}
+	if f != f || f < 0 {
+		return nil
+	}
+	return ptrFloat(f)
+}
+
 func mikrotikFieldString(fields map[string]any, key string) string {
 	fr, _ := fields[key].(map[string]any)
 	if fr == nil {
@@ -376,8 +473,8 @@ func mergeMikrotikKPIs(metricsJSON []byte, cpu, mem, temp **float64, uptime *str
 		}
 	}
 	if *mem == nil {
-		used := mikrotikFieldFloat(fields, "memory_used")
-		total := mikrotikFieldFloat(fields, "memory_total")
+		used := mikrotikFieldBytes(fields, "memory_used")
+		total := mikrotikFieldBytes(fields, "memory_total")
 		if used != nil && total != nil && *total > 0 {
 			pct := 100.0 * (*used) / (*total)
 			if pct >= 0 && pct <= 100.0001 {

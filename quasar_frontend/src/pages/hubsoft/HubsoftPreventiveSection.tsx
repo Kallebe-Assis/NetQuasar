@@ -15,6 +15,9 @@ type Count = { service_id: string; preventive: number; last_at?: string; dates?:
 type ChunkResp = { ok: boolean; message?: string; items: Count[]; failed?: string[] };
 
 type Result = {
+  /** Período aplicado na consulta (AAAA-MM-DD; vazio = sem limite). */
+  from: string;
+  to: string;
   base: BaseResp;
   counts: Map<string, Count>;
   failed: number;
@@ -45,7 +48,7 @@ const selectStyle = { fontSize: 11, color: "var(--muted)", display: "flex", flex
  * Os filtros (período, status, plano, cidade) são aplicados na tela sobre o resultado já coletado.
  */
 export function HubsoftPreventiveSection() {
-  const { notify } = useConsultaToast();
+  const { notify, missing } = useConsultaToast();
   const [res, setRes] = useState<Result | null>(LAST);
   const [phase, setPhase] = useState<"idle" | "base" | "counting">("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -58,12 +61,17 @@ export function HubsoftPreventiveSection() {
   const stopRef = useRef(false);
 
   async function run() {
+    if (from && to && from > to) {
+      missing("o período está invertido (a data inicial é maior que a final).");
+      return;
+    }
+    const period = { from, to };
     stopRef.current = false;
     setPhase("base");
     setProgress({ done: 0, total: 0 });
     let base: BaseResp;
     try {
-      base = await apiFetch<BaseResp>(`${BASE}/base`, { timeoutMs: 6 * 60_000 });
+      base = await apiFetch<BaseResp>(`${BASE}/base${from ? `?from=${from}` : ""}`, { timeoutMs: 6 * 60_000 });
     } catch (e) {
       notify(null, e);
       setPhase("idle");
@@ -93,13 +101,13 @@ export function HubsoftPreventiveSection() {
       }
     } catch (e) {
       notify(null, e);
-      const partial: Result = { base, counts, failed, stopped: true, at: Date.now() };
+      const partial: Result = { ...period, base, counts, failed, stopped: true, at: Date.now() };
       LAST = partial;
       setRes(partial);
       setPhase("idle");
       return;
     }
-    const done: Result = { base, counts, failed, stopped, at: Date.now() };
+    const done: Result = { ...period, base, counts, failed, stopped, at: Date.now() };
     LAST = done;
     setRes(done);
     setPhase("idle");
@@ -119,15 +127,15 @@ export function HubsoftPreventiveSection() {
         let dates = c.dates ?? [];
         // Sem data por ocorrência (resposta antiga) só dá para filtrar por período pelo "último".
         if (dates.length === 0 && c.last_at) dates = [c.last_at];
-        const inRange = dates.filter((d) => (!from || d >= from) && (!to || d <= to));
-        const count = from || to ? inRange.length : c.preventive;
+        const inRange = dates.filter((d) => (!res.from || d >= res.from) && (!res.to || d <= res.to));
+        const count = res.from || res.to ? inRange.length : c.preventive;
         if (count <= 0) continue;
         const last = inRange.length > 0 ? [...inRange].sort().at(-1)! : (c.last_at ?? "");
         rows.push({ client: cl.name ?? "", code: cl.code ?? "", svc: sv, count, last });
       }
     }
     return rows;
-  }, [res, from, to]);
+  }, [res]);
 
   const options = useMemo(() => {
     const uniq = (f: (r: Row) => string | undefined) => Array.from(new Set(dated.map(f).filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b, "pt-BR"));
@@ -154,11 +162,9 @@ export function HubsoftPreventiveSection() {
     return { dist, occurrences: rows.reduce((a, r) => a + r.count, 0) };
   }, [rows]);
 
-  const filtered = !!(from || to || fStatus || fPlan || fCity || search.trim());
+  const filtered = !!(fStatus || fPlan || fCity || search.trim());
 
   function clearFilters() {
-    setFrom("");
-    setTo("");
     setFStatus("");
     setFPlan("");
     setFCity("");
@@ -188,11 +194,20 @@ export function HubsoftPreventiveSection() {
             <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Desbloqueio preventivo</h3>
             <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
               Quantos serviços têm “desbloqueio preventivo” registrado e quantas vezes ocorreu em cada um. Considera serviços não cancelados;
-              a HubSoft só informa isso cliente a cliente, então a consulta percorre a base em lotes e pode levar alguns minutos.
+              a HubSoft só informa isso cliente a cliente, então a consulta percorre os clientes em lotes. Informe o período (opcional) ANTES de consultar:
+              a data inicial limita a busca na HubSoft e deixa tudo bem mais rápido.
             </p>
             {res ? <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>Atualizado em {fmtConsultaAt(res.at)}</p> : null}
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label style={selectStyle}>
+              Desbloqueio de
+              <input type="date" className="input" value={from} disabled={busy} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label style={selectStyle}>
+              até
+              <input type="date" className="input" value={to} disabled={busy} onChange={(e) => setTo(e.target.value)} />
+            </label>
             {busy ? (
               <button type="button" className="btn btn--sm" onClick={() => { stopRef.current = true; }}>
                 <Square size={12} style={{ marginRight: 4, verticalAlign: -2 }} aria-hidden />
@@ -218,14 +233,6 @@ export function HubsoftPreventiveSection() {
         <>
           <div className="card" style={{ padding: 14 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, alignItems: "end" }}>
-              <label style={selectStyle}>
-                Desbloqueio de
-                <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label style={selectStyle}>
-                até
-                <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
               <label style={selectStyle}>
                 Status
                 <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
@@ -260,7 +267,7 @@ export function HubsoftPreventiveSection() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 0 0" }}>
-              Os filtros são aplicados sobre o resultado já coletado (não consultam a HubSoft). O período considera a data de cada desbloqueio preventivo.
+              Estes filtros são aplicados sobre o resultado já coletado (não consultam a HubSoft).{res.from || res.to ? ` Período consultado: ${fmtBR(res.from) === "—" ? "início" : fmtBR(res.from)} a ${fmtBR(res.to) === "—" ? "hoje" : fmtBR(res.to)}.` : ""}
             </p>
           </div>
 

@@ -46,3 +46,6 @@ push_github.bat
 # Arquivos soltos que não pertencem ao repositório (entraram por engano)
 /Certified-postgres.crt
 /winget
+
+# Backups manuais do operador (dumps do Postgres e exports de configuracao)
+backups_manual/
