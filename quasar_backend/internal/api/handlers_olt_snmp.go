@@ -122,6 +122,8 @@ func (s *Server) getOLTDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{
 		"id": id, "description": desc, "ip": ip,
+		// A tela de ONUs só mostra "Atualizar PON" quando o perfil da OLT tem o comando por PON configurado.
+		"pon_refresh_available": s.oltPonRefreshConfigured(r.Context(), id),
 		"summary":         json.RawMessage(sum),
 		"pons":            json.RawMessage(pons),
 		"computed":        oltparse.SnapshotComputed(sum, pons),
@@ -192,7 +194,9 @@ func (s *Server) getOLTDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(strings.ToLower(cat)) == "olt" {
 		if tab, ok := out["interface_table"].([]map[string]any); ok {
+			tab = oltifderive.DedupeOltInterfaceTablePonRows(tab)
 			oltifderive.AnnotateInterfaceTable(tab)
+			out["interface_table"] = tab
 		}
 	}
 	if sumObj != nil {

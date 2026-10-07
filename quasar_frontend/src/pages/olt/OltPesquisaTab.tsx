@@ -225,7 +225,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     queryKey: ["olt", "pesquisa-pons", selectedOltId],
     enabled: Boolean(selectedOltId),
     queryFn: () =>
-      apiFetch<{ pons_table?: Array<{ pon?: number; id?: string; name?: string }> }>(
+      apiFetch<{ pons_table?: Array<{ pon?: number; id?: string; name?: string }>; pon_refresh_available?: boolean }>(
         `/api/v1/olt/devices/${selectedOltId}`,
       ),
     staleTime: 60_000,
@@ -307,6 +307,39 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   useEffect(() => {
     searchMut.mutate(payload);
   }, [payloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Atualizar PON": roda o comando por PON configurado no perfil da OLT (Configurações → OLT) e recarrega a lista.
+  const ponRefreshMut = useMutation({
+    mutationFn: ({ oltId, pon }: { oltId: string; pon: number }) =>
+      apiFetch<{
+        ok: boolean;
+        error?: string;
+        output?: string;
+        stats?: { entries: number; added: number; serials_filled: number; state_changed: number; online: number; offline: number; total: number };
+      }>(`/api/v1/olt/devices/${oltId}/pons/${pon}/refresh`, { method: "POST", timeoutMs: 3 * 60_000 }),
+    onSuccess: (res, vars) => {
+      if (!res.ok) {
+        setErrorModal({
+          title: `PON ${vars.pon}: nenhuma ONU reconhecida`,
+          message:
+            (res.error || "A OLT não devolveu uma listagem reconhecível.") +
+            (res.output ? ` Resposta da OLT: ${res.output.replace(/\s+/g, " ").slice(0, 600)}` : ""),
+        });
+        return;
+      }
+      const st = res.stats;
+      toastOk(
+        pushToast,
+        st
+          ? `PON ${vars.pon} atualizada: ${st.total} ONUs (${st.online} online, ${st.offline} offline) · ${st.serials_filled} serial(is) novos/atualizados` +
+              (st.added > 0 ? ` · ${st.added} ONU(s) nova(s)` : "")
+          : `PON ${vars.pon} atualizada.`,
+      );
+      searchMut.mutate(payload);
+      void oltDetailQ.refetch();
+    },
+    onError: (e) => openErrorModal(e, "Erro ao atualizar a PON"),
+  });
 
   const runTelnetSerialSearch = useCallback(async (oltId: string, serial: string, pon: number) => {
     setTelnetLoading(true);
@@ -694,6 +727,18 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               }}
               style={{ width: 72, minWidth: 72, padding: "6px 8px", fontSize: 12 }}
             />
+            {effectivePon > 0 && oltDetailQ.data?.pon_refresh_available ? (
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={ponRefreshMut.isPending}
+                title={`Atualiza só as ONUs da PON ${effectivePon} (serial, modelo e estado) com o comando configurado no perfil da OLT`}
+                onClick={() => ponRefreshMut.mutate({ oltId: selectedOltId, pon: effectivePon })}
+              >
+                <RefreshCw size={14} className={ponRefreshMut.isPending ? "map-refresh-spin" : undefined} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+                {ponRefreshMut.isPending ? `Atualizando PON ${effectivePon}…` : `Atualizar PON ${effectivePon}`}
+              </button>
+            ) : null}
           </>
         ) : null}
 

@@ -59,14 +59,14 @@ func lessPonKey(a, b string) bool {
 }
 
 type PonAgg struct {
-	Compact   string
-	Name      string
-	Total     int
-	Online    int
-	Offline   int
-	PonAdmin  int
-	PonOper   int
-	PonIfIdx  int
+	Compact  string
+	Name     string
+	Total    int
+	Online   int
+	Offline  int
+	PonAdmin int
+	PonOper  int
+	PonIfIdx int
 }
 
 func ifaceLabel(ifName, descr string) string {
@@ -328,6 +328,107 @@ func AnnotateInterfaceTable(tab []map[string]any) {
 			row["octets_saturated_32bit"] = true
 		}
 	}
+}
+
+// ponKeyForIfaceRow calcula a mesma chave canónica de PON (ver CanonicalPonRowKey) a partir de uma
+// linha da tabela GENÉRICA de interfaces (campos display_name/descr, não name/id) — usado por
+// DedupeOltInterfaceTablePonRows. Devolve "" para qualquer linha que não seja reconhecida como porta
+// PON física em nenhum dos formatos conhecidos (GPON0/N, ZTE, Datacom, ou o nome sintético VSOL
+// "PON N").
+func ponKeyForIfaceRow(row map[string]any) string {
+	disp := strings.TrimSpace(fmt.Sprint(row["display_name"]))
+	descr := strings.TrimSpace(fmt.Sprint(row["descr"]))
+	if disp == "<nil>" {
+		disp = ""
+	}
+	if descr == "<nil>" {
+		descr = ""
+	}
+	if c := PonCompactFromPhy(disp, descr); c != "" {
+		return c
+	}
+	for _, s := range []string{disp, descr} {
+		if sm := reVsolPonName.FindStringSubmatch(s); len(sm) == 2 {
+			if n, err := strconv.Atoi(sm[1]); err == nil && n > 0 {
+				return VsolMibPonCompactID(n)
+			}
+		}
+	}
+	return ""
+}
+
+func isEmptyNumeric(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case float64:
+		return x == 0
+	case int:
+		return x == 0
+	case int64:
+		return x == 0
+	case string:
+		return strings.TrimSpace(x) == ""
+	default:
+		return false
+	}
+}
+
+// mergeOltIfaceRowPair funde duas linhas da tabela genérica de interfaces que representam a MESMA
+// porta PON física (ver DedupeOltInterfaceTablePonRows) — prefere o nome estilo "GPONx/y" para
+// exibição (mesma regra de preferPonDisplayName) e preenche contadores/estado vazios de uma linha
+// com os valores da outra, já que normalmente só uma das duas entradas duplicadas no ifTable do
+// equipamento carrega os contadores de tráfego/estado reais.
+func mergeOltIfaceRowPair(a, b map[string]any) map[string]any {
+	nameA := strings.TrimSpace(fmt.Sprint(a["display_name"]))
+	nameB := strings.TrimSpace(fmt.Sprint(b["display_name"]))
+	primary, secondary := a, b
+	if ponDisplayNameRank(nameB) > ponDisplayNameRank(nameA) {
+		primary, secondary = b, a
+	}
+	out := cloneMap(primary)
+	for _, k := range []string{"in_octets", "out_octets", "in_bps", "out_bps", "tx_dbm", "rx_dbm", "speed_bps"} {
+		if isEmptyNumeric(out[k]) && !isEmptyNumeric(secondary[k]) {
+			out[k] = secondary[k]
+		}
+	}
+	if rowToInt(out["oper_status_n"]) == 0 && rowToInt(secondary["oper_status_n"]) != 0 {
+		out["oper_status"] = secondary["oper_status"]
+		out["oper_status_n"] = secondary["oper_status_n"]
+	}
+	if rowToInt(out["admin_status_n"]) == 0 && rowToInt(secondary["admin_status_n"]) != 0 {
+		out["admin_status"] = secondary["admin_status"]
+		out["admin_status_n"] = secondary["admin_status_n"]
+	}
+	return out
+}
+
+// DedupeOltInterfaceTablePonRows funde linhas duplicadas da MESMA porta PON física na tabela
+// genérica de interfaces (usada em Equipamentos > OLT > Interfaces, distinta do resumo PON/ONU que
+// já tinha esse dedup via DedupePonMaps). Bug real observado: algumas OLTs (confirmado numa VSOL
+// V1600G1) expõem cada porta PON física duas vezes no próprio ifTable SNMP — uma entrada estilo
+// "GPON0/1" e outra com o nome sintético "PON 01" — fazendo uma OLT de 8 PONs aparecer com 16
+// interfaces. Linhas que não são PON (GE, VLAN, ONU, outras) passam intactas.
+func DedupeOltInterfaceTablePonRows(tab []map[string]any) []map[string]any {
+	if len(tab) == 0 {
+		return tab
+	}
+	out := make([]map[string]any, 0, len(tab))
+	keyToIdx := map[string]int{}
+	for _, row := range tab {
+		key := ponKeyForIfaceRow(row)
+		if key == "" {
+			out = append(out, row)
+			continue
+		}
+		if i, ok := keyToIdx[key]; ok {
+			out[i] = mergeOltIfaceRowPair(out[i], row)
+			continue
+		}
+		keyToIdx[key] = len(out)
+		out = append(out, row)
+	}
+	return out
 }
 
 func toInt64(v any) int64 {

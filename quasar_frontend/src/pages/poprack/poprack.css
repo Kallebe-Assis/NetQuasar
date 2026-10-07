@@ -163,7 +163,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  max-width: 260px;
+  max-width: 800px; /* ~50 portas por linha (cada uma ~15-16px com o gap) antes de quebrar */
 }
 .rack-node__port {
   display: flex;

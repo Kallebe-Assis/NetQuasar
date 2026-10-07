@@ -183,6 +183,27 @@ func (s *Server) getAutomationOverview(w http.ResponseWriter, r *http.Request) {
 		jr := readSimple("automation_database_backup")
 		add(jobDatabaseBackup, jr)
 	}
+	{
+		var jr jobRow
+		jr.extra = map[string]any{"frequency": "interval"}
+		var lightEn, fullEn, runL, runF bool
+		var lightMin, fullMin int
+		var lastLight, lastFull *time.Time
+		_ = pool.QueryRow(ctx, `
+			SELECT enabled, last_status, last_error, last_run_at, running_light, running_full,
+				light_enabled, light_interval_minutes, last_light_at,
+				full_enabled, full_interval_minutes, last_full_at
+			FROM automation_olt_onu_collection WHERE id = 1`).Scan(&jr.enabled, &jr.lastStatus, &jr.lastError, &jr.lastAt,
+			&runL, &runF, &lightEn, &lightMin, &lastLight, &fullEn, &fullMin, &lastFull)
+		jr.running = runL || runF
+		jr.extra["light_enabled"] = lightEn
+		jr.extra["light_interval_minutes"] = lightMin
+		jr.extra["last_light_at"] = lastLight
+		jr.extra["full_enabled"] = fullEn
+		jr.extra["full_interval_minutes"] = fullMin
+		jr.extra["last_full_at"] = lastFull
+		add(jobOltOnuCollection, jr)
+	}
 
 	var total, enabledN, runningN int
 	var runsToday, okToday, fail30d int64

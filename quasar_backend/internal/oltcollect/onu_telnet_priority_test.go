@@ -77,10 +77,37 @@ func TestSelectOnuTelnetBatch_priorityExceedsBudget(t *testing.T) {
 	}
 	for _, r := range batch {
 		if rowHasPlausibleSerial(r) {
-			t.Fatalf("rotação sobre `rest` não devia ter avançado (sem orçamento sobrando): %v", r)
+			t.Fatalf("lote devia ter só prioritárias (sem serial): %v", r)
 		}
 	}
-	if nextOffset != 7 {
-		t.Fatalf("nextOffset = %d, want inalterado (7) — rodízio sobre rest não avançou", nextOffset)
+	// offset 7 sobre 5 prioritárias = posição 2 → ONUs 3,4,5; próximo offset = (2+3)%5 = 0.
+	if intFromRow(batch[0], "onu") != 3 || nextOffset != 0 {
+		t.Fatalf("rodízio sobre priority: primeiro=%d nextOffset=%d, want 3 e 0", intFromRow(batch[0], "onu"), nextOffset)
+	}
+}
+
+// Reproduz o sintoma "serial só nas primeiras PONs": com muitas ONUs sem serial e lote pequeno, a
+// fila prioritária fixa nunca chegava às PONs finais. Com rodízio, todas entram em algum ciclo.
+func TestSelectOnuTelnetBatch_priorityRotationReachesLastPon(t *testing.T) {
+	var priority []map[string]any
+	for pon := 1; pon <= 8; pon++ {
+		for onu := 1; onu <= 10; onu++ {
+			priority = append(priority, rowWithSerial(pon, onu, "", false))
+		}
+	}
+	seen := map[string]bool{}
+	offset := 0
+	for cycle := 0; cycle < 4; cycle++ { // 80 ONUs, lote de 25 → 4 ciclos cobrem tudo
+		var batch []map[string]any
+		batch, offset = selectOnuTelnetBatch(priority, nil, 25, offset)
+		for _, r := range batch {
+			seen[onuRowKey(r)] = true
+		}
+	}
+	if len(seen) != 80 {
+		t.Fatalf("ONUs atendidas em 4 ciclos = %d, want 80 (inclui PON 8)", len(seen))
+	}
+	if !seen["8.10"] {
+		t.Fatal("última ONU da última PON nunca foi atendida")
 	}
 }

@@ -4,6 +4,7 @@ import { Download, X } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { ConsultaLoading } from "./ConsultaLoading";
 import { useConsultaToast } from "./hubsoftConsulta";
+import { saveCsvText } from "./hubsoftCsv";
 
 const SLUG = "hubsoft";
 const CHUNK = 20;
@@ -76,12 +77,7 @@ export function HubsoftBulkClientsModal({ onClose }: { onClose: () => void }) {
       }
     }
     const csv = lines.map((l) => l.map(csvEsc).join(";")).join("\r\n");
-    const url = URL.createObjectURL(new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `consulta-em-massa-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveCsvText(`consulta-em-massa-${new Date().toISOString().slice(0, 10)}.csv`, csv);
   }
 
   return createPortal(

@@ -30,6 +30,7 @@ export const AUTOMATION_JOB_OPTIONS = [
   { value: "onu_monthly_report", label: "Relatório ONU mensal" },
   { value: "bng_stats_report", label: "Totais BNG" },
   { value: "database_backup", label: "Backup PostgreSQL (B2)" },
+  { value: "olt_onu_collection", label: "Coleta de ONUs (OLT)" },
 ];
 
 export function formatAutomationWhen(iso: string): string {
@@ -74,6 +75,11 @@ function summaryTotals(row: AutomationHistoryRow): string {
   } else if (row.job_type === "database_backup") {
     if (s.object_key) parts.push(String(s.object_key));
     if (s.size_bytes != null) parts.push(`${(Number(s.size_bytes) / (1024 * 1024)).toFixed(1)} MB`);
+  } else if (row.job_type === "olt_onu_collection") {
+    if (s.mode != null) parts.push(`modo: ${String(s.mode)}`);
+    if (s.olts_ok != null) parts.push(`OLTs OK: ${s.olts_ok}`);
+    if (Number(s.olts_failed) > 0) parts.push(`falhas: ${s.olts_failed}`);
+    if (s.duration_s != null) parts.push(`${s.duration_s}s`);
   } else if (row.job_type === "bng_stats_report") {
     if (s.pppoe != null) parts.push(`PPPoE: ${s.pppoe}`);
     if (s.total != null) parts.push(`total: ${s.total}`);

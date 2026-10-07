@@ -42,7 +42,10 @@ export function AddAutomationModal({ open, takenIds, onClose, onCreated }: Props
       if (job.recurrences.includes("custom") && rec.kind === "custom" && rec.weekdays.length === 0) {
         throw new Error("Seleccione pelo menos um dia da semana.");
       }
-      await apiFetch(job.patchPath, { method: "PATCH", json: recurrenceToPatch(job.id, rec, true) });
+      await apiFetch(job.patchPath, {
+        method: "PATCH",
+        json: job.intervalBased ? { enabled: true } : recurrenceToPatch(job.id, rec, true),
+      });
       return job.id;
     },
     onSuccess: async (id) => {
@@ -52,6 +55,7 @@ export function AddAutomationModal({ open, takenIds, onClose, onCreated }: Props
       await qc.invalidateQueries({ queryKey: queryKeys.automationCommercial });
       await qc.invalidateQueries({ queryKey: queryKeys.automationOnu });
       await qc.invalidateQueries({ queryKey: queryKeys.automationDatabaseBackup });
+      await qc.invalidateQueries({ queryKey: queryKeys.automationOltOnuCollection });
       onCreated(id);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "Falha ao cadastrar."),
@@ -99,7 +103,11 @@ export function AddAutomationModal({ open, takenIds, onClose, onCreated }: Props
               ))}
             </div>
 
-            {job ? (
+            {job?.intervalBased ? (
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0" }}>
+                Corre por intervalo (padrão: leve a cada 5 min, completa a cada 6 h). Ajuste os intervalos no cartão depois de cadastrar.
+              </p>
+            ) : job ? (
               <div style={{ marginTop: 16 }}>
                 <div className="automation-add-modal__label">Recorrência</div>
                 <AutomationRecurrenceFields value={rec} allowed={job.recurrences} onChange={setRec} />

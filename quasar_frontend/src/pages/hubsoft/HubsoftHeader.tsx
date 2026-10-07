@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, BarChart3, ClipboardList, FileBarChart2, LifeBuoy, Receipt, Search, Settings } from "lucide-react";
-import { isAdminUser } from "../../lib/auth";
+import { can, isAdminUser } from "../../lib/auth";
 import { APP_ROUTES } from "../../app/routes";
 import { apiFetch } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -15,7 +15,7 @@ import type { IntegrationSummary } from "../../integrations/types";
  */
 export function HubsoftHeader() {
   const loc = useLocation();
-  const admin = isAdminUser();
+  const showConfig = isAdminUser() || can("integrations.manage") || can("integrations.hubsoft_bulk") || can("integrations.ixc_logins");
   // Mesma queryKey/endpoint já usado pelo card da tela Integrações — reaproveita a cache em vez
   // de mais uma chamada; logo_url vem do banco (integrations.logo_url), não do localStorage.
   const integrationsQ = useQuery({
@@ -49,7 +49,7 @@ export function HubsoftHeader() {
             {t.icon} {t.label}
           </Link>
         ))}
-        {admin ? (
+        {showConfig ? (
           <Link
             to={APP_ROUTES.integrationConfig("hubsoft")}
             className={loc.pathname.endsWith("/config") ? "active" : ""}

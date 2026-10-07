@@ -994,6 +994,35 @@ func SuspendClientService(ctx context.Context, cfg Config, token, idClienteServi
 	return nil
 }
 
+// ResetClientServiceMAC limpa o MAC gravado na autenticação do serviço (POST
+// .../cliente/reset_mac_addr, corpo {"id_cliente_servico"}) — documentado em
+// github.com/hubsoftbrasil/api (docs/source/clientes/resetar_mac.rst). A HubSoft valida que o
+// serviço tem dados de autenticação; sem eles devolve erro próprio, relançado tal-qual. Também
+// trata "status":"error" em HTTP 200 (a HubSoft nem sempre usa o código HTTP para falhas).
+func ResetClientServiceMAC(ctx context.Context, cfg Config, token, idClienteServico string) (string, error) {
+	idClienteServico = strings.TrimSpace(idClienteServico)
+	if idClienteServico == "" {
+		return "", fmt.Errorf("id_cliente_servico obrigatório")
+	}
+	bodyJSON, _ := json.Marshal(map[string]any{"id_cliente_servico": idClienteServico})
+	res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
+		Method: "POST", Path: "/api/v1/integracao/cliente/reset_mac_addr",
+		BodyTemplate: string(bodyJSON), BodyType: "json",
+	})
+	body := ResponseBodyBytes(res)
+	msg := hubsoftActionMessageWithErrors(body)
+	if !res.OK {
+		return "", fmt.Errorf("%s", firstNonEmpty(msg, "hubsoft: "+firstNonEmpty(res.ErrorMessage, "falha ao limpar MAC")))
+	}
+	var doc struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(body, &doc) == nil && strings.EqualFold(strings.TrimSpace(doc.Status), "error") {
+		return "", fmt.Errorf("%s", firstNonEmpty(msg, "a HubSoft recusou limpar o MAC"))
+	}
+	return firstNonEmpty(msg, "Endereço MAC resetado com sucesso!"), nil
+}
+
 // --- Resumo financeiro agregado (amostra) ---------------------------------------------------
 //
 // Mesma limitação: /cliente/financeiro só existe por cliente, não há "todas as faturas da
@@ -1167,16 +1196,22 @@ func fetchAllPages(ctx context.Context, cfg Config, token, path string, basePara
 				items = append(items, m)
 			}
 		}
+		totalPages := page + 1
 		if pg, ok := doc["paginacao"].(map[string]any); ok {
 			if tr, ok := pg["total_registros"].(float64); ok {
 				totalRegistros = int(tr)
 			}
+			if lp, ok := pg["ultima_pagina"].(float64); ok {
+				totalPages = int(lp) + 1 // ultima_pagina é 0-indexada
+			}
 			last := scalarToString(pg["ultima_pagina"])
 			cur := scalarToString(pg["pagina_atual"])
 			if last != "" && cur != "" && cur == last {
+				reportPageProgress(ctx, page+1, totalPages)
 				break
 			}
 		}
+		reportPageProgress(ctx, page+1, totalPages)
 		if len(arr) == 0 {
 			break
 		}
@@ -1383,6 +1418,57 @@ func reportFromConnectionExtract(ctx context.Context, cfg Config, token string, 
 	return ReportListResult{OK: true, Rows: rows, TotalScanned: len(rows), Message: msg}, nil
 }
 
+
+// clientServiceRows converte um cliente de /cliente/todos (ou de /cliente) nas linhas de serviço do relatório —
+// uma por serviço, com login, IPs, conexão e status. Não aplica filtros de localidade.
+func clientServiceRows(m map[string]any) []ReportServiceRow {
+	clientID := pickStr(m, "id_cliente")
+	clientCode := pickStr(m, "codigo_cliente")
+	clientName := pickStr(m, "nome_razaosocial")
+	doc := formatCPFCNPJ(pickStr(m, "cpf_cnpj"))
+	var out []ReportServiceRow
+	svcArr, _ := m["servicos"].([]any)
+	for _, sit := range svcArr {
+		sm, ok := sit.(map[string]any)
+		if !ok {
+			continue
+		}
+		row := ReportServiceRow{
+			ClientID: clientID, ClientCode: clientCode, ClientName: clientName, Document: doc,
+			ServiceID:   pickStr(sm, "id_cliente_servico"),
+			ServiceName: pickStr(sm, "nome"),
+			Login:       pickStr(sm, "login"),
+			// IPv4 estático do plano/serviço — quase sempre vazio; serve só de fallback. O IP de facto usado para
+			// testar acesso remoto é o da última conexão (ultima_conexao.ultimo_ipv4, sobrescrito abaixo), o mesmo
+			// campo mostrado como "Último Ipv4" na consulta de cliente.
+			IPv4: pickStr(sm, "ipv4"),
+			// IPv6 — servicos[].ipv6 é um campo estático (config manual, raramente preenchido). O IPv6 de facto
+			// atribuído por sessão só aparece embutido em texto livre dentro de ultima_conexao.status_txt (ex.:
+			// "...- 45.235.87.49 - 2804:4d68:4df:5e00::/56 (45.235.87.124)"); extraído abaixo via regex.
+			IPv6:         pickStr(sm, "ipv6"),
+			MAC:          pickStr(sm, "mac_addr", "phy_addr"),
+			Status:       pickStr(sm, "status"),
+			StatusPrefix: pickStr(sm, "status_prefixo"),
+		}
+		if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {
+			row.City = pickStr(addr, "cidade")
+			row.State = pickStr(addr, "estado")
+			row.Neighborhood = pickStr(addr, "bairro")
+		}
+		if ac, ok := sm["ultima_conexao"].(map[string]any); ok {
+			row.Connected = pickStr(ac, "conectado")
+			if v := pickStr(ac, "ultimo_ipv4"); v != "" {
+				row.IPv4 = v
+			}
+			if row.IPv6 == "" {
+				row.IPv6 = extractIPv6Prefix(pickStr(ac, "status_txt", "status_txt_resumido"))
+			}
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filter ReportListFilter) (ReportListResult, error) {
 	q := map[string]string{"relacoes": "endereco_instalacao,ultima_conexao"}
 	if s := strings.TrimSpace(filter.ServiceStatus); s != "" {
@@ -1406,52 +1492,7 @@ func reportFromClientsTodos(ctx context.Context, cfg Config, token string, filte
 
 	rows := []ReportServiceRow{}
 	for _, m := range items {
-		clientID := pickStr(m, "id_cliente")
-		clientCode := pickStr(m, "codigo_cliente")
-		clientName := pickStr(m, "nome_razaosocial")
-		doc := formatCPFCNPJ(pickStr(m, "cpf_cnpj"))
-		svcArr, _ := m["servicos"].([]any)
-		for _, sit := range svcArr {
-			sm, ok := sit.(map[string]any)
-			if !ok {
-				continue
-			}
-			row := ReportServiceRow{
-				ClientID: clientID, ClientCode: clientCode, ClientName: clientName, Document: doc,
-				ServiceID:   pickStr(sm, "id_cliente_servico"),
-				ServiceName: pickStr(sm, "nome"),
-				Login:       pickStr(sm, "login"),
-				// IPv4 estático do plano/serviço — quase sempre vazio; serve só de fallback.
-				// O IP de facto usado para testar acesso remoto é o da última conexão
-				// (ultima_conexao.ultimo_ipv4, sobrescrito abaixo), mesmo campo mostrado como
-				// "Último Ipv4" na consulta de cliente.
-				IPv4: pickStr(sm, "ipv4"),
-				// IPv6 — servicos[].ipv6 é um campo estático (config manual, raramente preenchido —
-				// confirmado ao vivo: vem null mesmo em clientes com IPv6 activo na conexão).
-				// O IPv6 de facto atribuído por sessão só aparece embutido em texto livre dentro
-				// de ultima_conexao.status_txt (ex.: "...- 45.235.87.49 - 2804:4d68:4df:5e00::/56
-				// (45.235.87.124)" — IPv4, prefixo IPv6, NAS-IP entre parêntesis) — não há campo
-				// estruturado próprio para ele nesta versão da API. Extraído abaixo via regex,
-				// sobrepondo o campo estático quando presente.
-				IPv6:         pickStr(sm, "ipv6"),
-				MAC:          pickStr(sm, "mac_addr", "phy_addr"),
-				Status:       pickStr(sm, "status"),
-				StatusPrefix: pickStr(sm, "status_prefixo"),
-			}
-			if addr, ok := sm["endereco_instalacao"].(map[string]any); ok {
-				row.City = pickStr(addr, "cidade")
-				row.State = pickStr(addr, "estado")
-				row.Neighborhood = pickStr(addr, "bairro")
-			}
-			if ac, ok := sm["ultima_conexao"].(map[string]any); ok {
-				row.Connected = pickStr(ac, "conectado")
-				if v := pickStr(ac, "ultimo_ipv4"); v != "" {
-					row.IPv4 = v
-				}
-				if row.IPv6 == "" {
-					row.IPv6 = extractIPv6Prefix(pickStr(ac, "status_txt", "status_txt_resumido"))
-				}
-			}
+		for _, row := range clientServiceRows(m) {
 			if len(stateWant) > 0 {
 				got := strings.ToLower(strings.TrimSpace(stripAccents(row.State)))
 				matched := false
@@ -1738,172 +1779,6 @@ func BuildWorkOrderPeriodReport(ctx context.Context, cfg Config, token, from, to
 	return WorkOrderPeriodReport{
 		OK: true, From: from, To: to, Total: total, Finished: finishedTotal, FinishedPct: pct,
 		ByStatus: topNamedCounts(statusCount, nil, 20), ByTechnician: byTech, Truncated: total > n,
-	}
-}
-
-// --- Conferência de O.S. por período (aba Ordens de serviço → botão "Conferência") -------------
-//
-// Cruza as O.S. de um período com o serviço do cliente correspondente (login, IPv4, estado
-// "conectado" — já vem directo da HubSoft, mesmo campo que alimenta o badge Conectado/
-// Desconectado da aba Relatório → Clientes) para dar o que a O.S. sozinha não tem. O resto das
-// conferências pedidas (IPv6, acesso remoto HTTP/HTTPS) não é dado da HubSoft — fica a cargo do
-// handler (internal/api/handlers_hubsoft_conference.go), que tem acesso a bng_known_logins e ao
-// probe de rede; este pacote só fala com a API da HubSoft.
-
-var clienteCodigoRe = regexp.MustCompile(`^\((\d+)\)`)
-
-// extractClientCodeFromLabel extrai o código de "(123) FULANO DE TAL" — formato em que o campo
-// "cliente" vem no endpoint /ordem_servico/todos (confirmado no comentário de enrichWorkOrders
-// acima, "já vem como texto (código) NOME neste endpoint").
-func extractClientCodeFromLabel(s string) string {
-	m := clienteCodigoRe.FindStringSubmatch(strings.TrimSpace(s))
-	if len(m) < 2 {
-		return ""
-	}
-	return m[1]
-}
-
-// ConferenceOSItem uma O.S. do período, cruzada com o serviço do cliente quando resolvida.
-type ConferenceOSItem struct {
-	ID          string `json:"id,omitempty"`
-	Number      string `json:"number,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Description string `json:"description,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	ScheduledAt string `json:"scheduled_at,omitempty"`
-	ClientCode  string `json:"client_code,omitempty"`
-	ClientName  string `json:"client_name,omitempty"`
-	Login       string `json:"login,omitempty"`
-	IPv4        string `json:"ipv4,omitempty"`
-	// IPv6 prefixo estático do serviço (servicos[].ipv6, irmão de ipv4 — não vem de
-	// ultima_conexao). Vazio = cliente sem IPv6 atribuído.
-	IPv6 string `json:"ipv6,omitempty"`
-	// Connected vem directo da HubSoft ("true"/"false"/"" sem dado) — mesmo campo do relatório
-	// de Clientes, não é cruzado com dados nossos.
-	Connected string `json:"connected,omitempty"`
-	// Resolved indica se achou o serviço do cliente (login/IPv4/connected preenchidos) — uma O.S.
-	// pode não resolver se o cliente foi removido/o campo "cliente" não trouxe código válido.
-	Resolved bool `json:"resolved"`
-}
-
-type WorkOrderConferenceData struct {
-	OK        bool               `json:"ok"`
-	Message   string             `json:"message,omitempty"`
-	From      string             `json:"from"`
-	To        string             `json:"to"`
-	Items     []ConferenceOSItem `json:"items"`
-	Total     int                `json:"total"`
-	Resolved  int                `json:"resolved"`
-	Truncated bool               `json:"truncated,omitempty"`
-}
-
-// BuildWorkOrderConferenceData faz duas varreduras paginadas (O.S. do período + roster completo
-// de clientes/serviços) e junta-as em memória — evita N chamadas extra (uma por O.S.) para
-// resolver login/IPv4/IPv6/estado de conexão.
-//
-// Uma primeira tentativa desta função ligava a O.S. a "qualquer serviço do cliente com login
-// preenchido" — errado quando o cliente tem mais de um serviço/login (relatado ao vivo: cliente
-// MARLETE GOMES DOMICIANO, O.S. do login "marlete", sistema a conferir "marletegomes" por
-// engano). Uma segunda tentativa foi buscar o atendimento vinculado à O.S., mas
-// /atendimento/todos?relacoes=cliente_servico voltou 0 resultados úteis em produção (confirmado
-// ao vivo via log) — provavelmente essa relação não é suportada nesse endpoint de listagem em
-// massa. A solução real, também confirmada ao vivo: exibir_atendimento=true no /ordem_servico/
-// todos já embute directamente "dados_servico":{"id_cliente_servico":...} e
-// "dados_cliente":{"codigo_cliente":...,"nome_razaosocial":...} em CADA O.S. — o ID exacto do
-// serviço envolvido naquela O.S. especificamente, sem precisar de nenhuma chamada extra nem de
-// adivinhar por cliente. byServiceID cruza isto directo com ReportServiceRow.ServiceID (o mesmo
-// id_cliente_servico já extraído em reportFromClientsTodos). Só cai para o roster completo do
-// cliente (heurística antiga, "primeiro com login") nos poucos casos em que dados_servico não
-// vem preenchido.
-func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, to string) WorkOrderConferenceData {
-	from, to = defaultPeriod(from, to)
-	osItems, osTotal, err := fetchAllPages(ctx, cfg, token, "/api/v1/integracao/ordem_servico/todos",
-		map[string]string{"data_inicio": from, "data_fim": to, "exibir_atendimento": "true"}, maxReportPages, "ordens_servico", "ordem_servico", "ordens")
-	if err != nil {
-		return WorkOrderConferenceData{Message: "Falha ao coletar ordens de serviço: " + err.Error(), From: from, To: to}
-	}
-	svcResult, svcErr := ListClientServiceReport(ctx, cfg, token, ReportListFilter{})
-	if svcErr != nil {
-		return WorkOrderConferenceData{Message: "Falha ao coletar clientes/serviços: " + svcErr.Error(), From: from, To: to}
-	}
-	byServiceID := make(map[string]ReportServiceRow, len(svcResult.Rows))
-	byClient := make(map[string][]ReportServiceRow, len(svcResult.Rows))
-	for _, row := range svcResult.Rows {
-		if row.ServiceID != "" {
-			byServiceID[row.ServiceID] = row
-		}
-		if row.ClientCode != "" {
-			byClient[row.ClientCode] = append(byClient[row.ClientCode], row)
-		}
-	}
-
-	items := make([]ConferenceOSItem, 0, len(osItems))
-	resolved := 0
-	for _, m := range osItems {
-		clienteLabel := pickStr(m, "cliente")
-		code := extractClientCodeFromLabel(clienteLabel)
-		clientName := strings.TrimSpace(clienteCodigoRe.ReplaceAllString(clienteLabel, ""))
-		serviceID := ""
-		if dc, ok := m["dados_cliente"].(map[string]any); ok {
-			if v := pickStr(dc, "codigo_cliente"); v != "" {
-				code = v
-			}
-			if v := pickStr(dc, "nome_razaosocial"); v != "" {
-				clientName = v
-			}
-		}
-		if ds, ok := m["dados_servico"].(map[string]any); ok {
-			serviceID = pickStr(ds, "id_cliente_servico")
-		}
-		it := ConferenceOSItem{
-			ID:          pickStr(m, "id_ordem_servico"),
-			Number:      firstNonEmpty(pickStr(m, "numero"), pickStr(m, "id_ordem_servico")),
-			Status:      firstNonEmpty(pickStr(m, "status"), "Sem status"),
-			Type:        pickStr(m, "tipo"),
-			Description: firstNonEmpty(pickStr(m, "descricao_abertura"), pickStr(m, "descricao_servico")),
-			CreatedAt:   pickStr(m, "data_cadastro"),
-			ScheduledAt: pickStr(m, "data_inicio_programado"),
-			ClientCode:  code,
-			ClientName:  clientName,
-		}
-
-		var svc *ReportServiceRow
-		if serviceID != "" {
-			if row, ok := byServiceID[serviceID]; ok {
-				svc = &row
-			}
-		}
-		if svc == nil {
-			// Rede de segurança: dados_servico não veio preenchido nesta O.S. — mantém o
-			// comportamento anterior em vez de deixar a O.S. sem dado nenhum. Um cliente pode ter
-			// mais de um serviço; sem saber qual é o certo, prioriza o primeiro com login
-			// preenchido (caso comum: um só serviço).
-			if rows, ok := byClient[code]; code != "" && ok && len(rows) > 0 {
-				best := rows[0]
-				for _, r := range rows {
-					if strings.TrimSpace(r.Login) != "" {
-						best = r
-						break
-					}
-				}
-				svc = &best
-			}
-		}
-		if svc != nil {
-			it.Login = svc.Login
-			it.IPv4 = svc.IPv4
-			it.IPv6 = svc.IPv6
-			it.Connected = svc.Connected
-			it.Resolved = true
-			resolved++
-		}
-		items = append(items, it)
-	}
-
-	return WorkOrderConferenceData{
-		OK: true, From: from, To: to, Items: items, Total: osTotal, Resolved: resolved,
-		Truncated: osTotal > len(osItems),
 	}
 }
 

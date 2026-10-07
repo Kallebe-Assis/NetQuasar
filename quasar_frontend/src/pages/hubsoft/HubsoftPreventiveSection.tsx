@@ -3,6 +3,7 @@ import { Download, Square } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { ConsultaLoading } from "./ConsultaLoading";
 import { fmtConsultaAt, useConsultaToast } from "./hubsoftConsulta";
+import { saveCsvText } from "./hubsoftCsv";
 
 const SLUG = "hubsoft";
 const BASE = `/api/v1/integrations/${SLUG}/hubsoft/report/preventive`;
@@ -175,12 +176,7 @@ export function HubsoftPreventiveSection() {
     const head = ["Cliente", "Código", "Login", "Plano", "Cidade", "Status", "Desbloqueios preventivos", "Último desbloqueio"];
     const lines = [head, ...rows.map((r) => [r.client, r.code, r.svc.login ?? "", r.svc.plan ?? "", r.svc.city ?? "", r.svc.status ?? "", String(r.count), fmtBR(r.last)])];
     const text = lines.map((l) => l.map(csvEsc).join(";")).join("\r\n");
-    const url = URL.createObjectURL(new Blob([`﻿${text}`], { type: "text/csv;charset=utf-8;" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `desbloqueio-preventivo-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveCsvText(`desbloqueio-preventivo-${new Date().toISOString().slice(0, 10)}.csv`, text);
   }
 
   const busy = phase !== "idle";

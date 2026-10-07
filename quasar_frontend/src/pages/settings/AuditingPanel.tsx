@@ -17,6 +17,8 @@ const ENTITY_FILTER_OPTIONS = [
   "user",
   "automation_onu_report",
   "nightly_collection",
+  "hubsoft_bulk_import_client",
+  "hubsoft_bulk_import_service",
 ];
 
 const ACTION_FILTER_OPTIONS = [
@@ -34,6 +36,13 @@ const ACTION_FILTER_OPTIONS = [
   "ping_run",
   "executed",
   "run",
+  "created",
+  "failed",
+  "rejected_local",
+  "already_exists",
+  "service_added",
+  "login_repair",
+  "skipped_login_in_use",
 ];
 
 export function AuditingPanel() {

@@ -135,7 +135,10 @@ func (s *Server) listDeviceInterfaces(w http.ResponseWriter, r *http.Request) {
 		_ = pool.QueryRow(r.Context(), `SELECT coalesce(lower(trim(category)),'') FROM devices WHERE id=$1`, id).Scan(&devCat)
 		if devCat == "olt" {
 			if tab, ok := out["interface_table"].([]map[string]any); ok {
+				tab = oltifderive.DedupeOltInterfaceTablePonRows(tab)
 				oltifderive.AnnotateInterfaceTable(tab)
+				out["interface_table"] = tab
+				out["interface_count"] = len(tab)
 			}
 		}
 	}
@@ -260,7 +263,9 @@ func (s *Server) refreshDeviceInterfaces(w http.ResponseWriter, r *http.Request)
 	}
 	if strings.TrimSpace(devCat) == "olt" {
 		if tab, ok := payload["interface_table"].([]map[string]any); ok {
+			tab = oltifderive.DedupeOltInterfaceTablePonRows(tab)
 			oltifderive.AnnotateInterfaceTable(tab)
+			payload["interface_table"] = tab
 		}
 		// Snapshot OLT/PON só via refresh manual (perfil em Definições).
 	}

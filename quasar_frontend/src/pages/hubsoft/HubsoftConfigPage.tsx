@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { BookOpen, CalendarClock, CheckCircle2, ClipboardCheck, History, KeyRound, MapPinned, PlugZap, PowerOff, UserPlus, XCircle } from "lucide-react";
+import { HubsoftPasswordFix } from "./HubsoftPasswordFix";
+import { ToolPanel } from "./hubsoftAdminKit";
+import { HubsoftRegistrationCheck } from "./HubsoftRegistrationCheck";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { HubsoftDataVendaSection } from "./HubsoftDataVendaSection";
-import { isAdminUser } from "../../lib/auth";
+import { HubsoftCatalogExplorer } from "./HubsoftCatalogExplorer";
+import { HubsoftBulkImportSection } from "./HubsoftBulkImportSection";
+import { HubsoftBulkImportHistory } from "./HubsoftBulkImportHistory";
+import { HubsoftIxcLogins } from "./HubsoftIxcLogins";
+import { HubsoftAddressCheck } from "./HubsoftAddressCheck";
+import { can, isAdminUser } from "../../lib/auth";
 import { IntegrationLogoField } from "../../components/IntegrationLogoField";
 import type { IntegrationDetail } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
@@ -11,6 +20,22 @@ import { PageToastHost, usePageToast } from "../../lib/pageToast";
 import { queryKeys } from "../../lib/queryKeys";
 
 type TestOutcome = { ok: boolean; message: string; latency_ms?: number };
+
+type ConfigTab = "conexao" | "importar" | "conferir" | "senhas" | "data-venda" | "catalogos" | "historico" | "ixc-logins" | "enderecos";
+
+// Seções da configuração. "Conexão" é de quem gere integrações; as de edição em massa (bulk) só aparecem para
+// administradores ou perfis com a permissão "integrations.hubsoft_bulk" (Configurações → Perfis de permissão).
+const CONFIG_TABS: { id: ConfigTab; label: string; icon: ReactNode; bulk?: boolean; ixc?: boolean }[] = [
+  { id: "conexao", label: "Conexão", icon: <PlugZap size={15} aria-hidden /> },
+  { id: "importar", label: "Importar clientes", icon: <UserPlus size={15} aria-hidden />, bulk: true },
+  { id: "conferir", label: "Conferir cadastros", icon: <ClipboardCheck size={15} aria-hidden />, bulk: true },
+  { id: "senhas", label: "Corrigir senhas", icon: <KeyRound size={15} aria-hidden />, bulk: true },
+  { id: "enderecos", label: "Conferir endereços", icon: <MapPinned size={15} aria-hidden />, bulk: true },
+  { id: "data-venda", label: "Data de venda", icon: <CalendarClock size={15} aria-hidden />, bulk: true },
+  { id: "catalogos", label: "Catálogos", icon: <BookOpen size={15} aria-hidden />, bulk: true },
+  { id: "historico", label: "Histórico", icon: <History size={15} aria-hidden />, bulk: true },
+  { id: "ixc-logins", label: "Inativar no IXC", icon: <PowerOff size={15} aria-hidden />, ixc: true },
+];
 
 /**
  * Configuração simplificada da HubSoft: só os campos comuns a qualquer integração
@@ -21,6 +46,7 @@ export function HubsoftConfigPage() {
   const slug = "hubsoft";
   const qc = useQueryClient();
   const { toast, show: showToast, dismiss: dismissToast } = usePageToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const detailQ = useQuery({
     queryKey: queryKeys.integrationDetail(slug),
@@ -115,114 +141,141 @@ export function HubsoftConfigPage() {
     );
   }
 
+  const canConnection = isAdminUser() || can("integrations.manage");
+  const canBulk = can("integrations.hubsoft_bulk");
+  const canIxc = can("integrations.ixc_logins");
+  const visibleTabs = CONFIG_TABS.filter((t) => (t.bulk ? canBulk : t.ixc ? canIxc : canConnection));
+  const tabParam = searchParams.get("aba") as ConfigTab | null;
+  const tab: ConfigTab = visibleTabs.some((t) => t.id === tabParam) ? (tabParam as ConfigTab) : (visibleTabs[0]?.id ?? "conexao");
+  const selectTab = (id: ConfigTab) => {
+    const next = new URLSearchParams(searchParams);
+    if (id === "conexao") next.delete("aba");
+    else next.set("aba", id);
+    setSearchParams(next, { replace: true });
+  };
+
   return (
-    <div>
+    <div className="hsa-page">
       <HubsoftHeader />
       <PageToastHost toast={toast} onDismiss={dismissToast} />
 
-      <div className="card" style={{ maxWidth: 560 }}>
-        <h2 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <PlugZap size={18} aria-hidden /> Conexão com a HubSoft
-        </h2>
-        <p style={{ fontSize: 12, color: "var(--muted)", marginTop: -4 }}>
-          Credenciais criadas por um administrador no HubSoft (client_id/client_secret/usuário/senha da API). Ver{" "}
-          <a href="https://docs.hubsoft.com.br" target="_blank" rel="noreferrer">
-            docs.hubsoft.com.br
-          </a>
-          .
-        </p>
+      <nav className="hsa-tabs" aria-label="Seções da configuração da HubSoft">
+        {visibleTabs.map((t) => (
+          <button key={t.id} type="button" className={`hsa-tabs__btn${tab === t.id ? " is-active" : ""}`} aria-current={tab === t.id ? "page" : undefined} onClick={() => selectTab(t.id)}>
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </nav>
 
-        <IntegrationLogoField slug={slug} logoUrl={d.logo_url} />
+      {tab === "conexao" ? (
+        <ToolPanel
+          icon={<PlugZap size={20} />}
+          title="Conexão com a HubSoft"
+          subtitle={
+            <>
+              Credenciais criadas por um administrador na HubSoft (client_id, client_secret, usuário e senha da API). Documentação:{" "}
+              <a href="https://docs.hubsoft.com.br" target="_blank" rel="noreferrer">
+                docs.hubsoft.com.br
+              </a>
+              .
+            </>
+          }
+        >
+          <div className="hsa-panel__body hsa-panel__body--pad">
+            <IntegrationLogoField slug={slug} logoUrl={d.logo_url} />
 
-        <div className="field">
-          <label>URL da API</label>
-          <input className="input mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.seudominio.hubsoft.com.br" />
-        </div>
-        <div className="field">
-          <label>Client ID</label>
-          <input className="input mono" value={clientId} onChange={(e) => setClientId(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Client Secret {secretConfigured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — deixe em branco para manter)</span> : null}</label>
-          <input className="input mono" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={secretConfigured ? "••••••••" : ""} />
-        </div>
-        <div className="field">
-          <label>Username</label>
-          <input className="input mono" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="api@provedor.com.br" />
-        </div>
-        <div className="field">
-          <label>Password {passwordConfigured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — deixe em branco para manter)</span> : null}</label>
-          <input className="input mono" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={passwordConfigured ? "••••••••" : ""} />
-        </div>
+            <div className="hsa-form-grid">
+              <div className="field field--wide">
+                <label>URL da API</label>
+                <input className="input mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.seudominio.hubsoft.com.br" />
+              </div>
+              <div className="field">
+                <label>Client ID</label>
+                <input className="input mono" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>
+                  Client Secret {secretConfigured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — deixe em branco para manter)</span> : null}
+                </label>
+                <input className="input mono" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={secretConfigured ? "••••••••" : ""} />
+              </div>
+              <div className="field">
+                <label>Username</label>
+                <input className="input mono" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="api@provedor.com.br" />
+              </div>
+              <div className="field">
+                <label>
+                  Password {passwordConfigured ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(já configurado — deixe em branco para manter)</span> : null}
+                </label>
+                <input className="input mono" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={passwordConfigured ? "••••••••" : ""} />
+              </div>
+            </div>
 
-        <div style={{ marginTop: 14, marginBottom: "0.65rem" }}>
-          <label className="toggle" style={{ display: "inline-flex" }}>
-            <span className="toggle__track">
-              <input
-                type="checkbox"
-                role="switch"
-                className="toggle__input"
-                checked={preloadOnStartup}
-                onChange={(e) => {
-                  setPreloadOnStartup(e.target.checked);
-                  preloadM.mutate(e.target.checked);
+            <div>
+              <label className="toggle" style={{ display: "inline-flex" }}>
+                <span className="toggle__track">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="toggle__input"
+                    checked={preloadOnStartup}
+                    onChange={(e) => {
+                      setPreloadOnStartup(e.target.checked);
+                      preloadM.mutate(e.target.checked);
+                    }}
+                  />
+                  <span className="toggle__thumb" aria-hidden />
+                </span>
+                <span className="toggle__label" style={{ display: "inline" }}>
+                  Carregar dados ao iniciar o sistema
+                </span>
+              </label>
+              <p className="hsa-muted" style={{ margin: "4px 0 0 52px", maxWidth: "72ch" }}>
+                Ligado: o servidor coleta atendimentos, O.S. e financeiro recentes assim que arranca, em segundo plano — quem abrir a tela de
+                Integrações já encontra os dados prontos. Desligado (padrão): só carrega quando alguém entra na tela.
+              </p>
+            </div>
+
+            <div className="hsa-actions">
+              <button type="button" className="btn btn--primary" disabled={busy || !baseUrl.trim() || !clientId.trim() || !username.trim()} onClick={() => saveM.mutate()}>
+                {saveM.isPending ? "Salvando…" : "Salvar"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setTestResult(null);
+                  testM.mutate();
                 }}
-              />
-              <span className="toggle__thumb" aria-hidden />
-            </span>
-            <span className="toggle__label" style={{ display: "inline" }}>Carregar dados ao iniciar o sistema</span>
-          </label>
-          <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0 52px" }}>
-            Ligado: o servidor coleta atendimentos/O.S./financeiro recentes assim que arranca, em segundo plano — quem
-            abrir a tela de Integrações já encontra os dados prontos. Desligado (padrão): só carrega quando alguém
-            entra na tela.
-          </p>
-        </div>
+              >
+                {testM.isPending ? "Testando…" : "Testar API"}
+              </button>
+              {d.last_test_at ? <span className="hsa-muted">Último teste: {new Date(d.last_test_at).toLocaleString("pt-BR")}</span> : null}
+            </div>
 
-        <div className="row" style={{ gap: 8, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={busy || !baseUrl.trim() || !clientId.trim() || !username.trim()}
-            onClick={() => saveM.mutate()}
-          >
-            {saveM.isPending ? "A salvar…" : "Salvar"}
-          </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => { setTestResult(null); testM.mutate(); }}>
-            {testM.isPending ? "A testar…" : "Testar API"}
-          </button>
-          {d.last_test_at ? (
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              Último teste: {new Date(d.last_test_at).toLocaleString("pt-PT")}
-            </span>
-          ) : null}
-        </div>
-
-        {testResult ? (
-          <div
-            className={`msg ${testResult.ok ? "msg--ok" : "msg--err"}`}
-            style={{ marginTop: 12, display: "flex", alignItems: "flex-start", gap: 8 }}
-          >
-            {testResult.ok ? <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <XCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
-            <span>
-              {testResult.message}
-              {testResult.latency_ms != null ? ` (${testResult.latency_ms} ms)` : ""}
-            </span>
+            {testResult ? (
+              <div className={`msg ${testResult.ok ? "msg--ok" : "msg--err"}`} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                {testResult.ok ? <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <XCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
+                <span>
+                  {testResult.message}
+                  {testResult.latency_ms != null ? ` (${testResult.latency_ms} ms)` : ""}
+                </span>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-
-      {isAdminUser() ? (
-        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Edição em massa</h2>
-            <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--muted)" }}>
-              Ferramentas provisórias, só para administradores. Alteram dados de produção na HubSoft.
-            </p>
-          </div>
-          <HubsoftDataVendaSection />
-        </div>
+        </ToolPanel>
       ) : null}
+
+      {tab === "importar" ? <HubsoftBulkImportSection /> : null}
+      {tab === "conferir" ? <HubsoftRegistrationCheck /> : null}
+      {tab === "senhas" ? <HubsoftPasswordFix /> : null}
+      {tab === "enderecos" ? <HubsoftAddressCheck /> : null}
+      {tab === "data-venda" ? <HubsoftDataVendaSection /> : null}
+      {tab === "catalogos" ? <HubsoftCatalogExplorer /> : null}
+      {tab === "historico" ? <HubsoftBulkImportHistory /> : null}
+      {tab === "ixc-logins" ? <HubsoftIxcLogins /> : null}
     </div>
   );
 }

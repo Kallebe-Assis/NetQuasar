@@ -25,6 +25,8 @@ var permissionCatalog = []permissionDefinition{
 	{Key: "integrations.view", Module: "integrations", ModuleLabel: "Integrações", Label: "Visualizar e consultar"},
 	{Key: "integrations.execute", Module: "integrations", ModuleLabel: "Integrações", Label: "Executar requisições"},
 	{Key: "integrations.manage", Module: "integrations", ModuleLabel: "Integrações", Label: "Criar, editar e excluir"},
+	{Key: "integrations.hubsoft_bulk", Module: "integrations", ModuleLabel: "Integrações", Label: "HubSoft: edições em massa", Description: "Importar clientes e serviços, conferir cadastros, corrigir senhas e datas de venda e consultar catálogos da HubSoft. Administradores já têm acesso."},
+	{Key: "integrations.ixc_logins", Module: "integrations", ModuleLabel: "Integrações", Label: "IXC: inativar logins em massa", Description: "Inativa ou reativa logins (radusuarios) do IXC a partir de uma lista. Derruba a conexão PPPoE do login inativado. Administradores já têm acesso."},
 	{Key: "pops.view", Module: "pops", ModuleLabel: "Localidades", Label: "Visualizar"},
 	{Key: "pops.manage", Module: "pops", ModuleLabel: "Localidades", Label: "Criar, editar e excluir"},
 	{Key: "devices.view", Module: "devices", ModuleLabel: "Equipamentos", Label: "Visualizar"},

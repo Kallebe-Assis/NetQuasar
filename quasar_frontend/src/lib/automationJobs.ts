@@ -7,7 +7,8 @@ export type AutomationJobType =
   | "onu_monthly_report"
   | "bng_stats_report"
   | "alerts_digest"
-  | "commercial_report";
+  | "commercial_report"
+  | "olt_onu_collection";
 
 export type RecurrenceKind = "daily" | "weekly" | "monthly" | "custom";
 
@@ -17,6 +18,8 @@ export type AutomationJobDef = {
   description: string;
   category: string;
   recurrences: RecurrenceKind[];
+  /** Corre por intervalo (minutos) em vez de dia/hora — configurado no próprio cartão. */
+  intervalBased?: boolean;
   patchPath: string;
   runPath: string;
 };
@@ -66,6 +69,17 @@ export const AUTOMATION_JOBS: AutomationJobDef[] = [
     recurrences: ["monthly"],
     patchPath: "/api/v1/settings/automation/commercial-report",
     runPath: "/api/v1/settings/automation/commercial-report/run",
+  },
+  {
+    id: "olt_onu_collection",
+    label: "Coleta de ONUs (OLT)",
+    description:
+      "Coleta em segundo plano de todas as OLTs: status + RX com frequência e dados completos (serial, temperatura, TX) espaçados.",
+    category: "Sistema",
+    recurrences: [],
+    intervalBased: true,
+    patchPath: "/api/v1/settings/automation/olt-onu-collection",
+    runPath: "/api/v1/settings/automation/olt-onu-collection/run",
   },
 ];
 

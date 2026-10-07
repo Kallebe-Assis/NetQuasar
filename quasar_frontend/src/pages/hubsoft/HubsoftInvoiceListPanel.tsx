@@ -9,6 +9,8 @@ import { ConfirmModal } from "../../components/ConfirmModal";
 import { useConsultaToast } from "./hubsoftConsulta";
 
 import { ConsultaLoading } from "./ConsultaLoading";
+import { todayISO } from "./hubsoftDates";
+import { saveCsvText } from "./hubsoftCsv";
 function fmtCurrencyStr(v?: string): string {
   const n = Number(v);
   if (!v || !Number.isFinite(n)) return v || "—";
@@ -52,19 +54,7 @@ function downloadInvoicesCsv(rows: HubsoftInvoiceRow[]) {
     ];
     lines.push(cols.map(csvCell).join(","));
   }
-  const blob = new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `faturas-hubsoft-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function todayISO(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  saveCsvText(`faturas-hubsoft-${new Date().toISOString().slice(0, 10)}.csv`, lines.join("\r\n"));
 }
 
 /**

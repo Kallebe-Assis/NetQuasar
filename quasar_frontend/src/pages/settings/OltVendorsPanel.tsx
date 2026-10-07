@@ -158,6 +158,7 @@ type OltOnuReportCommands = {
   command?: string;
   commands?: string[];
   serial_search_command?: string;
+  pon_refresh_command?: string;
   onu_authorize_command?: string;
   onu_deauthorize_command?: string;
   unauthorized_onu_query_command?: string;
@@ -718,6 +719,7 @@ function OltVendorsPanel() {
   const [onuReportPreText, setOnuReportPreText] = useState("");
   const [onuReportCommandsText, setOnuReportCommandsText] = useState("");
   const [onuReportSerialSearchText, setOnuReportSerialSearchText] = useState("");
+  const [ponRefreshCmdText, setPonRefreshCmdText] = useState("");
   const [onuAuthorizeCmd, setOnuAuthorizeCmd] = useState("");
   const [onuDeauthorizeCmd, setOnuDeauthorizeCmd] = useState("");
   const [onuUnauthorizedQueryCmd, setOnuUnauthorizedQueryCmd] = useState("");
@@ -805,6 +807,7 @@ function OltVendorsPanel() {
     setOnuReportPreText(parsed.pre_commands.join("\n"));
     setOnuReportCommandsText(parsed.commands.join("\n"));
     setOnuReportSerialSearchText(rc?.serial_search_command?.trim() ?? "");
+    setPonRefreshCmdText(rc?.pon_refresh_command?.trim() ?? "");
     setOnuAuthorizeCmd(rc?.onu_authorize_command?.trim() ?? "");
     setOnuDeauthorizeCmd(rc?.onu_deauthorize_command?.trim() ?? "");
     setOnuUnauthorizedQueryCmd(rc?.unauthorized_onu_query_command?.trim() ?? "");
@@ -858,7 +861,8 @@ function OltVendorsPanel() {
       textToLines(onuAuthorizeCmd).length +
       textToLines(onuDeauthorizeCmd).length +
       textToLines(ponTelnetCommandsText).length +
-      (onuReportSerialSearchText.trim() ? 1 : 0)
+      (onuReportSerialSearchText.trim() ? 1 : 0) +
+      textToLines(ponRefreshCmdText).length
     );
   }, [
     onuReportCommandsText,
@@ -868,6 +872,7 @@ function OltVendorsPanel() {
     onuDeauthorizeCmd,
     ponTelnetCommandsText,
     onuReportSerialSearchText,
+    ponRefreshCmdText,
   ]);
 
   const vlanActive = authorizeVlanCatalog.filter((e) => !e.ignored).length;
@@ -899,6 +904,7 @@ function OltVendorsPanel() {
             pre_commands: preCommands,
             commands,
             serial_search_command: serialSearch || undefined,
+            pon_refresh_command: ponRefreshCmdText.trim() || undefined,
             onu_authorize_command: onuAuthorizeCmd.trim() || undefined,
             onu_deauthorize_command: onuDeauthorizeCmd.trim() || undefined,
             unauthorized_onu_query_command: onuUnauthorizedQueryCmd.trim() || undefined,
@@ -1022,6 +1028,7 @@ function OltVendorsPanel() {
     setOnuReportPreText(parsed.pre_commands.join("\n"));
     setOnuReportCommandsText(parsed.commands.join("\n"));
     setOnuReportSerialSearchText(src.onu_report_commands?.serial_search_command?.trim() ?? "");
+    setPonRefreshCmdText(src.onu_report_commands?.pon_refresh_command?.trim() ?? "");
     setOnuAuthorizeCmd(src.onu_report_commands?.onu_authorize_command?.trim() ?? "");
     setOnuDeauthorizeCmd(src.onu_report_commands?.onu_deauthorize_command?.trim() ?? "");
     setOnuUnauthorizedQueryCmd(src.onu_report_commands?.unauthorized_onu_query_command?.trim() ?? "");
@@ -1948,6 +1955,34 @@ function OltVendorsPanel() {
                 <code>show gpon onu by sn {"{serial}"}</code>; VSOL: <code>onu search {"{serial}"}</code> em modo{" "}
                 <code>config</code> — use os pré-comandos do bloco 1, ex. <code>enable</code> + <code>configure terminal</code>
                 ). Sem <code>{"{serial}"}</code>, lista e filtra no NetQuasar. Use <code>{"{pon}"}</code> para uma porta.
+              </p>
+            </div>
+          </div>
+
+          {/* 2b. Atualizar ONUs de uma PON */}
+          <div className="card olt-telnet-block">
+            <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Atualizar ONUs de uma PON</h4>
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 10px", maxWidth: 640 }}>
+              Aba <strong>OLT → Pesquisa</strong>: com <strong>uma OLT e uma PON</strong> selecionadas aparece o botão <strong>Atualizar PON</strong>.
+              Ele roda o(s) comando(s) abaixo só para essa porta e atualiza serial, modelo e estado das ONUs dela, sem coletar a OLT inteira. Usa os{" "}
+              <strong>pré-comandos do bloco 1</strong>.
+            </p>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Comando(s) — um por linha</label>
+              <textarea
+                className="input mono"
+                rows={3}
+                value={ponRefreshCmdText}
+                onChange={(e) => setPonRefreshCmdText(e.target.value)}
+                placeholder={
+                  brand.toUpperCase().includes("ZTE")
+                    ? "show gpon onu baseinfo gpon-olt_1/1/{pon}\nshow gpon onu state gpon-olt_1/1/{pon}"
+                    : "show onu info {pon}"
+                }
+              />
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+                Use <code>{"{pon}"}</code> para o número da porta. ZTE: <code>baseinfo</code> traz serial e modelo de todas as ONUs (mesmo offline) e{" "}
+                <code>state</code> traz a fase (working, LOS, DyingGasp…). VSOL: <code>show onu info {"{pon}"}</code>. Deixe em branco para esconder o botão.
               </p>
             </div>
           </div>

@@ -553,6 +553,41 @@ func (s *Server) hubsoftSuspendClientService(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// hubsoftResetClientServiceMAC — "Limpar MAC" (aba Serviços do cliente): ação manual por serviço.
+// A HubSoft exige que o serviço tenha dados de autenticação; sem eles devolve o erro próprio,
+// relançado tal-qual em HUBSOFT.
+func (s *Server) hubsoftResetClientServiceMAC(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	serviceID := strings.TrimSpace(chi.URLParam(r, "serviceId"))
+	if serviceID == "" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "id do serviço é obrigatório", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	msg, err := integrationhubsoft.ResetClientServiceMAC(ctx, cfg, token, serviceID)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", err.Error(), nil)
+		return
+	}
+	s.appendAuditLog(ctx, "hubsoft_client_service", serviceID, "reset_mac", s.actorFromRequest(r), nil, map[string]any{"integration_id": integID.String()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
+}
+
 const (
 	hubsoftMaxBoletosPerMerge = 50
 	hubsoftMaxBoletoBytes     = 25 << 20 // 25MB por boleto — generoso para um PDF de fatura, evita abuso
@@ -837,7 +872,7 @@ func (s *Server) hubsoftReportServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, integrationhubsoft.BuildServicesReport(ctx, cfg, token))
 }
 
-// hubsoftDataVendaExport — PROVISÓRIO (só administradores). Todos os serviços, para montar o CSV.
+// hubsoftDataVendaExport — Edições em massa (permissão integrations.hubsoft_bulk). Todos os serviços, para montar o CSV.
 func (s *Server) hubsoftDataVendaExport(w http.ResponseWriter, r *http.Request) {
 	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
@@ -865,12 +900,63 @@ func (s *Server) hubsoftDataVendaExport(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rows": rows})
 }
 
+// hubsoftCatalogList — Edições em massa (permissão integrations.hubsoft_bulk). Lista os catálogos de configuração
+// disponíveis para consulta (id usado em ?which= + rótulo para o seletor da tela).
+func (s *Server) hubsoftCatalogList(w http.ResponseWriter, r *http.Request) {
+	items := make([]map[string]string, 0, len(integrationhubsoft.CatalogList))
+	for _, c := range integrationhubsoft.CatalogList {
+		items = append(items, map[string]string{"id": c.ID, "label": c.Label})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "catalogs": items})
+}
+
+// hubsoftCatalogFetch — Edições em massa (permissão integrations.hubsoft_bulk). Consulta ao vivo um catálogo de
+// configuração da HubSoft (planos, formas de cobrança, vendedores, vencimentos, status de serviço
+// etc.) — usado para resolver os IDs internos exigidos pelo cadastro de cliente/serviço, que não
+// existem em nenhum export do sistema antigo. Repassa o JSON da HubSoft tal como veio.
+func (s *Server) hubsoftCatalogFetch(w http.ResponseWriter, r *http.Request) {
+	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_ID", "identificador inválido", nil)
+		return
+	}
+	which := strings.TrimSpace(r.URL.Query().Get("which"))
+	if _, ok := integrationhubsoft.CatalogEndpoints[which]; !ok {
+		writeErr(w, http.StatusBadRequest, "VALIDATION", "catálogo inválido", nil)
+		return
+	}
+	cfg, err := s.loadHubsoftConfig(r.Context(), integID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "NOT_HUBSOFT", err.Error(), nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", err.Error(), nil)
+		return
+	}
+	code, body, err := integrationhubsoft.FetchCatalog(ctx, cfg, token, which)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", err.Error(), nil)
+		return
+	}
+	if code < 200 || code >= 300 {
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", fmt.Sprintf("HubSoft respondeu HTTP %d", code), nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
 type hubsoftDataVendaPreviewBody struct {
 	Rows             []integrationhubsoft.DataVendaInputRow `json:"rows"`
 	IncludeCancelled bool                                   `json:"include_cancelled"`
 }
 
-// hubsoftDataVendaPreview — PROVISÓRIO (só administradores). Cruza o CSV com a base viva da HubSoft
+// hubsoftDataVendaPreview — Edições em massa (permissão integrations.hubsoft_bulk). Cruza o CSV com a base viva da HubSoft
 // por login PPPoE + id + código + nome e devolve o que seria alterado. Não altera nada.
 func (s *Server) hubsoftDataVendaPreview(w http.ResponseWriter, r *http.Request) {
 	integID, err := s.resolveIntegrationID(r.Context(), chi.URLParam(r, "id"))
@@ -907,7 +993,7 @@ type hubsoftDataVendaApplyBody struct {
 	Rows []integrationhubsoft.DataVendaApplyInput `json:"rows"`
 }
 
-// hubsoftDataVendaApply — PROVISÓRIO (só administradores). Aplica um LOTE PEQUENO (≤ 20 linhas por
+// hubsoftDataVendaApply — Edições em massa (permissão integrations.hubsoft_bulk). Aplica um LOTE PEQUENO (≤ 20 linhas por
 // chamada; o front encadeia os lotes). Cada linha é revalidada e conferida; ao primeiro sinal de
 // inconsistência grave (halt) o servidor interrompe o lote e o front deve parar tudo.
 func (s *Server) hubsoftDataVendaApply(w http.ResponseWriter, r *http.Request) {

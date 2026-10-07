@@ -102,14 +102,18 @@ func rowHasPlausibleSerial(row map[string]any) bool {
 // selectOnuTelnetBatch monta o lote deste ciclo dentro do orçamento `maxN`: as ONUs prioritárias
 // (sem serial) entram sempre primeiro — nunca ficam de fora por causa do rodízio — e o que
 // sobrar do orçamento é preenchido pelo rodízio normal sobre `rest`. Se só as prioritárias já
-// ultrapassam maxN, usa-se apenas as primeiras maxN delas (por PON/ONU) e a rotação sobre `rest`
-// não avança neste ciclo (o offset devolvido é o mesmo recebido).
+// ultrapassam maxN, o lote é um rodízio sobre elas (o offset avança sobre `priority`; `rest` não
+// é atendido neste ciclo).
 func selectOnuTelnetBatch(priority, rest []map[string]any, maxN, offset int) (batch []map[string]any, nextOffset int) {
 	if maxN <= 0 {
 		return nil, offset
 	}
 	if len(priority) >= maxN {
-		return priority[:maxN], offset
+		// Rodízio também na fila prioritária: com a fila ordenada por PON/ONU e sempre cortada nas
+		// `maxN` primeiras, ONUs que nunca respondem ao telnet (offline, comando sem SN) ficavam
+		// fixas no início e as PONs finais NUNCA entravam no lote — sintoma "serial só nas primeiras
+		// PONs". O offset (que não avançaria sobre `rest` neste caso) passa a girar sobre `priority`.
+		return selectRotatingOnuBatch(priority, maxN, offset)
 	}
 	restBatch, no := selectRotatingOnuBatch(rest, maxN-len(priority), offset)
 	batch = make([]map[string]any, 0, len(priority)+len(restBatch))

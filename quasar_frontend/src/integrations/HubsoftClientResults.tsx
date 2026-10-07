@@ -364,10 +364,10 @@ function ClientCardSummary({
   );
 }
 
-type ServiceActionTarget = { client: ClientCard; service: ClientServiceSummary; mode: "enable" | "suspend" };
+type ServiceActionTarget = { client: ClientCard; service: ClientServiceSummary; mode: "enable" | "suspend" | "reset_mac" };
 type ServiceActionResult = { ok: boolean; message?: string };
 
-// Confirmação antes de habilitar/suspender — acção real contra a HubSoft, afecta o acesso à
+// Confirmação antes de habilitar/suspender/limpar MAC — acção real contra a HubSoft, afecta o acesso à
 // internet do cliente na hora, por isso não dispara direto no clique do botão do cartão.
 function ServiceActionModal({
   target,
@@ -390,7 +390,7 @@ function ServiceActionModal({
     setBusy(true);
     setError("");
     try {
-      const r = await onConfirm(mode === "enable" ? motivo.trim() : tipoSuspensao);
+      const r = await onConfirm(mode === "enable" ? motivo.trim() : mode === "suspend" ? tipoSuspensao : "");
       if (!r.ok) {
         setError(r.message || "Não foi possível concluir a operação.");
         return;
@@ -404,10 +404,16 @@ function ServiceActionModal({
   return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
       <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-        <h3 style={{ marginTop: 0 }}>{mode === "enable" ? "Habilitar serviço" : "Suspender serviço"}</h3>
+        <h3 style={{ marginTop: 0 }}>
+          {mode === "enable" ? "Habilitar serviço" : mode === "suspend" ? "Suspender serviço" : "Limpar MAC"}
+        </h3>
         <p style={{ fontSize: 13, color: "var(--muted)" }}>
-          {mode === "enable" ? "Habilitar" : "Suspender"} <strong>{label}</strong>
-          {mode === "suspend" ? " — o cliente perde acesso à internet imediatamente." : "."}
+          {mode === "enable" ? "Habilitar" : mode === "suspend" ? "Suspender" : "Limpar o MAC gravado de"} <strong>{label}</strong>
+          {mode === "suspend"
+            ? " — o cliente perde acesso à internet imediatamente."
+            : mode === "reset_mac"
+              ? " — o próximo equipamento que o cliente conectar será registrado como novo MAC."
+              : "."}
         </p>
         {mode === "enable" ? (
           <div className="field">
@@ -421,7 +427,7 @@ function ServiceActionModal({
               disabled={busy}
             />
           </div>
-        ) : (
+        ) : mode === "reset_mac" ? null : (
           <div className="field">
             <label htmlFor="hubsoft-suspend-tipo">Motivo da suspensão</label>
             <select
@@ -462,11 +468,20 @@ function formatFieldLabel(key: string): string {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+/** "2026-09-29" → "29/09/2026"; "2026-10-02 12:02:05" → "02/10/2026 12:02" (hora só quando não é 00:00). Outros textos ficam como estão. */
+export function formatMaybeDate(text: string): string {
+  const m = text.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
+  if (!m) return text;
+  const date = `${m[3]}/${m[2]}/${m[1]}`;
+  if (m[4] === undefined || (m[4] === "00" && m[5] === "00")) return date;
+  return `${date} ${m[4]}:${m[5]}`;
+}
+
 function formatScalar(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "Sim" : "Não";
   if (typeof v === "object") return JSON.stringify(v);
-  return String(v).trim();
+  return formatMaybeDate(String(v).trim());
 }
 
 function isHttpUrl(v: string): boolean {
@@ -782,10 +797,12 @@ function ServicesTabContent({
   services,
   onEnableClick,
   onSuspendClick,
+  onResetMacClick,
 }: {
   services: ClientServiceSummary[];
   onEnableClick?: (s: ClientServiceSummary) => void;
   onSuspendClick?: (s: ClientServiceSummary) => void;
+  onResetMacClick?: (s: ClientServiceSummary) => void;
 }) {
   const [idx, setIdx] = useState(0);
   if (services.length === 0) {
@@ -806,8 +823,13 @@ function ServicesTabContent({
           </h4>
           {s.status ? <span className={labelStatus(s.status) ?? "badge"}>{s.status}</span> : null}
         </div>
-        {(onEnableClick || onSuspendClick) && s.id ? (
-          <div className="row" style={{ gap: 8 }}>
+        {(onEnableClick || onSuspendClick || onResetMacClick) && s.id ? (
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            {onResetMacClick ? (
+              <button type="button" className="btn btn--sm" onClick={() => onResetMacClick(s)}>
+                Limpar MAC
+              </button>
+            ) : null}
             {onEnableClick ? (
               <button type="button" className="btn btn--sm" onClick={() => onEnableClick(s)}>
                 Habilitar serviço
@@ -939,7 +961,183 @@ type DetailTabDef = { id: string; label: string; content: ReactNode };
 // do IXC (casa por palavra-chave no nome do campo, não por nomes exactos de um só
 // fornecedor). Cada array de topo (ex. "grupos", "servicos") vira a sua própria aba —
 // cobre "Grupo"/"Serviços" e qualquer outro array presente ("e etc") sem hardcode.
-function buildDetailTabs(raw?: Record<string, unknown>): DetailTabDef[] {
+function onlyDigitsOf(v: unknown): string {
+  return String(v ?? "").replace(/\D/g, "");
+}
+
+function formatPhoneBR(v: unknown): string {
+  const d = onlyDigitsOf(v);
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(v ?? "").trim();
+}
+
+function formatDocBR(v: unknown): string {
+  const d = onlyDigitsOf(v);
+  if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  if (d.length === 14) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  return String(v ?? "").trim();
+}
+
+function ageFromBirth(v: unknown): string {
+  const m = String(v ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const born = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  if (now.getMonth() < born.getMonth() || (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())) age--;
+  return age >= 0 && age < 130 ? `${age} anos` : "";
+}
+
+const TIPO_PESSOA_LABEL: Record<string, string> = { pf: "Pessoa física", pj: "Pessoa jurídica" };
+
+// Campos de topo do cadastro HubSoft que a aba Identificação já mostra em cartões próprios — o resto cai em "Outros".
+const HUBSOFT_CONSUMED_KEYS = new Set([
+  "nome_razaosocial", "nome_fantasia", "tipo_pessoa", "cpf_cnpj", "rg", "rg_emissao", "inscricao_estadual", "inscricao_municipal",
+  "data_nascimento", "estado_civil", "genero", "nacionalidade", "profissao", "nome_mae", "nome_pai",
+  "codigo_cliente", "id_cliente", "id_externo", "uuid_cliente", "ativo",
+  "email_principal", "email_secundario", "telefone_primario", "telefone_secundario", "telefone_terciario",
+  "origem_cliente", "id_origem_cliente", "motivo_contratacao",
+  "data_cadastro", "data_atualizacao", "alerta", "alerta_ids", "alerta_mensagens",
+]);
+
+function isHubsoftClientRaw(raw?: Record<string, unknown>): boolean {
+  return !!raw && raw.id_cliente !== undefined && raw.uuid_cliente !== undefined;
+}
+
+function nameOf(v: unknown): string {
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return String(o.descricao ?? o.nome ?? o.name ?? o.display ?? "").trim();
+  }
+  return String(v ?? "").trim();
+}
+
+/** Aba Identificação dos cadastros da HubSoft: cartões com dados pessoais, contato, grupos, endereços, serviços e datas. */
+function buildHubsoftIdentification(raw: Record<string, unknown>, client?: ClientCard): ReactNode {
+  const row = (label: string, value: unknown) => <DetailScalar key={label} label={label} value={value} />;
+  const groups = (Array.isArray(raw.grupos) ? raw.grupos : []) as Record<string, unknown>[];
+  const services = client?.services ?? [];
+  const addresses = Array.from(new Set(services.map((s) => (s.install_address ?? "").trim()).filter(Boolean)));
+  const statusCount = new Map<string, number>();
+  for (const s of services) {
+    const k = (s.status_label || s.status || "Sem status").trim();
+    statusCount.set(k, (statusCount.get(k) ?? 0) + 1);
+  }
+  const consumed = HUBSOFT_CONSUMED_KEYS;
+  const others = Object.entries(raw).filter(
+    ([k, v]) => !consumed.has(k) && v !== null && v !== undefined && typeof v !== "object" && formatScalar(v) !== "",
+  );
+  const tipo = String(raw.tipo_pessoa ?? "").toLowerCase();
+  const birth = raw.data_nascimento;
+  const active = raw.ativo === undefined ? undefined : raw.ativo === true;
+  const alerts = (Array.isArray(raw.alerta_mensagens) ? raw.alerta_mensagens : []).map((m) => String(m)).filter(Boolean);
+
+  return (
+    <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
+      <div className="hubsoft-service-grid">
+        <ServiceCard icon={IdCard} title="Identificação" accent="conexao">
+          {row("Nome / razão social", raw.nome_razaosocial)}
+          {row("Nome fantasia", raw.nome_fantasia)}
+          {row("Tipo de pessoa", TIPO_PESSOA_LABEL[tipo] ?? raw.tipo_pessoa)}
+          {row(tipo === "pj" ? "CNPJ" : "CPF", formatDocBR(raw.cpf_cnpj))}
+          {row("RG / identidade", raw.rg)}
+          {row("Emissão do RG", raw.rg_emissao)}
+          {row("Inscrição estadual", raw.inscricao_estadual)}
+          {row("Inscrição municipal", raw.inscricao_municipal)}
+          {active === undefined ? null : (
+            <div className="integration-detail__row">
+              <span className="integration-detail__label">Situação do cadastro</span>
+              <span className={active ? "badge badge--ok" : "badge badge--off"}>{active ? "Ativo" : "Inativo"}</span>
+            </div>
+          )}
+          {alerts.length > 0 || raw.alerta === true ? (
+            <div className="integration-detail__row integration-detail__row--stack">
+              <span className="integration-detail__label">Alerta no cadastro</span>
+              <span className="integration-detail__value integration-detail__value--block">{alerts.join(" · ") || "Cliente com alerta"}</span>
+            </div>
+          ) : null}
+        </ServiceCard>
+
+        <ServiceCard icon={User} title="Dados pessoais" accent="cadastro">
+          {row("Data de nascimento", birth ? `${formatMaybeDate(String(birth))}${ageFromBirth(birth) ? ` · ${ageFromBirth(birth)}` : ""}` : "")}
+          {row("Estado civil", raw.estado_civil)}
+          {row("Gênero", raw.genero)}
+          {row("Nacionalidade", raw.nacionalidade)}
+          {row("Profissão", raw.profissao)}
+          {row("Nome da mãe", raw.nome_mae)}
+          {row("Nome do pai", raw.nome_pai)}
+        </ServiceCard>
+
+        <ServiceCard icon={Phone} title="Contato" accent="historico">
+          {row("E-mail principal", raw.email_principal)}
+          {row("E-mail secundário", raw.email_secundario)}
+          {row("Telefone principal", formatPhoneBR(raw.telefone_primario))}
+          {row("Telefone secundário", formatPhoneBR(raw.telefone_secundario))}
+          {row("Telefone terciário", formatPhoneBR(raw.telefone_terciario))}
+        </ServiceCard>
+
+        <ServiceCard icon={Building2} title="Grupos e origem" accent="vendedor">
+          <div className="integration-detail__row integration-detail__row--stack">
+            <span className="integration-detail__label">Grupos de cliente</span>
+            <span className="integration-detail__value integration-detail__value--block">
+              {groups.length === 0 ? (
+                "—"
+              ) : (
+                <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6 }}>
+                  {groups.map((g, i) => (
+                    <span key={`${g.id_grupo_cliente ?? i}`} className={g.ativo === false ? "badge badge--off" : "badge"} title={`ID ${g.id_grupo_cliente ?? "—"}`}>
+                      {nameOf(g) || `Grupo ${g.id_grupo_cliente ?? ""}`}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </span>
+          </div>
+          {row("Origem do cliente", nameOf(raw.origem_cliente))}
+          {row("Motivo da contratação", nameOf(raw.motivo_contratacao))}
+        </ServiceCard>
+
+        <ServiceCard icon={MapPin} title="Endereços de instalação" accent="endereco">
+          {client?.address ? row("Endereço principal", client.address) : null}
+          {addresses.length > 0 ? (
+            addresses.map((a, i) => row(addresses.length > 1 ? `Serviço — endereço ${i + 1}` : "Endereço do serviço", a))
+          ) : client?.address ? null : (
+            <span className="hsa-muted">Sem endereço de instalação.</span>
+          )}
+        </ServiceCard>
+
+        <ServiceCard icon={Router} title="Serviços" accent="conexao">
+          {row("Quantidade de serviços", services.length || "")}
+          {Array.from(statusCount.entries()).map(([k, n]) => row(k, n))}
+        </ServiceCard>
+
+        <ServiceCard icon={FileText} title="Códigos" accent="cadastro">
+          {row("Código do cliente (HubSoft)", raw.codigo_cliente)}
+          {row("ID interno (id_cliente)", raw.id_cliente)}
+          {row("ID externo", raw.id_externo)}
+          {row("UUID", raw.uuid_cliente)}
+        </ServiceCard>
+
+        <ServiceCard icon={CalendarDays} title="Datas" accent="historico">
+          {row("Cadastrado em", raw.data_cadastro)}
+          {row("Última atualização", raw.data_atualizacao)}
+          {row("Data de nascimento", birth)}
+        </ServiceCard>
+
+        {others.length > 0 ? (
+          <ServiceCard icon={FileText} title="Outros" accent="endereco">
+            {others.map(([k, v]) => (
+              <DetailScalar key={k} label={formatFieldLabel(k)} value={v} />
+            ))}
+          </ServiceCard>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function buildDetailTabs(raw?: Record<string, unknown>, client?: ClientCard): DetailTabDef[] {
   if (!raw || Object.keys(raw).length === 0) return [];
 
   const scalarRows: [string, unknown][] = [];
@@ -987,7 +1185,9 @@ function buildDetailTabs(raw?: Record<string, unknown>): DetailTabDef[] {
   tabs.push({
     id: "identificacao",
     label: "Identificação",
-    content: (
+    content: isHubsoftClientRaw(raw) ? (
+      buildHubsoftIdentification(raw, client)
+    ) : (
       <div className="integration-detail hubsoft-tab-body" style={{ fontSize: DETAIL_FONT }}>
         <div className="hubsoft-service-grid">
           {grouped.map((g, i) => (
@@ -1579,9 +1779,11 @@ export function ClientDetailModal({
   onDownloadBoletos,
   onEnableService,
   onSuspendService,
+  onResetMacService,
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
+  autoLoadTabs,
 }: {
   client: ClientCard;
   loading?: boolean;
@@ -1598,14 +1800,17 @@ export function ClientDetailModal({
     service: ClientServiceSummary,
     tipo: "suspenso_debito" | "suspenso_pedido_cliente",
   ) => Promise<ServiceActionResult>;
+  onResetMacService?: (client: ClientCard, service: ClientServiceSummary) => Promise<ServiceActionResult>;
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
+  /** Ao entrar nas abas Financeiro/Atendimentos/Ordens de serviço, consulta sozinho (opt-in: o IXC continua só no botão). */
+  autoLoadTabs?: boolean;
   // Busca atendimentos/ordens de serviço em paralelo assim que o modal abre, em vez de só ao
   // clicar na aba — reduz a espera percebida ao trocar de aba. Opt-in (default false) para não
   // mudar o comportamento do IXC, que continua a buscar só ao clicar na aba.
 }) {
-  const detailTabs = useMemo(() => buildDetailTabs(client.raw), [client.raw]);
+  const detailTabs = useMemo(() => buildDetailTabs(client.raw, client), [client.raw, client.address, client.services]); // eslint-disable-line react-hooks/exhaustive-deps
   const services = client.services ?? [];
   const tabs = useMemo(() => {
     // "identificacao" é sempre a primeira (buildDetailTabs) — "Serviços" entra logo a seguir,
@@ -1650,7 +1855,8 @@ export function ClientDetailModal({
     setServiceAction(null);
   }, [client.id, client.code, tabs]);
 
-  // Nada é consultado ao abrir a aba: só o botão "Consultar" chama a HubSoft (evita sobrecarregar a API).
+  // Ao entrar numa aba de dados do cliente (Financeiro, Atendimentos, Ordens de serviço), a consulta já roda sozinha —
+  // só para o cliente que o usuário abriu, uma vez por aba. O botão "Consultar" continua servindo para atualizar.
   const { notify } = useConsultaToast();
   async function consultTab(tab: "financeiro" | "atendimentos" | "ordens" | "logins") {
     const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -1705,6 +1911,14 @@ export function ClientDetailModal({
     }
   }
 
+  function selectTab(id: string) {
+    setActiveTab(id);
+    if (!autoLoadTabs) return;
+    if (id === "financeiro" && onFetchFinancial && !financial && !financialLoading) void consultTab("financeiro");
+    else if (id === "atendimentos" && onFetchAttendance && !attendance && !attendanceLoading) void consultTab("atendimentos");
+    else if (id === "ordens" && onFetchWorkOrders && !workOrders && !workOrderLoading) void consultTab("ordens");
+  }
+
   let activeContent: ReactNode;
   if (activeTab === "servicos") {
     activeContent = (
@@ -1712,6 +1926,7 @@ export function ClientDetailModal({
         services={services}
         onEnableClick={onEnableService ? (s) => setServiceAction({ client, service: s, mode: "enable" }) : undefined}
         onSuspendClick={onSuspendService ? (s) => setServiceAction({ client, service: s, mode: "suspend" }) : undefined}
+        onResetMacClick={onResetMacService ? (s) => setServiceAction({ client, service: s, mode: "reset_mac" }) : undefined}
       />
     );
   } else if (activeTab === "financeiro") {
@@ -1766,7 +1981,7 @@ export function ClientDetailModal({
       <>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>
-            {showBody ? "" : `Clique em Consultar para carregar ${consultTabState.what}. Nada é buscado automaticamente.`}
+            {showBody ? "" : `Clique em Consultar para carregar ${consultTabState.what}.`}
           </span>
           <button
             type="button"
@@ -1815,7 +2030,7 @@ export function ClientDetailModal({
           <>
             <div className="tabs integration-detail-modal__tabs">
               {tabs.map((t) => (
-                <button key={t.id} type="button" className={t.id === activeTab ? "active" : ""} onClick={() => setActiveTab(t.id)}>
+                <button key={t.id} type="button" className={t.id === activeTab ? "active" : ""} onClick={() => selectTab(t.id)}>
                   {t.label}
                 </button>
               ))}
@@ -1833,6 +2048,10 @@ export function ClientDetailModal({
             if (serviceAction.mode === "enable") {
               if (!onEnableService) return Promise.resolve({ ok: false, message: "Ação indisponível." });
               return onEnableService(serviceAction.client, serviceAction.service, value);
+            }
+            if (serviceAction.mode === "reset_mac") {
+              if (!onResetMacService) return Promise.resolve({ ok: false, message: "Ação indisponível." });
+              return onResetMacService(serviceAction.client, serviceAction.service);
             }
             if (!onSuspendService) return Promise.resolve({ ok: false, message: "Ação indisponível." });
             return onSuspendService(
@@ -1860,10 +2079,12 @@ export function HubsoftClientResults({
   onFetchFinancial,
   onEnableService,
   onSuspendService,
+  onResetMacService,
   onDownloadBoletos,
   attendanceEnabled,
   workOrderEnabled,
   loginEnabled,
+  autoLoadTabs,
 }: {
   clients: ClientCard[];
   message?: string;
@@ -1880,10 +2101,13 @@ export function HubsoftClientResults({
     service: ClientServiceSummary,
     tipo: "suspenso_debito" | "suspenso_pedido_cliente",
   ) => Promise<ServiceActionResult>;
+  onResetMacService?: (client: ClientCard, service: ClientServiceSummary) => Promise<ServiceActionResult>;
   onDownloadBoletos?: (client: ClientCard, invoiceIds: string[]) => Promise<void>;
   attendanceEnabled?: boolean;
   workOrderEnabled?: boolean;
   loginEnabled?: boolean;
+  /** Entrar nas abas Financeiro/Atendimentos/Ordens do cliente já consulta sozinho (só HubSoft). */
+  autoLoadTabs?: boolean;
 }) {
   const [detailClient, setDetailClient] = useState<ClientCard | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1982,9 +2206,11 @@ export function HubsoftClientResults({
           onDownloadBoletos={onDownloadBoletos}
           onEnableService={onEnableService}
           onSuspendService={onSuspendService}
+          onResetMacService={onResetMacService}
           attendanceEnabled={attendanceEnabled}
           workOrderEnabled={workOrderEnabled}
           loginEnabled={loginEnabled}
+          autoLoadTabs={autoLoadTabs}
         />
       ) : null}
     </>

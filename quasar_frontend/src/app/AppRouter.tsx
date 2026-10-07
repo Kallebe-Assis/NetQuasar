@@ -161,7 +161,7 @@ export function AppRouter() {
           <Route
             path="integrations/hubsoft/config"
             element={
-              <AdminOnly>
+              <AdminOnly also={["integrations.hubsoft_bulk", "integrations.ixc_logins"]}>
                 {withSuspense(<HubsoftConfigPage />)}
               </AdminOnly>
             }

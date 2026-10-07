@@ -120,11 +120,14 @@ export function AboutPage() {
                   <li>Dashboard (Geral, Equipamentos, Fibra, Infraestrutura, Sessões, Servidor, Frota)</li>
                   <li>Monitoramento / Tempo real / Alertas / Eventos da rede</li>
                   <li>Equipamentos: Geral, MikroTik, OLT, BNG, BGP, Switch</li>
-                  <li>OLT: ONUs (histórico e qualidade RX), Pesquisa de ONUs, Relatório por PON</li>
-                  <li>Localidades, Clientes, Elementos ópticos, Mapa, Topologia 2D por POP</li>
-                  <li>Integrações (HubSoft/IXC): consulta, dashboards e relatórios (serviços, O.S., atendimentos)</li>
+                  <li>OLT: ONUs (histórico e qualidade RX), Pesquisa de ONUs, Relatório por PON, coleta contínua de serial/status/RX</li>
+                  <li>Localidades, Clientes, Elementos ópticos, Mapa, Topologia 2D e diagrama de rack por POP (portas SFP, SFP+, Ethernet e PON)</li>
+                  <li>
+                    Integrações (HubSoft/IXC): consulta com ações por serviço (habilitar, suspender, limpar MAC), dashboards,
+                    relatórios (serviços, O.S., atendimentos), importação/edição em massa e conferência de cadastros por CSV
+                  </li>
                   <li>Frota, Relatórios de sistema, Registros de credenciais</li>
-                  <li>Configurações e Automações (relatórios agendados por Telegram)</li>
+                  <li>Configurações e Automações (relatórios agendados por Telegram e coleta de ONUs em segundo plano)</li>
                 </ul>
               </div>
             </section>

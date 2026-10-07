@@ -11,7 +11,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/integrationhttp"
 )
 
-// --- Correção em lote da "data da venda" (PROVISÓRIO, só administradores) ---------------------------
+// --- Correção em lote da "data da venda" (permissão integrations.hubsoft_bulk) ---------------------------
 //
 // PUT /api/v1/integracao/cliente/cliente_servico/editar/:id  {"data_venda":"YYYY-MM-DD"}
 // (a doc exige que data_venda seja o único parâmetro do pedido). Fluxo em duas fases:
@@ -134,6 +134,8 @@ func dvSuspiciousLogin(s string) string {
 
 type dvService struct {
 	ServiceID, ClientID, ClientCode, ClientName, Login, Status, DataVenda string
+	Senha                                                                 string // só preenchida quando a HubSoft a devolve
+	Obs                                                                   string // observacoes_autenticacao
 }
 
 func dvServicesFrom(clients []map[string]any) []dvService {
@@ -152,7 +154,7 @@ func dvServicesFrom(clients []map[string]any) []dvService {
 			out = append(out, dvService{
 				ServiceID: id, ClientID: pickStr(c, "id_cliente"), ClientCode: pickStr(c, "codigo_cliente"),
 				ClientName: pickStr(c, "nome_razaosocial"), Login: pickStr(s, "login"), Status: pickStr(s, "status"),
-				DataVenda: dvNormDate(pickStr(s, "data_venda")),
+				DataVenda: dvNormDate(pickStr(s, "data_venda")), Senha: pickStr(s, "senha"), Obs: pickStr(s, "observacoes_autenticacao"),
 			})
 		}
 	}

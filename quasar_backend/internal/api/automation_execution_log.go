@@ -18,6 +18,7 @@ const (
 	jobOnuMonthlyReport = "onu_monthly_report"
 	jobBngStatsReport   = "bng_stats_report"
 	jobDatabaseBackup   = "database_backup"
+	jobOltOnuCollection = "olt_onu_collection"
 )
 
 func automationJobLabel(jobType string) string {
@@ -32,6 +33,8 @@ func automationJobLabel(jobType string) string {
 		return "Totais BNG"
 	case jobDatabaseBackup:
 		return "Backup PostgreSQL (B2)"
+	case jobOltOnuCollection:
+		return "Coleta de ONUs (OLT)"
 	default:
 		return jobType
 	}
@@ -39,7 +42,7 @@ func automationJobLabel(jobType string) string {
 
 func automationJobCategory(jobType string) string {
 	switch jobType {
-	case jobDatabaseBackup:
+	case jobDatabaseBackup, jobOltOnuCollection:
 		return "Sistema"
 	case jobAlertsDigest, jobCommercialReport, jobOnuMonthlyReport, jobBngStatsReport:
 		return "Relatórios"
@@ -60,6 +63,8 @@ func automationJobDescription(jobType string) string {
 		return "Envia totais de sessões BNG (PPPoE/IPv4/IPv6) por canal configurado."
 	case jobDatabaseBackup:
 		return "Dump completo PostgreSQL enviado para o bucket Backblaze B2."
+	case jobOltOnuCollection:
+		return "Coleta em segundo plano de todas as OLTs: leve (status + RX) frequente e completa (serial, temperatura, TX) espaçada."
 	default:
 		return ""
 	}

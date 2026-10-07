@@ -75,6 +75,10 @@ Execução manual de um ciclo: `POST /api/v1/monitoring/cycles/{latency|telemetr
 2. **OLT por perfil de fabricante** (VSOL, ZTE, etc.): lê `olt_vendor_models` (passos SNMP/telnet); executa `onu_metrics_collect` ou `onu_snmp_walk`; grava o mesmo `olt_snapshots`.
 3. **Refresh manual** na tela OLT: `POST /olt/devices/{id}/refresh` executa o perfil completo do modelo (scope `full` ou `onu`).
 
+**Serial das ONUs.** O walk único da tabela de serial de uma OLT grande estourava o orçamento de tempo e era cortado em ordem de PON — as primeiras PONs completavam e as últimas ficavam sem serial. Na coleta completa (`oltcollect/serial_completion.go`) o NetQuasar agora volta só nas PONs que ainda têm ONU sem serial e refaz a leitura da sub-árvore daquela PON, com tempo próprio, começando pelas mais incompletas. A fila do enriquecimento por telnet também gira (em vez de reler sempre as mesmas primeiras ONUs). ONU **offline** não informa serial por SNMP — mantém o último serial conhecido. Os modos `baseline`/`status_rx` não leem serial: ele vem da coleta completa.
+
+**Interfaces/PONs sem duplicar.** O inventário de interfaces e o resumo de PON deduplicam a mesma porta quando a OLT a expõe com dois nomes (ex.: `PON 01` e `GPON001` numa VSOL V1600G1) — vale para todas as marcas (`oltifderive`: `CanonicalPonRowKey`, `DedupeOltInterfaceTablePonRows`).
+
 A UI OLT e o Dashboard leem `olt_snapshots` e atualizam-se via polling + sinalização de `monitoring_runtime.activity_updated_at`.
 
 ### Coleta nocturna
@@ -178,6 +182,44 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 - **Clientes** — filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC (o cartão do cliente já traz o endereço de instalação).
 - **Serviços** — fotografia actual da base inteira: total, repartição por status, por plano e por localidade; a lista por localidade é uma tabela (uma linha por localidade) e clicar abre um modal com abas Status / Plano / Bairro só dessa localidade. Cache no cliente por 5 min. **Enviar por Telegram** abre uma selecção (Total de logins / por status / por plano / por localidade / localidade específica / tudo).
 - **Atendimentos** e **Ordens de serviço** por período (O.S. com ranking por técnico), e **Financeiro** (percentual recebido/aberto/vencido, mês específico ou média dos últimos X meses) — cada um com **Enviar por Telegram**.
+- **Boletos por forma** (`GET …/hubsoft/report/invoices-by-method?forma=…&data_inicio=…&data_fim=…`, somente leitura) — lista os boletos **em aberto** cuja **fatura** ainda carrega uma forma de cobrança (ex.: «Sicoob - API (G2)»), mesmo que o cliente/serviço já tenha sido migrado para outra: a forma fica gravada na fatura quando o boleto é gerado. Varre `/financeiro/fatura` (100 por página, sem `tipo_resultado=simplificado`, que não traz a forma) e filtra pelo id ou por parte do nome (ignora acento, caixa e pontuação). Mostra a contagem por forma encontrada, a lista (cliente, login, fatura, vencimento, valor, situação, link do boleto) e exporta CSV para a análise manual na HubSoft — a API não tem rota para trocar a forma de cobrança de uma fatura. Se a HubSoft não devolver o campo, o relatório avisa e lista os campos que a fatura traz (`campos_fatura`).
+
+**Cartão do cliente (Consulta):** o modal do cliente tem a aba **Serviços** com ações por serviço — **Habilitar serviço**, **Suspender serviço** (por débito ou a pedido do cliente) e **Limpar MAC** (`POST /integrations/{id}/hubsoft/service/{serviceId}/reset-mac` → `POST /api/v1/integracao/cliente/reset_mac_addr` da HubSoft, corpo `{"id_cliente_servico"}`). Todas pedem confirmação, mostram a mensagem de erro da própria HubSoft (a HubSoft exige que o serviço já tenha dados de autenticação para limpar o MAC) e ficam em `ops_audit_log` (`hubsoft_client_service`: `enable` / `suspend` / `reset_mac`).
+
+#### HubSoft — Configuração API e ferramentas de administração
+
+`/integrations/hubsoft/config` é organizada em abas (a aba aberta fica na URL, `?aba=`). **Conexão** é de uso geral; as demais exigem a permissão **`integrations.hubsoft_bulk`** («HubSoft: edições em massa», perfil de permissão — administradores já têm) e **IXC: logins** exige **`integrations.ixc_logins`**. As rotas correspondentes ficam em dois grupos protegidos por `requirePermissionMiddleware` em `server.go`; no frontend o acesso é decidido por `can()` / `AdminOnly also=[…]`.
+
+| Aba | O que faz | Escreve na HubSoft? |
+|-----|-----------|---------------------|
+| **Importar clientes** | CSV de clientes novos e de serviços adicionais: validar → conferir com a HubSoft (*preflight*) → importar. Botão de **baixar o modelo CSV** de cada tipo | Sim (cria cliente/serviço/login) |
+| **Conferir cadastros** | Compara o mesmo CSV da importação com o que está na HubSoft, campo a campo | Não (só o botão «Registrar» observação de login) |
+| **Corrigir senhas** | Varre a base atrás de senhas gravadas como `="12345"` e troca por `12345` | Sim, com confirmação |
+| **Conferir endereços** | Compara os 4 endereços de cada serviço (fiscal, cadastral, cobrança, instalação) e lista os divergentes; CSV para correção manual | Não |
+| **Data de venda** | Correção em lote da data da venda (CSV, pré-visualização e releitura) | Sim |
+| **Catálogos** | Consulta serviços, vencimentos, vendedores, formas de cobrança, status, grupos, equipamentos e POPs da conta | Não |
+| **Histórico** | Linhas importadas/recusadas (`ops_audit_log`) | Não |
+| **IXC: logins** | Inativa/reativa logins (`radusuarios`) do IXC em massa a partir de uma lista (migração para a HubSoft) | Escreve no **IXC** |
+
+**Importação em massa** (`internal/integrationhubsoft`: `bulk_import*.go`)
+
+- **Fluxo:** a validação local confere o formato de cada campo e — com os catálogos carregados — se cada ID existe na conta; o **preflight** (`POST …/bulk-import/preflight`, somente leitura) mostra para cada linha se vai criar cliente novo, adicionar serviço a um cliente existente (mesmo ou outro endereço) ou se o login já existe; a aplicação (`POST …/bulk-import/apply`) roda em **lotes de 15 linhas e para após 3 falhas seguidas**. Cada linha criada/recusada fica no histórico (`ops_audit_log`).
+- **Regra de ouro:** nenhum valor não confirmado é enviado à HubSoft — a mesma validação da fase 1 roda de novo em cada linha antes de montar o pedido.
+- **Duplicidade:** cliente é localizado por CPF/CNPJ; serviço, por login. Antes de criar, a importação confere se o login já existe em **qualquer** cadastro (`login_radius`); se existir, a linha não é cadastrada (`skipped_login_in_use`). Cliente que já existe ganha o serviço novo no **endereço de instalação do CSV** (e a linha avisa se difere do cadastrado).
+- **Login/senha PPPoE:** nenhuma rota da API cria a autenticação do serviço — `configurar_autenticacao` só altera uma existente. Por isso a HubSoft precisa ter a automação de **login automático** (máscara) ativa: o serviço nasce com um login predefinido (`netquasar`) e o NetQuasar o troca pelo do CSV. Depois de configurar, o sistema relê o serviço e confere login e senha (reaplica só a senha se divergir). *Reparo:* um serviço que ficou com o login padrão `netquasar`, ou com a senha provisória `nq12345`, é corrigido ao reenviar a linha — nunca se há 2 ou mais serviços no login padrão.
+- **Caixa do login:** a HubSoft padroniza o login em minúsculas e o Radius dela **não diferencia maiúsculas** (confirmado pela HubSoft); a **senha** é exata. Para um futuro ERP que diferencie, grava-se nas **Observações da autenticação** o texto `Login PPPoE configurado no cliente: <login original>` (automático na importação; em lote pelo botão «Registrar» da aba *Conferir cadastros*, `POST …/login-observation`; observações do operador são preservadas).
+- **Regras reais da HubSoft aplicadas na validação:** telefone com no mínimo 10 dígitos; e-mail só ASCII e sem ponto no fim; **carnê** (`carne = true`) exige `gerar_carne`, enviado sempre como `nao_gerar_carne` (marca o serviço como carnê sem gerar boleto); **data de nascimento** vazia vira `01/01/1900` (com aviso) e titular menor de 18 anos recusado pela HubSoft é reenviado **uma vez** com `01/01/1990`.
+- **Limites da API (corrigir só na HubSoft):** `PUT /cliente/cliente_servico/editar/{id}` altera apenas forma de cobrança, vendedor, status, data da venda, perfil de suspensão e grupos do **serviço**. **Não** há edição de plano, endereço nem grupo do **cliente** — por isso as ferramentas de conferência listam e exportam, mas a correção é feita na interface da HubSoft. *Grupos de serviço* (`grupo_cliente_servico`: pré-pago, pós-pago…) não são os *grupos de cliente* (Residencial, Empresarial, NFCom, NF 62…).
+
+**Conferir cadastros** (`POST …/registration-check`, lotes de até 25 linhas, somente leitura): para cada linha consulta a HubSoft (por CPF/CNPJ ou `id_cliente`; se o CPF não bater, pelo login) e compara nome, CPF/CNPJ, telefone, e-mail, nascimento, RG, endereço, plano, status, vendedor, interface, valor, data da venda, carnê, referência, login e senha. Texto é comparado sem caixa/acento/espaços; **login e senha são exatos**. O que a consulta da HubSoft não devolve (ex.: vencimento, forma de cobrança) aparece como «não verificável». Dois modos (`"mode": "especifica" | "completa"`): **Específica** (nome, CPF/CNPJ, login, senha, valor e velocidade do plano — extraída do nome do plano, com até 50 Mbit/s de margem) e **Completa** (todos os campos). O resultado classifica cada cadastro em *tudo certo*, *divergente*, *não encontrado* ou *ambíguo*, com detalhe arquivo × HubSoft e exportação das divergências em CSV.
+
+**Corrigir senhas** (`GET …/password-fix/scan`, `POST …/password-fix/apply`): varre a base (serviços não cancelados) atrás de senhas no formato `="…"` (resíduo de CSV exportado do IXC/Excel) e, com confirmação, troca pelo conteúdo. Cada serviço é relido antes e só é alterado se ainda estiver nesse formato; a auditoria guarda apenas os ids.
+
+**Conferir endereços** (`GET …/address-check/scan[?cancelados=1]`): lê `/cliente/todos` com as relações de endereço e classifica cada serviço como `fiscal_diferente` (só o fiscal é outro), `instalacao_diferente` («2º ponto») ou `outra`. O que **não** pode divergir é o endereço **fiscal**; instalação diferente costuma ser legítima.
+
+**IXC: logins** (`POST …/ixc/logins/preview` e `…/apply`, permissão `integrations.ixc_logins`): a lista (CSV de logins) é conferida **somente leitura** (*pronto*, *já inativo*, *não encontrado*, *ambíguo*); o `apply` inativa (`ativo = N`) ou reativa os ids informados, relê antes e depois e grava no histórico o **estado anterior** (para reverter). O próprio IXC derruba a sessão PPPoE do login inativado. O `PUT /radusuarios/{id}` reenvia o registro **completo** lido antes, trocando só `ativo` (`S`/`N`), e a gravação é conferida relendo o login.
+
+**Relatório → Desbloqueio preventivo / Tempo de cliente:** o primeiro conta quantos serviços têm «desbloqueio preventivo» e quantas vezes (a HubSoft só informa isso por cliente, então a consulta corre em lotes com progresso); o segundo mostra clientes ativos por faixa de data da venda. Na aba **Ordens de serviço**, a **Conferência** cruza cada O.S. do período com status de conexão, acesso remoto (HTTP/HTTPS) e IPv6 do cliente. Roda como **tarefa em segundo plano** — `POST …/hubsoft/conference` devolve um `job_id` e a tela consulta `GET …/hubsoft/conference/{jobId}` mostrando uma barra de progresso (de 5 em 5 %, nunca regride). Por omissão pede à HubSoft só as O.S. **finalizadas** (`only_finished`) e mostra data/usuário de fechamento e o motivo; datas começam em *hoje* (fuso local). Até 150 clientes distintos os dados de conexão vêm de uma consulta por cliente; acima disso, da varredura completa da base. No cartão de um cliente (Consulta), as abas *Financeiro*, *Atendimentos* e *O.S.* carregam sozinhas ao abrir e a aba *Identificação* mostra os dados cadastrais completos.
 
 Usa os endpoints `/todos` da HubSoft (paginação real) para os relatórios por período; a Consulta usa `/cliente` (a API não pagina esse endpoint — devolve até 100 e avisa quando o resultado bate no teto). Resultados de Atendimentos/O.S./Financeiro (Dashboard) ficam em cache no servidor (Redis) por alguns minutos — "Carregar dados ao iniciar o sistema" (Configurações → Integrações → HubSoft) aquece esse cache no arranque. Todos os relatórios HubSoft estão também no catálogo de **Automações** (ver abaixo).
 
@@ -244,6 +286,14 @@ Em alertas de **OLT offline** (`ping_unreachable` numa OLT) ou **PON DOWN**, o m
 
 ---
 
+### Topologia do POP (`/pops/:popId/rack`)
+
+**Função:** diagrama do rack de um POP — equipamentos e as suas portas ligadas por fibra.
+
+**Como funciona:** cada equipamento mostra as suas interfaces numa grelha que só quebra linha depois de **50 portas**. Cada porta tem um tipo — **SFP**, **SFP+**, **Ethernet /100**, **Ethernet /1000** ou **PON** (ícone de sol) — que define o ícone no diagrama.
+
+---
+
 ### Topologia (`/topology`)
 
 **Função:** diagrama de rede desenhado **manualmente** (equipamentos, agrupamentos por POP, ligações tipadas) — deliberadamente sem descoberta automática (LLDP na tela BGP é só informativo, não alimenta este diagrama).
@@ -279,6 +329,7 @@ Em alertas de **OLT offline** (`ping_unreachable` numa OLT) ou **PON DOWN**, o m
 
 - **Aba ONUs** — dados que não vêm por a ONU estar offline aparecem como "-" (não valor obsoleto). A coluna RX é classificada por cor (**Boa / Aceitável / Ruim**) pelos limiares em Configurações → OLT → *Qualidade da potência RX (ONU)* (`monitoring_settings.onu_rx_good_dbm` / `onu_rx_bad_dbm`). Cada linha tem **Histórico** nos 3 pontinhos: últimas 10 colectas dessa ONU (`olt_onu_history`, `GET /olt/devices/{id}/onu-history`).
 - **Aba Pesquisa de ONUs** — busca entre todas as OLTs por serial/modelo/cliente + filtros de OLT, PON, potência, temperatura, voltagem. Botão de **exportar CSV** (ícone) leva exactamente o que está filtrado (todas as páginas). O limite da consulta HubSoft-independente é a própria API/coleta.
+- **Atualizar PON** — com **1 OLT e 1 PON** selecionadas na Pesquisa de ONUs aparece o botão que atualiza só essa PON (`POST /olt/devices/{id}/pons/{pon}/refresh`), via Telnet com o comando configurado por fabricante em Configurações → OLT (bloco *Atualizar ONUs de uma PON*, com o placeholder `{pon}`; um comando por linha ou separados por `;`; usa os pré-comandos do bloco 1). O resultado é mesclado no snapshot sem recoletar a OLT inteira; a OLT informa `pon_refresh_available` quando há comando configurado.
 - **Aba Relatório** — histórico de ONUs por OLT (total/online/offline). Ao seleccionar **uma OLT específica**, mostra também um gráfico geral (soma de todas as PONs) e um grid de 4 colunas com o histórico de cada porta PON (`olt_pon_samples`, `GET /olt/reports/pon-history`).
 
 ---
@@ -385,7 +436,7 @@ Qualquer usuário autenticado acede às preferências pessoais. As restantes aba
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
 | **OLT / MikroTik / Switch / BNG / BGP** | Perfis por marca/modelo, coleta e (BGP) cadastro de operadoras (CNPJ, AS, limite de banda). A aba **OLT** tem ainda os limiares de *Qualidade da potência RX (ONU)* (dBm "boa" / "ruim") usados na tabela de ONUs e no Dashboard |
 | **Telegram** | Bot monitoring e relatórios |
-| **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial — mais **Automações personalizadas** (ilimitadas, qualquer relatório do sistema ou de frota, recorrência própria) |
+| **Automações** | Backup, digest de alertas, ONU mensal, totais BNG, base comercial e **Coleta de ONUs (OLT)** — mais **Automações personalizadas** (ilimitadas, qualquer relatório do sistema ou de frota, recorrência própria) |
 | **Auditoria** | `ops_audit_log` |
 
 Preferências por conta (novos usuários: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
@@ -409,7 +460,9 @@ O watcher global reage a `monitoring_runtime.last_alerts_change_at` (offline, PO
 
 ### Automações agendadas
 
-Em **Configurações → Automações**: os 5 cadastros fixos — backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG e base comercial — mais **Automações personalizadas** (`automation_schedules`, tabela própria, sem limite de instâncias): cada uma escolhe qualquer relatório do catálogo `/api/v1/reports/system` ou um relatório de frota/combustível, com recorrência diária/semanal/dias específicos/mensal e janela de dados própria — enviado pelo bot Telegram "reports". Mesmo motor de agendamento (`scheduleutil`) dos 5 cadastros fixos, executando a cada verificação de 30 s do worker. Histórico em `automation_execution_log`.
+Em **Configurações → Automações**: os 6 cadastros fixos — backup PostgreSQL (B2), digest de alertas, relatório ONU, totais BNG, base comercial e **Coleta de ONUs (OLT)** — mais **Automações personalizadas** (`automation_schedules`, tabela própria, sem limite de instâncias): cada uma escolhe qualquer relatório do catálogo `/api/v1/reports/system` ou um relatório de frota/combustível, com recorrência diária/semanal/dias específicos/mensal e janela de dados própria — enviado pelo bot Telegram "reports". Mesmo motor de agendamento (`scheduleutil`) dos cadastros por dia/hora, executando a cada verificação de 30 s do worker. Histórico em `automation_execution_log`.
+
+**Coleta de ONUs (OLT)** (`automation_olt_onu_collection`, migração 155) corre por **intervalo**, em segundo plano, sobre todas as OLTs, em duas cadências independentes: **leve** (status das ONUs/PONs + RX, padrão a cada 5 min — modo `status_rx`) e **completa** (serial, temperatura, TX, modelo e telnet, padrão a cada 6 h — modo `full`, com a fase de completar serial por PON). Quando as duas vencem juntas roda só a completa. Cada OLT é consultada uma vez de cada vez (`snmpdevicelock`). O cartão tem liga/desliga, intervalos, «Executar leve/completa agora» e o resultado da última execução por OLT. API: `GET/PATCH /settings/automation/olt-onu-collection` e `POST …/run` (`{"kind":"light"|"full"}`). Vem **desligada** por padrão.
 
 O catálogo de relatórios do sistema inclui alertas, BGP, OLT/BNG e **HubSoft**: `hubsoft-overview` (combinado), `hubsoft-services-by-plan` / `-by-locality` / `-full`, `hubsoft-work-orders-period` (com ranking por técnico) e `hubsoft-attendance-period` — cada um agendável de forma independente.
 
@@ -420,6 +473,7 @@ O catálogo de relatórios do sistema inclui alertas, BGP, OLT/BNG e **HubSoft**
 - **Login UI** — `POST /auth/login` → JWT (`NETQUASAR_SESSION_SECRET`).
 - **API keys** — cabeçalho `X-API-Key` (`NETQUASAR_API_KEYS`).
 - Permissões por perfil (`permission_profiles`); mutações e coletas exigem a chave correspondente ou admin.
+  Chaves ligadas à HubSoft/IXC: `integrations.hubsoft_bulk` (edições em massa na HubSoft) e `integrations.ixc_logins` (inativar logins no IXC). O catálogo fica em `api/permission_catalog.go` e `quasar_frontend/src/lib/permissions.ts`.
 - Preferências do usuário autenticado: `/api/v1/me/preferences`.
 
 Health: `GET /health` · Métricas Prometheus: `GET /metrics`
@@ -442,6 +496,9 @@ NetQuasar/
 │   │   ├── alertnotify/     # Telegram
 │   │   ├── alertcorrelation/# Incidentes
 │   │   ├── oltcollect/      # Perfis e coleta OLT
+│   │   ├── integrationhubsoft/ # Cliente da API HubSoft: relatórios, importação em massa (bulk_import_*.go),
+│   │   │                    #   conferências (conference.go, registration_check.go, address_check.go), correção de senhas
+│   │   ├── integrationixc/  # Cliente IXC para inativar/reativar logins (radusuarios)
 │   │   ├── oltifderive/     # Derivação PON/ONU via IF-MIB
 │   │   ├── bgpcollect/      # Catálogo SNMP e pivot de dados BGP (peers/óptica/hardware/…)
 │   │   ├── networkevents/   # Catálogo de eventos de rede

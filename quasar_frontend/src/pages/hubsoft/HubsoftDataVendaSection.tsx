@@ -1,8 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
+import { CalendarClock, Download, Eye } from "lucide-react";
+import { downloadCsv, parseCsv } from "./hubsoftCsv";
+import { Callout, CsvDropzone, Pill, ProgressBar, Segmented, Stat, Step, ToolPanel } from "./hubsoftAdminKit";
 
 /**
- * PROVISÓRIO — só administradores. Correção em lote da "data da venda" dos serviços HubSoft a partir de
+ * Correção em lote da "data da venda" dos serviços HubSoft a partir de
  * um CSV. Fluxo: exportar base → preencher data_venda_nova → pré-visualizar (conferência por login + id +
  * código + nome, no servidor) → aplicar em lotes pequenos, parando ao primeiro sinal de inconsistência.
  */
@@ -34,54 +37,6 @@ type ExportResp = {
   message?: string;
   rows: { login: string; service_id: string; client_code: string; client_name: string; status: string; current_date?: string }[];
 };
-
-function csvEsc(v: string): string {
-  return /[";,\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-function downloadCsv(name: string, head: string[], rows: string[][]) {
-  const text = [head, ...rows].map((r) => r.map((c) => csvEsc(c ?? "")).join(";")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([`﻿${text}`], { type: "text/csv;charset=utf-8;" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-/** Parser CSV mínimo: separador ; ou , (detectado pelo cabeçalho), aspas duplas, BOM. */
-function parseCsv(text: string): string[][] {
-  const t = text.replace(/^﻿/, "");
-  const firstLine = t.split(/\r?\n/, 1)[0] ?? "";
-  const sep = (firstLine.match(/;/g)?.length ?? 0) >= (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let q = false;
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i];
-    if (q) {
-      if (c === '"' && t[i + 1] === '"') {
-        cell += '"';
-        i++;
-      } else if (c === '"') q = false;
-      else cell += c;
-    } else if (c === '"') q = true;
-    else if (c === sep) {
-      row.push(cell);
-      cell = "";
-    } else if (c === "\n" || c === "\r") {
-      if (c === "\r" && t[i + 1] === "\n") i++;
-      row.push(cell);
-      cell = "";
-      if (row.some((x) => x.trim() !== "")) rows.push(row);
-      row = [];
-    } else cell += c;
-  }
-  row.push(cell);
-  if (row.some((x) => x.trim() !== "")) rows.push(row);
-  return rows;
-}
 
 const HEADER_ALIASES: Record<string, string[]> = {
   login: ["login_pppoe", "login", "pppoe"],
@@ -123,7 +78,6 @@ function mapCsv(rows: string[][]): { items: InputRow[]; error?: string; skipped:
 type Filter = "all" | "approved" | "blocked";
 
 export function HubsoftDataVendaSection() {
-  const fileRef = useRef<HTMLInputElement>(null);
   const [includeCancelled, setIncludeCancelled] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [items, setItems] = useState<InputRow[]>([]);
@@ -262,84 +216,111 @@ export function HubsoftDataVendaSection() {
   const okCount = results.filter((r) => r.ok).length;
   const canApply = !!preview && approved.length > 0 && !overLimit && ack && typed.trim() === confirmText && !applying && results.length === 0;
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div className="card" style={{ padding: 14 }}>
-        <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Correção em lote da data de venda</h3>
-        <p style={{ fontSize: 12, color: "var(--warn)", margin: "0 0 10px" }}>
-          Ferramenta provisória, só para administradores. Altera dados de produção na HubSoft — cada serviço é conferido por login PPPoE, id, código e nome do cliente antes e depois da alteração.
-        </p>
-        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 4 }}>
-          <li>Exporte o CSV com todos os serviços e preencha a coluna <b>data_venda_nova</b> (AAAA-MM-DD ou DD/MM/AAAA). Não altere login, id, código nem cliente.</li>
-          <li>Envie o CSV preenchido e gere a pré-visualização — nada é alterado nesta etapa.</li>
-          <li>Revise o que foi aprovado/bloqueado, confirme e aplique (máx. {APPLY_MAX} por execução).</li>
-        </ol>
-      </div>
+  function clearFile() {
+    setItems([]);
+    setFileName("");
+    setSkipped(0);
+    setPreview(null);
+    setResults([]);
+    setStopMsg("");
+    setAck(false);
+    setTyped("");
+    setErr("");
+  }
 
-      <div className="card" style={{ padding: 14 }}>
-        <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>1 · Exportar base</h4>
-        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button type="button" className="btn btn--sm btn--primary" disabled={exporting} onClick={() => void doExport()}>
+  return (
+    <ToolPanel
+      icon={<CalendarClock size={20} />}
+      title="Correção em lote da data de venda"
+      badge="Altera a HubSoft"
+      badgeTone="warn"
+      subtitle="Altera dados de produção na HubSoft. Cada serviço é conferido por login PPPoE, id, código e nome do cliente antes e depois da alteração."
+    >
+      <Step n={1} title="Exportar a base" done={false} hint="Gera um CSV com todos os serviços; preencha a coluna data_venda_nova (AAAA-MM-DD ou DD/MM/AAAA) e não altere login, id, código nem cliente.">
+        <div className="hsa-actions">
+          <button type="button" className="btn btn--primary" disabled={exporting} onClick={() => void doExport()}>
+            <Download size={14} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
             {exporting ? "Lendo a HubSoft…" : "Exportar CSV de todos os serviços"}
           </button>
-          <label className="row" style={{ gap: 6, fontSize: 12 }}>
+          <label className="hsa-check">
             <input type="checkbox" checked={includeCancelled} onChange={(e) => setIncludeCancelled(e.target.checked)} />
             Incluir serviços cancelados
           </label>
         </div>
-      </div>
+      </Step>
 
-      <div className="card" style={{ padding: 14 }}>
-        <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>2 · Enviar CSV preenchido e pré-visualizar</h4>
-        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0])} />
-          <button type="button" className="btn btn--sm btn--primary" disabled={previewing || items.length === 0} onClick={() => void doPreview()}>
+      <Step n={2} title="Enviar o CSV preenchido e pré-visualizar" done={!!preview} hint="Nada é alterado nesta etapa.">
+        <CsvDropzone
+          fileName={fileName}
+          info={fileName ? `${items.length} linha(s) com nova data${skipped ? `, ${skipped} sem data (ignoradas)` : ""}` : undefined}
+          disabled={previewing || applying}
+          onFile={(f) => void onFile(f)}
+          onClear={clearFile}
+        />
+        <div className="hsa-actions">
+          <span className="hsa-spacer" />
+          <button type="button" className="btn btn--primary" disabled={previewing || items.length === 0} onClick={() => void doPreview()}>
+            <Eye size={14} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
             {previewing ? "Conferindo com a HubSoft…" : "Pré-visualizar alterações"}
           </button>
         </div>
-        {fileName ? (
-          <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>
-            {fileName}: {items.length} linha(s) com nova data{skipped ? `, ${skipped} sem data (ignoradas)` : ""}.
-          </p>
-        ) : null}
-        {err ? <div className="msg msg--err" style={{ marginTop: 8 }}>{err}</div> : null}
-      </div>
+        {err ? <Callout tone="err">{err}</Callout> : null}
+      </Step>
 
       {preview ? (
-        <div className="card" style={{ padding: 14 }}>
-          <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>3 · Pré-visualização</h4>
-          <div className="dashboard-kpi-row" style={{ gridTemplateColumns: "repeat(3, minmax(0, 180px))", marginBottom: 10 }}>
-            <div className="stat"><div className="stat__k">Aprovadas</div><div className="stat__v" style={{ color: "var(--ok)" }}>{approved.length}</div></div>
-            <div className="stat"><div className="stat__k">Bloqueadas</div><div className="stat__v" style={{ color: preview.blocked ? "var(--err)" : undefined }}>{preview.blocked}</div></div>
-            <div className="stat"><div className="stat__k">Serviços na HubSoft</div><div className="stat__v">{preview.base_size}</div></div>
+        <Step n={3} title="Pré-visualização" done={approved.length > 0 && preview.blocked === 0}>
+          <div className="hsa-stats">
+            <Stat label="Aprovadas" value={approved.length} tone="ok" />
+            <Stat label="Bloqueadas" value={preview.blocked} tone={preview.blocked ? "err" : "muted"} />
+            <Stat label="Serviços na HubSoft" value={preview.base_size} tone="muted" />
           </div>
-          <div className="row" style={{ gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-            {(["all", "approved", "blocked"] as Filter[]).map((f) => (
-              <button key={f} type="button" className={`btn btn--sm${filter === f ? " btn--primary" : ""}`} onClick={() => setFilter(f)}>
-                {f === "all" ? "Todas" : f === "approved" ? "Aprovadas" : "Bloqueadas"}
-              </button>
-            ))}
-            <button type="button" className="btn btn--sm" style={{ marginLeft: "auto" }} onClick={downloadPlan}>Baixar plano (CSV)</button>
+          <div className="hsa-actions">
+            <Segmented
+              label="Filtrar linhas"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "Todas" },
+                { value: "approved", label: "Aprovadas" },
+                { value: "blocked", label: "Bloqueadas" },
+              ]}
+            />
+            <span className="hsa-spacer" />
+            <button type="button" className="btn btn--sm" onClick={downloadPlan}>
+              <Download size={13} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+              Baixar plano (CSV)
+            </button>
           </div>
-          <div className="table-wrap integration-support-table" style={{ maxHeight: 460, overflow: "auto" }}>
-            <table className="integration-support-table__grid">
+          <div className="hsa-table-wrap">
+            <table className="hsa-table">
               <thead>
-                <tr><th>Linha</th><th>Login PPPoE</th><th>ID</th><th>Cliente</th><th>Status</th><th>Data atual</th><th>Nova data</th><th>Decisão</th></tr>
+                <tr>
+                  <th>Linha</th>
+                  <th>Login PPPoE</th>
+                  <th>ID</th>
+                  <th>Cliente</th>
+                  <th>Status</th>
+                  <th>Data atual</th>
+                  <th>Nova data</th>
+                  <th>Decisão</th>
+                </tr>
               </thead>
               <tbody>
                 {shown.map((r) => (
                   <tr key={r.line}>
-                    <td className="mono integration-support-table__cell">{r.line}</td>
-                    <td className="mono integration-support-table__cell">{r.login}</td>
-                    <td className="mono integration-support-table__cell">{r.service_id || "—"}</td>
-                    <td className="integration-support-table__cell">{r.client_name || "—"}</td>
-                    <td className="integration-support-table__cell">{r.status || "—"}</td>
-                    <td className="mono integration-support-table__cell">{r.current_date || "—"}</td>
-                    <td className="mono integration-support-table__cell">{r.new_date || "—"}</td>
-                    <td className="integration-support-table__cell" style={{ color: r.approved ? "var(--ok)" : "var(--err)" }}>
-                      {r.approved ? "Aprovada" : `Bloqueada: ${r.reason}`}
+                    <td className="hsa-table__num mono">{r.line}</td>
+                    <td className="mono">{r.login}</td>
+                    <td className="mono">{r.service_id || "—"}</td>
+                    <td>{r.client_name || "—"}</td>
+                    <td>{r.status || "—"}</td>
+                    <td className="mono">{r.current_date || "—"}</td>
+                    <td className="mono">{r.new_date || "—"}</td>
+                    <td>
+                      {r.approved ? <Pill tone="ok">Aprovada</Pill> : <span style={{ color: "var(--err)" }}>Bloqueada: {r.reason}</span>}
                       {(r.warnings ?? []).map((w) => (
-                        <div key={w} style={{ color: "var(--warn)", fontSize: 11 }}>⚠ {w}</div>
+                        <div key={w} className="hsa-muted" style={{ color: "var(--warn)" }}>
+                          ⚠ {w}
+                        </div>
                       ))}
                     </td>
                   </tr>
@@ -347,62 +328,93 @@ export function HubsoftDataVendaSection() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Step>
       ) : null}
 
       {preview && approved.length > 0 ? (
-        <div className="card" style={{ padding: 14 }}>
-          <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>4 · Aplicar</h4>
+        <Step n={4} title="Aplicar" done={results.length > 0 && !applying}>
           {overLimit ? (
-            <div className="msg msg--err">São {approved.length} aprovadas; o máximo por execução é {APPLY_MAX}. Divida o CSV.</div>
+            <Callout tone="err">
+              São {approved.length} aprovadas; o máximo por execução é {APPLY_MAX}. Divida o CSV.
+            </Callout>
           ) : (
             <>
-              <label className="row" style={{ gap: 6, fontSize: 12, marginBottom: 8 }}>
+              <label className="hsa-check">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
                 Revisei a pré-visualização e entendo que isto altera a data de venda de {approved.length} serviço(s) na HubSoft.
               </label>
-              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <input className="input" style={{ width: 170 }} placeholder={confirmText} value={typed} onChange={(e) => setTyped(e.target.value)} />
-                <button type="button" className="btn btn--sm btn--primary" disabled={!canApply} onClick={() => void doApply()}>
+              <div className="hsa-actions">
+                <input className="input" style={{ width: 190 }} placeholder={confirmText} value={typed} onChange={(e) => setTyped(e.target.value)} />
+                <button type="button" className="btn btn--primary" disabled={!canApply} onClick={() => void doApply()}>
                   {applying ? "Aplicando…" : `Aplicar ${approved.length} alteração(ões)`}
                 </button>
                 {applying ? (
-                  <button type="button" className="btn btn--sm" onClick={() => { stopRef.current = true; }}>Parar</button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      stopRef.current = true;
+                    }}
+                  >
+                    Parar
+                  </button>
                 ) : null}
               </div>
-              <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0" }}>Digite exatamente “{confirmText}” para liberar o botão.</p>
+              <span className="hsa-muted">Digite exatamente “{confirmText}” para liberar o botão.</span>
+              {applying ? <ProgressBar done={results.length} total={Math.min(approved.length, APPLY_MAX)} label={`Aplicando… ${results.length} de ${Math.min(approved.length, APPLY_MAX)}`} /> : null}
             </>
           )}
-        </div>
+        </Step>
       ) : null}
 
       {results.length > 0 ? (
-        <div className="card" style={{ padding: 14 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            <h4 style={{ margin: 0, fontSize: 13 }}>Resultado — {okCount} ok, {results.length - okCount} com problema {applying ? `(processando… ${results.length}/${Math.min(approved.length, APPLY_MAX)})` : ""}</h4>
-            <button type="button" className="btn btn--sm" onClick={downloadResults}>Baixar resultado (CSV)</button>
+        <Step n={5} title="Resultado" done={!applying && okCount === results.length}>
+          <div className="hsa-stats">
+            <Stat label="OK" value={okCount} tone="ok" />
+            <Stat label="Com problema" value={results.length - okCount} tone={results.length - okCount ? "err" : "muted"} />
           </div>
-          {stopMsg ? <div className="msg msg--err" style={{ marginBottom: 8 }}>{stopMsg}</div> : null}
-          <div className="table-wrap integration-support-table" style={{ maxHeight: 360, overflow: "auto" }}>
-            <table className="integration-support-table__grid">
-              <thead><tr><th>Linha</th><th>Login</th><th>ID</th><th>Resultado</th><th>Antes → Depois</th></tr></thead>
+          {stopMsg ? <Callout tone="err">{stopMsg}</Callout> : null}
+          <div className="hsa-actions">
+            <span className="hsa-spacer" />
+            <button type="button" className="btn btn--sm" onClick={downloadResults}>
+              <Download size={13} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+              Baixar resultado (CSV)
+            </button>
+          </div>
+          <div className="hsa-table-wrap">
+            <table className="hsa-table">
+              <thead>
+                <tr>
+                  <th>Linha</th>
+                  <th>Login</th>
+                  <th>ID</th>
+                  <th>Resultado</th>
+                  <th>Antes → Depois</th>
+                </tr>
+              </thead>
               <tbody>
                 {results.map((r) => (
                   <tr key={`${r.line}-${r.service_id}`}>
-                    <td className="mono integration-support-table__cell">{r.line}</td>
-                    <td className="mono integration-support-table__cell">{r.login}</td>
-                    <td className="mono integration-support-table__cell">{r.service_id}</td>
-                    <td className="integration-support-table__cell" style={{ color: r.ok ? "var(--ok)" : "var(--err)" }}>{r.ok ? "OK" : r.halt ? "PAROU" : "Erro"} — {r.message}</td>
-                    <td className="mono integration-support-table__cell">{r.date_before || "?"} → {r.date_after || "—"}</td>
+                    <td className="hsa-table__num mono">{r.line}</td>
+                    <td className="mono">{r.login}</td>
+                    <td className="mono">{r.service_id}</td>
+                    <td style={{ color: r.ok ? "var(--ok)" : "var(--err)" }}>
+                      {r.ok ? "OK" : r.halt ? "PAROU" : "Erro"} — {r.message}
+                    </td>
+                    <td className="mono">
+                      {r.date_before || "?"} → {r.date_after || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </Step>
       ) : stopMsg ? (
-        <div className="msg msg--err">{stopMsg}</div>
+        <div className="hsa-panel__body--pad">
+          <Callout tone="err">{stopMsg}</Callout>
+        </div>
       ) : null}
-    </div>
+    </ToolPanel>
   );
 }

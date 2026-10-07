@@ -21,16 +21,23 @@ const (
 )
 
 var (
-	rePonPhy      = regexp.MustCompile(`(?i)^GPON(\d+)/(\d+)`)
-	reOnuIface    = regexp.MustCompile(`(?i)^GPON(\d+)ONU(\d+)`)
-	rePonPhyZTE   = regexp.MustCompile(`(?i)^PON-(\d+)/(\d+)/(\d+)`)
-	rePonPhyZTEIf = regexp.MustCompile(`(?i)^GPON_OLT-(\d+)/(\d+)/(\d+)`)
-	rePonPhyDatacom  = regexp.MustCompile(`(?i)^gpon-(\d+)/(\d+)/(\d+)`)
-	reOnuIfaceZTE     = regexp.MustCompile(`(?i)^(?:GPON[-_]?ONU[-_]?|EPON[-_]?ONU[-_]?|ONU[-_])(\d+)/(\d+)/(\d+):(\d+)`)
+	rePonPhy           = regexp.MustCompile(`(?i)^GPON(\d+)/(\d+)`)
+	reOnuIface         = regexp.MustCompile(`(?i)^GPON(\d+)ONU(\d+)`)
+	rePonPhyZTE        = regexp.MustCompile(`(?i)^PON-(\d+)/(\d+)/(\d+)`)
+	rePonPhyZTEIf      = regexp.MustCompile(`(?i)^GPON_OLT-(\d+)/(\d+)/(\d+)`)
+	rePonPhyDatacom    = regexp.MustCompile(`(?i)^gpon-(\d+)/(\d+)/(\d+)`)
+	reOnuIfaceZTE      = regexp.MustCompile(`(?i)^(?:GPON[-_]?ONU[-_]?|EPON[-_]?ONU[-_]?|ONU[-_])(\d+)/(\d+)/(\d+):(\d+)`)
 	reOnuIfaceZTELoose = regexp.MustCompile(`(?i)(?:GPON[-_]?ONU|EPON[-_]?ONU|ONU)[-_]?(\d+)/(\d+)/(\d+):(\d+)`)
-	reVlan        = regexp.MustCompile(`(?i)^VLAN\d+`)
-	reGE          = regexp.MustCompile(`(?i)^GE\d+/\d+`)
-	reVsolPonName = regexp.MustCompile(`(?i)^PON\s+(\d+)\s*$`)
+	reVlan             = regexp.MustCompile(`(?i)^VLAN\d+`)
+	reGE               = regexp.MustCompile(`(?i)^GE\d+/\d+`)
+	reVsolPonName      = regexp.MustCompile(`(?i)^PON\s+(\d+)\s*$`)
+	// rePonPhyNoSlash — variante VSOL sem barra, com zero à esquerda ("GPON001", "GPON01"), sem
+	// "ONU" depois dos dígitos (o `$` já garante isso — "GPON01ONU2" não bate aqui, cai em
+	// reOnuIface). Mesma porta física de "GPON0/1" e "PON 01", só que numa 3ª grafia — bug real
+	// relatado pelo usuário: sem reconhecer essa forma, CanonicalPonRowKey/ponKeyForIfaceRow
+	// tratavam "GPON001" como uma porta DIFERENTE de "PON 01"/"GPON0/1", duplicando cada PON físico
+	// (8 PONs viravam 16 linhas).
+	rePonPhyNoSlash = regexp.MustCompile(`(?i)^GPON(\d{2,4})$`)
 )
 
 func firstToken(s string) string {
@@ -76,6 +83,9 @@ func ClassifyKind(displayName, descr string) Kind {
 		return KindPON
 	}
 	if rePonPhyDatacom.MatchString(tok) {
+		return KindPON
+	}
+	if rePonPhyNoSlash.MatchString(tok) {
 		return KindPON
 	}
 	// GE sem barra ou outras VLAN por nome
@@ -155,6 +165,14 @@ func PonCompactFromPhy(displayName, descr string) string {
 	m = rePonPhyDatacom.FindStringSubmatch(tok)
 	if m != nil {
 		return m[1] + "/" + m[2] + "/" + m[3]
+	}
+	m = rePonPhyNoSlash.FindStringSubmatch(tok)
+	if m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			// Mesmo esquema de chave de GPON0/N e "PON N" (sempre "0"+número, sem zero à esquerda
+			// duplicado) — assim "GPON001", "GPON0/1" e "PON 01" convergem pra "01".
+			return VsolMibPonCompactID(n)
+		}
 	}
 	return ""
 }

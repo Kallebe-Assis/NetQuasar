@@ -16,6 +16,32 @@ func TestCanonicalPonRowKey_vsol_matches_if_mib(t *testing.T) {
 	}
 }
 
+// TestCanonicalPonRowKey_noSlashVsolVariant confere o 3º nome real de uma mesma porta PON física
+// (ver TestPonCompactFromPhy_noSlashVsolVariant) também converge no resumo PON/ONU da OLT
+// (olt_snapshots.pons via DedupePonMaps), não só na tabela genérica de interfaces.
+func TestCanonicalPonRowKey_noSlashVsolVariant(t *testing.T) {
+	row := map[string]any{"id": "", "name": "GPON001", "status": "pon_up"}
+	if got := CanonicalPonRowKey(row); got != "01" {
+		t.Fatalf("GPON001 row key %q want 01", got)
+	}
+}
+
+// TestPreferPonDisplayName_threeWay confere que a preferência de nome não depende da ordem de
+// chegada quando AS DUAS variantes contêm "GPON" (ex. "GPON0/1" vs "GPON001") — antes da correção,
+// preferPonDisplayName só distinguia "tem GPON" vs "não tem", então "GPON0/1" e "GPON001" eram
+// indistinguíveis pra ela e a escolha virava sorte da ordem de chegada.
+func TestPreferPonDisplayName_threeWay(t *testing.T) {
+	if got := preferPonDisplayName("GPON0/1", "GPON001"); got != "GPON0/1" {
+		t.Errorf("GPON0/1 vs GPON001 (nessa ordem) = %q, want GPON0/1", got)
+	}
+	if got := preferPonDisplayName("GPON001", "GPON0/1"); got != "GPON0/1" {
+		t.Errorf("GPON001 vs GPON0/1 (ordem invertida) = %q, want GPON0/1 — não pode depender da ordem", got)
+	}
+	if got := preferPonDisplayName("PON 01", "GPON001"); got != "GPON001" {
+		t.Errorf("PON 01 vs GPON001 = %q, want GPON001 (GPON sem barra ainda é mais informativo que o nome sintético)", got)
+	}
+}
+
 func TestCanonicalPonRowKey_numericIdWithoutVsolStatus(t *testing.T) {
 	plain := map[string]any{"id": "4", "name": "", "status": "pon_up"}
 	if got := CanonicalPonRowKey(plain); got != "04" {

@@ -36,6 +36,7 @@ func (s *Server) runReportSchedulersLoop(ctx context.Context) {
 		s.tryScheduledCommercialReport(ctx, &l)
 		s.tryScheduledBngStatsReport(ctx, &l)
 		s.tryScheduledDatabaseBackup(ctx, &l)
+		s.tryScheduledOltOnuCollection(ctx, &l)
 		s.tryScheduledCustomAutomations(ctx, &l)
 	}
 	corr := time.NewTicker(5 * time.Minute)

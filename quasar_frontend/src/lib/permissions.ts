@@ -15,6 +15,8 @@ export type PermissionKey =
   | "integrations.view"
   | "integrations.execute"
   | "integrations.manage"
+  | "integrations.hubsoft_bulk"
+  | "integrations.ixc_logins"
   | "pops.view"
   | "pops.manage"
   | "devices.view"
@@ -91,6 +93,20 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { key: "integrations.view", module: "integrations", module_label: "Integrações", label: "Visualizar e consultar" },
   { key: "integrations.execute", module: "integrations", module_label: "Integrações", label: "Executar requisições" },
   { key: "integrations.manage", module: "integrations", module_label: "Integrações", label: "Criar, editar e excluir" },
+  {
+    key: "integrations.hubsoft_bulk",
+    module: "integrations",
+    module_label: "Integrações",
+    label: "HubSoft: edições em massa",
+    description: "Importar clientes e serviços, conferir cadastros, corrigir senhas e datas de venda e consultar catálogos da HubSoft. Administradores já têm acesso.",
+  },
+  {
+    key: "integrations.ixc_logins",
+    module: "integrations",
+    module_label: "Integrações",
+    label: "IXC: inativar logins em massa",
+    description: "Inativa ou reativa logins (radusuarios) do IXC a partir de uma lista. Derruba a conexão PPPoE do login inativado. Administradores já têm acesso.",
+  },
   { key: "pops.view", module: "pops", module_label: "Localidades", label: "Visualizar" },
   { key: "pops.manage", module: "pops", module_label: "Localidades", label: "Criar, editar e excluir" },
   { key: "devices.view", module: "devices", module_label: "Equipamentos", label: "Visualizar" },

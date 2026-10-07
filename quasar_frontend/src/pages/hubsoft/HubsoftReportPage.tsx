@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Headset, Hourglass, Layers, Send, ShieldCheck, Users, Wallet, Wrench } from "lucide-react";
+import { Ban, Headset, Hourglass, Layers, Receipt, Send, ShieldCheck, Users, Wallet, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { InfoHint } from "../../components/InfoHint";
@@ -25,12 +25,15 @@ import type {
   HubsoftWorkOrderReportResponse,
 } from "../../integrations/types";
 import { apiFetch } from "../../lib/api";
+import { HubsoftInvoicesByMethod } from "./HubsoftInvoicesByMethod";
 import { HubsoftPreventiveSection } from "./HubsoftPreventiveSection";
 import { HubsoftBulkClientsModal } from "./HubsoftBulkClientsModal";
 import { HubsoftTenureBandModal, type TenureBand } from "./HubsoftTenureBandModal";
 import { fmtConsultaAt, useConsulta, useConsultaToast } from "./hubsoftConsulta";
 
 import { ConsultaLoading } from "./ConsultaLoading";
+import { todayISO } from "./hubsoftDates";
+import { saveCsvText } from "./hubsoftCsv";
 const SLUG = "hubsoft";
 
 const SERVICE_STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -50,7 +53,7 @@ const SERVICE_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "franquia_excedida", label: "Franquia excedida" },
 ];
 
-type Section = "clients" | "services" | "blocked" | "preventive" | "tenure" | "attendance" | "work_orders" | "financial";
+type Section = "clients" | "services" | "blocked" | "preventive" | "tenure" | "attendance" | "work_orders" | "financial" | "invoices_method";
 
 function fmtInt(n?: number): string {
   return (n ?? 0).toLocaleString("pt-BR");
@@ -88,12 +91,6 @@ function rowToClientCard(row: HubsoftReportServiceRow): ClientCard {
     status: row.status,
     services: [svc],
   };
-}
-
-function todayISO(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
 }
 
 /** "2026-08" (valor de <input type="month">) → {from, to, label} — 1º ao último dia do mês. */
@@ -430,6 +427,7 @@ function ClientsReportSection() {
           onFetchWorkOrders={fetchClientWorkOrders}
           attendanceEnabled
           workOrderEnabled
+          autoLoadTabs
         />
       ) : null}
     </div>
@@ -838,13 +836,7 @@ function BlockedReportSection() {
           .join(","),
       );
     }
-    const blob = new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `bloqueios-hubsoft-${applied.from}_a_${applied.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveCsvText(`bloqueios-hubsoft-${applied.from}_a_${applied.to}.csv`, lines.join("\r\n"));
   }
 
   return (
@@ -1558,6 +1550,7 @@ const SECTIONS: { id: Section; label: string; Icon: LucideIcon }[] = [
   { id: "attendance", label: "Atendimentos", Icon: Headset },
   { id: "work_orders", label: "Ordens de serviço", Icon: Wrench },
   { id: "financial", label: "Financeiro", Icon: Wallet },
+  { id: "invoices_method", label: "Boletos por forma", Icon: Receipt },
 ];
 
 /**
@@ -1597,6 +1590,7 @@ export function HubsoftReportPage() {
       {section === "attendance" && <AttendanceReportSection />}
       {section === "work_orders" && <WorkOrderReportSection />}
       {section === "financial" && <FinancialReportSection />}
+      {section === "invoices_method" && <HubsoftInvoicesByMethod />}
     </div>
   );
 }

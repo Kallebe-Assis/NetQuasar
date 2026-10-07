@@ -254,6 +254,7 @@ export type HubsoftConferenceChecks = {
   check_connection: boolean;
   check_remote_access: boolean;
   check_ipv6: boolean;
+  only_finished?: boolean;
 };
 
 export type HubsoftConferenceItem = {
@@ -270,6 +271,15 @@ export type HubsoftConferenceItem = {
   ipv4?: string;
   /** Vem directo da HubSoft ("true"/"false"/"" sem dado) — mesmo campo do relatório de Clientes. */
   connected?: string;
+  /** Dados do fechamento (vêm no próprio /ordem_servico/todos). */
+  started_at?: string;
+  closed_at?: string;
+  closed_by?: string;
+  closing_description?: string;
+  closing_reasons?: string[];
+  technicians?: string[];
+  protocol?: string;
+  service_name?: string;
   resolved: boolean;
   connection_checked: boolean;
   connection_online: boolean;
@@ -300,6 +310,18 @@ export type HubsoftConferenceResponse = {
     ipv6: HubsoftConferenceStatBucket;
   };
   items: HubsoftConferenceItem[];
+};
+
+/** Acompanhamento da conferência em segundo plano (GET .../hubsoft/conference/{jobId}). */
+export type HubsoftConferenceJobStatus = {
+  job_id: string;
+  status: "running" | "done" | "error";
+  /** Múltiplo de 5. */
+  percent: number;
+  label: string;
+  elapsed_s: number;
+  message?: string;
+  result?: HubsoftConferenceResponse;
 };
 
 export type RecentActivityResponse = {

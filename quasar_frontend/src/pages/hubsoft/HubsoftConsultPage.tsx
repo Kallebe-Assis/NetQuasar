@@ -150,6 +150,25 @@ export function HubsoftConsultPage() {
     [showToast],
   );
 
+  // "Limpar MAC" (aba Serviços do cliente) — POST /cliente/reset_mac_addr na HubSoft. O erro da
+  // própria HubSoft (ex.: serviço sem dados de autenticação) volta tal-qual em e.message.
+  const resetClientServiceMac = useCallback(
+    async (_client: ClientCard, service: ClientServiceSummary) => {
+      if (!service.id) return { ok: false, message: "Serviço sem identificador." };
+      try {
+        const r = await apiFetch<{ ok?: boolean; message?: string }>(
+          `/api/v1/integrations/${slug}/hubsoft/service/${encodeURIComponent(service.id)}/reset-mac`,
+          { method: "POST", json: {} },
+        );
+        showToast("ok", r?.message || "MAC limpo com sucesso.");
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    [showToast],
+  );
+
   // "Baixar selecionados" (aba Financeiro) — o backend busca de novo os boleto_link na HubSoft
   // (não confia nos que já estão na tela) e devolve um único PDF já juntado.
   const downloadBoletos = useCallback(async (client: ClientCard, invoiceIds: string[]) => {
@@ -288,9 +307,11 @@ export function HubsoftConsultPage() {
               onFetchFinancial={fetchClientFinancial}
               onEnableService={enableClientService}
               onSuspendService={suspendClientService}
+              onResetMacService={resetClientServiceMac}
               onDownloadBoletos={downloadBoletos}
               attendanceEnabled
               workOrderEnabled
+              autoLoadTabs
             />
           </>
         ) : (

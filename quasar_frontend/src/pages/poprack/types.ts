@@ -13,6 +13,7 @@ import {
   Network,
   Router,
   Signpost,
+  Sun,
   Waves,
   Wifi,
   Zap,
@@ -93,13 +94,14 @@ export const RACK_EXIT_KIND_ICONS: Record<RackExitKind, LucideIcon> = {
 };
 
 /** Tipo de interface de uma porta — tudo opcional (o utilizador pode deixar em branco). */
-export type RackPortType = "sfp" | "sfp_plus" | "ether_100" | "ether_1000";
+export type RackPortType = "sfp" | "sfp_plus" | "ether_100" | "ether_1000" | "pon";
 
 export const RACK_PORT_TYPE_LABELS: Record<RackPortType, string> = {
   sfp: "SFP",
   sfp_plus: "SFP+",
   ether_100: "Ethernet /100",
   ether_1000: "Ethernet /1000",
+  pon: "PON",
 };
 
 // O pedido original dava o mesmo SVG (circle-dot) para SFP+ e para as duas Ethernet — na
@@ -112,6 +114,7 @@ export const RACK_PORT_TYPE_ICONS: Record<RackPortType, LucideIcon> = {
   sfp_plus: CircleDot,
   ether_100: EthernetPort,
   ether_1000: EthernetPort,
+  pon: Sun,
 };
 
 export type RackPort = { index: number; label: string; description?: string; portType?: RackPortType | null };

@@ -81,6 +81,26 @@ func ponRowHasProtectedCounts(m map[string]any) bool {
 	return strings.Contains(ss, "if_mib_onu")
 }
 
+// ponDisplayNameRank ordena as 3 grafias conhecidas da mesma porta física por quão informativas
+// são: "GPON0/1" (com barra, formato IF-MIB padrão) > "GPON001" (GPON sem barra, variante VSOL) >
+// "PON 01" (nome sintético, sem "GPON" nenhum) > qualquer outra coisa. Sem isso, duas linhas cujo
+// nome AMBOS contêm "GPON" (ex. "GPON0/1" vs "GPON001") ficavam indistinguíveis pra
+// preferPonDisplayName, e qual delas sobrevivia dependia só da ordem de chegada — às vezes a forma
+// menos informativa "ganhava" por acaso.
+func ponDisplayNameRank(s string) int {
+	u := strings.ToUpper(s)
+	switch {
+	case strings.Contains(u, "GPON") && strings.Contains(u, "/"):
+		return 3
+	case strings.Contains(u, "GPON"):
+		return 2
+	case strings.Contains(u, "PON"):
+		return 1
+	default:
+		return 0
+	}
+}
+
 func preferPonDisplayName(a, b string) string {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	if b == "" {
@@ -89,11 +109,11 @@ func preferPonDisplayName(a, b string) string {
 	if a == "" {
 		return b
 	}
-	au, bu := strings.ToUpper(a), strings.ToUpper(b)
-	if strings.Contains(bu, "GPON") && !strings.Contains(au, "GPON") {
+	ra, rb := ponDisplayNameRank(a), ponDisplayNameRank(b)
+	if rb > ra {
 		return b
 	}
-	if strings.Contains(au, "GPON") && !strings.Contains(bu, "GPON") {
+	if ra > rb {
 		return a
 	}
 	if len(b) > len(a) {

@@ -21,6 +21,7 @@ import { AutomationsHistoryTable, AutomationsLogDetail, type AutomationHistoryRo
 import { OnuMonthlyReportPanel } from "./OnuMonthlyReportPanel";
 import { DatabaseBackupAutomationCard } from "./DatabaseBackupAutomationCard";
 import { CustomAutomationsPanel } from "./CustomAutomationsPanel";
+import { OltOnuCollectionCard } from "./OltOnuCollectionCard";
 
 const TZ_DEFAULT = "America/Sao_Paulo";
 
@@ -548,6 +549,10 @@ type AutomationJobOverview = {
   time_hhmm?: string | null;
   timezone?: string | null;
   days_of_week?: number[] | null;
+  light_enabled?: boolean;
+  light_interval_minutes?: number;
+  full_enabled?: boolean;
+  full_interval_minutes?: number;
 };
 
 type AutomationKpis = {
@@ -573,7 +578,18 @@ function formatWhen(iso?: string | null) {
   }
 }
 
+function formatInterval(min: number): string {
+  if (min >= 60 && min % 60 === 0) return `${min / 60} h`;
+  return `${min} min`;
+}
+
 function jobScheduleText(j: AutomationJobOverview): string {
+  if (j.job_type === "olt_onu_collection") {
+    const parts: string[] = [];
+    if (j.light_enabled) parts.push(`status + RX a cada ${formatInterval(j.light_interval_minutes ?? 5)}`);
+    if (j.full_enabled) parts.push(`completa a cada ${formatInterval(j.full_interval_minutes ?? 360)}`);
+    return parts.join(" · ") || "Sem coleta ativa";
+  }
   const def = automationJobDef(j.job_type);
   if (def?.recurrences.length === 1 && def.recurrences[0] === "monthly") {
     return formatRecurrence(draftFromJob({ ...j, frequency: "monthly", day_of_month: j.day_of_month ?? 1 }));
@@ -776,6 +792,7 @@ export function ScheduledReportsPanel() {
                 {selected === "bng_stats_report" && <BngStatsScheduleCard />}
                 {selected === "alerts_digest" && <DigestScheduleCard />}
                 {selected === "commercial_report" && <CommercialScheduleCard />}
+                {selected === "olt_onu_collection" && <OltOnuCollectionCard />}
               </div>
             ) : null}
             {detailTab === "historico" ? (

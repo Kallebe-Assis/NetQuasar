@@ -29,6 +29,8 @@ type OnuReportConfig struct {
 	Commands             []string `json:"commands"`
 	SerialSearchCommand      string   `json:"serial_search_command"`
 	SerialListSearchCommand  string   `json:"serial_list_search_command"`
+	// PonRefreshCommand atualiza as ONUs de UMA PON (placeholder {pon}); um comando por linha ou separados por ";".
+	PonRefreshCommand string `json:"pon_refresh_command,omitempty"`
 	OnuAuthorizeCommand             string   `json:"onu_authorize_command"`
 	OnuDeauthorizeCommand           string   `json:"onu_deauthorize_command"`
 	UnauthorizedOnuQueryCommand     string   `json:"unauthorized_onu_query_command"`
@@ -80,6 +82,7 @@ func ParseOnuReportConfig(raw []byte) OnuReportConfig {
 	cfg.Command = strings.TrimSpace(cfg.Command)
 	cfg.SerialSearchCommand = strings.TrimSpace(cfg.SerialSearchCommand)
 	cfg.SerialListSearchCommand = strings.TrimSpace(cfg.SerialListSearchCommand)
+	cfg.PonRefreshCommand = strings.TrimSpace(cfg.PonRefreshCommand)
 	cfg.OnuAuthorizeCommand = strings.TrimSpace(cfg.OnuAuthorizeCommand)
 	cfg.OnuDeauthorizeCommand = strings.TrimSpace(cfg.OnuDeauthorizeCommand)
 	cfg.UnauthorizedOnuQueryCommand = strings.TrimSpace(cfg.UnauthorizedOnuQueryCommand)

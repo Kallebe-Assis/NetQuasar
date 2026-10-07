@@ -316,7 +316,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que a integração HubSoft oferece?",
-    a: "Seis abas: Consulta (busca cliente por nome, CPF/CNPJ, código, telefone, login, IPv4 ou MAC — IPv4/MAC pelo extrato de conexão real da HubSoft, sem varrer a base — com modal de dados completos em abas: Identificação, Grupo, Serviços, Financeiro, Atendimentos, Ordens de serviço), Atendimentos e Ordens de serviço (últimos 30 dias, direto dos endpoints paginados da HubSoft — \"Tipo de O.S.\" e \"Plano/serviço\" como colunas próprias, botão \"Ver mais\" busca o detalhe completo incluindo a descrição de abertura e a conversa), Financeiro (KPIs dos últimos 6 meses + lista paginada de faturas com filtro por período/estado/cliente e datas em DD/MM/AAAA), Dashboard (gráficos e KPIs) e Relatório (filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC, relatórios por período de atendimentos/O.S. por técnico/financeiro — com opção de mês específico ou média dos últimos X meses — e botão \"Enviar por Telegram\" em cada um).",
+    a: "Seis abas: Consulta (busca cliente por nome, CPF/CNPJ, código, telefone, login, IPv4 ou MAC — IPv4/MAC pelo extrato de conexão real da HubSoft, sem varrer a base — com modal de dados completos em abas: Identificação, Grupo, Serviços (com Habilitar, Suspender e Limpar MAC), Financeiro, Atendimentos, Ordens de serviço), Atendimentos e Ordens de serviço (últimos 30 dias, direto dos endpoints paginados da HubSoft — \"Tipo de O.S.\" e \"Plano/serviço\" como colunas próprias, botão \"Ver mais\" busca o detalhe completo incluindo a descrição de abertura e a conversa), Financeiro (KPIs dos últimos 6 meses + lista paginada de faturas com filtro por período/estado/cliente e datas em DD/MM/AAAA), Dashboard (gráficos e KPIs) e Relatório (filtro de clientes/serviços por estado/cidade/bairro/status/IPv4/MAC, relatórios por período de atendimentos/O.S. por técnico/financeiro — com opção de mês específico ou média dos últimos X meses — e botão \"Enviar por Telegram\" em cada um).",
     cat: "funcoes",
   },
   {
@@ -351,7 +351,7 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
   },
   {
     q: "O que são as Automações personalizadas?",
-    a: "Em Configurações → Automações, além dos 5 cadastros fixos (backup, resumo de alertas, relatório ONU, totais BNG, base comercial), a secção \"Automações personalizadas\" permite criar quantas automações quiser: escolhe qualquer relatório do catálogo do sistema (alertas, BGP, HubSoft, tráfego, OLT, BNG, etc.) ou um relatório de frota/combustível, define a recorrência (diária, semanal, dias específicos ou mensal) e a janela de dados — enviado por Telegram no bot \"reports\". Cada uma pode ser editada, removida ou executada manualmente (\"Executar agora\") a qualquer momento.",
+    a: "Em Configurações → Automações, além dos 6 cadastros fixos (backup, resumo de alertas, relatório ONU, totais BNG, base comercial e coleta de ONUs das OLTs), a secção \"Automações personalizadas\" permite criar quantas automações quiser: escolhe qualquer relatório do catálogo do sistema (alertas, BGP, HubSoft, tráfego, OLT, BNG, etc.) ou um relatório de frota/combustível, define a recorrência (diária, semanal, dias específicos ou mensal) e a janela de dados — enviado por Telegram no bot \"reports\". Cada uma pode ser editada, removida ou executada manualmente (\"Executar agora\") a qualquer momento.",
     cat: "funcoes",
   },
   {
@@ -673,5 +673,30 @@ export const ABOUT_FAQ: AboutFaqItem[] = [
     q: "O que é a descoberta SNMP?",
     a: "Fluxo auxiliar para explorar o que o equipamento expõe via SNMP e ajudar a afinar perfis/coleta. Os resultados ficam nos dados do backend conforme a funcionalidade activa.",
     cat: "tecnico",
+  },
+  {
+    q: "Como funciona a coleta automática de ONUs (serial, status, RX)?",
+    a: "Em Configurações → Automações → Nova automação → \"Coleta de ONUs (OLT)\". Ela corre em segundo plano sobre todas as OLTs em duas cadências: leve (status das ONUs/PONs + RX, padrão a cada 5 min) e completa (serial, temperatura, TX, modelo e telnet, padrão a cada 6 h). Se as duas vencerem juntas roda só a completa. Cada OLT é consultada uma vez de cada vez. O cartão permite ajustar os intervalos e executar cada uma na hora; vem desligada por padrão.",
+    cat: "como_funciona",
+  },
+  {
+    q: "Por que uma ONU aparece sem serial?",
+    a: "O serial só é lido na coleta completa (a leve lê apenas status e RX). Nas OLTs grandes a leitura da tabela inteira pode ser cortada por tempo; a coleta completa então refaz a leitura PON a PON nas ONUs que ficaram sem serial. ONU offline não informa serial por SNMP — mantém o último serial conhecido e, se nunca esteve online, fica sem serial até ligar. Use 'Executar completa agora' na automação ou o atualizar individual da ONU.",
+    cat: "como_funciona",
+  },
+  {
+    q: "O que é \"Limpar MAC\" na integração HubSoft?",
+    a: "Na Consulta, abra o cliente → aba Serviços e use 'Limpar MAC' no serviço desejado. O NetQuasar chama o endpoint reset_mac_addr da HubSoft para apagar o MAC gravado na autenticação, e o próximo equipamento do cliente passa a ser registrado. A HubSoft só aceita se o serviço tiver dados de autenticação — caso contrário a mensagem de erro dela é mostrada. A ação pede confirmação e fica na Auditoria. Na mesma aba há Habilitar e Suspender serviço.",
+    cat: "funcoes",
+  },
+  {
+    q: "Quais tipos de interface posso usar no diagrama de rack do POP?",
+    a: "SFP, SFP+, Ethernet /100, Ethernet /1000 e PON (ícone de sol). Cada equipamento mostra até 50 portas por linha antes de quebrar para a seguinte.",
+    cat: "funcoes",
+  },
+  {
+    q: "Como confiro se os cadastros importados na HubSoft estão corretos?",
+    a: "Em Integrações → HubSoft → Configuração (engrenagem) → aba 'Conferir cadastros' (só administradores). Envie o mesmo CSV da importação — clientes ou serviços adicionais — e o sistema consulta a HubSoft linha a linha e compara cada campo (nome, CPF/CNPJ, telefone, e-mail, nascimento, endereço, plano, status, vendedor, valor, data da venda, login, senha…). Cada cadastro sai como tudo certo, divergente, não encontrado ou ambíguo, com o detalhe arquivo × HubSoft e um CSV das divergências. É somente leitura: nada é alterado. Login e senha são comparados exatamente (maiúsculas contam); dados que a HubSoft não devolve na consulta, como vencimento e forma de cobrança, aparecem como 'não verificável'.",
+    cat: "funcoes",
   },
 ];

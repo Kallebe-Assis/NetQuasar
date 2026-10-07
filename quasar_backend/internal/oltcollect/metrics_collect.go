@@ -56,8 +56,8 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	}
 	weight := func(metric string) int {
 		switch metric {
-		case MetricRxPower, MetricTxPower, MetricPonRxPower, MetricPonTxPower, MetricPonVoltage, MetricPonCurrent, MetricPonTemp, MetricTemperature:
-			return 2 // costumam ter mais linhas/latência; ganham mais budget
+		case MetricRxPower, MetricTxPower, MetricPonRxPower, MetricPonTxPower, MetricPonVoltage, MetricPonCurrent, MetricPonTemp, MetricTemperature, MetricSerial:
+			return 2 // costumam ter mais linhas/latência; ganham mais budget (serial: tabela inteira, ver serial_completion.go)
 		default:
 			return 1
 		}
@@ -407,6 +407,30 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 		}
 		entry["matched_rows"] = matched
 		walkLog = append(walkLog, entry)
+	}
+
+	// Serial: o walk da tabela inteira costuma ser cortado pelo orçamento nas últimas PONs (ver
+	// serial_completion.go) — completa só as PONs que ainda têm ONU sem serial, antes de gravar.
+	if serialDef, ok := metrics[MetricSerial]; ok && containsMetricKey(keys, MetricSerial) {
+		if countRowsMissingSerial(byKey) > 0 {
+			filled, extra := completeMissingSerials(ctx, host, community, serialDef, byKey,
+				ponByIfIndex, onuPonByOnu, serialCompletionTotalBudget(totalBudget))
+			if len(extra) > 0 {
+				walkLog = append(walkLog, extra...)
+				summary["onu_serial_completion_filled"] = filled
+			}
+			if len(extra) > 0 && countRowsMissingSerial(byKey) == 0 {
+				// Tudo recuperado: o corte do walk inicial deixou de importar (senão o snapshot
+				// inteiro continuaria marcado "incompleto" por IsOltSnapshotIncomplete e os
+				// alertas ficariam suprimidos à toa).
+				for _, e := range walkLog {
+					if e["metric"] == MetricSerial {
+						delete(e, "truncated")
+						e["note"] = "walk inicial cortado; completado por PON (serial_completion)"
+					}
+				}
+			}
+		}
 	}
 
 	if shouldApplyStatusFromRx(metrics) {

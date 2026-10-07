@@ -38,13 +38,24 @@ const ENTITY_LABELS: Record<string, string> = {
   settings_mikrotik_collection: "Coleta Mikrotik",
   settings_bng_collection: "Coleta BNG",
   device_config_backup: "Backup de configuração",
+  hubsoft_bulk_import_client: "Importação em massa — cliente HubSoft",
+  hubsoft_bulk_import_service: "Importação em massa — serviço HubSoft",
   commercial_report: "Relatório comercial",
+  ixc_login: "Login IXC (radusuarios)",
+  olt_snapshot: "Snapshot da OLT",
 };
 
 const ACTION_LABELS: Record<string, string> = {
   create: "Adicionado",
   patch: "Editado",
   delete: "Removido",
+  created: "Criado na HubSoft",
+  failed: "Recusado pela HubSoft",
+  rejected_local: "Recusado antes de enviar (dado incompleto)",
+  already_exists: "Já existia (mesmo login) — nada foi criado",
+  service_added: "Cliente já existia — serviço novo adicionado",
+  login_repair: "Serviço já existia com o login padrão — login corrigido",
+  skipped_login_in_use: "Não cadastrado — o login já existe na HubSoft",
   put: "Atualizado",
   start: "Iniciado",
   stop: "Parado",
@@ -63,6 +74,9 @@ const ACTION_LABELS: Record<string, string> = {
   executed: "Executado",
   test_send: "Envio de teste",
   telegram_send: "Envio Telegram",
+  inativar: "Login inativado no IXC",
+  reativar: "Login reativado no IXC",
+  pon_refresh: "ONUs da PON atualizadas",
 };
 
 export function formatAuditEntityType(type: string): string {
@@ -159,6 +173,9 @@ export function formatAuditDetailPreview(row: AuditRowView): string {
   pick("latency_ms", "Latência (ms)");
   pick("count", "Quantidade");
   pick("imported", "Importados");
+  pick("message", "Resultado");
+  if (after.login_ok === false) parts.push(`Login: falhou — ${String(after.login_message ?? "")}`);
+  else if (after.login_ok === true) parts.push("Login: configurado");
   pick("scope", "Âmbito");
   pick("mode", "Modo");
   pick("tool", "Ferramenta");
