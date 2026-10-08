@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d1117" />
+    <title>NetQuasar — sem conexão</title>
+    <style>
+      :root { --bg: #f4f0fa; --fg: #1c1633; --muted: #6a6188; --accent: #5b3fd1; --card: #ffffff; --line: #ddd6f0; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #a78bfa; --card: #161b22; --line: #30363d; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--fg);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      main { width: min(420px, 100%); text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 22px; }
+      img { width: 72px; height: 72px; border-radius: 16px; }
+      h1 { font-size: 20px; margin: 14px 0 6px; }
+      p { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+      button { appearance: none; border: 0; border-radius: 12px; padding: 14px 22px; min-height: 48px; font: inherit; font-weight: 600; background: var(--accent); color: #fff; width: 100%; }
+      button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/pwa/icon-192.png" alt="" width="72" height="72" />
+      <h1>Sem conexão</h1>
+      <p>Não foi possível falar com o servidor do NetQuasar. Confira o Wi-Fi ou os dados móveis e tente de novo.</p>
+      <button type="button" onclick="location.reload()">Tentar novamente</button>
+    </main>
+  </body>
+</html>

@@ -69,18 +69,19 @@ function IntegrationCard({
       </div>
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
           <Link
             to={APP_ROUTES.integrationConsulta(it.slug)}
-            style={{ fontWeight: 600, fontSize: 17, textDecoration: "none", color: "var(--text)" }}
+            style={{ fontWeight: 600, fontSize: 17, textDecoration: "none", color: "var(--text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            title={it.name}
           >
             {it.name}
           </Link>
-        </div>
-        <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Ativa" : "Inativa"}</span>
-          {it.last_test_ok === true ? <span className="badge badge--ok">Teste OK</span> : null}
-          {it.last_test_ok === false ? <span className="badge badge--err">Teste falhou</span> : null}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: "0 0 auto" }}>
+            <span className={it.enabled ? "badge badge--ok" : "badge badge--off"}>{it.enabled ? "Ativa" : "Inativa"}</span>
+            {it.last_test_ok === true ? <span className="badge badge--ok">Teste OK</span> : null}
+            {it.last_test_ok === false ? <span className="badge badge--err">Teste falhou</span> : null}
+          </div>
         </div>
         <div className="row" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
           <Link

@@ -15,7 +15,9 @@ import (
 //   - "fiscal_diferente"    — o fiscal é um e cadastral, cobrança e instalação são outro (todos iguais entre si);
 //   - "instalacao_diferente" — fiscal, cadastral e cobrança iguais e só a instalação é outra (ex.: 2º ponto);
 //   - "outra".
-// A API pública da HubSoft não tem rota para editar endereço — a correção é feita na própria HubSoft.
+// A documentação oficial da API (docs.hubsoft.com.br, conferida) não tem rota para editar nem sincronizar endereço: só
+// "Cadastrar/Migrar Cliente Serviço" aceitam um endereco_instalacao novo (e ambos CRIAM um serviço). Por isso a correção
+// é feita na própria HubSoft (função «sincronizar endereços»).
 
 type AddressCheckRow struct {
 	IDCliente        string   `json:"id_cliente"`

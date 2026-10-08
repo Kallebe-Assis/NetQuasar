@@ -119,3 +119,51 @@ func TestBuildInvoicesByMethodSemCampo(t *testing.T) {
 		t.Errorf("sem o campo deve avisar e listar os campos da fatura: %+v", rep)
 	}
 }
+
+func TestFormatBRDate(t *testing.T) {
+	for in, want := range map[string]string{"2026-12-15": "15/12/2026", "2026-12-15 00:00:00": "15/12/2026", "15/12/2026": "15/12/2026", "": "", "lixo": "lixo"} {
+		if got := formatBRDate(in); got != want {
+			t.Errorf("formatBRDate(%q) = %q, esperado %q", in, got, want)
+		}
+	}
+}
+
+func TestInvoiceRowsFormatoESevico(t *testing.T) {
+	// serviço dentro de uma lista e data em ISO — como a resposta completa da HubSoft costuma vir
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(invoicePage(map[string]any{
+			"id_fatura": 9, "valor": "79.90", "data_vencimento": "2026-12-15",
+			"forma_cobranca": map[string]any{"id_forma_cobranca": 19, "descricao": "Sicoob - API (G2)"},
+			"cliente": map[string]any{"id_cliente": 7, "codigo_cliente": 17, "nome_razaosocial": "ALEXANDRE",
+				"servicos": []any{map[string]any{"id_cliente_servico": 55, "nome": "500 MB - PÓS PAGO (Origem)", "login": "alexandre.rocha"}}},
+		}))
+	}))
+	defer srv.Close()
+	rep := BuildInvoicesByMethod(context.Background(), Config{BaseURL: srv.URL}, "tok", "2023-01-01", "2027-01-01", "19")
+	if len(rep.Rows) != 1 {
+		t.Fatalf("linhas: %+v", rep)
+	}
+	r := rep.Rows[0]
+	if r.Vencimento != "15/12/2026" || r.Servico != "alexandre.rocha" || r.Plano != "500 MB - PÓS PAGO (Origem)" || r.IDServico != "55" || r.Cliente != "ALEXANDRE" || r.IDCliente != "7" {
+		t.Errorf("linha: %+v", r)
+	}
+	if rep.AmostraFatura["cliente.nome_razaosocial"] != "ALEXANDRE" {
+		t.Errorf("amostra: %+v", rep.AmostraFatura)
+	}
+}
+
+func TestListFormasCobranca(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integracao/configuracao/forma_cobranca" {
+			t.Errorf("caminho: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","formas_cobranca":[{"id_forma_cobranca":19,"descricao":"Sicoob - API (G2)","tipo_cobranca":"boleto_bancario"},{"id_forma_cobranca":14,"descricao":"BB - API (G2)"}]}`))
+	}))
+	defer srv.Close()
+	got, err := ListFormasCobranca(context.Background(), Config{BaseURL: srv.URL}, "tok")
+	if err != nil || len(got) != 2 || got[0].Nome != "BB - API (G2)" || got[1].ID != "19" {
+		t.Errorf("formas: %+v err=%v", got, err)
+	}
+}

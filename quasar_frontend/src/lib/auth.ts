@@ -32,14 +32,33 @@ function emitAuthChanged() {
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
+/** Token da sessão. Com «Manter-me conectado» fica no localStorage (sobrevive ao fechar o navegador); sem ele, no sessionStorage. */
 export function getAuthToken(): string {
-  return localStorage.getItem(K_AUTH) ?? "";
+  try {
+    return sessionStorage.getItem(K_AUTH) ?? localStorage.getItem(K_AUTH) ?? "";
+  } catch {
+    return localStorage.getItem(K_AUTH) ?? "";
+  }
 }
 
-export function saveAuthToken(token: string) {
+export function saveAuthToken(token: string, remember = true) {
   const t = token.trim();
-  if (t) localStorage.setItem(K_AUTH, t);
-  else localStorage.removeItem(K_AUTH);
+  localStorage.removeItem(K_AUTH);
+  try {
+    sessionStorage.removeItem(K_AUTH);
+  } catch {
+    /* sessionStorage indisponível: segue só com o localStorage */
+  }
+  if (t) {
+    if (remember) localStorage.setItem(K_AUTH, t);
+    else {
+      try {
+        sessionStorage.setItem(K_AUTH, t);
+      } catch {
+        localStorage.setItem(K_AUTH, t);
+      }
+    }
+  }
   emitAuthChanged();
 }
 
@@ -106,6 +125,11 @@ export function isSessionReady(): boolean {
 export function clearSession() {
   localStorage.removeItem(K_READY);
   localStorage.removeItem(K_AUTH);
+  try {
+    sessionStorage.removeItem(K_AUTH);
+  } catch {
+    /* ignora */
+  }
   localStorage.removeItem(K_ROLE);
   localStorage.removeItem(K_USER_LABEL);
   localStorage.removeItem(K_PERMS);

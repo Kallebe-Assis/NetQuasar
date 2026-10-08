@@ -1,0 +1,67 @@
+/* NetQuasar — avisos do PWA (instalar / nova versão). Usa só os tokens de tema.
+ *
+ * Camadas (z-index) do app: modais 50–60 · menu lateral 95–100 · toast 140 · mapa 1000. O aviso fica em 45, ABAIXO de
+ * modais e do menu (nunca tapa botões de rodapé de modal nem itens do menu aberto) e abaixo dos toasts de alerta.
+ */
+.pwa-banner {
+  position: fixed;
+  left: calc(12px + var(--safe-left, 0px));
+  right: calc(12px + var(--safe-right, 0px));
+  bottom: calc(12px + var(--safe-bottom, 0px));
+  z-index: 45;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: 14px;
+  line-height: 1.4;
+  max-width: 560px;
+  margin-inline: auto;
+}
+.pwa-banner--update {
+  border-color: var(--accent);
+}
+.pwa-banner > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.pwa-banner__txt {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+/* o .btn--sm global tem fonte de 11px — pequena demais para toque; aqui o botão tem 40 px de altura e fonte de 14 px */
+.pwa-banner .btn {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.pwa-banner__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pwa-banner__close:focus-visible {
+  outline: 2px solid var(--accent);
+}
+/* telas muito estreitas (≤ 360 px): texto na largura toda e botões na linha de baixo */
+@media (max-width: 360px) {
+  .pwa-banner__txt {
+    flex-basis: calc(100% - 34px);
+  }
+}

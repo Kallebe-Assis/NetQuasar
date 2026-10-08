@@ -55,6 +55,10 @@ func Handler(log zerolog.Logger) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		if strings.HasSuffix(upath, ".webmanifest") {
+			// o Go nem sempre conhece esta extensão (depende do /etc/mime.types da imagem)
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
 		if strings.HasPrefix(upath, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {

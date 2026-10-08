@@ -228,7 +228,8 @@
     display: none;
   }
 
-  .sidebar a {
+  .sidebar a,
+  .sidebar__group-btn {
     min-height: 36px;
     padding: 0.3rem 0.65rem 0.3rem 0.6rem;
     font-size: 11.5px;
@@ -482,7 +483,8 @@
     width: min(248px, calc(100vw - 32px));
   }
 
-  .sidebar a {
+  .sidebar a,
+  .sidebar__group-btn {
     min-height: 30px;
     font-size: 10.5px;
     padding: 0.22rem 0.5rem 0.22rem 0.45rem;
@@ -856,43 +858,60 @@
    Telefone — redesign de leitura e toque (aplica-se a TODAS as telas)
    ═══════════════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
+  /* Densidade compacta de celular: informação por tela > respiro. Alvos de toque de 34 px (30 px nos botões pequenos). */
   body {
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
-  h1 { font-size: 1.1rem; }
-  h2 { font-size: 1rem; }
-  h3 { font-size: 0.92rem; }
+  h1 { font-size: 1rem; }
+  h2 { font-size: 0.92rem; }
+  h3 { font-size: 0.86rem; }
 
-  /* Campos com 16px: o iOS dá zoom na página em campos menores que isso. Altura confortável para o dedo. */
+  /* Campos: 13 px no Android (compacto). O iOS dá zoom em campos < 16 px — por isso só lá (ver @supports abaixo) fica 16 px. */
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea,
   .input {
-    font-size: 16px !important;
-    min-height: 40px;
+    font-size: 13px !important;
+    min-height: 34px;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+  textarea {
+    min-height: 64px;
+  }
+  @supports (-webkit-touch-callout: none) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select,
+    textarea,
+    .input {
+      font-size: 16px !important;
+    }
   }
 
   .btn,
   button.btn {
-    min-height: 40px;
-    font-size: 13px;
+    min-height: 34px;
+    font-size: 12px;
+    padding: 0.25rem 0.7rem;
   }
   .btn--sm {
-    min-height: 36px;
-    padding-left: 0.7rem;
-    padding-right: 0.7rem;
+    min-height: 30px;
+    font-size: 11.5px;
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
   }
   .btn--icon {
-    min-width: 40px;
+    min-width: 34px;
   }
 
-  /* Abas: rolagem horizontal contida, alvo de toque maior. */
+  /* Abas: UMA linha com rolagem horizontal (nada de 3 linhas de abas), alvo de toque de 34 px. */
+  /* rolagem horizontal das abas: accent-skin.css */
   .tabs button {
-    min-height: 38px;
+    min-height: 34px;
     font-size: 12px;
-    padding: 0.4rem 0.7rem;
+    padding: 0.3rem 0.65rem;
   }
 
   /* Barras de botões/filtros quebram de linha em vez de estourar a tela. */
@@ -919,15 +938,11 @@
     word-break: break-word;
   }
 
-  /* Abas de relatório da integração: 2 por linha. */
-  .hubsoft-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
+  /* Abas de relatório da integração: uma linha rolável (regras em accent-skin.css). */
   .hubsoft-tabs__btn {
     font-size: 12px;
-    padding: 6px 8px;
-    min-height: 40px;
+    padding: 4px 10px;
+    min-height: 34px;
   }
 
   /* Cabeçalhos de página com botões: empilha e ocupa a largura. */
@@ -954,6 +969,10 @@
 
   /* ——— Tabelas viram cartões (classe aplicada por lib/mobileTables.ts) ——— */
   .table-wrap:has(> table.tbl-cards) {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
     overflow-x: visible;
     margin-left: 0;
     margin-right: 0;
@@ -975,22 +994,22 @@
     white-space: nowrap;
   }
   table.tbl-cards {
-    font-size: 13px;
+    font-size: 12px;
     border: 0;
     background: transparent;
   }
   /* Cartão: grade de 2 colunas; rótulo pequeno em cima, valor embaixo. */
   table.tbl-cards tbody tr {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px 14px;
-    margin: 0 0 10px;
-    padding: 12px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px 12px;
+    margin: 0 0 8px;
+    padding: 10px;
     box-sizing: border-box;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--panel);
-    box-shadow: var(--shadow-lg);
+    box-shadow: none;
   }
   table.tbl-cards td {
     display: flex;
@@ -1007,9 +1026,9 @@
   }
   table.tbl-cards td::before {
     content: attr(data-label);
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
     color: var(--muted);
   }
@@ -1021,9 +1040,9 @@
   }
   /* Primeira coluna com texto = título do cartão. */
   table.tbl-cards td[data-card-title] {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
     border-bottom: 1px solid var(--border);
   }
   table.tbl-cards td[data-card-title]::before {
@@ -1066,40 +1085,155 @@
 }
 
 @media (max-width: 767px) {
-  /* Abas da integração (Consulta, Atendimentos, …): grade de 3 colunas em vez de uma fila que estoura a tela. */
   .hubsoft-header {
     align-items: stretch;
   }
   .hubsoft-header__title-row {
     justify-content: flex-start;
   }
-  .hubsoft-header__tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    border-bottom: 0;
-    margin-top: 10px;
+}
+
+/* ——— Compactação de celular (Fase 3): componentes recorrentes ——— */
+@media (max-width: 767px) {
+  /* Indicadores (ONUs total/online/offline…): 3 por linha, número menor. */
+  .stat {
+    min-width: 0 !important;
+    flex: 1 1 calc(33.333% - 8px);
+    padding: 0.4rem 0.55rem;
   }
-  .hubsoft-header__tabs > a {
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    min-height: 54px;
-    padding: 6px 4px;
-    margin-bottom: 0;
+  .stat__v {
+    font-size: 1.05rem;
+  }
+  .stat__k {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .field {
+    margin-bottom: 0.45rem;
+  }
+  .field label {
+    font-size: 10.5px;
+  }
+  .main .row,
+  .card .row {
+    gap: 0.35rem;
+  }
+
+  /* Cartões de tabela recolhidos: só o título + os primeiros campos; o resto aparece ao tocar na faixa «Ver mais». */
+  table.tbl-cards tbody tr[data-card-more]:not([data-open]) td[data-card-extra] {
+    display: none;
+  }
+  table.tbl-cards tbody tr[data-card-more]::after {
+    content: "Ver mais ▾";
+    grid-column: 1 / -1;
+    margin: 2px -10px -10px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 10px 10px;
     text-align: center;
     font-size: 11px;
-    line-height: 1.15;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel);
+    font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
-  .hubsoft-header__tabs > a.active {
-    color: var(--on-accent);
-    background: var(--accent);
-    border-color: var(--accent);
+  table.tbl-cards tbody tr[data-card-more][data-open]::after {
+    content: "Ver menos ▴";
   }
-  .hubsoft-header__tabs > a.active:hover {
-    color: var(--on-accent);
+}
+
+/* ——— Compactação de celular (rodada 2): ações no topo do cartão, indicadores em 2 colunas, sem textos de ajuda ——— */
+@media (max-width: 767px) {
+  /* Cartão em 4 colunas: campos curtos ocupam 2 (= 2 por linha); título, valores longos e ações têm regras próprias. */
+  table.tbl-cards td {
+    grid-column: span 2;
+  }
+  /* Cartões COM ações (opções, atualizar…): vira uma linha flexível — título à esquerda e botões pequenos à direita,
+     na mesma linha. Os botões não fazem o cartão crescer; os campos seguem 2 por linha. */
+  table.tbl-cards tbody tr[data-card-actions] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  table.tbl-cards tbody tr[data-card-actions] > td {
+    flex: 0 0 calc(50% - 6px);
+  }
+  table.tbl-cards tbody tr[data-card-actions] > td[data-card-wide] {
+    flex-basis: 100%;
+  }
+  table.tbl-cards tbody tr[data-card-actions] > td[data-card-title] {
+    order: -2;
+    /* base de 55%: o título cresce até os botões, mas o 1º campo não cabe na mesma linha (quebra para baixo) */
+    flex: 1 1 55%;
+    min-width: 0;
+    min-height: 28px;
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  table.tbl-cards tbody tr[data-card-actions] > td[data-card-actions] {
+    order: -1;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 0;
+  }
+  table.tbl-cards td[data-card-actions] .btn,
+  table.tbl-cards td[data-card-actions] button {
+    min-height: 28px;
+    min-width: 28px;
+    padding: 0 8px;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  table.tbl-cards td[data-card-actions] svg {
+    width: 14px;
+    height: 14px;
+  }
+  /* faixa «Ver mais» em largura total também no cartão flexível */
+  table.tbl-cards tbody tr[data-card-actions][data-card-more]::after {
+    flex: 1 0 calc(100% + 20px);
+  }
+
+  /* Indicadores (dashboard): grade de 2 colunas — vale para `.stat`, para os KPIs do NOC/BNG e para a linha de KPIs do dashboard. */
+  :where(div, section):has(> .stat + .stat) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem !important;
+  }
+  :where(div, section):has(> .stat + .stat) > .stat {
+    min-width: 0 !important;
+    width: auto;
+    flex: none;
+  }
+  .main .mk-noc-kpi-row[style*="grid-template-columns"],
+  .mk-noc-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+  .mk-noc-kpi {
+    min-height: 0;
+    padding: 6px 8px;
+  }
+  .mk-noc-kpi__value {
+    font-size: 1.05rem;
+  }
+  .mk-noc-kpi__value--sm {
+    font-size: 0.85rem;
+  }
+
+  /* Textos explicativos: somem no celular (parágrafos longos de ajuda também são marcados por lib/mobileHints.ts). */
+  [data-mobile-hint]:not([data-mobile-keep]),
+  .tools-panel__desc,
+  .hsa-step__hint,
+  .hsa-panel__sub,
+  .mon-cfg__card-hint,
+  .mon-cfg__pipe-desc,
+  .map-settings-section__hint,
+  .olt-metrics-panel__desc {
+    display: none !important;
   }
 }

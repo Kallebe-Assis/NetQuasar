@@ -1,0 +1,335 @@
+/* NetQuasar — destaque azul em TODAS as telas (web e celular).
+ *
+ * Carregado depois de global.css/responsive.css. Regra de ouro: o que é «atual» ou «principal» ganha o gradiente azul —
+ * a página atual no menu lateral, a aba ativa, o botão primário — e os detalhes pequenos (foco dos campos, caixas de
+ * seleção, avisos informativos, indicadores, título da página, seleção de texto) usam o mesmo azul em tom mais suave.
+ * Só usa tokens de tema (--accent, --on-accent, --ok, --err, --panel…): vale para o tema claro e o escuro.
+ */
+:root {
+  /* escuro: o fim do gradiente continua claro o bastante para o texto escuro (--on-accent) ter contraste */
+  --accent-grad: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 78%, #1f6feb));
+  --accent-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+[data-theme="light"] {
+  --accent-grad: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #0a2a66));
+}
+
+/* ——— Pequenos detalhes ——— */
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--accent);
+}
+.input:focus,
+.select:focus,
+.textarea:focus,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+/* título da tela atual: filete azul curto embaixo */
+.main h1 {
+  position: relative;
+  padding-bottom: 6px;
+}
+.main h1::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent-grad);
+}
+.hubsoft-header__title::after {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.hubsoft-header__title {
+  padding-bottom: 6px;
+}
+/* cabeçalho de tabela com fio azul */
+.table-wrap thead th {
+  border-bottom-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+/* avisos informativos (sem variante de erro/ok/atenção) */
+.msg:not(.msg--err):not(.msg--ok):not(.msg--warn) {
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: 10px;
+  color: var(--text);
+}
+/* indicadores: filete azul no topo; online = verde, offline = vermelho */
+.stat:not(.stat--ok):not(.stat--err),
+.mk-noc-kpi {
+  border-top: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.stat--ok {
+  background: color-mix(in srgb, var(--ok) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+}
+.stat--ok .stat__v {
+  color: var(--ok);
+}
+.stat--err {
+  background: color-mix(in srgb, var(--err) 11%, var(--panel));
+  border-color: color-mix(in srgb, var(--err) 35%, var(--border));
+}
+.stat--err .stat__v {
+  color: var(--err);
+}
+
+/* ——— Botão primário ——— */
+.btn--primary,
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-grad);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--accent-shadow);
+}
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.btn--primary:disabled {
+  box-shadow: none;
+}
+
+/* ——— Abas: pílulas; a ativa é azul cheia ——— */
+.tabs {
+  gap: 6px;
+  border-bottom: 0;
+  padding: 2px 0 8px;
+}
+.tabs button {
+  margin-bottom: 0;
+  padding-inline: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+.tabs button:hover:not(.active) {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+}
+.tabs > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+.tabs > a:hover:not(.active) {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.tabs > a.active,
+.tabs > a.active:hover {
+  background: var(--accent-grad);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--accent-shadow);
+}
+/* demais famílias de abas (cada uma com a sua marcação): só o estado ativo ganha o azul cheio */
+.tabs button.active,
+.tabs button.active:hover,
+.conn-tabs button.active,
+.mon-cfg__tab.is-active,
+.automations-detail__tabs button.is-active,
+.hubsoft-header__tabs > a.active,
+.hubsoft-header__tabs > a.active:hover,
+.hubsoft-tabs__btn--active,
+.about-tabs__btn.is-active {
+  background: var(--accent-grad);
+  border-color: transparent;
+  border-bottom-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--accent-shadow);
+}
+.mon-cfg__tab.is-active,
+.automations-detail__tabs button.is-active,
+.hubsoft-header__tabs > a.active {
+  border-radius: 10px;
+}
+
+/* ——— Menu lateral: a tela atual em azul cheio ——— */
+.sidebar a.active,
+.sidebar a.active:hover,
+.sidebar__sublink.active {
+  background: var(--accent-grad);
+  border-left-color: transparent;
+  border-radius: 8px;
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--accent-shadow);
+}
+.sidebar a.active:hover {
+  filter: brightness(1.06);
+}
+.sidebar a.active .sidebar__nav-icon {
+  opacity: 1;
+}
+/* grupo que contém a tela atual: realce suave (a tela em si fica no sublink azul cheio) */
+.sidebar__group-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ——— Barras de abas: UMA linha com rolagem horizontal (nunca quebram linha nem viram grade) ———
+   Vale para a web e para o celular. A aba ativa é levada para o centro por lib/scrollTabs.ts. */
+.tabs,
+.hubsoft-header__tabs,
+.hubsoft-tabs,
+.hsa-tabs {
+  display: flex;
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.tabs > *,
+.hubsoft-header__tabs > *,
+.hubsoft-tabs > *,
+.hsa-tabs > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .tabs,
+  .hubsoft-header__tabs,
+  .hubsoft-tabs,
+  .hsa-tabs {
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar,
+  .hubsoft-header__tabs::-webkit-scrollbar,
+  .hubsoft-tabs::-webkit-scrollbar,
+  .hsa-tabs::-webkit-scrollbar {
+    display: none;
+  }
+}
+/* divisor entre grupos de abas (Configurações) */
+.tabs__sep {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+/* Cabeçalho das integrações (HubSoft) e abas internas do relatório/configuração: mesmas pílulas das demais abas */
+.hubsoft-header__tabs {
+  gap: 6px;
+  border-bottom: 0;
+  padding-bottom: 8px;
+}
+.hubsoft-header__tabs > a,
+.hubsoft-tabs__btn,
+.hsa-tabs__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+  margin-bottom: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+.hubsoft-header__tabs > a:hover,
+.hubsoft-tabs__btn:hover,
+.hsa-tabs__btn:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+}
+.hubsoft-tabs {
+  gap: 6px;
+  padding-bottom: 6px;
+}
+.hsa-tabs {
+  gap: 6px;
+  border-bottom: 0;
+  padding-bottom: 8px;
+}
+.hsa-tabs__btn.is-active,
+.hsa-tabs__btn.is-active:hover {
+  background: var(--accent-grad);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--accent-shadow);
+}
+
+/* ——— Menu lateral: item de grupo (Equipamentos, Mapa, Frota…) com as mesmas medidas dos demais itens ——— */
+.sidebar__group-btn {
+  border-radius: 8px;
+}
+.sidebar__group-btn .sidebar__nav-label {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* ——— Título da integração + tags de estado (Ativa, Sessão ativa…): tags à direita, na MESMA linha do nome ——— */
+.integration-nav__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+.integration-nav__title h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.integration-nav__badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 767px) {
+  /* celular: as tags ficam na linha do nome; se não couberem todas, rolam ali mesmo, sem quebrar linha */
+  .integration-nav__badges {
+    max-width: 62%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .integration-nav__badges::-webkit-scrollbar {
+    display: none;
+  }
+  .integration-nav__badges .badge {
+    white-space: nowrap;
+  }
+}

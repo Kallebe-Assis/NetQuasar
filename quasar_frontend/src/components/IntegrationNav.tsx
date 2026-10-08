@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, Search, Settings } from "lucide-react";
 import { isAdminUser } from "../lib/auth";
@@ -7,10 +8,13 @@ export function IntegrationNav({
   slug,
   name,
   consultaEnabled,
+  badges,
 }: {
   slug: string;
   name: string;
   consultaEnabled?: boolean;
+  /** Tags de estado (Ativa, Sessão ativa…): aparecem no canto direito, na mesma linha do nome. */
+  badges?: ReactNode;
 }) {
   const loc = useLocation();
   const admin = isAdminUser();
@@ -22,7 +26,10 @@ export function IntegrationNav({
       <Link to={APP_ROUTES.integrations} className="btn" style={{ textDecoration: "none", marginBottom: 10, display: "inline-flex" }}>
         <ArrowLeft size={14} style={{ marginRight: 4 }} /> Integrações
       </Link>
-      <h1 style={{ margin: "0 0 10px", fontSize: 20 }}>{name}</h1>
+      <div className="integration-nav__title">
+        <h1 style={{ margin: 0, fontSize: 20 }}>{name}</h1>
+        {badges ? <div className="integration-nav__badges">{badges}</div> : null}
+      </div>
       <div className="tabs integration-nav__tabs">
         {consultaEnabled !== false ? (
           <Link

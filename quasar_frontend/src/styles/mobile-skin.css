@@ -1,0 +1,135 @@
+/* NetQuasar — celular (≤ 767 px): organização + toque de azul.
+ *
+ * Carregado DEPOIS de responsive.css. Três grupos:
+ *   1. Correções de layout vistas no aparelho real (cartões aninhados, menu do Alertas, filtros do Eventos, gráficos vazios);
+ *   2. Barras de botões de período viram «chips» numa linha rolável;
+ *   3. «Pele» — só o que é específico do celular; o destaque azul (abas, botão primário, menu, avisos, indicadores) vale para
+ *      todas as telas e está em accent-skin.css.
+ * Só usa os tokens de tema (--accent, --ok, --err, --panel…), então funciona no tema claro e no escuro.
+ */
+@media (max-width: 767px) {
+  /* ——— 1. Layout ——— */
+
+  /* Cartão dentro de cartão dentro de painel: cada nível somava ~19 px de moldura+respiro e o conteúdo ficava espremido
+     no meio da tela (BGP/BNG). Os paddings inline (`style={{ padding: 14 }}`) exigem !important. */
+  .main .card[style*="padding"],
+  .main .mk-noc-panel[style*="padding"] {
+    padding: 8px 10px !important;
+  }
+  .card .card,
+  .card .mk-noc-panel,
+  .mk-noc-panel .card,
+  .mk-noc-panel .mk-noc-panel {
+    padding: 8px 10px !important;
+    margin-bottom: 0.5rem;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+  .mk-noc-panel {
+    padding: 10px;
+    border-radius: 12px;
+  }
+  /* painel que só embrulha cartões: sem moldura própria (evita 3 bordas seguidas) */
+  .mk-noc-panel:has(> .card) {
+    border: 0;
+    background: transparent;
+    padding: 0 !important;
+  }
+  /* Cabeçalho «título + botões» do painel: os botões descem para a linha de baixo em vez de espremer o título. */
+  .mk-noc-panel > div[style*="space-between"] {
+    flex-wrap: wrap;
+  }
+  /* Área de gráfico com altura fixa que só mostra «Aguardando histórico…»: encolhe ao tamanho do texto. */
+  div[style*="height"]:has(> .mk-noc-muted:only-child) {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  /* Alertas: o menu de filtros (tipo/severidade) abria ancorado no botão e saía pela esquerda da tela. No celular vira uma
+     folha na base da tela, com largura total. */
+  .alerts-toolbar__menu,
+  .alerts-toolbar__menu--wide,
+  .alerts-toolbar__menu--end {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    min-width: 0;
+    max-width: none;
+    max-height: 60dvh;
+    z-index: 120;
+    padding: 6px;
+    border-radius: 14px;
+    box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.3);
+  }
+  .alerts-toolbar__menu-item {
+    padding: 11px 12px;
+    font-size: 13px;
+  }
+  .alerts-toolbar__search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .alerts-toolbar__actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+
+  /* Eventos da Rede: filtros em 2 colunas (busca ocupa a linha inteira) em vez de um embaixo do outro. */
+  .netev-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .netev-toolbar > input:first-child {
+    grid-column: 1 / -1;
+  }
+  .netev-toolbar > select,
+  .netev-toolbar > input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* ——— 2. Chips: barra com 3+ botões pequenos (períodos 24 h / 3 dias / 7 dias…) = UMA linha rolável ——— */
+  .main :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm),
+  .modal :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm) {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .main :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm)::-webkit-scrollbar,
+  .modal :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm)::-webkit-scrollbar {
+    display: none;
+  }
+  .main :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm) > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* a sombra azul do chip ativo seria cortada pela rolagem da linha: mais leve e com folga embaixo */
+  .main :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm) {
+    padding-block: 3px 6px;
+  }
+  .main :is(.row, [style*="display: flex"]):has(> .btn--sm ~ .btn--sm ~ .btn--sm) > .btn--primary {
+    box-shadow: 0 2px 5px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  /* ——— 3. Pele (toque de azul) ——— */
+
+  /* Cartões: cantos arredondados e sombra leve (substitui a sombra pesada). */
+  .card {
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+  }
+
+  /* Barra superior: fio azul sutil embaixo (a marca fica escondida no celular; o título da tela aparece ao lado do menu). */
+  .mobile-topbar {
+    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}

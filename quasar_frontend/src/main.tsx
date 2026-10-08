@@ -7,12 +7,20 @@ import { ThemeProvider } from "./app/ThemeProvider";
 import "./styles/themes.css";
 import "./styles/global.css";
 import "./styles/responsive.css";
+import "./styles/accent-skin.css";
+import "./styles/mobile-skin.css";
+import "./styles/login.css";
+import "./styles/pwa.css";
+import { registerServiceWorker } from "./pwa/registerServiceWorker";
+import "./pwa/install"; // registra o ouvinte de beforeinstallprompt já na abertura do app
 
 const qc = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false },
   },
 });
+
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -6,8 +6,11 @@ import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Menu, X } from "luc
 import { clearSession, getAuthToken, getStoredUserDisplayLabel, getStoredUserPermissionsKey, can, isAdminUser } from "../lib/auth";
 import { prefetchStaticPages } from "../lib/prefetchStaticPages";
 import { installMobileTableCards } from "../lib/mobileTables";
+import { installMobileHints } from "../lib/mobileHints";
+import { installScrollActiveTab } from "../lib/scrollTabs";
 import { apiFetch } from "../lib/api";
 import { AlertNotificationWatcher } from "../components/AlertNotificationWatcher";
+import { PwaInstallBanner, PwaUpdatePrompt } from "../pwa/PwaPrompts";
 import { OnuReportGlobalToast } from "../components/OnuReportGlobalToast";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { SidebarSearch } from "../components/SidebarSearch";
@@ -376,6 +379,8 @@ export function ShellLayout() {
 
   // Telefone: tabelas com muitas colunas viram cartões (evita rolagem horizontal em todas as telas).
   useEffect(() => installMobileTableCards(), []);
+  useEffect(() => installMobileHints(), []);
+  useEffect(() => installScrollActiveTab(), []);
 
   const sidebarClass = ["sidebar", !isMobileNav && sidebarCollapsed ? "sidebar--collapsed" : ""].filter(Boolean).join(" ");
 
@@ -402,6 +407,8 @@ export function ShellLayout() {
 
         <OnuReportGlobalToast />
         <AlertNotificationWatcher />
+        <PwaUpdatePrompt />
+        <PwaInstallBanner />
         {showIndicator ? (
           <div className={`runtime-indicator ${activity ? "runtime-indicator--busy" : ""}`} title="Atividade atual do sistema">
             <span className="runtime-indicator__dot" />

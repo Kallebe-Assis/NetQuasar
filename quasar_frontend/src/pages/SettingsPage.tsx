@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { OverflowTabs } from "../components/OverflowTabs";
 import {
@@ -80,6 +80,14 @@ type SettingsTab =
 const SETTINGS_TABS: SettingsTab[] = [
   "database", "logs", "users", "alerts", "monitoring", "appearance", "connection",
   "telegram", "olt", "mikrotik", "switch", "bng", "bgp", "fleet", "automation",
+];
+
+/** Ordem de EXIBIÇÃO das abas, agrupadas (um divisor separa cada grupo). A ordem de SETTINGS_TABS acima continua a definir a aba inicial. */
+const SETTINGS_TAB_GROUPS: { group: string; tabs: SettingsTab[] }[] = [
+  { group: "sistema", tabs: ["database", "users", "logs", "connection", "appearance"] },
+  { group: "monitoramento", tabs: ["alerts", "monitoring", "telegram", "automation"] },
+  { group: "equipamentos", tabs: ["olt", "mikrotik", "switch", "bng", "bgp"] },
+  { group: "frota", tabs: ["fleet"] },
 ];
 
 const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
@@ -190,16 +198,13 @@ function TabContent({ tab }: { tab: SettingsTab }) {
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const visibleTabs = useMemo(() => SETTINGS_TABS.filter(canSeeSettingsTab), []);
-  const [tab, setTab] = useState<SettingsTab>(() => {
-    const raw = searchParams.get("tab");
-    if (SETTINGS_TABS.includes(raw as SettingsTab) && canSeeSettingsTab(raw as SettingsTab)) {
-      return raw as SettingsTab;
-    }
-    return visibleTabs[0] ?? "appearance";
-  });
+  // A aba é derivada da URL (e não de um useState inicial): o menu lateral navega para `?tab=outra` SEM remontar a página,
+  // então um estado local ficava preso na aba antiga (o menu mudava, a tela não).
+  const raw = searchParams.get("tab");
+  const tab: SettingsTab =
+    SETTINGS_TABS.includes(raw as SettingsTab) && canSeeSettingsTab(raw as SettingsTab) ? (raw as SettingsTab) : (visibleTabs[0] ?? "appearance");
 
   function selectTab(next: SettingsTab) {
-    setTab(next);
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     setSearchParams(params, { replace: true });
@@ -212,7 +217,7 @@ export function SettingsPage() {
         Base de dados, usuários, credenciais de rede, Telegram (alertas e relatórios), perfis OLT por marca/modelo, coleta MikroTik/Switch/BNG e relatórios automáticos.
       </p>
       <OverflowTabs
-        items={visibleTabs.map((k) => ({ key: k, label: SETTINGS_TAB_LABELS[k], icon: SETTINGS_TAB_ICONS[k] }))}
+        items={SETTINGS_TAB_GROUPS.flatMap((g) => g.tabs.filter((k) => visibleTabs.includes(k)).map((k) => ({ key: k, label: SETTINGS_TAB_LABELS[k], icon: SETTINGS_TAB_ICONS[k], group: g.group })))}
         active={tab}
         onSelect={selectTab}
       />

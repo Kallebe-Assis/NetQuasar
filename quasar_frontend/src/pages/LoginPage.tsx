@@ -4,6 +4,8 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { APP_ROUTES } from "../app/routes";
 import { GlobeSplash } from "../components/GlobeSplash";
 import { LoginBrandLogo } from "../components/LoginBrandLogo";
+import { LoginCard } from "../components/login/LoginCard";
+import { LoginHero } from "../components/login/LoginHero";
 import { LoginCircuitBackdrop } from "../components/LoginCircuitBackdrop";
 import { apiFetch, ApiError } from "../lib/api";
 import {
@@ -35,12 +37,22 @@ type AuthLoginResponse = {
 /** Duração mínima do ecrã de loading após requisição de login (ms). */
 const LOGIN_SPLASH_MIN_MS = 2000;
 
+const REMEMBER_KEY = "netquasar_login_remember";
+
 export function LoginPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // «Manter-me conectado»: marcado = sessão persistente (como sempre foi); desmarcado = vale só até fechar o navegador.
+  const [remember, setRemember] = useState(() => {
+    try {
+      return localStorage.getItem(REMEMBER_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
   const [err, setErr] = useState("");
   const loginStartedAtRef = useRef<number | null>(null);
   const postLoginNavTimerRef = useRef<number | null>(null);
@@ -72,7 +84,12 @@ export function LoginPage() {
         setErr("Resposta do servidor sem token de sessão.");
         return;
       }
-      saveAuthToken(t);
+      saveAuthToken(t, remember);
+      try {
+        localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+      } catch {
+        /* sem armazenamento: só não lembra a escolha */
+      }
       const role = typeof data?.role === "string" ? data.role : "admin";
       saveUserRole(role);
       const incoming = Array.isArray(data?.permissions) ? data.permissions.map((x) => String(x)).filter(Boolean) : [];
@@ -190,46 +207,22 @@ export function LoginPage() {
   const loading = authMut.isPending || postLoginNavPending;
 
   return (
-    <div className="login-page" style={{ position: "relative" }}>
+    <div className="login-page login-page--split" style={{ position: "relative" }}>
       <LoginCircuitBackdrop />
       {loading ? <GlobeSplash /> : null}
-      <div className="login-box">
-        <LoginBrandLogo />
-        {err ? <div className="msg msg--err">{err}</div> : null}
-        <form onSubmit={onSubmit}>
-          <div className="login-credentials-row">
-            <div className="field">
-              <label htmlFor="login-email">E-mail</label>
-              <input
-                id="login-email"
-                className="input"
-                style={{ width: "100%" }}
-                autoComplete="username"
-                type="email"
-                inputMode="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="nome@empresa.com"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="login-pass">Palavra-passe</label>
-              <input
-                id="login-pass"
-                className="input"
-                style={{ width: "100%" }}
-                type="password"
-                autoComplete="current-password"
-                inputMode="text"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-          <button className="btn btn--primary" type="submit" disabled={loading} style={{ width: "100%", marginTop: 8 }}>
-            {loading ? "A entrar…" : "Entrar"}
-          </button>
-        </form>
+      <div className="login-split">
+        <LoginHero />
+        <LoginCard
+          email={email}
+          password={password}
+          remember={remember}
+          error={err}
+          loading={loading}
+          onEmail={setEmail}
+          onPassword={setPassword}
+          onRemember={setRemember}
+          onSubmit={onSubmit}
+        />
       </div>
     </div>
   );

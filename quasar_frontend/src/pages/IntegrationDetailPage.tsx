@@ -277,17 +277,22 @@ export function IntegrationDetailPage() {
 
   return (
     <div>
-      <IntegrationNav slug={slug!} name={d.name} />
-      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Ativa" : "Inativa"}</span>
-        {d.session_active ? <span className="badge">Sessão ativa</span> : null}
-        {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta ativa</span> : null}
-        {consumerCfg.client_attendance?.enabled ||
-        consumerCfg.client_work_order?.enabled ||
-        consumerCfg.client_login?.enabled ? (
-          <span className="badge badge--ok">Atend. / O.S. / Logins</span>
-        ) : null}
-      </div>
+      <IntegrationNav
+        slug={slug!}
+        name={d.name}
+        badges={
+          <>
+            <span className={d.enabled ? "badge badge--ok" : "badge badge--off"}>{d.enabled ? "Ativa" : "Inativa"}</span>
+            {d.session_active ? <span className="badge">Sessão ativa</span> : null}
+            {consumerCfg.client_search?.enabled ? <span className="badge badge--ok">Consulta ativa</span> : null}
+            {consumerCfg.client_attendance?.enabled ||
+            consumerCfg.client_work_order?.enabled ||
+            consumerCfg.client_login?.enabled ? (
+              <span className="badge badge--ok">Atend. / O.S. / Logins</span>
+            ) : null}
+          </>
+        }
+      />
 
       <PageToastHost toast={toast} onDismiss={dismissToast} />
 

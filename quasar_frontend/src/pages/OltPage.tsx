@@ -893,11 +893,11 @@ export function OltPage() {
             <div className="stat__k">ONUs total (todas as OLTs)</div>
             <div className="stat__v">{formatNum(fleetOnu.total)}</div>
           </div>
-          <div className="stat" style={{ minWidth: 120 }}>
+          <div className="stat stat--ok" style={{ minWidth: 120 }}>
             <div className="stat__k">Online</div>
             <div className="stat__v">{formatNum(fleetOnu.online)}</div>
           </div>
-          <div className="stat" style={{ minWidth: 120 }}>
+          <div className="stat stat--err" style={{ minWidth: 120 }}>
             <div className="stat__k">Offline</div>
             <div className="stat__v">{formatNum(fleetOnu.offline)}</div>
           </div>

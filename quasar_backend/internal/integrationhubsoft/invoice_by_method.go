@@ -2,6 +2,7 @@ package integrationhubsoft
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -29,7 +30,9 @@ type InvoiceMethodRow struct {
 	IDCliente      string `json:"id_cliente,omitempty"`
 	CodigoCliente  string `json:"codigo_cliente,omitempty"`
 	Cliente        string `json:"cliente"`
-	Servico        string `json:"servico,omitempty"`
+	Servico        string `json:"servico,omitempty"` // login PPPoE do serviço (quando a fatura o traz)
+	Plano          string `json:"plano,omitempty"`   // nome do serviço/plano (fallback visual do login)
+	IDServico      string `json:"id_cliente_servico,omitempty"`
 	Valor          string `json:"valor"`
 	Vencimento     string `json:"vencimento"`
 	Status         string `json:"status"` // "pending" (a vencer) | "overdue" (vencida)
@@ -67,6 +70,8 @@ type InvoiceMethodReport struct {
 	MatchValue   float64                   `json:"match_value"`
 	Rows         []InvoiceMethodRow        `json:"rows"`
 	CamposFatura []string                  `json:"campos_fatura,omitempty"`
+	// AmostraFatura: valores (achatados, truncados) da 1ª fatura lida — diagnóstico de campos.
+	AmostraFatura map[string]string `json:"amostra_fatura,omitempty"`
 }
 
 // BuildInvoicesByMethod varre as faturas em aberto vencidas entre from e to (YYYY-MM-DD) e devolve as que têm a
@@ -84,6 +89,9 @@ func BuildInvoicesByMethod(ctx context.Context, cfg Config, token, from, to, mat
 	rep.Truncated = total > len(items)
 	rep.OK = true
 	rep.Rows, rep.Formas, rep.CamposFatura, rep.Scanned, rep.FormaFound, rep.MatchCount, rep.MatchValue = classifyInvoicesByMethod(items, rep.Match)
+	if len(items) > 0 {
+		rep.AmostraFatura = flattenInvoiceSample(items[0])
+	}
 	switch {
 	case rep.Scanned == 0:
 		rep.Message = "Nenhuma fatura em aberto com vencimento nesse período."
@@ -127,18 +135,16 @@ func classifyInvoicesByMethod(items []map[string]any, match string) (rows []Invo
 			continue
 		}
 		row := InvoiceMethodRow{
-			IDFatura: pickStr(m, "id_fatura", "id"), Valor: pickStr(m, "valor"), Vencimento: pickStr(m, "data_vencimento"),
+			IDFatura: pickStr(m, "id_fatura", "id"), Valor: pickStr(m, "valor"), Vencimento: formatBRDate(pickStr(m, "data_vencimento")),
 			Status: deriveInvoiceStatus(m), FormaID: id, FormaNome: nome,
 			NossoNumero: pickStr(m, "nosso_numero"), LinhaDigitavel: pickStr(m, "linha_digitavel"), Link: pickStr(m, "link"),
 		}
-		if cli, ok := m["cliente"].(map[string]any); ok {
-			row.IDCliente = pickStr(cli, "id_cliente")
-			row.CodigoCliente = pickStr(cli, "codigo_cliente")
-			row.Cliente = pickStr(cli, "nome_razaosocial", "nome")
-			if svc, ok := cli["servico"].(map[string]any); ok {
-				row.Servico = firstNonEmpty(pickStr(svc, "login"), pickStr(svc, "nome"))
-			}
-		}
+		row.IDCliente = findInvoiceStr(m, "id_cliente")
+		row.CodigoCliente = findInvoiceStr(m, "codigo_cliente")
+		row.Cliente = findInvoiceStr(m, "nome_razaosocial", "nome_cliente", "razao_social")
+		row.Servico = findInvoiceStr(m, "login", "login_radius", "login_pppoe")
+		row.IDServico = findInvoiceStr(m, "id_cliente_servico")
+		row.Plano = invoiceServiceName(m)
 		rows = append(rows, row)
 		matchCount++
 		matchValue += val
@@ -257,4 +263,165 @@ func invoiceFieldNames(m map[string]any) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// flattenInvoiceSample achata uma fatura em "chave" → valor (objetos como "cliente.nome_razaosocial", listas só pelo
+// tamanho), com valores longos truncados. Só para diagnóstico na tela — nunca é gravado.
+func flattenInvoiceSample(m map[string]any) map[string]string {
+	out := map[string]string{}
+	var walk func(prefix string, v any, depth int)
+	walk = func(prefix string, v any, depth int) {
+		switch t := v.(type) {
+		case map[string]any:
+			if depth >= 3 {
+				return
+			}
+			for k, val := range t {
+				key := k
+				if prefix != "" {
+					key = prefix + "." + k
+				}
+				walk(key, val, depth+1)
+			}
+		case []any:
+			out[prefix] = fmt.Sprintf("[lista com %d item(ns)]", len(t))
+		case nil:
+			out[prefix] = ""
+		default:
+			s := strings.TrimSpace(scalarToString(t))
+			if len(s) > 80 {
+				s = s[:80] + "…"
+			}
+			out[prefix] = s
+		}
+	}
+	walk("", m, 0)
+	return out
+}
+
+// formatBRDate normaliza uma data da HubSoft (ISO "2026-12-15", "2026-12-15 00:00:00" ou já "15/12/2026") para DD/MM/AAAA.
+// Se não for uma data reconhecível devolve o texto original.
+func formatBRDate(s string) string {
+	t := parseBRDate(s)
+	if t.IsZero() {
+		return strings.TrimSpace(s)
+	}
+	return t.Format("02/01/2006")
+}
+
+// findInvoiceStr devolve o primeiro valor textual não vazio de qualquer uma das chaves, procurando primeiro na
+// própria fatura e depois em objetos/listas aninhados (até 4 níveis). A resposta completa de /financeiro/fatura
+// não tem esquema documentado publicamente, então a leitura é deliberadamente tolerante ao lugar onde o dado vem
+// (ex.: "cliente.servico.login" ou "servicos[0].login").
+func findInvoiceStr(m map[string]any, keys ...string) string {
+	var walk func(v any, depth int) string
+	walk = func(v any, depth int) string {
+		switch t := v.(type) {
+		case map[string]any:
+			if got := pickStr(t, keys...); got != "" {
+				return got
+			}
+			if depth >= 4 {
+				return ""
+			}
+			names := make([]string, 0, len(t))
+			for k := range t {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, k := range names {
+				if got := walk(t[k], depth+1); got != "" {
+					return got
+				}
+			}
+		case []any:
+			if depth >= 4 {
+				return ""
+			}
+			for _, el := range t {
+				if got := walk(el, depth+1); got != "" {
+					return got
+				}
+			}
+		}
+		return ""
+	}
+	return walk(m, 0)
+}
+
+// invoiceServiceName acha o nome do serviço/plano: dentro de um objeto (ou lista) chamado "servico",
+// "cliente_servico" ou "servicos", pega "nome"/"descricao".
+func invoiceServiceName(m map[string]any) string {
+	var walk func(v any, depth int) string
+	walk = func(v any, depth int) string {
+		switch t := v.(type) {
+		case map[string]any:
+			for _, k := range []string{"servico", "cliente_servico", "servicos"} {
+				switch sv := t[k].(type) {
+				case map[string]any:
+					if n := pickStr(sv, "nome", "descricao"); n != "" {
+						return n
+					}
+				case []any:
+					for _, el := range sv {
+						if em, ok := el.(map[string]any); ok {
+							if n := pickStr(em, "nome", "descricao"); n != "" {
+								return n
+							}
+						}
+					}
+				}
+			}
+			if depth >= 3 {
+				return ""
+			}
+			names := make([]string, 0, len(t))
+			for k := range t {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, k := range names {
+				if got := walk(t[k], depth+1); got != "" {
+					return got
+				}
+			}
+		}
+		return ""
+	}
+	return walk(m, 0)
+}
+
+// FormaCobrancaOption é uma forma de cobrança cadastrada na HubSoft (catálogo de Configuração).
+type FormaCobrancaOption struct {
+	ID   string `json:"id"`
+	Nome string `json:"nome"`
+	Tipo string `json:"tipo,omitempty"`
+}
+
+// ListFormasCobranca devolve as formas de cobrança da conta (somente leitura), para a tela escolher em vez de digitar.
+func ListFormasCobranca(ctx context.Context, cfg Config, token string) ([]FormaCobrancaOption, error) {
+	code, body, err := FetchCatalog(ctx, cfg, token, "forma_cobranca")
+	if err != nil {
+		return nil, err
+	}
+	if code < 200 || code >= 300 {
+		return nil, fmt.Errorf("HubSoft respondeu HTTP %d", code)
+	}
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return nil, fmt.Errorf("resposta inválida da HubSoft")
+	}
+	out := []FormaCobrancaOption{}
+	for _, it := range extractArray(doc, "formas_cobranca", "forma_cobranca", "registros", "data") {
+		fm, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		o := FormaCobrancaOption{ID: pickStr(fm, "id_forma_cobranca", "id"), Nome: pickStr(fm, "descricao", "nome"), Tipo: pickStr(fm, "tipo_cobranca")}
+		if o.ID != "" || o.Nome != "" {
+			out = append(out, o)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return alnumKey(out[i].Nome) < alnumKey(out[j].Nome) })
+	return out, nil
 }

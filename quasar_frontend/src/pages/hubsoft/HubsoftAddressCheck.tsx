@@ -2,12 +2,15 @@ import { useMemo, useState } from "react";
 import { Download, MapPinned, Search } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { downloadCsv } from "./hubsoftCsv";
+import { todayISO } from "./hubsoftDates";
 import { Callout, Pill, Stat, Step, ToolPanel } from "./hubsoftAdminKit";
 
 /**
  * Conferência dos 4 endereços do serviço (fiscal, cadastral, cobrança e instalação) — SOMENTE LEITURA. Lista os serviços em que
- * os quatro não são iguais. A API pública da HubSoft não tem rota para editar endereço, então a correção é feita na HubSoft;
- * o CSV traz o endereço de cada tipo para isso.
+ * os quatro não são iguais. A API pública da HubSoft (documentação oficial, conferida) NÃO tem rota para editar nem
+ * sincronizar endereço — só criar serviço/migrar plano com um endereço de instalação novo —, então a correção é feita na
+ * HubSoft, com a função «sincronizar endereços» dela. O caso típico é «só a instalação é outra» (fiscal, cadastral e
+ * cobrança iguais entre si): o CSV traz, para cada serviço, o endereço da instalação como endereço-alvo.
  */
 
 const BASE = "/api/v1/integrations/hubsoft/hubsoft/address-check";
@@ -31,9 +34,10 @@ type Scan = { clientes_lidos: number; servicos_lidos: number; iguais: number; ro
 
 const PADRAO: Record<Row["padrao"], { text: string; tone: "ok" | "err" | "warn" }> = {
   fiscal_diferente: { text: "Fiscal diferente dos outros 3", tone: "err" },
-  instalacao_diferente: { text: "Só a instalação é outra", tone: "warn" },
+  instalacao_diferente: { text: "Instalação diferente (os outros 3 são iguais entre si)", tone: "warn" },
   outra: { text: "Outra divergência", tone: "warn" },
 };
+const PADRAO_ORDER: Row["padrao"][] = ["instalacao_diferente", "fiscal_diferente", "outra"];
 
 const TIPO_LABEL: Record<string, string> = { cadastral: "Cadastral", cobranca: "Cobrança", instalacao: "Instalação" };
 
@@ -42,8 +46,9 @@ export function HubsoftAddressCheck() {
   const [scan, setScan] = useState<Scan | null>(null);
   const [err, setErr] = useState("");
   const [cancelados, setCancelados] = useState(false);
-  const [onlyMulti, setOnlyMulti] = useState(true);
-  const [onlyFiscal, setOnlyFiscal] = useState(false);
+  const [onlyMulti, setOnlyMulti] = useState(false);
+  // padrão mostrado: por omissão o caso pedido — instalação num endereço e os outros 3 em outro, iguais entre si
+  const [padrao, setPadrao] = useState<"" | Row["padrao"]>("instalacao_diferente");
 
   async function run() {
     setScanning(true);
@@ -61,17 +66,21 @@ export function HubsoftAddressCheck() {
   const rows = useMemo(() => {
     let r = scan?.rows ?? [];
     if (onlyMulti) r = r.filter((x) => x.n_servicos >= 2);
-    if (onlyFiscal) r = r.filter((x) => x.padrao === "fiscal_diferente");
+    if (padrao) r = r.filter((x) => x.padrao === padrao);
     return r;
-  }, [scan, onlyMulti, onlyFiscal]);
+  }, [scan, onlyMulti, padrao]);
   const total = scan?.rows ?? [];
   const nFiscal = total.filter((r) => r.padrao === "fiscal_diferente").length;
+  const countByPadrao = (p: Row["padrao"]) => total.filter((r) => r.padrao === p).length;
 
   function download() {
     downloadCsv(
-      `enderecos-divergentes-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["id_cliente", "codigo_cliente", "cliente", "id_cliente_servico", "login", "servicos_do_cliente", "padrao", "fiscal", "cadastral", "cobranca", "instalacao"],
-      rows.map((r) => [r.id_cliente, r.codigo_cliente ?? "", r.nome, r.id_cliente_servico, r.login, String(r.n_servicos), PADRAO[r.padrao].text, r.fiscal, r.cadastral, r.cobranca, r.instalacao]),
+      `enderecos-divergentes-${todayISO()}.csv`,
+      ["id_cliente", "codigo_cliente", "cliente", "id_cliente_servico", "login", "status_servico", "servicos_do_cliente", "padrao", "tipos_que_diferem_do_fiscal", "endereco_alvo_(igual_a_instalacao)", "fiscal", "cadastral", "cobranca", "instalacao"],
+      rows.map((r) => [
+        r.id_cliente, r.codigo_cliente ?? "", r.nome, r.id_cliente_servico, r.login, r.status ?? "", String(r.n_servicos), PADRAO[r.padrao].text,
+        r.diferentes.map((d) => TIPO_LABEL[d] ?? d).join(" | "), r.instalacao, r.fiscal, r.cadastral, r.cobranca, r.instalacao,
+      ]),
     );
   }
 
@@ -81,7 +90,7 @@ export function HubsoftAddressCheck() {
       title="Conferir endereços dos serviços"
       badge="Somente leitura"
       badgeTone="ok"
-      subtitle="Compara os 4 endereços de cada serviço (fiscal, cadastral, cobrança e instalação) e lista os que não são iguais. A API da HubSoft não permite alterar endereço — a correção é feita na HubSoft."
+      subtitle="Compara os 4 endereços de cada serviço (fiscal, cadastral, cobrança e instalação) e lista os que não são iguais. A API da HubSoft não tem rota para alterar nem sincronizar endereço — para igualar os 4 use a função «sincronizar endereços» da própria HubSoft; o CSV traz o endereço da instalação de cada serviço como alvo."
     >
       <Step n={1} title="Conferir a base" done={!!scan && !scanning} hint="Lê todos os clientes e serviços da HubSoft — leva cerca de 1 a 2 minutos.">
         <div className="hsa-actions">
@@ -104,12 +113,7 @@ export function HubsoftAddressCheck() {
             <Stat label="Fiscal diferente dos outros 3" value={nFiscal} tone={nFiscal ? "err" : "ok"} />
           </div>
         ) : null}
-        {scan && nFiscal === 0 ? (
-          <Callout tone="info">
-            Nenhum serviço tem o endereço fiscal diferente dos outros três. As divergências abaixo (se houver) são, em geral, “2º ponto”: a instalação fica em outro endereço
-            que o do cadastro.
-          </Callout>
-        ) : null}
+        {scan && nFiscal === 0 ? <Callout tone="info">Nenhum serviço tem o endereço fiscal diferente dos outros três.</Callout> : null}
       </Step>
 
       {scan ? (
@@ -120,8 +124,15 @@ export function HubsoftAddressCheck() {
               Só clientes com 2 ou mais serviços
             </label>
             <label className="hsa-check">
-              <input type="checkbox" checked={onlyFiscal} onChange={(e) => setOnlyFiscal(e.target.checked)} />
-              Só “fiscal diferente dos outros 3”
+              Padrão
+              <select className="input" style={{ marginLeft: 8 }} value={padrao} onChange={(e) => setPadrao(e.target.value as typeof padrao)}>
+                <option value="">Todos ({total.length})</option>
+                {PADRAO_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {PADRAO[p].text} ({countByPadrao(p)})
+                  </option>
+                ))}
+              </select>
             </label>
             <span className="hsa-spacer" />
             <button type="button" className="btn btn--sm" disabled={rows.length === 0} onClick={download}>

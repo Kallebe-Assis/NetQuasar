@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "NetQuasar",
+  "short_name": "NetQuasar",
+  "description": "Monitoramento de rede, alertas, OLT/ONU e integrações do provedor.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "categories": ["business", "utilities"],
+  "icons": [
+    { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Alertas", "short_name": "Alertas", "url": "/alerts?source=shortcut", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Monitoramento", "short_name": "Monitor", "url": "/monitoring?source=shortcut", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "OLT / ONUs", "short_name": "OLT", "url": "/olt?source=shortcut", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Consulta de cliente", "short_name": "Cliente", "url": "/integrations/hubsoft/consulta?source=shortcut", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

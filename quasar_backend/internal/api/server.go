@@ -486,6 +486,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 			r.Get("/{id}/hubsoft/conference/{jobId}", s.hubsoftConferenceStatus)
 			r.Get("/{id}/hubsoft/report/financial", s.hubsoftReportFinancial)
 			r.Get("/{id}/hubsoft/report/invoices-by-method", s.hubsoftReportInvoicesByMethod)
+			r.Get("/{id}/hubsoft/report/invoices-by-method/formas", s.hubsoftInvoiceMethodFormas)
+			r.Post("/{id}/hubsoft/report/invoices-by-method/services-check", s.hubsoftServiceFormaCheck)
 			r.Get("/{id}/hubsoft/attendance/detail", s.hubsoftAttendanceDetail)
 			r.Get("/{id}/hubsoft/work-orders/detail", s.hubsoftWorkOrderDetail)
 			r.Get("/{id}/hubsoft/financial/list", s.hubsoftFinancialList)
