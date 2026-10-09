@@ -6,6 +6,7 @@ import { ConsultaLoading } from "./ConsultaLoading";
 import { useConsultaToast } from "./hubsoftConsulta";
 import { downloadCsv, parseCsv, csvRowsToObjects } from "./hubsoftCsv";
 import { todayISO } from "./hubsoftDates";
+import { PRODUCT_FIELDS, PRODUCT_OPTIONAL, absentColumns, pickField } from "./hubsoftStockFields";
 
 const SLUG = "hubsoft";
 const BASE = `/api/v1/integrations/${SLUG}/hubsoft/stock-products`;
@@ -19,45 +20,7 @@ const MAX_ROWS = 500;
  * configurado e conferido; as três etapas aparecem separadas no resultado e tudo fica no histórico.
  */
 
-// Colunas do modelo, na ordem. Cada uma aceita também nomes alternativos (ex.: o CSV de revisão «nome_final_na_hubsoft»).
-const FIELDS: { key: string; aliases: string[] }[] = [
-  { key: "codigo", aliases: ["codigo", "id_produto_ixc", "código"] },
-  { key: "nome", aliases: ["nome", "nome_final_na_hubsoft", "nome_final"] },
-  { key: "id_categoria", aliases: ["id_categoria"] },
-  { key: "id_marca", aliases: ["id_marca", "id_produto_marca"] },
-  { key: "id_tipo", aliases: ["id_tipo", "id_produto_tipo", "tipo_produto"] },
-  { key: "unidade_medida", aliases: ["unidade_medida", "unidade"] },
-  { key: "controle_patrimonial", aliases: ["controle_patrimonial"] },
-  { key: "epi", aliases: ["epi"] },
-  { key: "valor_compra", aliases: ["valor_compra"] },
-  { key: "valor_venda", aliases: ["valor_venda"] },
-  { key: "estoque_minimo", aliases: ["estoque_minimo"] },
-  { key: "incluir_nota_fiscal", aliases: ["incluir_nota_fiscal"] },
-  { key: "permite_venda_cliente", aliases: ["permite_venda_cliente"] },
-  { key: "permite_comodato_cliente", aliases: ["permite_comodato_cliente"] },
-  { key: "permite_vinculo_pop", aliases: ["permite_vinculo_pop"] },
-  { key: "permite_vinculo_projeto_mapeamento", aliases: ["permite_vinculo_projeto_mapeamento"] },
-  { key: "permite_vinculo_usuario", aliases: ["permite_vinculo_usuario"] },
-  { key: "permite_vinculo_composicao", aliases: ["permite_vinculo_composicao"] },
-];
-
-const norm = (h: string) =>
-  h
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/\s*\(.*\)\s*/g, "")
-    .trim();
-
-function pickField(r: Record<string, string>, aliases: string[]): string {
-  const byNorm: Record<string, string> = {};
-  for (const [k, v] of Object.entries(r)) byNorm[norm(k)] = v;
-  for (const a of aliases) {
-    const v = byNorm[norm(a)];
-    if (v !== undefined && v.trim() !== "") return v.trim();
-  }
-  return "";
-}
+const FIELDS = PRODUCT_FIELDS;
 
 type RowValidation = { line: number; valid: boolean; problems?: string[]; label?: string };
 type ValidationResp = { ok: boolean; rows: RowValidation[]; valid: number; invalid: number; unchecked_catalogs?: string[] };
@@ -164,6 +127,14 @@ export function HubsoftStockProducts() {
     setFileName(f.name);
     const objs = csvRowsToObjects(parseCsv(await f.text()));
     if (objs.length === 0) return missing("o CSV não tem linhas de dados.");
+    // O arquivo precisa ter as colunas do modelo — evita subir por engano outro CSV (ex.: o mapa de produtos IXC → HubSoft).
+    const absent = absentColumns(objs[0], FIELDS, PRODUCT_OPTIONAL);
+    if (absent.length > 0) {
+      setFileName("");
+      return missing(
+        `este arquivo não parece ser um CSV de produtos — faltam as colunas: ${absent.join(", ")}. Use o modelo (botão "Baixar modelo CSV de produtos") ou o arquivo 11-IMPORTAR-no-NetQuasar-produtos-39.csv.`,
+      );
+    }
     if (objs.length > MAX_ROWS) return missing(`no máximo ${MAX_ROWS} linhas por importação (o arquivo tem ${objs.length}).`);
     setRawRows(objs);
   }

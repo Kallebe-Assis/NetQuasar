@@ -67,7 +67,9 @@ type stockMock struct {
 	ignoraMarca bool
 	// marcaViaRaiz: o PUT só aceita trocar a marca quando o corpo traz id_produto_marca na raiz.
 	marcaViaRaiz bool
-	puts         []map[string]any
+	// marcaViaPUT: o PUT com produto_marca{id_produto_marca} troca a marca (o que a HubSoft real faz).
+	marcaViaPUT bool
+	puts        []map[string]any
 }
 
 func jsonStr(v any) string { return strings.TrimSpace(scalarToString(v)) }
@@ -109,6 +111,14 @@ func (m *stockMock) handler(t *testing.T) http.Handler {
 			_ = json.Unmarshal(raw, &put)
 			m.puts = append(m.puts, put)
 			if _, isCfg := put["produto_configuracao"]; !isCfg {
+				if pm, ok := put["produto_marca"].(map[string]any); ok && m.marcaViaPUT {
+					id := strings.TrimPrefix(r.URL.Path, base+"/")
+					for _, p := range m.products {
+						if jsonStr(p["id_produto"]) == id {
+							p["produto_marca"] = map[string]any{"id_produto_marca": pm["id_produto_marca"], "nome": "VIA-PUT"}
+						}
+					}
+				}
 				if idm, ok := put["id_produto_marca"]; ok && m.marcaViaRaiz {
 					id := strings.TrimPrefix(r.URL.Path, base+"/")
 					for _, p := range m.products {
@@ -356,5 +366,17 @@ func TestRepararMarcaDeProdutoExistente(t *testing.T) {
 	r4 := ApplyStockProduct(context.Background(), cfg4, "tok", row, ix4, brands)
 	if r4.Action != StockActionAlreadyExists || len(m4.puts) != 0 {
 		t.Errorf("por nome não altera: %+v", r4)
+	}
+}
+
+func TestMarcaDefinidaPeloPutLogoAposCriar(t *testing.T) {
+	m := &stockMock{ignoraMarca: true, marcaViaPUT: true}
+	srv := httptest.NewServer(m.handler(t))
+	defer srv.Close()
+	cfg := Config{BaseURL: srv.URL}
+	ix, _ := NewStockProductIndex(context.Background(), cfg, "tok")
+	res := ApplyStockProduct(context.Background(), cfg, "tok", okRow(), ix, brands)
+	if !res.OK || res.Verified == nil || !*res.Verified || !strings.Contains(res.BrandRepair, "marca definida pelo PUT") || strings.Contains(res.BrandRepair, "não foi possível") {
+		t.Errorf("a marca deveria ficar certa na primeira passada: %+v", res)
 	}
 }

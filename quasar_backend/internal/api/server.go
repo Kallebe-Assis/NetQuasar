@@ -523,6 +523,18 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/{id}/hubsoft/stock-products/validate", s.hubsoftStockProductsValidate)
 				r.Post("/{id}/hubsoft/stock-products/preflight", s.hubsoftStockProductsPreflight)
 				r.Post("/{id}/hubsoft/stock-products/apply", s.hubsoftStockProductsApply)
+				r.Post("/{id}/hubsoft/stock-items/validate", s.hubsoftStockItemsValidate)
+				r.Post("/{id}/hubsoft/stock-items/preflight", s.hubsoftStockItemsPreflight)
+				r.Post("/{id}/hubsoft/stock-items/apply", s.hubsoftStockItemsApply)
+				r.Post("/{id}/hubsoft/stock-items/check", s.hubsoftStockItemsCheck)
+				r.Post("/{id}/hubsoft/stock-products/check", s.hubsoftStockProductsCheck)
+				r.Get("/{id}/hubsoft/stock-comodato/movement-types", s.hubsoftStockComodatoTypes)
+				r.Get("/{id}/hubsoft/stock-comodato/service", s.hubsoftStockComodatoService)
+				r.Get("/{id}/hubsoft/stock-comodato/item", s.hubsoftStockComodatoItem)
+				r.Post("/{id}/hubsoft/stock-comodato/preview", s.hubsoftStockComodatoPreview)
+				r.Post("/{id}/hubsoft/stock-comodato/apply", s.hubsoftStockComodatoApply)
+				r.Post("/{id}/hubsoft/stock-comodato/preview-batch", s.hubsoftStockComodatoPreviewBatch)
+				r.Post("/{id}/hubsoft/stock-comodato/apply-batch", s.hubsoftStockComodatoApplyBatch)
 			})
 			// IXC: inativar/reativar logins em massa (migração para a HubSoft) — administradores ou perfis com a permissão.
 			r.Group(func(r chi.Router) {

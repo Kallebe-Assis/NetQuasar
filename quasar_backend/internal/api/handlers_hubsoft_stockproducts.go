@@ -172,3 +172,27 @@ func (s *Server) hubsoftStockProductsApply(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "halted": halted})
 }
+
+// POST …/hubsoft/stock-products/check — CONFERÊNCIA (somente leitura): compara o CSV de produtos com a HubSoft, campo a campo.
+func (s *Server) hubsoftStockProductsCheck(w http.ResponseWriter, r *http.Request) {
+	cfg, _, body, ok := s.stockProductsPrepare(w, r, 2000, 8<<20)
+	if !ok {
+		return
+	}
+	extendWriteDeadline(w, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	integID, _ := s.resolveIntegrationID(ctx, chi.URLParam(r, "id"))
+	token, err := s.hubsoftToken(ctx, integID, cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "AUTH", "não foi possível autenticar na HubSoft: "+err.Error(), nil)
+		return
+	}
+	res, err := integrationhubsoft.CheckStockProducts(ctx, cfg, token, decodeStockRows(body.Rows))
+	if err != nil {
+		s.Log.Warn().Err(err).Msg("hubsoft stock-products check falhou")
+		writeErr(w, http.StatusBadGateway, "HUBSOFT", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": res})
+}

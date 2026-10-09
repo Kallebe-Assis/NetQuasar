@@ -4,13 +4,13 @@ import { useSearchParams } from "react-router-dom";
 import { BookOpen, CalendarClock, CheckCircle2, ClipboardCheck, History, KeyRound, MapPinned, Package, PlugZap, PowerOff, UserPlus, XCircle } from "lucide-react";
 import { HubsoftPasswordFix } from "./HubsoftPasswordFix";
 import { ToolPanel } from "./hubsoftAdminKit";
-import { HubsoftRegistrationCheck } from "./HubsoftRegistrationCheck";
 import { HubsoftHeader } from "./HubsoftHeader";
 import { HubsoftDataVendaSection } from "./HubsoftDataVendaSection";
 import { HubsoftCatalogExplorer } from "./HubsoftCatalogExplorer";
 import { HubsoftBulkImportSection } from "./HubsoftBulkImportSection";
 import { HubsoftBulkImportHistory } from "./HubsoftBulkImportHistory";
-import { HubsoftStockProducts } from "./HubsoftStockProducts";
+import { HubsoftStock } from "./HubsoftStock";
+import { HubsoftConference } from "./HubsoftConference";
 import { HubsoftIxcLogins } from "./HubsoftIxcLogins";
 import { HubsoftAddressCheck } from "./HubsoftAddressCheck";
 import { can, isAdminUser } from "../../lib/auth";
@@ -22,17 +22,17 @@ import { queryKeys } from "../../lib/queryKeys";
 
 type TestOutcome = { ok: boolean; message: string; latency_ms?: number };
 
-type ConfigTab = "conexao" | "importar" | "conferir" | "senhas" | "data-venda" | "catalogos" | "historico" | "ixc-logins" | "enderecos" | "produtos";
+type ConfigTab = "conexao" | "importar" | "conferir" | "senhas" | "data-venda" | "catalogos" | "historico" | "ixc-logins" | "enderecos" | "estoque";
 
 // Seções da configuração. "Conexão" é de quem gere integrações; as de edição em massa (bulk) só aparecem para
 // administradores ou perfis com a permissão "integrations.hubsoft_bulk" (Configurações → Perfis de permissão).
 const CONFIG_TABS: { id: ConfigTab; label: string; icon: ReactNode; bulk?: boolean; ixc?: boolean }[] = [
   { id: "conexao", label: "Conexão", icon: <PlugZap size={15} aria-hidden /> },
   { id: "importar", label: "Importar clientes", icon: <UserPlus size={15} aria-hidden />, bulk: true },
-  { id: "conferir", label: "Conferir cadastros", icon: <ClipboardCheck size={15} aria-hidden />, bulk: true },
+  { id: "conferir", label: "Conferência", icon: <ClipboardCheck size={15} aria-hidden />, bulk: true },
   { id: "senhas", label: "Corrigir senhas", icon: <KeyRound size={15} aria-hidden />, bulk: true },
   { id: "enderecos", label: "Conferir endereços", icon: <MapPinned size={15} aria-hidden />, bulk: true },
-  { id: "produtos", label: "Produtos de estoque", icon: <Package size={15} aria-hidden />, bulk: true },
+  { id: "estoque", label: "Estoque", icon: <Package size={15} aria-hidden />, bulk: true },
   { id: "data-venda", label: "Data de venda", icon: <CalendarClock size={15} aria-hidden />, bulk: true },
   { id: "catalogos", label: "Catálogos", icon: <BookOpen size={15} aria-hidden />, bulk: true },
   { id: "historico", label: "Histórico", icon: <History size={15} aria-hidden />, bulk: true },
@@ -147,7 +147,9 @@ export function HubsoftConfigPage() {
   const canBulk = can("integrations.hubsoft_bulk");
   const canIxc = can("integrations.ixc_logins");
   const visibleTabs = CONFIG_TABS.filter((t) => (t.bulk ? canBulk : t.ixc ? canIxc : canConnection));
-  const tabParam = searchParams.get("aba") as ConfigTab | null;
+  // links antigos (?aba=produtos / ?aba=patrimonios) abrem a aba «Estoque» já na sub-aba certa
+  const rawAba = searchParams.get("aba");
+  const tabParam = (rawAba === "produtos" || rawAba === "patrimonios" ? "estoque" : rawAba) as ConfigTab | null;
   const tab: ConfigTab = visibleTabs.some((t) => t.id === tabParam) ? (tabParam as ConfigTab) : (visibleTabs[0]?.id ?? "conexao");
   const selectTab = (id: ConfigTab) => {
     const next = new URLSearchParams(searchParams);
@@ -271,10 +273,10 @@ export function HubsoftConfigPage() {
       ) : null}
 
       {tab === "importar" ? <HubsoftBulkImportSection /> : null}
-      {tab === "conferir" ? <HubsoftRegistrationCheck /> : null}
+      {tab === "conferir" ? <HubsoftConference /> : null}
       {tab === "senhas" ? <HubsoftPasswordFix /> : null}
       {tab === "enderecos" ? <HubsoftAddressCheck /> : null}
-      {tab === "produtos" ? <HubsoftStockProducts /> : null}
+      {tab === "estoque" ? <HubsoftStock /> : null}
       {tab === "data-venda" ? <HubsoftDataVendaSection /> : null}
       {tab === "catalogos" ? <HubsoftCatalogExplorer /> : null}
       {tab === "historico" ? <HubsoftBulkImportHistory /> : null}

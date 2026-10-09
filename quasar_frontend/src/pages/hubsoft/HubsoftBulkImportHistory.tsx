@@ -12,6 +12,8 @@ const ENTITY_TYPES = {
   client: "hubsoft_bulk_import_client",
   service: "hubsoft_bulk_import_service",
   produto: "hubsoft_stock_product",
+  patrimonio: "hubsoft_stock_item",
+  comodato: "hubsoft_stock_comodato",
 } as const;
 
 /**
@@ -20,11 +22,11 @@ const ENTITY_TYPES = {
  */
 // Ações do log que contam como sucesso (a linha cumpriu o que devia: criou, adicionou, corrigiu o
 // login ou confirmou que já existia) — antes só "created" contava e o resto aparecia como erro.
-const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already_exists"]);
+const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already_exists", "already_done", "brand_repaired", "resumed"]);
 
 export function HubsoftBulkImportHistory() {
   const { notify } = useConsultaToast();
-  const [kind, setKind] = useState<"client" | "service" | "produto">("client");
+  const [kind, setKind] = useState<"client" | "service" | "produto" | "patrimonio" | "comodato">("client");
   const [rows, setRows] = useState<AuditRowView[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -51,7 +53,7 @@ export function HubsoftBulkImportHistory() {
 
   function exportCsv() {
     if (!rows) return;
-    const head = ["Quando", "Linha", "Identificação", "Resultado", "Mensagem", kind === "produto" ? "id_produto" : "id_cliente", kind === "produto" ? "detalhe_da_hubsoft" : "id_cliente_servico", "Usuário"];
+    const head = ["Quando", "Linha", "Identificação", "Resultado", "Mensagem", kind === "produto" ? "id_produto" : kind === "patrimonio" ? "id_produto_item" : "id_cliente", kind === "produto" ? "detalhe_da_hubsoft" : "id_cliente_servico", "Usuário"];
     const data = rows.map((r) => {
       const a = r.after_data ?? {};
       return [
@@ -60,7 +62,7 @@ export function HubsoftBulkImportHistory() {
         String(a.label ?? ""),
         OK_ACTIONS.has(r.action) ? "OK" : "Erro",
         String(a.message ?? ""),
-        String(a.id_cliente ?? a.id_produto ?? ""),
+        String(a.id_cliente ?? a.id_produto_item ?? a.id_produto ?? ""),
         String(a.id_cliente_servico ?? a.detail ?? ""),
         r.actor ?? "",
       ];
@@ -86,6 +88,8 @@ export function HubsoftBulkImportHistory() {
             { value: "client", label: "Clientes novos" },
             { value: "service", label: "Serviços adicionais" },
             { value: "produto", label: "Produtos de estoque" },
+            { value: "patrimonio", label: "Patrimônios de estoque" },
+            { value: "comodato", label: "Comodato de patrimônio" },
           ]}
         />
         <div className="hsa-actions">

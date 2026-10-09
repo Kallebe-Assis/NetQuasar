@@ -38,7 +38,7 @@ type ExportResp = {
   rows: { login: string; service_id: string; client_code: string; client_name: string; status: string; current_date?: string }[];
 };
 
-const HEADER_ALIASES: Record<string, string[]> = {
+export const HEADER_ALIASES: Record<string, string[]> = {
   login: ["login_pppoe", "login", "pppoe"],
   service_id: ["id_cliente_servico", "id_servico", "id"],
   client_code: ["codigo_cliente", "codigo"],
@@ -46,12 +46,16 @@ const HEADER_ALIASES: Record<string, string[]> = {
   new_date: ["data_venda_nova", "nova_data", "data_nova"],
 };
 
-function mapCsv(rows: string[][]): { items: InputRow[]; error?: string; skipped: number } {
+export type { InputRow, PreviewResp, PreviewRow };
+
+/** Lê o CSV de datas. `extraDateAliases` aceita outros nomes para a coluna da data (ex.: «data_venda» na conferência). */
+export function mapCsv(rows: string[][], extraDateAliases: string[] = []): { items: InputRow[]; error?: string; skipped: number } {
   if (rows.length < 2) return { items: [], error: "CSV vazio.", skipped: 0 };
   const head = rows[0].map((h) => h.trim().toLowerCase());
   const idx: Record<string, number> = {};
   for (const [k, names] of Object.entries(HEADER_ALIASES)) {
-    idx[k] = head.findIndex((h) => names.includes(h));
+    const all = k === "new_date" ? [...names, ...extraDateAliases] : names;
+    idx[k] = head.findIndex((h) => all.includes(h));
   }
   const missing = ["login", "service_id", "client_name", "new_date"].filter((k) => idx[k] < 0);
   if (missing.length) {

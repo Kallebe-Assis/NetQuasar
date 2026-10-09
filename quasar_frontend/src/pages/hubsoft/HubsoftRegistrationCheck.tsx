@@ -133,9 +133,10 @@ function CheckDetail({ row, onlyDiff }: { row: RowCheck; onlyDiff: boolean }) {
   );
 }
 
-export function HubsoftRegistrationCheck() {
+export function HubsoftRegistrationCheck({ fixedKind }: { fixedKind?: ImportKind } = {}) {
   const { notify, missing } = useConsultaToast();
-  const [kind, setKind] = useState<ImportKind>("client");
+  // fixedKind: quando a aba «Conferência» já escolheu clientes ou serviços, não repete o seletor
+  const [kind, setKind] = useState<ImportKind>(fixedKind ?? "client");
   const [mode, setMode] = useState<CheckMode>("especifica");
   const [fileName, setFileName] = useState("");
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
@@ -310,12 +311,13 @@ export function HubsoftRegistrationCheck() {
   return (
     <ToolPanel
       icon={<ClipboardCheck size={20} />}
-      title="Conferência de cadastros"
+      title={fixedKind === "service" ? "Conferência de serviços" : fixedKind === "client" ? "Conferência do cadastro de clientes" : "Conferência de cadastros"}
       badge="Somente leitura"
       badgeTone="ok"
       subtitle="Envie o mesmo CSV da importação (ou qualquer lista de clientes no mesmo formato): o sistema consulta a HubSoft e confere, campo a campo, se cada cadastro está igual ao arquivo."
     >
       <div className="hsa-panel__body hsa-panel__body--pad" style={{ borderBottom: "1px solid var(--border)" }}>
+        {fixedKind ? null : (
         <Segmented
           label="Tipo de arquivo"
           value={kind}
@@ -328,6 +330,7 @@ export function HubsoftRegistrationCheck() {
             { value: "service", label: "Serviços adicionais" },
           ]}
         />
+        )}
         <Segmented
           label="Tipo de conferência"
           value={mode}

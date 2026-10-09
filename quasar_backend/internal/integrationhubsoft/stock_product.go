@@ -217,6 +217,8 @@ type ExistingStockProduct struct {
 	ID     string
 	Nome   string
 	Codigo string
+	// Patrimonial — controle_patrimonial = true (cada unidade vira um patrimônio).
+	Patrimonial bool
 }
 
 // ListStockProducts lê TODOS os produtos da HubSoft (paginado).
@@ -227,7 +229,7 @@ func ListStockProducts(ctx context.Context, cfg Config, token string) ([]Existin
 	}
 	out := make([]ExistingStockProduct, 0, len(items))
 	for _, m := range items {
-		out = append(out, ExistingStockProduct{ID: pickStr(m, "id_produto"), Nome: strings.TrimSpace(pickStr(m, "nome")), Codigo: strings.TrimSpace(pickStr(m, "codigo"))})
+		out = append(out, ExistingStockProduct{ID: pickStr(m, "id_produto"), Nome: strings.TrimSpace(pickStr(m, "nome")), Codigo: strings.TrimSpace(pickStr(m, "codigo")), Patrimonial: pickBool(m, "controle_patrimonial")})
 	}
 	return out, nil
 }
@@ -477,6 +479,15 @@ func ApplyStockProduct(ctx context.Context, cfg Config, token string, r StockPro
 		return res
 	}
 
+	// 1b) marca: a HubSoft IGNORA a marca enviada no POST (grava uma marca «API») mas aceita o PUT com
+	// produto_marca{id_produto_marca} — confirmado em teste real. Define já aqui; a conferência final continua valendo e,
+	// se divergir, ainda tenta as formas alternativas (repairStockBrand).
+	if _, berr := stockCall(ctx, cfg, token, "PUT", "/api/v1/integracao/estoque/produto/"+res.IDProduto, brandVariants(r, marcaNome)[0].Body); berr != "" {
+		res.BrandRepair = "o PUT da marca foi recusado: " + berr
+	} else {
+		res.BrandRepair = "marca definida pelo PUT (a HubSoft ignora a marca no POST)"
+	}
+
 	// 2) configurar
 	cbody, cErr := stockCall(ctx, cfg, token, "PUT", "/api/v1/integracao/estoque/produto/"+res.IDProduto, stockConfigBody(r))
 	cok := cErr == ""
@@ -495,7 +506,7 @@ func ApplyStockProduct(ctx context.Context, cfg Config, token string, r StockPro
 	vok, vmsg := verifyStockProduct(vbody, vErr, r)
 	if !vok && strings.Contains(vmsg, "MARCA gravada") {
 		fixed, how, nb := repairStockBrand(ctx, cfg, token, res.IDProduto, r, marcaNome)
-		res.BrandRepair = how
+		res.BrandRepair += " | " + how
 		if fixed {
 			vbody, vErr = nb, ""
 			vok, vmsg = verifyStockProduct(vbody, vErr, r)
