@@ -205,6 +205,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/database/cleanup/overview", s.databaseCleanupOverview)
 				r.Post("/database/cleanup/scan", s.databaseCleanupScan)
 				r.Post("/database/cleanup/execute", s.databaseCleanupExecute)
+				r.Get("/database/cleanup/jobs/{jobId}", s.databaseCleanupJob)
 				r.Get("/database/logs", s.settingsDatabaseLogs)
 				r.Get("/database/backups/b2", s.listDatabaseBackupsB2)
 				r.Post("/database/backups/b2/cleanup", s.cleanupDatabaseBackupsB2)
@@ -519,6 +520,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Get("/{id}/hubsoft/password-fix/scan", s.hubsoftPasswordFixScan)
 				r.Get("/{id}/hubsoft/address-check/scan", s.hubsoftAddressCheckScan)
 				r.Post("/{id}/hubsoft/password-fix/apply", s.hubsoftPasswordFixApply)
+				r.Post("/{id}/hubsoft/stock-products/validate", s.hubsoftStockProductsValidate)
+				r.Post("/{id}/hubsoft/stock-products/preflight", s.hubsoftStockProductsPreflight)
+				r.Post("/{id}/hubsoft/stock-products/apply", s.hubsoftStockProductsApply)
 			})
 			// IXC: inativar/reativar logins em massa (migração para a HubSoft) — administradores ou perfis com a permissão.
 			r.Group(func(r chi.Router) {

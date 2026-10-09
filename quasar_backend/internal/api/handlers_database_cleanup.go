@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/netquasar/netquasar/quasar_backend/internal/localdbstore"
 )
 
 const (
 	databaseCleanupScanMinDays    = 1
-	databaseCleanupExecuteMinDays = 7
+	databaseCleanupExecuteMinDays = 1
 )
 
 type dbCleanupTableSpec struct {
@@ -28,6 +31,7 @@ var dbCleanupTables = []dbCleanupTableSpec{
 	{Table: "ping_history", DateCol: "checked_at", Label: "Histórico de ping", Category: "monitoramento"},
 	{Table: "interface_snapshots", DateCol: "collected_at", Label: "Snapshots de interfaces", Category: "monitoramento"},
 	{Table: "olt_onu_samples", DateCol: "recorded_at", Label: "Histórico agregado ONU (OLT)", Category: "olt"},
+	{Table: "olt_pon_samples", DateCol: "recorded_at", Label: "Histórico por PON (OLT)", Category: "olt"},
 	{Table: "bng_stats_samples", DateCol: "collected_at", Label: "Totais BNG (monitoramento)", Category: "bng"},
 	{Table: "bng_session_snapshots", DateCol: "captured_at", Label: "Snapshots sessões PPPoE BNG", Category: "bng"},
 	{Table: "bng_login_events", DateCol: "disconnected_at", Label: "Histórico de logins BNG (encerrados)", Category: "bng", Guard: "closed_only"},
@@ -178,12 +182,18 @@ func (s *Server) databaseCleanupOverview(w http.ResponseWriter, r *http.Request)
 		items = append(items, item)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"database_size_bytes": dbSize,
 		"total_rows":          totalRows,
 		"items":               items,
 		"scanned_at":          time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	// disco do servidor onde o NetQuasar roda (no Compose é o mesmo do Postgres) — para ver quanto sobra ao limpar
+	if free, total, ok := diskUsage(localdbstore.DataDir()); ok {
+		out["disk_free_bytes"] = free
+		out["disk_total_bytes"] = total
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) databaseCleanupScan(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +272,8 @@ type dbCleanupExecuteRequest struct {
 	OlderThanDays int      `json:"older_than_days"`
 	Tables        []string `json:"tables,omitempty"`
 	Confirm       bool     `json:"confirm"`
+	// Compact devolve o espaço ao disco (TRUNCATE / reescrita / VACUUM FULL). Ausente = true.
+	Compact *bool `json:"compact,omitempty"`
 }
 
 func (s *Server) databaseCleanupExecute(w http.ResponseWriter, r *http.Request) {
@@ -302,41 +314,29 @@ func (s *Server) databaseCleanupExecute(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusInternalServerError, "DB", "base indisponível", nil)
 		return
 	}
-	deleted := make([]map[string]any, 0, len(specs))
-	var deletedTotal int64
-	for _, spec := range specs {
-		exists, err := s.tableExists(r.Context(), spec.Table)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
-			return
-		}
-		if !exists {
-			continue
-		}
-		where := cleanupWhereClause(spec)
-		q := fmt.Sprintf(`DELETE FROM %s WHERE %s`, spec.Table, where)
-		tag, err := pool.Exec(r.Context(), q, cutoff)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "DB", fmt.Sprintf("falha ao apagar %s: %v", spec.Table, err), nil)
-			return
-		}
-		n := tag.RowsAffected()
-		deletedTotal += n
-		deleted = append(deleted, map[string]any{"table": spec.Table, "label": spec.Label, "deleted": n})
+	compact := body.Compact == nil || *body.Compact
+	job, started := startDBPurgeJob(days, compact)
+	if !started {
+		writeErr(w, http.StatusConflict, "BUSY", "já existe uma limpeza em andamento — aguarde terminar", map[string]any{"job_id": job.ID})
+		return
 	}
-
-	actor := s.actorFromRequest(r)
-	s.appendAuditLog(r.Context(), "database", "cleanup", "purge_old_data", actor, nil, map[string]any{
-		"older_than_days": days,
-		"cutoff_at":       cutoff.Format(time.RFC3339),
-		"deleted_total":   deletedTotal,
-		"tables":          deleted,
+	// A limpeza pode levar minutos: roda em segundo plano e a tela consulta o progresso em GET .../cleanup/jobs/{id}.
+	go s.runDatabasePurge(job, pool, specs, cutoff, s.actorFromRequest(r))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":        true,
+		"job_id":    job.ID,
+		"cutoff_at": cutoff.Format(time.RFC3339),
+		"eligible":  total,
+		"compact":   compact,
 	})
+}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"deleted_total": deletedTotal,
-		"items":         deleted,
-		"cutoff_at":     cutoff.Format(time.RFC3339),
-	})
+// GET /settings/database/cleanup/jobs/{jobId} — progresso (jobId "current" = a limpeza em andamento ou a última).
+func (s *Server) databaseCleanupJob(w http.ResponseWriter, r *http.Request) {
+	job := findDBPurgeJob(chi.URLParam(r, "jobId"))
+	if job == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"job": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": job.snapshot()})
 }

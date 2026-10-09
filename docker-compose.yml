@@ -4,6 +4,14 @@
 
 name: netquasar
 
+# Logs dos containers com teto: sem isto o Docker guarda TODO o stdout em /var/lib/docker/containers/*/*-json.log, sem
+# limite, e o disco do servidor enche aos poucos (3 arquivos de até 10 MB por serviço = no máximo 30 MB cada).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   netquasar:
     build:
@@ -50,6 +58,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    logging: *default-logging
     networks:
       - netquasar_net
 
@@ -74,6 +83,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    logging: *default-logging
     networks:
       - netquasar_net
 
@@ -101,6 +111,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
     networks:
       - netquasar_net
 
@@ -116,6 +127,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    logging: *default-logging
     networks:
       - netquasar_net
 

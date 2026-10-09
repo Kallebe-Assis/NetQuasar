@@ -201,6 +201,10 @@ Visíveis em **Alertas → Incidentes correlacionados**. Telegram de cascata é 
 | **Histórico** | Linhas importadas/recusadas (`ops_audit_log`) | Não |
 | **IXC: logins** | Inativa/reativa logins (`radusuarios`) do IXC em massa a partir de uma lista (migração para a HubSoft) | Escreve no **IXC** |
 
+**Catálogos de estoque (patrimônios):** a aba *Catálogos* lista também os IDs necessários para cadastrar produtos e patrimônios — locais de estoque, produtos, categorias, marcas, tipos, status de patrimônio e empresas (`catalog.go`; os catálogos paginados são lidos inteiros no servidor). Pela documentação oficial da API: **não existe rota para criar um patrimônio avulso** — ele nasce da *entrada manual de estoque* (`POST /estoque/movimento_estoque/entrada`) de um produto com `controle_patrimonial = true` (uma unidade = um patrimônio, com código automático e série/MAC vazios, status ESTOQUE); depois `PUT /estoque/produto_item/{id}` grava `numero_serie`, `mac_address` e `identificador_proprio`, e `GET /estoque/produto_item/consultar?busca=mac_address|numero_serie|codigo_item|identificador_proprio&termo_busca=` localiza um patrimônio. O comodato é a *saída para serviço do cliente* (`POST …/movimento_estoque/saida/cliente_servico`, exige `id_tipo_movimento_estoque`, `id_local_estoque` e os patrimônios). A API não expõe «repartições» dentro de um local de estoque.
+
+**Produtos de estoque (aba «Produtos de estoque»)** — `POST …/hubsoft/stock-products/validate|preflight|apply` (`stock_product.go`, permissão `integrations.hubsoft_bulk`): cria produtos a partir de CSV (`codigo`, `nome`, `id_categoria`, `id_marca`, `unidade_medida`, valores e as 7 opções de configuração: NF, venda, comodato, vínculo POP/projeto/usuário/composição; modelo para baixar na tela). Cada produto passa por: checagem de duplicidade (mesmo código ou mesmo nome → nunca recria), `POST /estoque/produto`, `PUT /estoque/produto/{id}` com `produto_configuracao` (a API só aceita a configuração no PUT) e `GET` de conferência. As três etapas aparecem separadas no resultado; se a criação der certo e a configuração falhar, a mensagem diz que o produto FOI criado (com o id). Erros da HubSoft são mostrados com a mensagem e o corpo bruto da resposta; cada linha vai para `ops_audit_log` (`hubsoft_stock_product`, aba Histórico → «Produtos de estoque») e o log do servidor. A conferência relê o produto e reprova se a **marca** ou a **categoria** gravadas forem diferentes das pedidas (a HubSoft já ignorou o `id_produto_marca` sozinho e criou uma marca «API»; por isso o POST envia id **e** nome exato da marca, e uma marca que não esteja no catálogo recusa a linha antes de enviar). Para após 3 falhas seguidas. Os patrimônios em si (série/MAC, entrada no almoxarifado, comodato) são passos seguintes.
+
 **Importação em massa** (`internal/integrationhubsoft`: `bulk_import*.go`)
 
 - **Fluxo:** a validação local confere o formato de cada campo e — com os catálogos carregados — se cada ID existe na conta; o **preflight** (`POST …/bulk-import/preflight`, somente leitura) mostra para cada linha se vai criar cliente novo, adicionar serviço a um cliente existente (mesmo ou outro endereço) ou se o login já existe; a aplicação (`POST …/bulk-import/apply`) roda em **lotes de 15 linhas e para após 3 falhas seguidas**. Cada linha criada/recusada fica no histórico (`ops_audit_log`).
@@ -431,7 +435,7 @@ Qualquer usuário autenticado acede às preferências pessoais. As restantes aba
 |--------|--------|
 | **Alertas** | **Pessoal:** toast em qualquer ecrã, som de alerta (4 sons padrão + MP3). **Global** (se tiver permissão): limiares CPU/temp/SFP/OLT/BNG |
 | **Aparência** | Tema claro/escuro **por usuário** (`users.preferences`) |
-| **Base de dados** | DSN, teste, limpeza, backup B2 |
+| **Base de dados** | DSN, teste, **limpeza de dados históricos** (apaga e devolve o espaço ao disco — ver abaixo), backup B2 |
 | **Usuários** | CRUD, perfis de permissão e «Forçar desconexão» (invalida a sessão de outro usuário — efeito quase imediato, a app já verifica a sessão a cada poucos segundos) |
 | **Monitoramento** | Intervalos, timeouts, modo, pipeline |
 | **OLT / MikroTik / Switch / BNG / BGP** | Perfis por marca/modelo, coleta e (BGP) cadastro de operadoras (CNPJ, AS, limite de banda). A aba **OLT** tem ainda os limiares de *Qualidade da potência RX (ONU)* (dBm "boa" / "ruim") usados na tabela de ONUs e no Dashboard |
@@ -440,6 +444,19 @@ Qualquer usuário autenticado acede às preferências pessoais. As restantes aba
 | **Auditoria** | `ops_audit_log` |
 
 Preferências por conta (novos usuários: toast e som ligados): tema, `alert_toast_everywhere`, `alert_sound_enabled`, som escolhido. API: `GET/PATCH /api/v1/me/preferences`.
+
+
+**Limpeza de dados históricos (Configurações → Base de dados).** `DELETE` no PostgreSQL só marca linhas como mortas: o arquivo da tabela não encolhe e o disco do servidor continua cheio. A limpeza escolhe, **por tabela**, uma estratégia que de fato devolve espaço: *esvaziar* (`TRUNCATE`, se tudo é antigo), *reescrever só o que fica* (copia o recente, `TRUNCATE` e devolve — quando ≥ 50% é antigo) ou *lotes + `VACUUM`* (+ `VACUUM FULL` se houver folga de disco). Roda em **segundo plano** (progresso, resultado por tabela e disco livre na própria janela), uma por vez, com mínimo de 1 dia, e respeita alertas ainda abertos. A caixa «Devolver o espaço ao disco» pode ser desmarcada (só apaga). O espaço livre vem do disco do servidor (`statfs` no volume de dados; no Compose é o mesmo do Postgres).
+
+Fora do painel, no servidor (mesma lógica; útil quando o disco está cheio demais para abrir a tela):
+
+```bash
+bash scripts/purge-old-data.sh 30            # tudo com mais de 30 dias (pede confirmação)
+bash scripts/purge-old-data.sh 1 --yes --tables=ping_history   # só o histórico de ping, mantendo 1 dia
+bash scripts/purge-old-data.sh 30 --dry-run  # só mostra o que seria apagado
+```
+
+A retenção **automática** (`history_retention_days` em `monitoring_intervals`, padrão 90) apaga em lotes mas não encolhe o arquivo; com ~1,2 GB/dia de `ping_history` use um valor baixo (2–7 dias).
 
 ---
 

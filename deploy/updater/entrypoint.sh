@@ -164,6 +164,11 @@ do_update() {
     mark_update_failed "Container reiniciou mas /health não respondeu em 60s — verifique os logs do netquasar."
     return
   fi
+  # Limpeza: cada atualização deixa a imagem anterior sem tag e camadas de build para trás; sem isto o disco do servidor
+  # enche a cada atualização. Só remove imagens SEM uso e cache de build com mais de 72 h — nunca toca em volumes
+  # (dados do Postgres/Redis). Roda só depois do /health responder, para a imagem anterior servir de volta atrás se falhar.
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -f --filter "until=72h" >/dev/null 2>&1 || true
   # Não marca "completed" aqui de propósito: quem fecha o estado é o processo NOVO, no arranque
   # (internal/bootstrap.ResumeAfterUpdate) — evita corrida entre os dois a escrever o estado final.
   log "netquasar respondeu — a aguardar que o processo novo confirme (bootstrap.ResumeAfterUpdate)"

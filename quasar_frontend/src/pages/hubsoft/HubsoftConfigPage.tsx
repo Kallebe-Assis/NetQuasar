@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BookOpen, CalendarClock, CheckCircle2, ClipboardCheck, History, KeyRound, MapPinned, PlugZap, PowerOff, UserPlus, XCircle } from "lucide-react";
+import { BookOpen, CalendarClock, CheckCircle2, ClipboardCheck, History, KeyRound, MapPinned, Package, PlugZap, PowerOff, UserPlus, XCircle } from "lucide-react";
 import { HubsoftPasswordFix } from "./HubsoftPasswordFix";
 import { ToolPanel } from "./hubsoftAdminKit";
 import { HubsoftRegistrationCheck } from "./HubsoftRegistrationCheck";
@@ -10,6 +10,7 @@ import { HubsoftDataVendaSection } from "./HubsoftDataVendaSection";
 import { HubsoftCatalogExplorer } from "./HubsoftCatalogExplorer";
 import { HubsoftBulkImportSection } from "./HubsoftBulkImportSection";
 import { HubsoftBulkImportHistory } from "./HubsoftBulkImportHistory";
+import { HubsoftStockProducts } from "./HubsoftStockProducts";
 import { HubsoftIxcLogins } from "./HubsoftIxcLogins";
 import { HubsoftAddressCheck } from "./HubsoftAddressCheck";
 import { can, isAdminUser } from "../../lib/auth";
@@ -21,7 +22,7 @@ import { queryKeys } from "../../lib/queryKeys";
 
 type TestOutcome = { ok: boolean; message: string; latency_ms?: number };
 
-type ConfigTab = "conexao" | "importar" | "conferir" | "senhas" | "data-venda" | "catalogos" | "historico" | "ixc-logins" | "enderecos";
+type ConfigTab = "conexao" | "importar" | "conferir" | "senhas" | "data-venda" | "catalogos" | "historico" | "ixc-logins" | "enderecos" | "produtos";
 
 // Seções da configuração. "Conexão" é de quem gere integrações; as de edição em massa (bulk) só aparecem para
 // administradores ou perfis com a permissão "integrations.hubsoft_bulk" (Configurações → Perfis de permissão).
@@ -31,6 +32,7 @@ const CONFIG_TABS: { id: ConfigTab; label: string; icon: ReactNode; bulk?: boole
   { id: "conferir", label: "Conferir cadastros", icon: <ClipboardCheck size={15} aria-hidden />, bulk: true },
   { id: "senhas", label: "Corrigir senhas", icon: <KeyRound size={15} aria-hidden />, bulk: true },
   { id: "enderecos", label: "Conferir endereços", icon: <MapPinned size={15} aria-hidden />, bulk: true },
+  { id: "produtos", label: "Produtos de estoque", icon: <Package size={15} aria-hidden />, bulk: true },
   { id: "data-venda", label: "Data de venda", icon: <CalendarClock size={15} aria-hidden />, bulk: true },
   { id: "catalogos", label: "Catálogos", icon: <BookOpen size={15} aria-hidden />, bulk: true },
   { id: "historico", label: "Histórico", icon: <History size={15} aria-hidden />, bulk: true },
@@ -272,6 +274,7 @@ export function HubsoftConfigPage() {
       {tab === "conferir" ? <HubsoftRegistrationCheck /> : null}
       {tab === "senhas" ? <HubsoftPasswordFix /> : null}
       {tab === "enderecos" ? <HubsoftAddressCheck /> : null}
+      {tab === "produtos" ? <HubsoftStockProducts /> : null}
       {tab === "data-venda" ? <HubsoftDataVendaSection /> : null}
       {tab === "catalogos" ? <HubsoftCatalogExplorer /> : null}
       {tab === "historico" ? <HubsoftBulkImportHistory /> : null}

@@ -11,6 +11,7 @@ import { Download } from "lucide-react";
 const ENTITY_TYPES = {
   client: "hubsoft_bulk_import_client",
   service: "hubsoft_bulk_import_service",
+  produto: "hubsoft_stock_product",
 } as const;
 
 /**
@@ -23,7 +24,7 @@ const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already
 
 export function HubsoftBulkImportHistory() {
   const { notify } = useConsultaToast();
-  const [kind, setKind] = useState<"client" | "service">("client");
+  const [kind, setKind] = useState<"client" | "service" | "produto">("client");
   const [rows, setRows] = useState<AuditRowView[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -50,7 +51,7 @@ export function HubsoftBulkImportHistory() {
 
   function exportCsv() {
     if (!rows) return;
-    const head = ["Quando", "Linha", "Identificação", "Resultado", "Mensagem", "id_cliente", "id_cliente_servico", "Usuário"];
+    const head = ["Quando", "Linha", "Identificação", "Resultado", "Mensagem", kind === "produto" ? "id_produto" : "id_cliente", kind === "produto" ? "detalhe_da_hubsoft" : "id_cliente_servico", "Usuário"];
     const data = rows.map((r) => {
       const a = r.after_data ?? {};
       return [
@@ -59,8 +60,8 @@ export function HubsoftBulkImportHistory() {
         String(a.label ?? ""),
         OK_ACTIONS.has(r.action) ? "OK" : "Erro",
         String(a.message ?? ""),
-        String(a.id_cliente ?? ""),
-        String(a.id_cliente_servico ?? ""),
+        String(a.id_cliente ?? a.id_produto ?? ""),
+        String(a.id_cliente_servico ?? a.detail ?? ""),
         r.actor ?? "",
       ];
     });
@@ -84,6 +85,7 @@ export function HubsoftBulkImportHistory() {
           options={[
             { value: "client", label: "Clientes novos" },
             { value: "service", label: "Serviços adicionais" },
+            { value: "produto", label: "Produtos de estoque" },
           ]}
         />
         <div className="hsa-actions">

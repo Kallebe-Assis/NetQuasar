@@ -2,7 +2,7 @@
  * Modal de análise e limpeza de dados históricos na base PostgreSQL.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Database, Loader2, Trash2 } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { formatBytes } from "../../lib/formatBytes";
@@ -24,6 +24,8 @@ type DbCleanupOverviewItem = {
 
 type DbCleanupOverviewResponse = {
   database_size_bytes: number;
+  disk_free_bytes?: number;
+  disk_total_bytes?: number;
   total_rows: number;
   items: DbCleanupOverviewItem[];
   scanned_at: string;
@@ -46,9 +48,47 @@ type DbCleanupScanResponse = {
   total_rows: number;
 };
 
-const DAY_PRESETS = [7, 30, 60, 90, 180, 365] as const;
+type PurgeTableResult = {
+  table: string;
+  label: string;
+  strategy: "nenhum" | "truncate" | "rewrite" | "batch";
+  eligible: number;
+  deleted: number;
+  size_before: number;
+  size_after: number;
+  compacted: boolean;
+  note?: string;
+  error?: string;
+};
+
+type PurgeJob = {
+  job_id: string;
+  status: "running" | "done" | "error";
+  phase: string;
+  table: string;
+  tables_total: number;
+  tables_done: number;
+  deleted_total: number;
+  freed_bytes: number;
+  older_than_days: number;
+  compact: boolean;
+  results: PurgeTableResult[];
+  message?: string;
+  disk_free_start_bytes?: number;
+  disk_free_bytes?: number;
+  disk_total_bytes?: number;
+};
+
+const STRATEGY_LABEL: Record<PurgeTableResult["strategy"], string> = {
+  nenhum: "nada a apagar",
+  truncate: "esvaziada",
+  rewrite: "reescrita (mantém o recente)",
+  batch: "em lotes",
+};
+
+const DAY_PRESETS = [1, 7, 30, 60, 90, 180, 365] as const;
 const SCAN_MIN_DAYS = 1;
-const EXECUTE_MIN_DAYS = 7;
+const EXECUTE_MIN_DAYS = 1;
 
 const CATEGORY_LABELS: Record<string, string> = {
   monitoramento: "Monitoramento",
@@ -80,6 +120,9 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
   const [scanResult, setScanResult] = useState<DbCleanupScanResponse | null>(null);
   const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0);
   const [modalTab, setModalTab] = useState<"overview" | "purge">("overview");
+  // «Compactar»: devolve o espaço ao disco do servidor (sem isto, DELETE só libera espaço DENTRO do banco)
+  const [compact, setCompact] = useState(true);
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const overview = useQuery({
     queryKey: ["db-cleanup-overview"],
@@ -93,7 +136,34 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
     setScanResult(null);
     setConfirmStep(0);
     setModalTab("overview");
+    setJobId("current"); // mostra a limpeza em andamento (ou a última), se houver
   }, [open]);
+
+  const jobQ = useQuery({
+    queryKey: ["db-purge-job", jobId],
+    queryFn: () => apiFetch<{ job: PurgeJob | null }>(`/api/v1/settings/database/cleanup/jobs/${jobId}`),
+    enabled: open && !!jobId,
+    refetchInterval: (q) => (q.state.data?.job?.status === "running" ? 1500 : false),
+    staleTime: 0,
+  });
+  const job = jobQ.data?.job ?? null;
+  const jobRunning = job?.status === "running";
+
+  // ao terminar: atualiza os números da tela (uma vez por job)
+  const finishedRef = useRef<string>("");
+  useEffect(() => {
+    if (!job || job.status === "running" || finishedRef.current === job.job_id) return;
+    // «current» pode trazer uma limpeza antiga já terminada: só reage se foi esta sessão que a iniciou
+    if (jobId === "current") {
+      finishedRef.current = job.job_id;
+      return;
+    }
+    finishedRef.current = job.job_id;
+    toastOk(pushToast, `${job.deleted_total.toLocaleString("pt-PT")} registo(s) apagado(s); ${formatBytes(job.freed_bytes)} devolvido(s) ao disco.`);
+    qc.invalidateQueries({ queryKey: ["db-cleanup-overview"] });
+    scan.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.status, job?.job_id]);
 
   useEffect(() => {
     if (!overview.data?.items.length) return;
@@ -133,23 +203,27 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
   const execute = useMutation({
     mutationFn: () => {
       const d = scanResult?.older_than_days ?? Math.max(EXECUTE_MIN_DAYS, parseInt(olderThanDays, 10) || 30);
-      return apiFetch<{ ok?: boolean; deleted_total?: number; message?: string }>("/api/v1/settings/database/cleanup/execute", {
+      return apiFetch<{ ok?: boolean; job_id?: string; message?: string }>("/api/v1/settings/database/cleanup/execute", {
         method: "POST",
         json: {
           older_than_days: d,
           tables: Array.from(selectedTables),
           confirm: true,
+          compact,
         },
       });
     },
     onSuccess: (data) => {
       setConfirmStep(0);
-      const n = data.deleted_total ?? 0;
-      toastOk(pushToast, data.message ?? `${n.toLocaleString("pt-PT")} registo(s) apagado(s).`);
-      qc.invalidateQueries({ queryKey: ["db-cleanup-overview"] });
-      scan.mutate();
+      if (data.job_id) {
+        setJobId(data.job_id);
+        qc.invalidateQueries({ queryKey: ["db-purge-job"] });
+        toastOk(pushToast, "Limpeza iniciada em segundo plano — acompanhe o progresso abaixo.");
+      } else {
+        toastOk(pushToast, data.message ?? "Nada a apagar.");
+      }
     },
-    onError: (e) => toastErr(pushToast, e, "Falha ao apagar dados antigos."),
+    onError: (e) => toastErr(pushToast, e, "Falha ao iniciar a limpeza."),
   });
 
   const toggleTable = (table: string) => {
@@ -173,7 +247,7 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
   if (!open) return null;
 
   const parsedDays = parseInt(olderThanDays, 10) || 30;
-  const canExecute = parsedDays >= EXECUTE_MIN_DAYS && selectedTables.size > 0;
+  const canExecute = parsedDays >= EXECUTE_MIN_DAYS && selectedTables.size > 0 && !jobRunning;
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={() => !execute.isPending && onClose()}>
@@ -227,6 +301,15 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>Tamanho da base</div>
                 <div style={{ fontSize: 16, fontWeight: 600 }}>{formatBytes(overview.data.database_size_bytes)}</div>
               </div>
+              {overview.data.disk_total_bytes ? (
+                <div className="card" style={{ padding: 10, margin: 0 }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>Disco do servidor</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>
+                    {formatBytes(overview.data.disk_free_bytes ?? 0)} livres
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--muted)" }}>de {formatBytes(overview.data.disk_total_bytes)}</div>
+                </div>
+              ) : null}
               <div className="card" style={{ padding: 10, margin: 0 }}>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>Registos históricos</div>
                 <div style={{ fontSize: 16, fontWeight: 600 }}>{overview.data.total_rows.toLocaleString("pt-PT")}</div>
@@ -241,6 +324,8 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                 )}
               </div>
             </div>
+
+            {job && (jobRunning || jobId !== "current") ? <PurgeProgress job={job} /> : null}
 
             <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
               <button type="button" className={`btn ${modalTab === "overview" ? "btn--primary" : ""}`} onClick={() => setModalTab("overview")}>
@@ -343,7 +428,7 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                 </div>
 
                 <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
-                  Análise: mínimo {SCAN_MIN_DAYS} dia · Eliminação: mínimo {EXECUTE_MIN_DAYS} dias · {selectedTables.size} tabela(s) seleccionada(s)
+                  Período mínimo: {SCAN_MIN_DAYS} dia · {selectedTables.size} tabela(s) seleccionada(s)
                 </p>
 
                 <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto", marginBottom: 12 }}>
@@ -408,7 +493,7 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                         className="btn btn--danger"
                         disabled={execute.isPending || !canExecute}
                         onClick={() => setConfirmStep(1)}
-                        title={!canExecute ? `Mínimo ${EXECUTE_MIN_DAYS} dias para eliminar` : undefined}
+                        title={jobRunning ? "Há uma limpeza em andamento" : undefined}
                       >
                         <Trash2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
                         Apagar {scanResult.total_rows.toLocaleString("pt-PT")} registo(s)
@@ -418,10 +503,8 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                         Nenhum registo elegível com este período. Tente um valor menor (ex.: 7 ou 14 dias) ou consulte a coluna «Mais antigo».
                       </p>
                     )}
-                    {!canExecute && parsedDays < EXECUTE_MIN_DAYS && scanResult.total_rows > 0 && (
-                      <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0" }}>
-                        Para eliminar, o período deve ser pelo menos {EXECUTE_MIN_DAYS} dias.
-                      </p>
+                    {jobRunning && (
+                      <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0" }}>Há uma limpeza em andamento — aguarde terminar.</p>
                     )}
                   </div>
                 )}
@@ -452,6 +535,13 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                     Serão apagados permanentemente <strong>{scanResult.total_rows.toLocaleString("pt-PT")}</strong> registo(s) com mais de{" "}
                     {scanResult.older_than_days} dias em <strong>{selectedTables.size}</strong> tabela(s). Esta acção não pode ser desfeita.
                   </p>
+                  <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, lineHeight: 1.45, margin: "0 0 12px", cursor: "pointer" }}>
+                    <input type="checkbox" checked={compact} onChange={(e) => setCompact(e.target.checked)} style={{ marginTop: 3 }} />
+                    <span>
+                      <strong>Devolver o espaço ao disco do servidor</strong> (recomendado). Sem isto o banco só reaproveita o espaço por dentro e o disco
+                      continua cheio. Pode bloquear a gravação das tabelas por alguns segundos/minutos enquanto compacta.
+                    </span>
+                  </label>
                   <div className="row" style={{ gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                     <button type="button" className="btn" disabled={execute.isPending} onClick={() => setConfirmStep(0)}>
                       Cancelar
@@ -472,7 +562,7 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
                       Voltar
                     </button>
                     <button type="button" className="btn btn--danger" disabled={execute.isPending} onClick={() => execute.mutate()}>
-                      {execute.isPending ? "A apagar…" : "Apagar definitivamente"}
+                      {execute.isPending ? "A iniciar…" : "Apagar definitivamente"}
                     </button>
                   </div>
                 </>
@@ -485,6 +575,74 @@ export function DatabaseCleanupModal({ open, onClose }: { open: boolean; onClose
   );
 }
 
+/** Progresso e resultado por tabela da limpeza em segundo plano. */
+function PurgeProgress({ job }: { job: PurgeJob }) {
+  const running = job.status === "running";
+  const pct = job.tables_total > 0 ? Math.round((job.tables_done / job.tables_total) * 100) : 0;
+  return (
+    <div
+      className="card"
+      style={{ padding: 12, marginBottom: 14, borderColor: running ? "var(--accent)" : undefined }}
+      role="status"
+      aria-live="polite"
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        {running ? <Loader2 size={16} className="map-refresh-spin" aria-hidden /> : null}
+        <strong style={{ fontSize: 13 }}>
+          {running ? `Limpando… ${job.phase}` : `Limpeza concluída — ${job.deleted_total.toLocaleString("pt-PT")} registo(s) apagado(s)`}
+        </strong>
+        <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+          {job.tables_done}/{job.tables_total} tabela(s)
+        </span>
+      </div>
+      <div style={{ height: 6, borderRadius: 999, background: "var(--panel2)", overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ width: `${running ? Math.max(pct, 3) : 100}%`, height: "100%", background: "var(--accent-grad, var(--accent))", transition: "width 0.4s ease" }} />
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, marginBottom: job.results.length ? 10 : 0 }}>
+        <span>
+          Devolvido ao disco: <strong>{formatBytes(job.freed_bytes)}</strong>
+        </span>
+        {job.disk_free_bytes != null ? (
+          <span>
+            Disco livre: <strong>{formatBytes(job.disk_free_bytes)}</strong>
+            {job.disk_free_start_bytes != null ? <span style={{ color: "var(--muted)" }}> (antes: {formatBytes(job.disk_free_start_bytes)})</span> : null}
+          </span>
+        ) : null}
+      </div>
+      {job.results.length > 0 ? (
+        <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto" }}>
+          <table style={{ fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th>Tabela</th>
+                <th>Como</th>
+                <th style={{ textAlign: "right" }}>Apagados</th>
+                <th style={{ textAlign: "right" }}>Tamanho</th>
+              </tr>
+            </thead>
+            <tbody>
+              {job.results.map((r) => (
+                <tr key={r.table}>
+                  <td>
+                    {r.label}
+                    {r.error ? <div style={{ fontSize: 11, color: "var(--err)" }}>{r.error}</div> : null}
+                    {r.note ? <div style={{ fontSize: 11, color: "var(--muted)" }}>{r.note}</div> : null}
+                  </td>
+                  <td>{STRATEGY_LABEL[r.strategy] ?? r.strategy}</td>
+                  <td style={{ textAlign: "right" }}>{r.deleted.toLocaleString("pt-PT")}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {formatBytes(r.size_before)} → <strong>{formatBytes(r.size_after)}</strong>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function DatabaseCleanupButton({ embedded = false }: { embedded?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -492,7 +650,7 @@ export function DatabaseCleanupButton({ embedded = false }: { embedded?: boolean
       <div style={embedded ? undefined : { marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
         <h3 style={{ fontSize: 14, margin: "0 0 6px" }}>Limpeza de dados históricos</h3>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.4 }}>
-          Analise e elimine registos antigos (com confirmação e auditoria).
+          Analise e elimine registos antigos e devolva o espaço ao disco do servidor (com confirmação e auditoria).
         </p>
         <button type="button" className="btn" onClick={() => setOpen(true)}>
           <Database size={16} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />

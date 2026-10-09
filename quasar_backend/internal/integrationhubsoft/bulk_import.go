@@ -132,10 +132,13 @@ type CatalogSets struct {
 var idKeyByCatalog = map[string]string{
 	"servico": "id_servico", "vencimento": "id_vencimento", "vendedor": "id",
 	"forma_cobranca": "id_forma_cobranca", "servico_status": "id_servico_status", "grupo_cliente": "id_grupo_cliente",
+	// estoque (cadastro de produtos — ver stock_product.go)
+	"produto_categoria": "id_categoria", "produto_marca": "id_produto_marca", "produto_tipo": "id_produto_tipo",
 }
 var arrKeyByCatalog = map[string]string{
 	"servico": "servicos", "vencimento": "vencimentos", "vendedor": "vendedores",
 	"forma_cobranca": "formas_cobranca", "servico_status": "servico_status", "grupo_cliente": "grupo_cliente",
+	"produto_categoria": "categorias", "produto_marca": "produto_marcas", "produto_tipo": "produto_tipos",
 }
 
 // CatalogSetsFromJSON lê os IDs válidos de um catálogo a partir do JSON devolvido pela HubSoft.
