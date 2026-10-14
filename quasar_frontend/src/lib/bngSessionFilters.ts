@@ -1,8 +1,6 @@
 import {
   formatBngIpType,
-  formatBngKbitRate,
   formatBngSessionStatus,
-  sessionDisplayOnline,
   type PppoeSessionFields,
 } from "./bngDisplay";
 
@@ -167,8 +165,8 @@ export function matchBngSessionSearch(s: BngSessionLike, field: BngSessionSearch
   if (!q) return true;
   switch (field) {
     case "login": {
-      const login = String(s.login ?? "").toLowerCase();
-      return login === q;
+      // busca parcial: «fulano» acha «fulano.silva», «maria_fulano»…
+      return String(s.login ?? "").toLowerCase().includes(q);
     }
     case "ipv4":
       return ipv4MatchesNeedle(String(s.ipv4 ?? ""), q);
@@ -263,13 +261,3 @@ export function countActiveBngSessionFilters(advanced: BngSessionAdvancedFilters
   return n;
 }
 
-/** Label legível do tempo online (para tabela). */
-export function sessionTableOnlineLabel(s: BngSessionLike): string {
-  return sessionDisplayOnline(s);
-}
-
-/** Label legível do limite downstream. */
-export function sessionTableDnLimitLabel(s: BngSessionLike): string {
-  if (s.car_dn_cir_display?.trim()) return s.car_dn_cir_display;
-  return formatBngKbitRate(s.car_dn_cir_kbps);
-}

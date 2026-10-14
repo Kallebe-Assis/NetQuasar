@@ -87,14 +87,6 @@ func (s *Server) resolveUserPermissions(ctx context.Context, userID uuid.UUID, r
 	return &idCopy, slug, perms, sessionsInvalidatedAt
 }
 
-// requestAuthRole devolve o papel efetivo: "admin", "viewer", ou ("", false) se não autenticado.
-// Sem RequireAuth, trata-se como admin (comportamento de desenvolvimento).
-// Chave API válida equivale a admin (acesso total).
-func (s *Server) requestAuthRole(r *http.Request) (role string, ok bool) {
-	ac := s.requestAuthContext(r)
-	return ac.Role, ac.OK
-}
-
 func (s *Server) requestAuthContext(r *http.Request) authContext {
 	bearer := bearerFromRequest(r)
 	if bearer != "" {

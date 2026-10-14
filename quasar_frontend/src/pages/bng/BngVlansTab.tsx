@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { InfoHint } from "../../components/InfoHint";
+import { ExportMenu } from "../../components/ExportMenu";
 import { apiFetch } from "../../lib/api";
 import { useAppToast } from "../../lib/appToast";
 import { can, isAdminUser } from "../../lib/auth";
@@ -204,12 +205,30 @@ export function BngVlansTab({ deviceId }: { deviceId: string | null }) {
           </h2>
           <p className="bng-vlans__sub">Gerencie as VLANs da rede e acompanhe a quantidade de conexões</p>
         </div>
-        {canMutate ? (
-          <button type="button" className="btn btn--primary" onClick={openCreate}>
-            <Plus size={16} style={{ marginRight: 6, verticalAlign: -3 }} />
-            Nova VLAN
-          </button>
-        ) : null}
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <ExportMenu
+            filename="vlans"
+            title="VLANs"
+            rows={filtered}
+            columns={[
+              { header: "VLAN", value: (v) => v.vlan_id },
+              { header: "Nome", value: (v) => v.name },
+              { header: "Descrição", value: (v) => v.description },
+              { header: "Tipo", value: (v) => KIND_LABEL[v.kind] || v.kind },
+              { header: "Conexões", value: (v) => v.connections },
+              { header: "Equipamentos", value: (v) => v.equipment },
+              { header: "Status", value: (v) => (v.status === "inactive" ? "Inativa" : "Ativa") },
+              { header: "Utilização (%)", value: (v) => v.utilization },
+              { header: "Catalogada", value: (v) => !!v.catalogued },
+            ]}
+          />
+          {canMutate ? (
+            <button type="button" className="btn btn--primary" onClick={openCreate}>
+              <Plus size={16} style={{ marginRight: 6, verticalAlign: -3 }} />
+              Nova VLAN
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="bng-vlans__kpis">

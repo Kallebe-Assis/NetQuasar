@@ -8,6 +8,7 @@ import {
   type AuditRowView,
 } from "../lib/auditPresentation";
 import { prettyAuditDiff } from "../lib/auditDisplay";
+import { ExportMenu } from "./ExportMenu";
 
 type Props = {
   rows: AuditRowView[];
@@ -20,6 +21,23 @@ export function AuditLogTable({ rows, showDetailColumn = true, emptyMessage }: P
     return <p style={{ color: "var(--muted)", fontSize: 12 }}>{emptyMessage ?? "Nenhum registo."}</p>;
   }
   return (
+    <>
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+      <ExportMenu
+        filename="auditoria"
+        title="Auditoria"
+        rows={rows}
+        columns={[
+          { header: "Quando", value: (a) => new Date(a.created_at).toLocaleString("pt-BR") },
+          { header: "Resumo", value: (a) => formatAuditSummary(a) },
+          { header: "Entidade", value: (a) => resolveAuditEntityName(a) },
+          { header: "Tipo de entidade", value: (a) => formatAuditEntityType(a.entity_type) },
+          { header: "Ação", value: (a) => formatAuditAction(a.action, a.entity_type) },
+          { header: "Usuário", value: (a) => formatAuditActor(a.actor) },
+          ...(showDetailColumn ? [{ header: "Detalhe", value: (a: AuditRowView) => formatAuditDetailPreview(a) }] : []),
+        ]}
+      />
+    </div>
     <div className="table-wrap audit-log-table" style={{ maxHeight: "min(65vh, 560px)", overflow: "auto" }}>
       <table style={{ fontSize: 12 }}>
         <thead>
@@ -69,5 +87,6 @@ export function AuditLogTable({ rows, showDetailColumn = true, emptyMessage }: P
         </tbody>
       </table>
     </div>
+    </>
   );
 }

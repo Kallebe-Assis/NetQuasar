@@ -7,6 +7,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { ExportMenu } from "../../components/ExportMenu";
 
 type ExpenseType = { id: string; description: string; code?: string | null; active: boolean; notes?: string | null };
 
@@ -52,7 +53,20 @@ export function FleetExpenseTypesPage({ embedded }: { embedded?: boolean } = {})
   const body = (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
-        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Tipos de despesa</h1>}
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          {embedded ? null : <h1 style={{ margin: 0 }}>Frota — Tipos de despesa</h1>}
+          <ExportMenu
+            filename="frota-tipos-de-despesa"
+            title="Frota — Tipos de despesa"
+            rows={q.data?.items ?? []}
+            columns={[
+              { header: "Descrição", value: (t) => t.description },
+              { header: "Código", value: (t) => t.code },
+              { header: "Ativo", value: (t) => t.active },
+              { header: "Observação", value: (t) => t.notes },
+            ]}
+          />
+        </div>
         {canMutate ? (
           <button
             type="button"

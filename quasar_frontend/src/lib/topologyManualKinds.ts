@@ -27,4 +27,3 @@ export function manualKindMeta(kind: string | undefined | null): ManualKindMeta 
   return BY_ID[String(kind ?? "")] ?? MANUAL_EQUIPMENT_KINDS[0];
 }
 
-export const DEFAULT_MANUAL_KIND: ManualEquipmentKind = "switch";

@@ -14,6 +14,7 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertnotify"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertthresholds"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifacemeta"
 	"github.com/netquasar/netquasar/quasar_backend/internal/monitorworker"
 )
 
@@ -95,6 +96,7 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	ifRes := ifacemeta.NewResolver(s.DB())
 	var list []map[string]any
 	for rows.Next() {
 		var id, devID uuid.UUID
@@ -114,6 +116,9 @@ func (s *Server) alertsActive(w http.ResponseWriter, r *http.Request) {
 			"id": id, "device_id": devID, "severity": sev, "type": typ, "message": msg,
 			"ip": ip, "device_name": dname, "active_since": since, "meta": json.RawMessage(meta),
 			"pop_name": popName, "device_category": devCategory,
+		}
+		if name := ifRes.Resolve(r.Context(), devID, meta); name != "" {
+			item["interface_custom_name"] = name
 		}
 		if incidentID != nil {
 			item["incident_id"] = *incidentID
@@ -188,15 +193,23 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
-	q := `
-		SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip,
-			COALESCE(NULLIF(trim(a.device_name), ''), NULLIF(trim(d.description), '')) AS device_name,
-			a.active_since, a.closed_at, a.meta::text,
-			COALESCE(NULLIF(trim(p.description), ''), '') AS pop_name
+	text := strings.TrimSpace(r.URL.Query().Get("q"))
+	// Paginação opcional: com page_size, devolve só aquela página (+ total); sem ele mantém o comportamento
+	// antigo (até `limit` eventos de uma vez) usado pelas telas de equipamento.
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	const histFrom = `
 		FROM alert_instances a
 		LEFT JOIN devices d ON d.id = a.device_id
 		LEFT JOIN pops p ON p.id = d.pop_id
 		WHERE 1=1`
+	q := histFrom
 	args := []any{}
 	n := 1
 	if deviceID != "" {
@@ -219,13 +232,38 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 		args = append(args, from, to)
 		n += 2
 	}
-	q += ` ORDER BY a.active_since DESC LIMIT ` + strconv.Itoa(limit)
+	if text != "" {
+		like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(text) + "%"
+		q += ` AND (a.message ILIKE $` + strconv.Itoa(n) + ` OR replace(a.alert_type, '_', ' ') ILIKE $` + strconv.Itoa(n) + ` OR a.severity ILIKE $` + strconv.Itoa(n) +
+			` OR COALESCE(a.device_name, d.description, '') ILIKE $` + strconv.Itoa(n) + ` OR COALESCE(a.ip::text, '') ILIKE $` + strconv.Itoa(n) + ` OR COALESCE(p.description, '') ILIKE $` + strconv.Itoa(n) + `)`
+		args = append(args, like)
+		n++
+	}
+	total := -1
+	if pageSize > 0 {
+		if err := s.DB().QueryRow(r.Context(), `SELECT count(*) `+q, args...).Scan(&total); err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
+			return
+		}
+	}
+	sel := `
+		SELECT a.id, a.device_id, a.severity, a.alert_type, a.message, a.ip,
+			COALESCE(NULLIF(trim(a.device_name), ''), NULLIF(trim(d.description), '')) AS device_name,
+			a.active_since, a.closed_at, a.meta::text,
+			COALESCE(NULLIF(trim(p.description), ''), '') AS pop_name `
+	q = sel + q + ` ORDER BY a.active_since DESC, a.id`
+	if pageSize > 0 {
+		q += ` LIMIT ` + strconv.Itoa(pageSize) + ` OFFSET ` + strconv.Itoa((page-1)*pageSize)
+	} else {
+		q += ` LIMIT ` + strconv.Itoa(limit)
+	}
 	rows, err := s.DB().Query(r.Context(), q, args...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return
 	}
 	defer rows.Close()
+	ifRes := ifacemeta.NewResolver(s.DB())
 	var list []map[string]any
 	for rows.Next() {
 		var id uuid.UUID
@@ -244,7 +282,19 @@ func (s *Server) alertsHistory(w http.ResponseWriter, r *http.Request) {
 			"ip": ip, "device_name": dname, "active_since": since, "closed_at": closed, "meta": json.RawMessage(meta),
 			"pop_name": ptrStr(popName),
 		}
+		if did != nil {
+			if name := ifRes.Resolve(r.Context(), *did, meta); name != "" {
+				item["interface_custom_name"] = name
+			}
+		}
 		list = append(list, item)
+	}
+	if pageSize > 0 {
+		if list == nil {
+			list = []map[string]any{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": list, "total": total, "page": page, "page_size": pageSize})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": list})
 }

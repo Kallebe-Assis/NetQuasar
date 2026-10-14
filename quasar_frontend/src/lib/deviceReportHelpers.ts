@@ -65,13 +65,6 @@ export function formatNum(n: number | null, decimals = 1, suffix = ""): string {
   return `${n.toFixed(decimals)}${suffix}`;
 }
 
-export function formatDelta(prev: number | null, curr: number | null, decimals = 1, suffix = ""): string {
-  if (prev == null || curr == null || !Number.isFinite(prev) || !Number.isFinite(curr)) return "—";
-  const d = curr - prev;
-  const sign = d > 0 ? "+" : "";
-  return `${sign}${d.toFixed(decimals)}${suffix}`;
-}
-
 /** Valores brutos por OID na última colecta SNMP (métricas.telemetria). */
 export function snmpVarsFromMetrics(metrics: Record<string, unknown> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -722,18 +715,6 @@ export function inferExtraOidLabel(oid: string, value: string): string | null {
   if (/^([0-9A-Fa-f]{2}){6,}$/.test(v.replace(/[:\s.-]/g, "")) && v.length >= 12) return "Endereço MAC / serial";
   if (/^[A-Z0-9][A-Z0-9._-]{2,}$/i.test(v) && v.length <= 48 && /model|version|sw/i.test(oid)) return "Modelo / versão";
   return null;
-}
-
-/** Secção ZTE MIB só para OLT ZTE com dados reais. */
-export function deviceReportShowsZteSection(brand?: string | null, oltData?: Record<string, unknown> | null): boolean {
-  const b = String(brand ?? "").trim().toLowerCase();
-  if (!b.includes("zte")) return false;
-  if (!oltData) return false;
-  const tables = ["zte_onu_online_table", "zte_pon_status_table", "zte_transceiver_table"] as const;
-  return tables.some((k) => {
-    const arr = oltData[k];
-    return Array.isArray(arr) && arr.length > 0;
-  });
 }
 
 export function isOltCategory(category?: string | null): boolean {

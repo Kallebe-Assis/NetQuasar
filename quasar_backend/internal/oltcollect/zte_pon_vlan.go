@@ -145,25 +145,6 @@ func ResolveAuthorizeVlanForPon(cfg OnuReportConfig, pon int) (vlan string, ok b
 	return "", false
 }
 
-// ParseZteVlanCatalogFromSNMPVars mantém compatibilidade: só entradas provisionáveis (PPPOE).
-func ParseZteVlanCatalogFromSNMPVars(vars []probing.SNMPVar) []ZteVlanEntry {
-	all := DiscoverZteVlanCatalogFromSNMPVars(vars)
-	out := make([]ZteVlanEntry, 0, len(all))
-	for _, e := range all {
-		if e.Ignored || e.Pon <= 0 {
-			continue
-		}
-		out = append(out, ZteVlanEntry{VID: e.VID, Name: e.Name, Description: e.Description})
-	}
-	return out
-}
-
-// IsProvisionableZteVlan filtra VLAN padrão (1), gestão e o que não for PPPOE-PONxx.
-func IsProvisionableZteVlan(e ZteVlanEntry) bool {
-	ae := AuthorizeVlanCatalogEntry{VID: e.VID, Name: e.Name, Description: e.Description, Pon: PonFromZteVlanDescription(e.Description)}
-	return !SuggestIgnoreZteVlan(ae)
-}
-
 // PonFromZteVlanDescription extrai o número da PON de "PPPOE-PON01", "PPPOE-PON9", etc.
 func PonFromZteVlanDescription(desc string) int {
 	m := pppoePonDescRE.FindStringSubmatch(strings.TrimSpace(desc))
@@ -172,19 +153,6 @@ func PonFromZteVlanDescription(desc string) int {
 	}
 	n, _ := strconv.Atoi(m[1])
 	return n
-}
-
-// ResolveVlanIDForPon devolve o VID associado à PON via descrição PPPOE-PONxx.
-func ResolveVlanIDForPon(entries []ZteVlanEntry, pon int) int {
-	if pon <= 0 {
-		return 0
-	}
-	for _, e := range entries {
-		if PonFromZteVlanDescription(e.Description) == pon {
-			return e.VID
-		}
-	}
-	return 0
 }
 
 // DiscoverZteVlanCatalogViaSNMP faz um walk único e devolve o catálogo ordenado.
@@ -256,7 +224,3 @@ func classifyZteVlanOID(oid string) (vid int, kind string) {
 	}
 }
 
-func oidLastInt(oid string) int {
-	vid, _ := classifyZteVlanOID(oid)
-	return vid
-}

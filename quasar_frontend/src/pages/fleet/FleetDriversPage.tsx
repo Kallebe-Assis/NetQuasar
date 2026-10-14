@@ -8,6 +8,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { ExportMenu } from "../../components/ExportMenu";
 import { DRIVER_STATUS, fleetDateOnly, fleetLicenseExpired, formatFleetPlateOrUnknown, UF_OPTIONS } from "./fleetUtils";
 
 type Driver = {
@@ -131,6 +132,25 @@ export function FleetDriversPage({ embedded }: { embedded?: boolean } = {}) {
         {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Motoristas</h1>}
         <div className="row" style={{ gap: 8 }}>
           <input className="input" placeholder="Pesquisar…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <ExportMenu
+            filename="frota-motoristas"
+            title="Frota — Motoristas"
+            rows={filtered}
+            columns={[
+              { header: "Nome", value: (d) => d.name },
+              { header: "CPF", value: (d) => d.cpf },
+              { header: "Telefone", value: (d) => d.phone },
+              { header: "E-mail", value: (d) => d.email },
+              { header: "CNH", value: (d) => d.license_number },
+              { header: "Categoria CNH", value: (d) => d.license_category },
+              { header: "Validade CNH", value: (d) => d.license_expires_on },
+              { header: "Cidade", value: (d) => d.city },
+              { header: "UF", value: (d) => d.uf },
+              { header: "Usuário", value: (d) => d.user_login },
+              { header: "Status", value: (d) => DRIVER_STATUS.find((s) => s.value === d.status)?.label ?? d.status },
+              { header: "Observação", value: (d) => d.notes },
+            ]}
+          />
           {canMutate ? (
             <button type="button" className="btn btn--icon btn--icon-menu btn--primary" title="Novo motorista" aria-label="Novo motorista" onClick={openCreate}>
               <UserPlus size={18} aria-hidden />

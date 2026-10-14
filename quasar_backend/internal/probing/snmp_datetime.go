@@ -2,8 +2,6 @@ package probing
 
 import (
 	"encoding/binary"
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -62,20 +60,3 @@ func snmpDateTimeFromBytes(b []byte) (time.Time, bool) {
 	return time.Date(year, time.Month(month), day, hour, min, sec, 0, loc).In(time.Local), true
 }
 
-// looksLikeMisreadDateTimeIPv4 detecta IPv4 falso (4 octetos DateAndTime).
-func looksLikeMisreadDateTimeIPv4(s string) bool {
-	parts := strings.Split(strings.TrimSpace(s), ".")
-	if len(parts) != 4 {
-		return false
-	}
-	b := make([]byte, 4)
-	for i, p := range parts {
-		var n int
-		if _, err := fmt.Sscanf(p, "%d", &n); err != nil || n < 0 || n > 255 {
-			return false
-		}
-		b[i] = byte(n)
-	}
-	_, ok := snmpDateTimeFromBytes(b)
-	return ok
-}

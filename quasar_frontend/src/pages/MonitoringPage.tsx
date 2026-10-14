@@ -9,6 +9,7 @@ import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
 import { EM_DASH } from "../lib/formatDisplay";
 import { AuditLogTable } from "../components/AuditLogTable";
+import { ExportMenu } from "../components/ExportMenu";
 import { friendlyApiMessage } from "../lib/apiErrors";
 import { useAppToast } from "../lib/appToast";
 import { collectDeviceTelemetry } from "../lib/telemetryCollectToast";
@@ -739,6 +740,24 @@ export function MonitoringPage() {
                 </button>
               </>
             ) : null}
+            <ExportMenu
+              filename="monitoramento-equipamentos"
+              title="Monitoramento — equipamentos ativos"
+              rows={filteredActiveEquipment}
+              columns={[
+                { header: "Descrição", value: (r) => r.description },
+                { header: "Categoria", value: (r) => r.category },
+                { header: "Marca", value: (r) => r.brand },
+                { header: "IP", value: (r) => r.ip },
+                { header: "Status", value: (r) => statusFromReachability(r) },
+                { header: "Última checagem", value: (r) => r.checked_at },
+                { header: "Latência (ms)", value: (r) => r.latency_ms },
+                { header: "CPU (%)", value: (r) => (r.cpu_percent != null ? Number(r.cpu_percent.toFixed(1)) : "") },
+                { header: "Memória (%)", value: (r) => (r.memory_percent != null ? Math.round(r.memory_percent) : "") },
+                { header: "Uptime", value: (r) => r.uptime },
+                { header: "Temperatura (°C)", value: (r) => (r.temperature_c != null ? Math.round(r.temperature_c) : "") },
+              ]}
+            />
             <div className={`monitoring-toolbar-search${equipQuickSearchOpen ? " monitoring-toolbar-search--open" : ""}`}>
               {!equipQuickSearchOpen ? (
                 <button

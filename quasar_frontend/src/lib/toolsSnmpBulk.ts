@@ -19,15 +19,6 @@ export function normalizeSnmpOid(oid: string): string {
   return oid.trim().replace(/^\.+/, "");
 }
 
-export function oidColumnTitle(oid: string): string {
-  const n = normalizeSnmpOid(oid);
-  const parts = n.split(".");
-  if (parts.length >= 2) {
-    return `…${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
-  }
-  return n.length > 28 ? `${n.slice(0, 25)}…` : n;
-}
-
 export function matchSnmpVar(
   vars: Array<{ oid?: string; type?: string; value?: unknown }>,
   wantedOid: string,

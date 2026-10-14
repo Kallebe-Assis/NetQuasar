@@ -1,3 +1,4 @@
+import { ExportMenu } from "../../components/ExportMenu";
 import { EM_DASH, ifaceStatusBadge, num } from "./bgpFormat";
 import { formatBitrate } from "../../lib/formatBitrate";
 import type { ETrunkMemberReport, ETrunkReport, InterfaceReport } from "./bgpTypes";
@@ -26,7 +27,21 @@ export function BgpInterfacesTab({ interfaces, etrunks, etrunkMembers }: Props) 
     <>
       {interfaces.length > 0 ? (
         <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Interfaces</h3>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", margin: "0 0 10px" }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Interfaces</h3>
+            <ExportMenu
+              filename="bgp-interfaces"
+              title="BGP — interfaces"
+              rows={interfaces}
+              columns={[
+                { header: "Interface", value: (i) => i.descr || i.if_index },
+                { header: "Descrição", value: (i) => i.alias },
+                { header: "Estado", value: (i) => i.oper_status },
+                { header: "Download", value: (i) => (i.in_bit_rate ? formatBitrate(num(i.in_bit_rate)) : "") },
+                { header: "Upload", value: (i) => (i.out_bit_rate ? formatBitrate(num(i.out_bit_rate)) : "") },
+              ]}
+            />
+          </div>
           <div className="table-wrap">
             <table>
               <thead>

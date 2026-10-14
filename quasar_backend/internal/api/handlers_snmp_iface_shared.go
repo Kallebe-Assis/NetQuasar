@@ -10,19 +10,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/netquasar/netquasar/quasar_backend/internal/alertstore"
 	"github.com/netquasar/netquasar/quasar_backend/internal/ifaceoptical"
-	"github.com/netquasar/netquasar/quasar_backend/internal/oltcollect"
 	"github.com/netquasar/netquasar/quasar_backend/internal/oltifderive"
-	"github.com/netquasar/netquasar/quasar_backend/internal/oltsamples"
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snapshotwalk"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpifparse"
 	"github.com/netquasar/netquasar/quasar_backend/internal/snmpmikrotik"
 	"github.com/netquasar/netquasar/quasar_backend/internal/switchcollect"
-	"github.com/rs/zerolog"
 )
 
 type oltVendorOIDProfile struct {
@@ -103,82 +98,6 @@ func enrichZTERows(rows []any, ifNameByIndex map[int]string, asOperStatus bool) 
 			case float64:
 				row["value_label"] = statusLabelFromInt(int(x))
 			}
-		}
-		out = append(out, row)
-	}
-	return out
-}
-
-func parseIfAndOnuFromSuffix(suffix string) (ifIndex int, onuIndex int, ok bool) {
-	s := strings.TrimSpace(suffix)
-	if s == "" {
-		return 0, 0, false
-	}
-	parts := strings.Split(s, ".")
-	if len(parts) < 2 {
-		return 0, 0, false
-	}
-	ifx, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	onu, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || ifx <= 0 || onu <= 0 {
-		return 0, 0, false
-	}
-	return ifx, onu, true
-}
-
-func buildZTEPonRowsFromTables(onuRows []map[string]any, ponRows []map[string]any) []map[string]any {
-	type agg struct {
-		ifIndex int
-		total   int
-		online  int
-		offline int
-		status  string
-	}
-	byIf := map[int]*agg{}
-	for _, r := range ponRows {
-		ifIdx := parseIfIndexFromSuffix(anyString(r["suffix"]))
-		if ifIdx <= 0 {
-			continue
-		}
-		st := strings.TrimSpace(anyString(r["value_label"]))
-		if st == "" {
-			if v, ok := r["value_int"].(int); ok {
-				st = statusLabelFromInt(v)
-			}
-		}
-		byIf[ifIdx] = &agg{ifIndex: ifIdx, status: st}
-	}
-	for _, r := range onuRows {
-		ifIdx, _, ok := parseIfAndOnuFromSuffix(anyString(r["suffix"]))
-		if !ok {
-			continue
-		}
-		a := byIf[ifIdx]
-		if a == nil {
-			a = &agg{ifIndex: ifIdx}
-			byIf[ifIdx] = a
-		}
-		a.total++
-		if v, ok := r["value_int"].(int); ok && v == 1 {
-			a.online++
-		} else {
-			a.offline++
-		}
-	}
-	out := make([]map[string]any, 0, len(byIf))
-	for _, a := range byIf {
-		if a.offline == 0 && a.total > a.online {
-			a.offline = a.total - a.online
-		}
-		row := map[string]any{
-			"id":           strconv.Itoa(a.ifIndex),
-			"name":         "PON ifIndex " + strconv.Itoa(a.ifIndex),
-			"onu_total":    a.total,
-			"onu_online":   a.online,
-			"onu_offline":  a.offline,
-			"status":       strings.TrimSpace(a.status),
-			"source_slice": "zte_oid",
-			"if_index":     a.ifIndex,
 		}
 		out = append(out, row)
 	}
@@ -304,39 +223,6 @@ func cleanSNMPOID(oid string) string {
 	return strings.TrimPrefix(strings.TrimSpace(oid), ".")
 }
 
-func loadVendorOIDProfile(ctx context.Context, pool *pgxpool.Pool, brand, model string) oltVendorOIDProfile {
-	if pool == nil {
-		return oltVendorOIDProfile{}
-	}
-	brand = strings.TrimSpace(brand)
-	model = strings.TrimSpace(model)
-	var p oltVendorOIDProfile
-	if brand != "" && model != "" {
-		err := pool.QueryRow(ctx, `
-			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
-			FROM olt_vendor_models WHERE brand = $1 AND model = $2
-		`, brand, model).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
-		if err == nil {
-			return p
-		}
-	}
-	if brand != "" {
-		_ = pool.QueryRow(ctx, `
-			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
-			FROM olt_vendor_models WHERE brand = $1 AND model <> 'Padrão'
-			ORDER BY model LIMIT 1
-		`, brand).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
-		if p.OnuOnlineOID != "" || p.PonStatusOID != "" || p.TransceiverOID != "" || p.SNMPBaseOID != "" {
-			return p
-		}
-		_ = pool.QueryRow(ctx, `
-			SELECT coalesce(onu_online_oid,''), coalesce(pon_status_oid,''), coalesce(transceiver_oid,''), coalesce(snmp_base_oid,'')
-			FROM olt_vendor_profiles WHERE upper(trim(brand)) = upper(trim($1))
-		`, brand).Scan(&p.OnuOnlineOID, &p.PonStatusOID, &p.TransceiverOID, &p.SNMPBaseOID)
-	}
-	return p
-}
-
 func walkRootRows(ctx context.Context, host, community, root string) ([]map[string]any, bool, string) {
 	root = cleanSNMPOID(root)
 	if root == "" {
@@ -365,14 +251,6 @@ func walkRootRows(ctx context.Context, host, community, root string) ([]map[stri
 	return out, trunc, note
 }
 
-func copyFloatPtr(p *float64) *float64 {
-	if p == nil {
-		return nil
-	}
-	v := *p
-	return &v
-}
-
 func isLikelyMikrotikDevice(category, brand, model, description string) bool {
 	hay := strings.ToLower(strings.TrimSpace(strings.Join([]string{category, brand, model, description}, " ")))
 	if hay == "" {
@@ -396,99 +274,6 @@ type alertMetricThreshold struct {
 	Critical float64
 	HasWarn  bool
 	HasCrit  bool
-}
-
-func loadGlobalMetricThreshold(ctx context.Context, pool *pgxpool.Pool, metricID string) (alertMetricThreshold, bool) {
-	var out alertMetricThreshold
-	if pool == nil || strings.TrimSpace(metricID) == "" {
-		return out, false
-	}
-	var enabled bool
-	var raw []byte
-	err := pool.QueryRow(ctx, `
-		SELECT enabled, condition_json::text FROM alert_rules
-		WHERE name = 'Limiar global de alertas' LIMIT 1
-	`).Scan(&enabled, &raw)
-	if err != nil || !enabled || len(raw) == 0 {
-		return out, false
-	}
-	var root struct {
-		Schema  string `json:"schema"`
-		Metrics []struct {
-			ID          string `json:"id"`
-			Enabled     *bool  `json:"enabled"`
-			Operator    string `json:"operator"`
-			WarningMin  string `json:"warning_min"`
-			CriticalMin string `json:"critical_min"`
-		} `json:"metrics"`
-	}
-	if json.Unmarshal(raw, &root) != nil {
-		return out, false
-	}
-	for _, m := range root.Metrics {
-		if strings.TrimSpace(m.ID) != metricID {
-			continue
-		}
-		if m.Enabled != nil && !*m.Enabled {
-			return out, false
-		}
-		op := strings.ToLower(strings.TrimSpace(m.Operator))
-		if op == "" {
-			op = "gte"
-		}
-		out.Operator = op
-		if f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(m.WarningMin), ",", "."), 64); err == nil {
-			out.Warning, out.HasWarn = f, true
-		}
-		if f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(m.CriticalMin), ",", "."), 64); err == nil {
-			out.Critical, out.HasCrit = f, true
-		}
-		return out, out.HasWarn || out.HasCrit
-	}
-	return out, false
-}
-
-func evalThresholdSeverity(v float64, t alertMetricThreshold) string {
-	if t.Operator == "lte" {
-		if t.HasCrit && v <= t.Critical {
-			return "critical"
-		}
-		if t.HasWarn && v <= t.Warning {
-			return "warning"
-		}
-		return "ok"
-	}
-	if t.HasCrit && v >= t.Critical {
-		return "critical"
-	}
-	if t.HasWarn && v >= t.Warning {
-		return "warning"
-	}
-	return "ok"
-}
-
-// openOrUpdateAlertWithMeta delega para alertstore (compatibilidade API).
-func openOrUpdateAlertWithMeta(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, severity, alertType, message, ip, devName string, meta map[string]any) (created bool, alertID uuid.UUID, err error) {
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	key, _ := meta["key"].(string)
-	res, err := alertstore.OpenOrUpdate(ctx, pool, alertstore.OpenSpec{
-		DeviceID: deviceID, Severity: severity, AlertType: alertType,
-		Message: message, IP: ip, DeviceName: devName, Meta: meta,
-		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
-	}, nil)
-	return res.Created, res.ID, err
-}
-
-func closeAlertByMetaKey(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, alertType, key string) {
-	_, _, _ = alertstore.Close(ctx, pool, log, alertstore.CloseSpec{
-		DeviceID: deviceID, AlertType: alertType,
-		Match: alertstore.Match{Kind: alertstore.MatchMetaKey, MetaKey: key},
-		Resolved: map[string]any{
-			"resolved": "normalized", "source": "interface_snmp_refresh", "key": key,
-		},
-	})
 }
 
 func parseTrailingIndex(oid string) int {
@@ -660,41 +445,6 @@ func loadLatestTwoInterfaceSnapshots(ctx context.Context, pool *pgxpool.Pool, de
 		prevAt = &p
 	}
 	return latestRaw, latestAt, prevRaw, prevAt, nil
-}
-
-func upsertOltSnapshotAfterInterfaceRefresh(ctx context.Context, pool *pgxpool.Pool, devID uuid.UUID, derivedPons []map[string]any, sumPatch map[string]any) error {
-	if pool == nil {
-		return nil
-	}
-	sumT, ponsT := "{}", "[]"
-	err := pool.QueryRow(ctx, `SELECT COALESCE(o.summary::text,'{}'), COALESCE(o.pons::text,'[]') FROM olt_snapshots o WHERE o.device_id=$1`, devID).Scan(&sumT, &ponsT)
-	if err != nil && err != pgx.ErrNoRows {
-		return err
-	}
-	var existPons []map[string]any
-	_ = json.Unmarshal([]byte(ponsT), &existPons)
-	mergedPons := oltifderive.MergePonRowsForIfaceRefresh(existPons, derivedPons)
-	oltifderive.ApplyPonOperStatusAll(mergedPons)
-	newSum, err := oltifderive.MergeSummaryJSON([]byte(sumT), sumPatch)
-	if err != nil {
-		return err
-	}
-	newSum = oltcollect.CarryForwardOnuIdentityJSON(newSum, []byte(sumT))
-	newSum = oltcollect.SanitizeOnuSerialsJSON(newSum)
-	pb, err := json.Marshal(mergedPons)
-	if err != nil {
-		return err
-	}
-	_, err = pool.Exec(ctx, `
-		INSERT INTO olt_snapshots (device_id, summary, pons) VALUES ($1, $2::jsonb, $3::jsonb)
-		ON CONFLICT (device_id) DO UPDATE SET summary = $2::jsonb, pons = $3::jsonb, updated_at = now()
-	`, devID, newSum, pb)
-	if err == nil {
-		oltsamples.RecordSample(ctx, pool, devID, newSum, pb)
-		oltsamples.RecordOnuHistory(ctx, pool, devID, newSum)
-		oltsamples.RecordPonSamples(ctx, pool, devID, pb)
-	}
-	return err
 }
 
 func walkJSONToSNMPVars(raw []byte) []probing.SNMPVar {

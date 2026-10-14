@@ -216,6 +216,8 @@ Se o patrimônio **já está vinculado ao mesmo serviço**, a conferência não 
 
 **Comodato em lote (aba «Estoque» → «Comodato em lote (CSV)»)** — `POST …/stock-comodato/preview-batch|apply-batch` (até 25 linhas por chamada; a tela envia 5 por vez): cada linha liga um patrimônio a um serviço. Colunas: `id_cliente_servico` (obrigatória); para achar o patrimônio `id_produto_item`, `identificador_proprio`, `numero_serie`, `mac_address` ou `codigo_item` (se vier mais de um, **todos** precisam apontar para o mesmo patrimônio — senão a linha é recusada; um MAC não encontrado é tolerado porque a HubSoft recusa alguns MACs no cadastro); opcionais só de conferência: `id_produto`, `cliente`, `login` (evitam ligar ao serviço errado) e `observacao`. O mesmo patrimônio em duas linhas: só a primeira vale. O envio para na primeira recusa da HubSoft; cada linha é conferida de novo antes de enviar e relida depois, e grava um registro em `hubsoft_stock_comodato`.
 
+**Transferência entre locais de estoque (aba «Estoque» → «Transferir local de estoque»)** — `POST …/stock-transfer/preview` (até 60 linhas) e `…/apply` (até 30; a tela envia 40 e 20 por vez), `stock_transfer.go`. Usa `POST /estoque/movimento_estoque/transferencia` (origem, destino, produto e `patrimonios:[{id_produto_item}]`); a API **não cria local de estoque** (só lista: `GET local_estoque`) e `PUT produto_item` não altera local, então o destino precisa existir e é escolhido na tela. CSV com a coluna `id_produto_item` (as demais só ajudam a identificar). Só patrimônio em **Estoque** é movido (comodato/vendido é bloqueado); quem já está no destino vira «já estava» (reenviar o mesmo arquivo é seguro). O envio agrupa por local de origem + produto (≤25 patrimônios por movimento), para após 3 grupos seguidos recusados, relê cada patrimônio (local = destino e status ainda Estoque) e grava `hubsoft_stock_transfer` por patrimônio; confirmação digitando `TRANSFERIR N`.
+
 **Importação em massa** (`internal/integrationhubsoft`: `bulk_import*.go`)
 
 - **Fluxo:** a validação local confere o formato de cada campo e — com os catálogos carregados — se cada ID existe na conta; o **preflight** (`POST …/bulk-import/preflight`, somente leitura) mostra para cada linha se vai criar cliente novo, adicionar serviço a um cliente existente (mesmo ou outro endereço) ou se o login já existe; a aplicação (`POST …/bulk-import/apply`) roda em **lotes de 15 linhas e para após 3 falhas seguidas**. Cada linha criada/recusada fica no histórico (`ops_audit_log`).
@@ -687,3 +689,12 @@ O NetQuasar é um **PWA instalável** (Android e iPhone): ícone na tela inicial
 ## Licença
 
 Consulte os ficheiros de licença no repositório. Evolução de longo prazo: [ROADMAP-ARQUITETURAL-DEPLOY.md](ROADMAP-ARQUITETURAL-DEPLOY.md).
+
+## Exportação de listas (CSV / Excel / PDF)
+
+As listas principais têm o botão **Exportar** (`components/ExportMenu.tsx`, `lib/tableExport.ts`; sem dependências externas): frota (veículos, motoristas, postos, combustíveis, despesas…), localidades, POPs, equipamentos, clientes/logins, sessões PPPoE e interfaces do BNG, VLANs, OLT (OLTs, portas PON, ONUs, pesquisa, não autorizadas), MikroTik (visão geral, interfaces, sessões), Switch, BGP, monitoramento, alertas (ativos e histórico completo), eventos de rede, registros, usuários e auditoria. O arquivo respeita o filtro da tela; o CSV usa «;» com BOM e protege contra injeção de fórmula. A lista de logins de clientes exportada **não** inclui senhas.
+
+## Sessões PPPoE — consulta ao vivo
+
+`GET /bng/devices/{id}/sessions/lookup` só marca um login como offline quando a leitura SNMP é confiável: um walk que devolve zero linhas (ou bem menos que as sessões online conhecidas) é tratado como **inconclusivo** e mantém o último estado; se o login constava online, a leitura é repetida uma vez antes de decidir. A comparação aceita variações (sem `@domínio`, caracteres de controle) e logins de 4 dígitos que o SNMP devolve como IPv4. Uma queda em massa (< 60 % das sessões online conhecidas, ≥ 50 sessões) só é aplicada se a leitura seguinte confirmar.
+

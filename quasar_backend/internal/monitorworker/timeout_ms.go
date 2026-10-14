@@ -57,10 +57,6 @@ func clampCollectionTimeoutMs(ms, defaultMs int) int {
 	return ms
 }
 
-func (c intervalConfig) telemetryTimeout() time.Duration {
-	return time.Duration(clampCollectionTimeoutMs(c.TelemetryTimeoutMs, defaultTelemetryTimeoutMs)) * time.Millisecond
-}
-
 func (c intervalConfig) mikrotikTimeout() time.Duration {
 	return time.Duration(clampCollectionTimeoutMs(c.MikrotikTimeoutMs, defaultInterfaceTimeoutMs)) * time.Millisecond
 }

@@ -133,12 +133,6 @@ func pollIncrementalFailLogs(ctx context.Context, host, community string, st *au
 	return buildFailAuthLogsForIndices(ctx, host, community, userMap, newIndices, timeout, stripSuffix)
 }
 
-// FetchRecentBngAuthRecords obtém os registos AAA mais recentes (todos os logins).
-func FetchRecentBngAuthRecords(ctx context.Context, host, community string, limit int, timeout time.Duration, stripSuffix string) []AuthAttemptLog {
-	_ = timeout
-	return fetchRecentBngAuthRecordsFast(ctx, host, community, limit, stripSuffix)
-}
-
 // FetchAuthAttemptsForLogin obtém falhas e sessões offline filtradas por login (walk mínimo).
 func FetchAuthAttemptsForLogin(ctx context.Context, host, community, login string, timeout time.Duration, stripSuffix string) []AuthAttemptLog {
 	login = strings.TrimSpace(login)

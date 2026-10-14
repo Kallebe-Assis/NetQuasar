@@ -86,24 +86,3 @@ export function countActiveFilters(f: ConnectionsFilterState, tab: ConnectionsTa
   return n;
 }
 
-export function filtersToQueryParams(f: ConnectionsFilterState, tab: ConnectionsTabId): URLSearchParams {
-  const p = new URLSearchParams();
-  if (f.q.trim()) p.set("q", f.q.trim());
-  if (f.project_id) p.set("project_id", f.project_id);
-  if (f.locality_id) p.set("locality_id", f.locality_id);
-  if (f.needs_maintenance) p.set("needs_maintenance", "1");
-  if (tab === "cto") {
-    if (f.ctos.fiber_color) p.set("fiber_color", f.ctos.fiber_color);
-    if (f.ctos.splitter.trim()) p.set("splitter", f.ctos.splitter.trim());
-    if (f.ctos.transmitter.trim()) p.set("transmitter", f.ctos.transmitter.trim());
-    if (f.ctos.vlan.trim()) p.set("vlan", f.ctos.vlan.trim());
-    if (f.ctos.olt_link) p.set("olt_link", f.ctos.olt_link);
-  }
-  if (tab === "cables") {
-    if (f.cables.cable_type.trim()) p.set("cable_type", f.cables.cable_type.trim());
-    if (f.cables.status) p.set("status", f.cables.status);
-  }
-  if (tab === "poles" && f.poles.pole_type.trim()) p.set("pole_type", f.poles.pole_type.trim());
-  if (tab === "projects" && f.projects.status) p.set("status", f.projects.status);
-  return p;
-}

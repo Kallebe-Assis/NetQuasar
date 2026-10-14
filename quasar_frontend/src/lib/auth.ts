@@ -1,4 +1,4 @@
-import { DEFAULT_USER_PERMISSIONS, hasAnyPermission, hasPermission, type PermissionKey } from "./permissions";
+import { DEFAULT_USER_PERMISSIONS, hasPermission, type PermissionKey } from "./permissions";
 
 const K_BASE = "netquasar_api_base";
 const K_KEY = "netquasar_api_key";
@@ -101,17 +101,6 @@ export function isClientConfigured(): boolean {
   return false;
 }
 
-export function clearClientSetup() {
-  localStorage.removeItem(K_CLIENT);
-}
-
-/** Limpa URL/chave do servidor (volta ao assistente `/client-setup`). */
-export function clearClientSetupAndApi() {
-  localStorage.removeItem(K_CLIENT);
-  localStorage.removeItem(K_BASE);
-  localStorage.removeItem(K_KEY);
-}
-
 /** Chamado após login com credenciais válidas — rotas internas exigem isto. */
 export function markSessionReady() {
   localStorage.setItem(K_READY, "1");
@@ -212,11 +201,6 @@ export function savePermissionProfileId(id: string | null | undefined) {
   else localStorage.removeItem(K_PROFILE);
 }
 
-export function getStoredPermissionProfileId(): string | null {
-  const t = localStorage.getItem(K_PROFILE)?.trim();
-  return t || null;
-}
-
 /** Visitante (viewer) — só leitura nas áreas restritas (legado). */
 export function isViewerUser(): boolean {
   return getStoredUserRole() === "viewer" && !hasPermission(getStoredUserPermissions(), "*");
@@ -241,12 +225,6 @@ export function can(permission: PermissionKey | string): boolean {
   if (!getAuthToken()) return false;
   if (isAdminUser()) return true;
   return hasPermission(getStoredUserPermissions(), permission);
-}
-
-export function canAny(...permissions: Array<PermissionKey | string>): boolean {
-  if (!getAuthToken()) return false;
-  if (isAdminUser()) return true;
-  return hasAnyPermission(getStoredUserPermissions(), permissions);
 }
 
 export function apiUrl(path: string): string {

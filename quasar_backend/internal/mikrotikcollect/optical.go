@@ -36,10 +36,6 @@ type OpticalPortRow struct {
 	RxDBm        *float64 `json:"rx_dbm,omitempty"`
 }
 
-func isOpticalSectionKey(key string) bool {
-	return strings.HasPrefix(key, "optical_")
-}
-
 func anyOpticalEnabledForCatalog(c MetricsConfig, catalog []CatalogEntry) bool {
 	for _, e := range catalog {
 		if e.Section != "optical" {
@@ -51,11 +47,6 @@ func anyOpticalEnabledForCatalog(c MetricsConfig, catalog []CatalogEntry) bool {
 		}
 	}
 	return false
-}
-
-// OpticalWalkRoot devolve um único walk para toda a tabela óptica quando qualquer métrica óptica está activa.
-func OpticalWalkRoot(c MetricsConfig) string {
-	return OpticalWalkRootForCatalog(c, MetricCatalog)
 }
 
 func OpticalWalkRootForCatalog(c MetricsConfig, catalog []CatalogEntry) string {

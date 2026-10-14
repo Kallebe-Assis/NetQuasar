@@ -4,6 +4,7 @@ import { Filter, Plus, Shield } from "lucide-react";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { ActionMenu } from "../../components/ActionMenu";
+import { ExportMenu } from "../../components/ExportMenu";
 import { apiFetch, ApiError } from "../../lib/api";
 import { isAdminUser } from "../../lib/auth";
 import { PermissionProfilesModal } from "./PermissionProfilesModal";
@@ -249,6 +250,20 @@ export function UsersPanel() {
         </div>
       )}
 
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+        <ExportMenu
+          filename="usuarios"
+          title="Usuários"
+          rows={filtered}
+          columns={[
+            { header: "Nome", value: (u) => u.display_name },
+            { header: "E-mail", value: (u) => u.email },
+            { header: "Telefone", value: (u) => formatBRPhoneDisplay(u.phone) },
+            { header: "Perfil", value: (u) => profileLabel(u) },
+            { header: "Estado", value: (u) => (u.is_active !== false ? "Ativo" : "Inativo") },
+          ]}
+        />
+      </div>
       <div className="table-wrap">
         <table>
           <thead>

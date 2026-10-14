@@ -279,19 +279,6 @@ func isIXCClientScopedQtype(qtype string) bool {
 	}
 }
 
-func attendanceItemsHaveClientKey(items []AttendanceItem) bool {
-	for _, it := range items {
-		m := attendanceItemRawMap(it)
-		if m == nil {
-			continue
-		}
-		if pickStr(m, "id_cliente", "id_login", "id_contrato") != "" {
-			return true
-		}
-	}
-	return false
-}
-
 // ApplyIXCAttendanceBodySearchAttempt aplica tentativa ao body su_ticket (preserva sortname do template).
 func ApplyIXCAttendanceBodySearchAttempt(bodyTemplate string, att IXCSearchAttempt) string {
 	obj := map[string]any{}

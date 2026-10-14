@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CirclePlus, Download, PenLine } from "lucide-react";
+import { CirclePlus, PenLine } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ActionMenu } from "../components/ActionMenu";
+import { ExportMenu } from "../components/ExportMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { PageCountPill } from "../components/PageCountPill";
-import { apiFetch, downloadBlob } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import { useAppToast } from "../lib/appToast";
-import { can, getAuthToken, isAdminUser } from "../lib/auth";
+import { can, isAdminUser } from "../lib/auth";
 import { ifaceDisplayName } from "../lib/monitor/extract";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -327,17 +328,18 @@ export function NetworkEventsPage() {
     setFormOpen(true);
   }
 
-  async function exportCsv() {
-    try {
-      const token = getAuthToken();
-      const res = await fetch(`/api/v1/network-events/export.csv?${listQs}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`Falha ao exportar (${res.status})`);
-      downloadBlob("eventos-rede.csv", await res.blob());
-    } catch (e) {
-      toastErr(push, e);
+  /** Todos os eventos do filtro atual (a lista da tela mostra só os 300 mais recentes; a API pagina de 500 em 500). */
+  async function loadAllEventsForExport(): Promise<NetworkEvent[]> {
+    const out: NetworkEvent[] = [];
+    for (let offset = 0; offset < 20000; offset += 500) {
+      const qs = new URLSearchParams(listQs);
+      qs.set("limit", "500");
+      qs.set("offset", String(offset));
+      const page = await apiFetch<{ items: NetworkEvent[]; total: number }>(`/api/v1/network-events?${qs}`);
+      out.push(...page.items);
+      if (page.items.length < 500 || out.length >= page.total) break;
     }
+    return out;
   }
 
   const fields = formCategory?.fields ?? [];
@@ -438,9 +440,26 @@ export function NetworkEventsPage() {
         </select>
         <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="De" />
         <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Até" />
-        <button type="button" className="btn btn--icon btn--icon-menu" title="Exportar CSV" aria-label="Exportar CSV" onClick={() => void exportCsv()}>
-          <Download size={18} aria-hidden />
-        </button>
+        <ExportMenu
+          filename="eventos-de-rede"
+          title="Eventos de rede"
+          rows={loadAllEventsForExport}
+          columns={[
+            { header: "Data", value: (ev) => formatWhen(ev.occurred_at) },
+            { header: "Categoria", value: (ev) => ev.category_label },
+            { header: "Tipo", value: (ev) => ev.type_label },
+            { header: "Impacto", value: (ev) => (catalog?.impacts ?? []).find((i) => i.code === ev.impact)?.label ?? ev.impact },
+            { header: "POP", value: (ev) => ev.pop_name },
+            { header: "Equipamento", value: (ev) => ev.device_name },
+            { header: "Projeto", value: (ev) => ev.project_name },
+            { header: "CTO / Cabo / Caixa / Poste", value: (ev) => [ev.cto_name, ev.cable_name, ev.splice_box_name, ev.pole_name].filter(Boolean).join(" · ") },
+            { header: "Interface", value: (ev) => ev.interface_name },
+            { header: "VLAN", value: (ev) => ev.vlan },
+            { header: "Técnico", value: (ev) => ev.technician_name },
+            { header: "Observações", value: (ev) => ev.notes },
+            { header: "Registrado por", value: (ev) => ev.created_by_name },
+          ]}
+        />
         {canMutate ? (
           <button type="button" className="btn btn--icon btn--icon-menu btn--primary" title="Novo evento" aria-label="Novo evento" onClick={openCreate}>
             <CirclePlus size={18} aria-hidden />

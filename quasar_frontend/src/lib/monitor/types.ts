@@ -1,7 +1,5 @@
 /** Tipos unificados de monitoramento — espelham monitorview no backend. */
 
-export type MonitorHealthStatus = "unknown" | "ok" | "partial" | "failed";
-
 export type MonitorReachability = {
   online: boolean;
   latency_ms?: number | null;

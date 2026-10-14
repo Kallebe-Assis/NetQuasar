@@ -86,11 +86,6 @@ func parseTelnetMetricFloat(s string) *float64 {
 	return &f
 }
 
-func ponTargetFromRow(row map[string]any) OnuReportTarget {
-	pon := ponIndexFromRowMap(row)
-	return OnuReportTarget{Pon: pon}
-}
-
 func ponIndexFromRowMap(row map[string]any) int {
 	if row == nil {
 		return 0

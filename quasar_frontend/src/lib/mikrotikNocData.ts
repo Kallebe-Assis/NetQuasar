@@ -570,16 +570,6 @@ export function buildMikrotikSystemInfo(metrics: Record<string, unknown> | undef
   };
 }
 
-export function pickPrimaryIface(ifaces: MikrotikIfRow[]): MikrotikIfRow | null {
-  const sorted = [...ifaces].sort((a, b) => {
-    const ta = Number(a.out_bps ?? 0) + Number(a.in_bps ?? 0);
-    const tb = Number(b.out_bps ?? 0) + Number(b.in_bps ?? 0);
-    return tb - ta;
-  });
-  const ether = sorted.find((r) => /ether/i.test(String(r.if_name ?? r.display_name ?? "")));
-  return ether ?? sorted[0] ?? null;
-}
-
 export function ifDisplayName(r: MikrotikIfRow): string {
   return String(r.display_name ?? r.if_name ?? r.descr ?? "").trim() || EM_DASH;
 }

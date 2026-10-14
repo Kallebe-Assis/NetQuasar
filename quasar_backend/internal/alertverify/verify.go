@@ -300,39 +300,6 @@ func verifyPing(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, s
 	return false, "Equipamento continua sem resposta ICMP/TCP.", collected, patch
 }
 
-func verifyLatency(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
-	collected := map[string]any{}
-	var lat *int64
-	var reachOK bool
-	_ = pool.QueryRow(ctx, `SELECT latency_ms, reach_ok FROM device_probe_cache WHERE device_id=$1`, row.DeviceID).Scan(&lat, &reachOK)
-	if lat != nil {
-		collected["latency_ms"] = *lat
-	}
-	collected["reach_ok"] = reachOK
-	if lat == nil || !reachOK {
-		return false, "Sem leitura de latência no cache ou equipamento offline.", collected, nil
-	}
-	var devCat string
-	_ = pool.QueryRow(ctx, `SELECT COALESCE(lower(trim(category)),'') FROM devices WHERE id=$1`, row.DeviceID).Scan(&devCat)
-	th, label, ok := alertthresholds.LoadGlobalGteMetricForDevice(ctx, pool, "latency_ms", devCat)
-	if ok {
-		sev := alertthresholds.EvalMetricSeverity(float64(*lat), th)
-		if sev == "ok" {
-			return true, fmt.Sprintf("%s: %d ms — dentro do limiar.", label, *lat), collected, map[string]any{"curr_latency_ms": *lat}
-		}
-		return false, fmt.Sprintf("%s: %d ms — ainda em %s.", label, *lat, sev), collected, map[string]any{"curr_latency_ms": *lat}
-	}
-	const calmMax int64 = 160
-	const warnMin int64 = 280
-	if *lat < calmMax {
-		return true, fmt.Sprintf("Latência %d ms — normalizada (heurística < %d ms).", *lat, calmMax), collected, map[string]any{"curr_latency_ms": *lat}
-	}
-	if *lat >= warnMin {
-		return false, fmt.Sprintf("Latência %d ms — ainda acima do limiar heurístico (%d ms).", *lat, warnMin), collected, map[string]any{"curr_latency_ms": *lat}
-	}
-	return false, fmt.Sprintf("Latência %d ms — entre limiares heurísticos.", *lat), collected, map[string]any{"curr_latency_ms": *lat}
-}
-
 func verifyTelemetry(ctx context.Context, pool *pgxpool.Pool, row *alertRow) (bool, string, map[string]any, map[string]any) {
 	collected := map[string]any{}
 	metricID, _ := row.Meta["metric_id"].(string)
@@ -710,6 +677,9 @@ func verifySfp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, row
 	}
 	sev := severityGte(*dbm, th)
 	patch := map[string]any{"dbm": *dbm, "value": *dbm}
+	if sev == "ok" && alertthresholds.SfpWithinClearBand(*dbm, th, alertthresholds.SfpClearMargin(false)) {
+		return false, fmt.Sprintf("%s: %.2f dBm — junto do limiar (folga de %.1f dB); mantido aberto para não oscilar.", label, *dbm, alertthresholds.SfpClearMargin(false)), collected, patch
+	}
 	if sev == "ok" {
 		return true, fmt.Sprintf("%s: %.2f dBm — dentro do limiar.", label, *dbm), collected, patch
 	}
@@ -751,6 +721,9 @@ func verifySfpTemp(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger,
 		return false, fmt.Sprintf("Temperatura actual %.1f °C (sem limiar global).", *temp), collected, patch
 	}
 	sev := severityGte(*temp, th)
+	if sev == "ok" && alertthresholds.SfpWithinClearBand(*temp, th, alertthresholds.SfpClearMargin(true)) {
+		return false, fmt.Sprintf("%s: %.1f °C — junto do limiar (folga de %.0f °C); mantido aberto para não oscilar.", label, *temp, alertthresholds.SfpClearMargin(true)), collected, patch
+	}
 	if sev == "ok" {
 		return true, fmt.Sprintf("%s: %.1f °C — dentro do limiar.", label, *temp), collected, patch
 	}

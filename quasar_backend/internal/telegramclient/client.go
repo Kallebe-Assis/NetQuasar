@@ -102,12 +102,6 @@ func SplitMessage(text string, maxLen int) []string {
 	return out
 }
 
-// SendMessageWithParseMode envia texto; parseMode pode ser "" (texto simples), "HTML" ou "MarkdownV2".
-func SendMessageWithParseMode(ctx context.Context, cfg Config, text string, parseMode string) error {
-	_, err := SendMessageWithResult(ctx, cfg, text, SendOpts{ParseMode: parseMode})
-	return err
-}
-
 // SendMessageWithResult envia mensagem e devolve message_id/chat_id para threading.
 func SendMessageWithResult(ctx context.Context, cfg Config, text string, opts SendOpts) (SendResult, error) {
 	if !cfg.Ready() {

@@ -25,16 +25,6 @@ func pickIXCStatusInternet(sm map[string]any) string {
 	return ""
 }
 
-// LooksLikeIXCClienteContratoRequest indica webservice IXC cliente_contrato (status_internet).
-func LooksLikeIXCClienteContratoRequest(rc integrationhttp.RequestConfig) bool {
-	path := strings.ToLower(strings.TrimSpace(rc.Path))
-	if strings.Contains(path, "cliente_contrato") {
-		return true
-	}
-	body := strings.ToLower(rc.BodyTemplate)
-	return strings.Contains(body, "cliente_contrato")
-}
-
 func prepareIXCClienteContratoList(rc integrationhttp.RequestConfig, searchCfg ClientSearchConfig) integrationhttp.RequestConfig {
 	action := strings.TrimSpace(searchCfg.IxcListAction)
 	if action == "" {

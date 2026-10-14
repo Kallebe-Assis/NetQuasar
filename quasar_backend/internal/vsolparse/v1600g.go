@@ -3,11 +3,9 @@ package vsolparse
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
@@ -163,16 +161,6 @@ func parseSuffix(oid string) (tbl, col, pon, onu int, ok bool) {
 	return 0, 0, 0, 0, false
 }
 
-func looksLikeSerial(s string) bool {
-	s = normalizeVSOLString(s)
-	if len(s) < 4 {
-		return false
-	}
-	up := strings.ToUpper(s)
-	return strings.HasPrefix(up, "MONU") || strings.HasPrefix(up, "HWTC") ||
-		strings.HasPrefix(up, "VSOL") || strings.HasPrefix(up, "GPON")
-}
-
 // isPlausibleOnuSerial evita gravar como serial um valor SNMP que veio de uma coluna errada do
 // walk — visto em produção na firmware V1600G0B (o layout de colunas do MIB diverge do V1600G1,
 // que o comentário acima em parseSuffix/FromSNMPWalk assume): a coluna que deveria ser o serial
@@ -190,47 +178,6 @@ func normalizeVSOLString(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, "\x00")
 	return strings.TrimSpace(s)
-}
-
-func parseOpticalFloat(s string) (float64, bool) {
-	s = normalizeVSOLString(s)
-	if s == "" {
-		return 0, false
-	}
-	s = strings.ReplaceAll(s, ",", ".")
-	if i := strings.IndexFunc(s, func(r rune) bool {
-		return !(unicode.IsDigit(r) || r == '.' || r == '-' || r == '+')
-	}); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
-		return f, true
-	}
-	return 0, false
-}
-
-func parseLegacyOpticalSuffix(oid string) (col, pon, onu int, ok bool) {
-	base := OIDLegacyGOnuOptical + "."
-	oid = strings.TrimPrefix(strings.TrimSpace(oid), ".")
-	if !strings.HasPrefix(oid, base) {
-		return 0, 0, 0, false
-	}
-	rest := strings.TrimPrefix(oid, base)
-	parts := strings.Split(rest, ".")
-	if len(parts) != 4 {
-		return 0, 0, 0, false
-	}
-	if intFromVal(parts[0]) != 1 {
-		return 0, 0, 0, false
-	}
-	col = intFromVal(parts[1])
-	pon = intFromVal(parts[2])
-	onu = intFromVal(parts[3])
-	if col < 3 || col > 7 || pon < 1 || onu < 1 {
-		return 0, 0, 0, false
-	}
-	return col, pon, onu, true
 }
 
 func VsolOnuRowsFromSummaryBlob(sum []byte) []any {

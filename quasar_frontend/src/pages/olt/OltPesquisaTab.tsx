@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Menu, RefreshCw, Server } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
@@ -7,10 +7,10 @@ import { EmptyState } from "../../components/EmptyState";
 import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
-import { ApiError, apiFetch, downloadBlob } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
-import { buildExcelCsvBlob } from "../../lib/excelCsv";
+import { ExportMenu } from "../../components/ExportMenu";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { OltOnuClientLinkModal } from "./OltOnuClientLinkModal";
 import { OnuMonitorModal } from "../../components/OnuMonitorModal";
@@ -122,33 +122,6 @@ function fmtRx(r: OltOnuSearchResult): string {
 
 function rowKey(r: Pick<OltOnuSearchResult, "olt_id" | "pon" | "onu" | "serial">): string {
   return `${r.olt_id}|${r.pon ?? 0}|${r.onu ?? 0}|${(r.serial ?? "").toLowerCase()}`;
-}
-
-/** Exporta exactamente o que está filtrado no ecrã (OLT/PON seleccionados + filtros de
- * potência/temperatura/voltagem/cliente) — todas as páginas, não só a visível. */
-function exportOnuSearchCsv(rows: OltOnuSearchResult[]) {
-  const header = [
-    "OLT", "IP", "Marca", "PON", "ONU", "Serial", "Modelo", "Status",
-    "RX (dBm)", "TX", "Temp.", "Voltagem", "Cliente", "Localidade",
-  ];
-  const body = rows.map((r) => [
-    r.olt_description ?? "",
-    r.olt_ip ?? "",
-    r.olt_brand ?? "",
-    r.pon != null ? String(r.pon) : "",
-    r.onu != null ? String(r.onu) : "",
-    r.serial ?? "",
-    r.model ?? "",
-    r.online === true ? "Online" : r.online === false ? "Offline" : "",
-    fmtRx(r),
-    r.tx_pwr ?? "",
-    r.temp ?? "",
-    r.voltage ?? "",
-    r.client_name ?? "",
-    r.locality_name ?? "",
-  ]);
-  const stamp = new Date().toISOString().slice(0, 10);
-  downloadBlob(`onus_${stamp}.csv`, buildExcelCsvBlob([header, ...body]));
 }
 
 function applyTelnetFieldsToRow(row: OltOnuSearchResult, steps: OltTelnetReportStep[]): OltOnuSearchResult {
@@ -760,13 +733,6 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
           title="Opções"
           icon={<Menu size={18} />}
           items={[
-            {
-              id: "export-csv",
-              label: "Exportar ONUs em CSV",
-              icon: <Download size={15} />,
-              disabled: enrichedResults.length === 0,
-              onClick: () => exportOnuSearchCsv(enrichedResults),
-            },
             ...(canMutate
               ? [
                   {
@@ -839,6 +805,27 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
             <span style={{ color: "var(--muted)" }}>{pageRangeLabel(safePage, pageSize, enrichedResults.length)}</span>
           </label>
           <div className="row" style={{ gap: 6, alignItems: "center" }}>
+            <ExportMenu
+              filename="olt-onus-pesquisa"
+              title="ONUs — pesquisa"
+              rows={enrichedResults}
+              columns={[
+                { header: "OLT", value: (r) => r.olt_description },
+                { header: "IP", value: (r) => r.olt_ip },
+                { header: "Marca", value: (r) => r.olt_brand },
+                { header: "PON", value: (r) => r.pon },
+                { header: "ONU", value: (r) => r.onu },
+                { header: "Serial", value: (r) => r.serial },
+                { header: "Modelo", value: (r) => r.model },
+                { header: "Status", value: (r) => (r.online === true ? "Online" : r.online === false ? "Offline" : "") },
+                { header: "RX (dBm)", value: (r) => (fmtRx(r) === EM_DASH ? "" : fmtRx(r)) },
+                { header: "TX", value: (r) => r.tx_pwr },
+                { header: "Temperatura", value: (r) => r.temp },
+                { header: "Voltagem", value: (r) => r.voltage },
+                { header: "Cliente", value: (r) => r.client_name },
+                { header: "Localidade", value: (r) => r.locality_name },
+              ]}
+            />
             <button
               type="button"
               className="btn btn--icon"

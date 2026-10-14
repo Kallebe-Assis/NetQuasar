@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { BanknoteArrowDown, Filter, Fuel, Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { ExportMenu } from "../../components/ExportMenu";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
@@ -468,6 +469,22 @@ export function FleetFuelingsPage() {
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>Frota — Despesas</h1>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <ExportMenu
+            filename="frota-despesas"
+            title="Frota — Despesas"
+            rows={rows}
+            columns={[
+              { header: "Data", value: (r) => new Date(r.at).toLocaleString("pt-BR") },
+              { header: "Placa", value: (r) => r.plate },
+              { header: "Tipo", value: (r) => r.typeLabel },
+              { header: "Descrição", value: (r) => r.description },
+              { header: "Quantidade", value: (r) => r.quantity },
+              { header: "Unitário", value: (r) => r.unitPrice },
+              { header: "Total", value: (r) => r.total },
+              { header: "KM", value: (r) => r.km },
+              { header: "Observação", value: (r) => r.notes },
+            ]}
+          />
           <button
             type="button"
             className={`btn btn--with-icon${filtersOpen || vehicleId || typeFilter ? " btn--filter-active" : ""}`}

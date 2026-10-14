@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/netquasar/netquasar/quasar_backend/internal/alertcorrelation"
+	"github.com/netquasar/netquasar/quasar_backend/internal/ifacemeta"
 	"github.com/netquasar/netquasar/quasar_backend/internal/telegramclient"
 	"github.com/rs/zerolog"
 )
@@ -374,6 +375,15 @@ func alertTelegramContextFromRow(ctx context.Context, pool *pgxpool.Pool, alertI
 	meta = map[string]any{}
 	_ = json.Unmarshal(metaRaw, &meta)
 	return strings.TrimSpace(alertType), meta
+}
+
+func alertDeviceID(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) uuid.UUID {
+	var id *uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT device_id FROM alert_instances WHERE id = $1`, alertID).Scan(&id)
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
 }
 
 func equipIPFromAlertRow(ctx context.Context, pool *pgxpool.Pool, alertID uuid.UUID) (equip string, ip string) {
@@ -781,10 +791,6 @@ func telegramDisplayedValue(parsed string, title, incident, alertType string, me
 	return "-"
 }
 
-func telegramMonitoringBlocks(level, title, message string, equipFallback string, ipFallback string) string {
-	return telegramMonitoringBlocksWithContext(level, title, message, equipFallback, ipFallback, "", nil)
-}
-
 func telegramMonitoringBlocksWithContext(level, title, message string, equipFallback string, ipFallback string, alertType string, meta map[string]any) string {
 	alertType = strings.TrimSpace(alertType)
 	eq, ip, inc, val := shortEquipmentAndIncident(message)
@@ -886,16 +892,15 @@ func telegramMonitoringBlocksWithContext(level, title, message string, equipFall
 		}
 	}
 
+	// Nome que o usuário deu à interface no cadastro do equipamento (aba Interfaces) — vale para qualquer alerta
+	// ligado a uma porta (SFP, interface down, PON da OLT…), sem repetir quando o texto já o traz.
+	if cn := strings.TrimSpace(metaString(meta, "interface_custom_name")); cn != "" &&
+		!strings.Contains(strings.ToLower(strings.Join(parts, "\n")), strings.ToLower(cn)) {
+		parts = append(parts, "• Nome da interface: "+cn)
+	}
+
 	parts = append(parts, "", "===============")
 	return strings.Join(parts, "\n")
-}
-
-func buildMonitoringText(level, title, message string) string {
-	return telegramMonitoringBlocks(level, title, message, "", "")
-}
-
-func buildResolutionText(alertType, title, detail string) string {
-	return telegramResolutionBlocks(alertType, title, detail, "", "", "")
 }
 
 type telegramMessageRef struct {
@@ -1003,20 +1008,6 @@ func shouldUnifyOnuResolutionTelegram(alertType string) bool {
 	}
 }
 
-func telegramResolutionReplyShort(alertType string, duration time.Duration) string {
-	if duration <= 0 {
-		if alertType == "ping_unreachable" {
-			return "✅ Equipamento online."
-		}
-		return "✅ Alerta resolvido."
-	}
-	dur := formatDurationPT(duration)
-	if alertType == "ping_unreachable" {
-		return "✅ Equipamento online após " + dur + "."
-	}
-	return "✅ Resolvido após " + dur + "."
-}
-
 func telegramResolutionBlocks(alertType, title, detail string, equipFallback string, ipFallback string, currentValue string, extras ...string) string {
 	header := resolutionHeader(alertType, title, detail)
 	eq, ip, _, _ := shortEquipmentAndIncident(detail)
@@ -1095,6 +1086,15 @@ func SendMonitoringTelegramAndPatchMeta(ctx context.Context, pool *pgxpool.Pool,
 	}
 	eqName, eqIP := equipIPFromAlertRow(ctx, pool, alertID)
 	alertType, meta := alertTelegramContextFromRow(ctx, pool, alertID)
+	if meta != nil {
+		if rawMeta, mErr := json.Marshal(meta); mErr == nil {
+			if devID := alertDeviceID(ctx, pool, alertID); devID != uuid.Nil {
+				if cn := ifacemeta.NewResolver(pool).Resolve(ctx, devID, rawMeta); cn != "" {
+					meta["interface_custom_name"] = cn
+				}
+			}
+		}
+	}
 	text := telegramMonitoringBlocksWithContext(level, title, message, eqName, eqIP, alertType, meta)
 	sent, sendErr := telegramclient.SendMessageWithResult(ctx, cfg, text, telegramclient.SendOpts{})
 	tg := map[string]any{"attempted_at": attempted, "text": text}
@@ -1333,16 +1333,3 @@ func patchResolutionBlock(ctx context.Context, pool *pgxpool.Pool, alertID uuid.
 	_, _ = pool.Exec(ctx, `UPDATE alert_instances SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE id = $1`, alertID, b)
 }
 
-// SeverityRank compara severidades (para escalonamento).
-func SeverityRank(sev string) int {
-	switch sev {
-	case "critical":
-		return 2
-	case "warning":
-		return 1
-	case "info":
-		return 0
-	default:
-		return 0
-	}
-}

@@ -43,10 +43,6 @@ func looksLikeVsolUptimeText(s string) bool {
 		strings.Contains(low, "dia") || strings.Contains(low, "hora")
 }
 
-func formatSysUpTimeTicks(ticks uint64) string {
-	return formatDurationSeconds(ticks / 100)
-}
-
 func formatDurationSeconds(sec uint64) string {
 	const day = uint64(86400)
 	const hour = uint64(3600)

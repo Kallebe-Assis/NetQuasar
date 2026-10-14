@@ -31,6 +31,7 @@ import { BngOverviewPanel } from "../components/BngOverviewPanel";
 import { BngUplinksPanel } from "../components/BngUplinksPanel";
 import { BngCgnatPoolsTab } from "./bng/BngCgnatPoolsTab";
 import { DeviceMonitorShell } from "../components/DeviceMonitorShell";
+import { ExportMenu } from "../components/ExportMenu";
 import "../styles/mikrotik-noc.css";
 import { apiFetch } from "../lib/api";
 import { can, isAdminUser } from "../lib/auth";
@@ -386,6 +387,11 @@ function bngIfaceAlias(r: MikrotikIfRow): string {
 }
 
 function mergeLivePppoeSession(cached: PppoeSession, live: PppoeSession): PppoeSession {
+  // O índice SNMP é reaproveitado pelo BNG: se a leitura ao vivo daquele índice trouxe OUTRO login, a linha em cache
+  // já não vale para esse índice — a leitura ao vivo é de outro cliente e não pode sobrescrever (nem derrubar) esta.
+  const cl = String(cached.login ?? "").trim().toLowerCase();
+  const ll = String(live.login ?? "").trim().toLowerCase();
+  if (cl && ll && cl !== ll) return cached;
   const merged: PppoeSession = { ...cached, ...live };
   const keep = (next?: string, prev?: string) => {
     const n = String(next ?? "").trim();
@@ -1010,7 +1016,7 @@ function SessionDetailModal({
         note?: string;
         query: string;
         list_updated?: boolean;
-      }>(`/api/v1/bng/devices/${deviceId}/sessions/lookup?q=${encodeURIComponent(login)}`, { timeoutMs: 45_000 }),
+      }>(`/api/v1/bng/devices/${deviceId}/sessions/lookup?q=${encodeURIComponent(login)}`, { timeoutMs: 55_000 }),
     staleTime: 0,
     retry: false,
   });
@@ -1528,25 +1534,34 @@ export function BngPage() {
         source: string;
         session?: PppoeSession;
         note?: string;
+        inconclusive?: boolean;
         query: string;
       }>(`/api/v1/bng/devices/${selectedId}/sessions/lookup?q=${encodeURIComponent(submittedLoginQuery)}`, {
-        timeoutMs: 45_000,
+        timeoutMs: 55_000,
       }),
     staleTime: 0,
     retry: false,
   });
 
   const cacheFilteredSessions = useMemo(() => {
-    const effectiveQuery = searchField === "login" ? submittedLoginQuery : searchQuery;
-    return filterBngSessions(sessions.data?.sessions ?? [], searchField, effectiveQuery, advancedFilters);
-  }, [sessions.data?.sessions, searchField, searchQuery, submittedLoginQuery, advancedFilters]);
+    // login: filtra a lista já carregada por trecho enquanto digita; o Enter confirma e acrescenta a consulta ao vivo
+    const effectiveQuery = searchField === "login" && loginSearchActive ? submittedLoginQuery : searchQuery;
+    const list = filterBngSessions(sessions.data?.sessions ?? [], searchField, effectiveQuery, advancedFilters);
+    if (searchField !== "login") return list;
+    const q = effectiveQuery.trim().toLowerCase();
+    if (!q) return list;
+    // quem tem o login exatamente igual aparece primeiro
+    return [...list].sort((a, b) => Number(String(b.login ?? "").toLowerCase() === q) - Number(String(a.login ?? "").toLowerCase() === q));
+  }, [sessions.data?.sessions, searchField, searchQuery, submittedLoginQuery, advancedFilters, loginSearchActive]);
 
   const filteredSessions = useMemo(() => {
     if (loginSearchActive) {
-      if (loginSearch.data?.found && loginSearch.data.session) {
-        return [loginSearch.data.session];
-      }
-      return [];
+      // trechos achados na lista + a consulta ao vivo do login exato (que vale mais que a linha em cache)
+      const live = loginSearch.data?.found ? loginSearch.data.session : undefined;
+      if (!live) return cacheFilteredSessions;
+      const liveKey = String(live.login ?? "").trim().toLowerCase();
+      const rest = cacheFilteredSessions.filter((s) => String(s.login ?? "").trim().toLowerCase() !== liveKey);
+      return [live, ...rest];
     }
     return cacheFilteredSessions;
   }, [loginSearchActive, loginSearch.data, cacheFilteredSessions]);
@@ -1634,10 +1649,7 @@ export function BngPage() {
   }, [loginSearchActive, sessionRefreshMode, selectedId, safeSessionPage, displayLimit, pageSliceKey, liveRefreshToken, pushToast]);
 
   const displayedSessions = useMemo(() => {
-    if (loginSearchActive) {
-      if (loginSearch.isFetching) return [];
-      return filteredSessions;
-    }
+    if (loginSearchActive) return pageSlice;
     if (sessionRefreshMode === "auto" && livePageSessions && livePageSessions.length > 0) {
       const byIndex = new Map(livePageSessions.map((s) => [String(s.index ?? ""), s]));
       return pageSlice.map((row) => {
@@ -1647,7 +1659,7 @@ export function BngPage() {
       });
     }
     return pageSlice;
-  }, [loginSearchActive, loginSearch.isFetching, filteredSessions, sessionRefreshMode, livePageSessions, pageSlice]);
+  }, [loginSearchActive, sessionRefreshMode, livePageSessions, pageSlice]);
 
   const sessionTableLoading =
     sessions.isLoading || (loginSearchActive ? loginSearch.isFetching : sessionRefreshMode === "auto" && livePageLoading);
@@ -1835,6 +1847,22 @@ export function BngPage() {
                   <option value="up">Up</option>
                   <option value="down">Down</option>
                 </select>
+                <ExportMenu
+                  className="mk-noc-btn"
+                  filename={`bng-interfaces_${selectedDevice?.description ?? "bng"}`}
+                  title={`Interfaces — ${selectedDevice?.description ?? "BNG"}`}
+                  rows={ifaceRowsFiltered}
+                  columns={[
+                    { header: "Índice", value: (r) => r.if_index },
+                    { header: "Nome", value: (r) => ifDisplayName(r) },
+                    { header: "Alias (SNMP)", value: (r) => bngIfaceAlias(r) },
+                    { header: "Descrição", value: (r) => bngIfaceDescription(r) },
+                    { header: "Tipo", value: (r) => bngIfaceType(r) },
+                    { header: "Status", value: (r) => bngIfaceStatus(r) },
+                    { header: "TX", value: (r) => formatBitrate(r.out_bps) },
+                    { header: "RX", value: (r) => formatBitrate(r.in_bps) },
+                  ]}
+                />
                 <button
                   type="button"
                   className="mk-noc-btn"
@@ -2003,7 +2031,7 @@ export function BngPage() {
                           : searchField === "vlan"
                             ? "100, 200…"
                             : searchField === "login"
-                              ? "Enter para pesquisar no equipamento"
+                              ? "Trecho do login — Enter consulta também ao vivo no BNG"
                               : "parcial"
                       }
                     />
@@ -2033,6 +2061,31 @@ export function BngPage() {
                       <option value="auto">Auto-refresh (SNMP live)</option>
                     </select>
                   </div>
+                  <ExportMenu
+                    filename={`bng-sessoes-pppoe_${selectedDevice?.description ?? "bng"}`}
+                    title={`Sessões PPPoE — ${selectedDevice?.description ?? "BNG"}`}
+                    rows={filteredSessions as PppoeSession[]}
+                    columns={[
+                      { header: "Status", value: (s) => formatBngSessionStatus(s.status).label },
+                      { header: "Login", value: (s) => s.login },
+                      { header: "Cliente", value: (s) => s.comment },
+                      { header: "IPv4", value: (s) => s.ipv4 },
+                      { header: "Tipo IP", value: (s) => formatBngIpType(s.ip_type, s.ip_type_raw, s) },
+                      { header: "IPv6 WAN", value: (s) => formatBngIpv6Display(s.ipv6) },
+                      { header: "IPv6 PD/LAN", value: (s) => formatBngIpv6Display(s.ipv6_pd) },
+                      { header: "MAC", value: (s) => s.mac },
+                      { header: "VLAN", value: (s) => s.vlan },
+                      { header: "Interface", value: (s) => s.interface },
+                      { header: "Domínio", value: (s) => s.domain },
+                      { header: "Tempo online", value: (s) => sessionDisplayOnline(s) },
+                      { header: "Limite up", value: (s) => sessionDisplayUpLimit(s) },
+                      { header: "Limite down", value: (s) => sessionDisplayDnLimit(s) },
+                      { header: "Autenticação", value: (s) => s.auth_state },
+                      { header: "Visto pela 1ª vez", value: (s) => (s.first_seen_at ? formatBngDateTime(s.first_seen_at) : "") },
+                      { header: "Último visto", value: (s) => (s.last_seen_at ? formatBngDateTime(s.last_seen_at) : "") },
+                      { header: "Última queda", value: (s) => (s.last_offline_at ? formatBngDateTime(s.last_offline_at) : "") },
+                    ]}
+                  />
                   <button
                     type="button"
                     className={`btn btn--icon-menu${filtersOpen || activeFilterCount > 0 ? " btn--primary" : ""}`}
@@ -2071,7 +2124,7 @@ export function BngPage() {
                   >
                     <RefreshCw size={16} className={sessionTableLoading ? "map-refresh-spin" : undefined} />
                   </button>
-                  {!loginSearchActive && filteredSessions.length > 0 ? (
+                  {filteredSessions.length > 0 ? (
                     <>
                       <button
                         type="button"
@@ -2100,10 +2153,6 @@ export function BngPage() {
                         <ChevronRight size={18} />
                       </button>
                     </>
-                  ) : loginSearchActive && filteredSessions.length > 0 ? (
-                    <span className="mono" style={{ fontSize: 11, color: "var(--muted)", minWidth: 52, textAlign: "center" }}>
-                      {sessionRangeLabel(1, 1, filteredSessions.length)}
-                    </span>
                   ) : null}
                 </div>
 
@@ -2216,6 +2265,11 @@ export function BngPage() {
 
               </div>
 
+              {loginSearchActive && !loginSearch.isFetching && loginSearch.data?.note && loginSearch.data.found ? (
+                <p className={loginSearch.data.inconclusive ? "msg msg--warn" : undefined} style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>
+                  {loginSearch.data.note}
+                </p>
+              ) : null}
               <div className="table-wrap mk-noc-panel" style={{ position: "relative", minHeight: 220, padding: 0, overflow: "hidden" }}>
                 {sessionTableLoading ? (
                   <div
@@ -2255,13 +2309,13 @@ export function BngPage() {
                     {displayedSessions.length === 0 && !sessionTableLoading ? (
                       <tr>
                         <td colSpan={14} style={{ color: "var(--muted)" }}>
-                          {searchField === "login" && submittedLoginQuery.length < 2
-                            ? "Digite o login e pressione Enter para pesquisar no equipamento (mín. 2 caracteres)."
+                          {searchField === "login" && searchQuery.trim().length > 0 && !loginSearchActive
+                            ? "Nenhum login da lista contém esse trecho. Pressione Enter para consultar o login exato ao vivo no BNG."
                             : loginSearchActive
                             ? loginSearch.isFetching
                               ? "Pesquisando login no equipamento…"
                               : loginSearch.data?.found === false
-                                ? "Login não encontrado online no BNG."
+                                ? loginSearch.data.note || "Nenhum login com esse trecho na lista e o login exato não está online no BNG."
                                 : "Aguardando resultado da pesquisa."
                             : "Nenhum login registado. Execute a consulta completa SNMP para sincronizar o inventário."}
                         </td>

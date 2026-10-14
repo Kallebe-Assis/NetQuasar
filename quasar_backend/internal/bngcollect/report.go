@@ -54,13 +54,6 @@ func vlanLabel(v string) string {
 	return v
 }
 
-func limitKey(kbps int) string {
-	if kbps <= 0 {
-		return "none"
-	}
-	return fmt.Sprintf("%d", kbps)
-}
-
 func onlineTimeBucket(sec int) string {
 	switch {
 	case sec < 3600:

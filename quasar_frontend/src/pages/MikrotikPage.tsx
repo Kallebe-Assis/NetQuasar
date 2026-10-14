@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageCountPill } from "../components/PageCountPill";
+import { ExportMenu } from "../components/ExportMenu";
 import { MikrotikNocDashboard, type MikrotikNocSection } from "../components/MikrotikNocDashboard";
 import { apiFetch } from "../lib/api";
 import { EM_DASH, formatDbm, formatSnmpDisplayText } from "../lib/formatDisplay";
@@ -76,6 +77,22 @@ function MikrotikOverviewTable({
       <span style={{ fontSize: 12, color: "var(--muted)" }}>
         {shown.length === rows.length ? `${rows.length} equipamento(s)` : `${shown.length} de ${rows.length}`}
       </span>
+      <ExportMenu
+        filename="mikrotiks"
+        title="MikroTiks"
+        rows={shown}
+        columns={[
+          { header: "Descrição", value: (r) => r.description },
+          { header: "IP", value: (r) => r.ip },
+          { header: "Localidade", value: (r) => r.locality_name },
+          { header: "CPU (%)", value: (r) => { const k = buildMikrotikNocKpis(r.metrics ?? undefined, r.description ?? ""); return k.cpuPct != null ? Math.round(k.cpuPct) : ""; } },
+          { header: "Memória (%)", value: (r) => { const k = buildMikrotikNocKpis(r.metrics ?? undefined, r.description ?? ""); return k.memPct != null ? Math.round(k.memPct) : ""; } },
+          { header: "Uptime", value: (r) => buildMikrotikNocKpis(r.metrics ?? undefined, r.description ?? "").uptime },
+          { header: "Estado", value: (r) => (r.online === true ? "Online" : r.online === false ? "Offline" : "") },
+          { header: "Saúde SNMP", value: (r) => r.snmp_health_status },
+          { header: "Última coleta", value: (r) => r.telemetry_collected_at },
+        ]}
+      />
     </div>
     {shown.length === 0 ? <p style={{ color: "var(--muted)" }}>Nenhum MikroTik encontrado para “{query.trim()}”.</p> : (
     <div className="table-wrap" style={{ maxWidth: "100%", overflowX: "auto" }}>
@@ -614,6 +631,24 @@ export function MikrotikPage() {
         </div>
       )}
       {realtimeOn && <p style={{ fontSize: 11, color: "var(--ok)" }}>Tempo real activo ({realtimeMs} ms)</p>}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+        <ExportMenu
+          filename={`mikrotik-interfaces_${selectedDevice?.description ?? "mikrotik"}`}
+          title={`Interfaces — ${selectedDevice?.description ?? "MikroTik"}`}
+          rows={interfaceRowsFiltered}
+          columns={[
+            { header: "Índice", value: (r) => r.if_index },
+            { header: "Nome", value: (r) => ifDisplayName(r) },
+            { header: "Descrição", value: (r) => interfaceDescription(r) },
+            { header: "Tipo", value: (r) => inferIfaceType(r) },
+            { header: "Status", value: (r) => ifaceStatus(r) },
+            { header: "TX", value: (r) => formatBitrate(r.out_bps) },
+            { header: "RX", value: (r) => formatBitrate(r.in_bps) },
+            { header: "TX dBm", value: (r) => formatDbm(r.tx_dbm) },
+            { header: "RX dBm", value: (r) => formatDbm(r.rx_dbm) },
+          ]}
+        />
+      </div>
       <div className="table-wrap" style={{ maxHeight: "min(70vh, 640px)", overflow: "auto" }}>
         <table className="mk-noc-table">
           <thead>

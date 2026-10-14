@@ -19,6 +19,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { Link } from "react-router-dom";
 import { DeviceMonitorShell } from "./DeviceMonitorShell";
 import { KpiCard, RingGauge } from "./DeviceMonitorWidgets";
+import { ExportMenu } from "./ExportMenu";
 import { EM_DASH, formatSnmpDisplayText } from "../lib/formatDisplay";
 import { formatBitrate } from "../lib/formatBitrate";
 import {
@@ -358,11 +359,24 @@ export function MikrotikNocDashboard(props: Props) {
                     {props.pppoeKnownLogins ? ` — ${props.pppoeKnownLogins} login(s) conhecido(s)` : ""}
                   </p>
                 </div>
-                {props.canMutate && props.onPppoeCollect ? (
-                  <button type="button" className="btn btn--sm" disabled={props.pppoeCollecting} onClick={props.onPppoeCollect}>
-                    <RefreshCw size={13} /> {props.pppoeCollecting ? "A consultar…" : "Consulta completa"}
-                  </button>
-                ) : null}
+                <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <ExportMenu
+                    filename="mikrotik-sessoes-pppoe"
+                    title="Sessões PPPoE ativas — MikroTik"
+                    rows={props.pppoeSessions ?? []}
+                    columns={[
+                      { header: "Login", value: (s) => (s.login == null ? "" : String(s.login)) },
+                      { header: "IPv4", value: (s) => (s.ipv4 == null ? "" : String(s.ipv4)) },
+                      { header: "MAC", value: (s) => (s.mac == null ? "" : String(s.mac)) },
+                      { header: "Tempo online", value: (s) => (s.online_time == null ? "" : String(s.online_time)) },
+                    ]}
+                  />
+                  {props.canMutate && props.onPppoeCollect ? (
+                    <button type="button" className="btn btn--sm" disabled={props.pppoeCollecting} onClick={props.onPppoeCollect}>
+                      <RefreshCw size={13} /> {props.pppoeCollecting ? "A consultar…" : "Consulta completa"}
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               {props.pppoeError ? (

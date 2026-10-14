@@ -7,6 +7,7 @@ import { errorMessageFromUnknown, parseApiErrorForModal } from "../../lib/apiErr
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { EmptyState } from "../../components/EmptyState";
+import { ExportMenu } from "../../components/ExportMenu";
 
 type OltOption = {
   id: string;
@@ -344,10 +345,26 @@ export function OltUnauthorizedOnusTab({
             <strong style={{ fontSize: 13 }}>
               {query.data.olt_description ?? "OLT"} — {entries.length} entrada(s)
             </strong>
-            <label className="row" style={{ gap: 6, fontSize: 12 }}>
-              <input type="checkbox" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
-              Mostrar saída bruta
-            </label>
+            <div className="row" style={{ gap: 10, alignItems: "center" }}>
+              <ExportMenu
+                filename={`olt-onus-nao-autorizadas_${query.data.olt_description ?? "olt"}`}
+                title={`ONUs não autorizadas — ${query.data.olt_description ?? "OLT"}`}
+                rows={entries}
+                columns={[
+                  { header: "Serial", value: (e) => e.serial },
+                  { header: "PON", value: (e) => e.pon },
+                  { header: "ONU", value: (e) => e.onu },
+                  { header: "GPON ONU", value: (e) => e.gpon_onu },
+                  { header: "Descrição da PON", value: (e) => ponDesc(e.pon) },
+                  { header: "Modelo", value: (e) => e.model },
+                  { header: "Estado", value: (e) => e.state },
+                ]}
+              />
+              <label className="row" style={{ gap: 6, fontSize: 12 }}>
+                <input type="checkbox" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
+                Mostrar saída bruta
+              </label>
+            </div>
           </div>
 
           {showRaw && query.data.output && (

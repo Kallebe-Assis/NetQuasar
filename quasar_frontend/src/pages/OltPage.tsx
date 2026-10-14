@@ -24,6 +24,7 @@ import { OltMetricsCollectLogModal, type MetricsWalkRow } from "../components/Ol
 import { OltSnmpDebugPanel } from "../components/OltSnmpDebugPanel";
 import { OltVsolOnuTable, type VsOnuRow } from "../components/OltVsolOnuTable";
 import { OnuHistoryModal } from "../components/OnuHistoryModal";
+import { ExportMenu } from "../components/ExportMenu";
 
 type OltRow = {
   id: string;
@@ -1205,6 +1206,26 @@ export function OltPage() {
       </style>
       {!sel ? (
         <div className="table-wrap olt-anim-enter" style={{ maxWidth: "100%", overflowX: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 0 8px" }}>
+            <ExportMenu
+              filename="olts"
+              title="OLTs"
+              rows={sortedRows}
+              columns={[
+                { header: "Descrição", value: (r) => r.description },
+                { header: "IP", value: (r) => r.ip },
+                { header: "Marca", value: (r) => r.brand },
+                { header: "Modelo", value: (r) => r.model },
+                { header: "Localidade", value: (r) => r.locality_name },
+                { header: "PONs", value: (r) => r.computed?.pon_count },
+                { header: "ONUs", value: (r) => r.computed?.onu_total_sum },
+                { header: "Online", value: (r) => r.computed?.onu_online_sum },
+                { header: "Offline", value: (r) => r.computed?.onu_offline_sum },
+                { header: "SNMP saúde", value: (r) => (r.snmp_health_status === "ok" ? "OK" : r.snmp_health_status === "partial" ? "Parcial" : r.snmp_health_status === "failed" ? "Falha" : "") },
+                { header: "Última atualização", value: (r) => (r.olt_snapshot_at ? formatCollectedPt(r.olt_snapshot_at) : "") },
+              ]}
+            />
+          </div>
           <table style={{ fontSize: 12 }}>
             <thead>
               <tr>
@@ -1386,7 +1407,26 @@ export function OltPage() {
                   <div className="stat"><div className="stat__k">Offline</div><div className="stat__v">{formatNum(comp?.onu_offline_sum)}</div></div>
                 </div>
 
-                <h2 style={{ marginTop: 18 }}>Portas PON</h2>
+                <div className="row" style={{ marginTop: 18, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <h2 style={{ margin: 0 }}>Portas PON</h2>
+                  <ExportMenu
+                    filename={`olt-portas-pon_${detail.data.description ?? "olt"}`}
+                    title={`Portas PON — ${detail.data.description ?? "OLT"}`}
+                    rows={ponsRows}
+                    columns={[
+                      { header: "Porta / ID", value: (p) => p.id },
+                      { header: "Nome", value: (p) => p.name },
+                      { header: "RX PON (dBm)", value: (p) => p.rx_dbm },
+                      { header: "TX PON (dBm)", value: (p) => p.tx_dbm },
+                      { header: "Voltagem", value: (p) => p.voltage },
+                      { header: "Corrente", value: (p) => p.current },
+                      { header: "Temperatura", value: (p) => p.temperature },
+                      { header: "ONUs total", value: (p) => p.onu_total },
+                      { header: "ONUs online", value: (p) => p.onu_online },
+                      { header: "ONUs offline", value: (p) => p.onu_offline },
+                    ]}
+                  />
+                </div>
                 {ponTableNote ? (
                   <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>{ponTableNote}</p>
                 ) : null}

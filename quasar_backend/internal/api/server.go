@@ -535,6 +535,8 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/{id}/hubsoft/stock-comodato/apply", s.hubsoftStockComodatoApply)
 				r.Post("/{id}/hubsoft/stock-comodato/preview-batch", s.hubsoftStockComodatoPreviewBatch)
 				r.Post("/{id}/hubsoft/stock-comodato/apply-batch", s.hubsoftStockComodatoApplyBatch)
+				r.Post("/{id}/hubsoft/stock-transfer/preview", s.hubsoftStockTransferPreview)
+				r.Post("/{id}/hubsoft/stock-transfer/apply", s.hubsoftStockTransferApply)
 			})
 			// IXC: inativar/reativar logins em massa (migração para a HubSoft) — administradores ou perfis com a permissão.
 			r.Group(func(r chi.Router) {

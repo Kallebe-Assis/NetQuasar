@@ -75,11 +75,6 @@ func UnlockLatencyCycle() {
 	latencyCycleMu.Unlock()
 }
 
-// LockLatencyCycle bloqueia até o ciclo ICMP/TCP estar livre (bootstrap monolítico).
-func LockLatencyCycle() {
-	latencyCycleMu.Lock()
-}
-
 // ErrLatencyCycleBusy indica que já corre outro ciclo de latência.
 var ErrLatencyCycleBusy = errors.New("monitor: ciclo de latência ocupado")
 

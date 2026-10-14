@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { ActionMenu } from "./ActionMenu";
+import { ExportMenu } from "./ExportMenu";
 import { EM_DASH, formatNullable, formatSnmpMetricCell } from "../lib/formatDisplay";
 import { classifyOnuRx, ONU_RX_QUALITY_COLOR, ONU_RX_QUALITY_LABEL, useOnuRxThresholds } from "../lib/onuRxQuality";
 
@@ -140,6 +141,23 @@ function onlineBadge(u: VsOnuRow, rxStatusMode?: boolean) {
   return <span className="badge badge--off">{EM_DASH}</span>;
 }
 
+/** Mesmo critério do selo de status, em texto (para exportação). */
+function onlineText(u: VsOnuRow, rxStatusMode?: boolean): string {
+  const useRx =
+    rxStatusMode ||
+    u.status_source === "rx_threshold" ||
+    (typeof u.online === "boolean" && (u.rx_dbm != null || rowHasText(u, "rx_pwr")));
+  if (useRx && typeof u.online === "boolean") return u.online ? "Online" : "Offline";
+  const label = String(u.oper_status_label ?? "").trim().toLowerCase();
+  const sta = u.oper_status ?? u.onu_online_sta;
+  if (label === "up" || u.online === true || sta === 1) return "Online";
+  if (label === "down" || u.online === false || sta === 2) return "Offline";
+  if (label !== "") return label;
+  if (sta === 3) return "Online";
+  if (sta === 4 || (sta != null && sta !== 1 && sta !== 3 && sta >= 0)) return "Offline";
+  return "";
+}
+
 type ColKey = "interface" | "status" | "phase" | "rx" | "tx" | "voltage" | "temp" | "model" | "serial" | "vlan";
 
 function metricEnabled(enabled: string[] | undefined, key: string): boolean {
@@ -243,6 +261,27 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
 
   return (
     <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+        <ExportMenu
+          filename="olt-onus"
+          title="ONUs — status e telemetria"
+          rows={displayRows}
+          columns={[
+            { header: "PON", value: (u) => cell(u.pon_compact ?? u.pon) },
+            { header: "ONU", value: (u) => cell(u.onu) },
+            ...(visible.has("interface") ? [{ header: "Interface", value: (u: VsOnuRow) => cell(u.if_name ?? u.if_descr) }] : []),
+            ...(visible.has("status") ? [{ header: "Status", value: (u: VsOnuRow) => onlineText(u, rxStatusMode) }] : []),
+            ...(visible.has("phase") ? [{ header: "Fase", value: (u: VsOnuRow) => cell(u.phase_sta) }] : []),
+            ...(visible.has("rx") ? [{ header: "RX ONU", value: (u: VsOnuRow) => displayOnuRx(u) }] : []),
+            ...(visible.has("tx") ? [{ header: "TX ONU", value: (u: VsOnuRow) => metricCell(u.tx_pwr) }] : []),
+            ...(visible.has("voltage") ? [{ header: "Voltagem", value: (u: VsOnuRow) => metricCell(u.voltage) }] : []),
+            ...(visible.has("temp") ? [{ header: "Temperatura", value: (u: VsOnuRow) => metricCell(u.temp) }] : []),
+            ...(visible.has("model") ? [{ header: "Modelo da ONU", value: (u: VsOnuRow) => cell(u.model) }] : []),
+            ...(visible.has("serial") ? [{ header: "Serial", value: (u: VsOnuRow) => cell(u.serial) }] : []),
+            ...(visible.has("vlan") ? [{ header: "VLAN", value: (u: VsOnuRow) => String(u.vlan ?? "").trim() || vlanForPon?.(u.pon)?.trim() || "" }] : []),
+          ]}
+        />
+      </div>
       <div className="table-wrap" style={{ maxHeight: 420, overflow: "auto" }}>
         <table className="table table--compact" style={{ width: "100%", fontSize: 12 }}>
           <thead>

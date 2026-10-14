@@ -131,7 +131,3 @@ export function MonitoringAdvancedFields({
   );
 }
 
-/** @deprecated Prefer MonitoringSettingsPanel — mantido para imports legados. */
-export function MonitoringPingIntervalsCard() {
-  return null;
-}

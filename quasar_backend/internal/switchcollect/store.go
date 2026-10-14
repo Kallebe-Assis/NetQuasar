@@ -103,27 +103,6 @@ func CollectHealthAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uui
 	return telemetry, err
 }
 
-// CollectInterfaceWalks devolve vars SNMP para interface_snapshots.
-func CollectInterfaceWalks(ctx context.Context, host, community string, pool *pgxpool.Pool, total time.Duration) ([]probing.SNMPVar, bool) {
-	profile := LoadGlobalProfile(ctx, pool)
-	out := mikrotikcollect.CollectMetrics(ctx, host, community, profile, mikrotikcollect.CollectOpts{
-		WalkTarget: mikrotikcollect.TargetInterfaces,
-		Timeout:    workerShareTimeout(total, 0.35, 12*time.Second, 90*time.Second),
-	})
-	var merged []probing.SNMPVar
-	truncated := false
-	for _, fr := range out.Fields {
-		if fr.Walk == nil {
-			continue
-		}
-		merged = append(merged, fr.Walk.Vars...)
-		if fr.Walk.Truncated {
-			truncated = true
-		}
-	}
-	return merged, truncated
-}
-
 func buildTelemetryMetricsJSON(collect mikrotikcollect.CollectOutput, snmpVars []probing.SNMPVar, telnet mikrotikcollect.TelnetCollectOutput) ([]byte, error) {
 	doc := map[string]any{
 		"switch_collection": collect,
@@ -152,16 +131,3 @@ func formatSNMPValue(v any) string {
 	}
 }
 
-func workerShareTimeout(total time.Duration, share float64, min, max time.Duration) time.Duration {
-	if total <= 0 {
-		return min
-	}
-	d := time.Duration(float64(total) * share)
-	if d < min {
-		return min
-	}
-	if d > max {
-		return max
-	}
-	return d
-}

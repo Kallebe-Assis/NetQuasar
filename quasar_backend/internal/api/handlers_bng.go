@@ -1160,27 +1160,61 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 
 	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
 	hintIndex := bngcollect.FindSessionIndexInLatestSnapshot(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix)
-	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 44*time.Second)
 	defer cancel()
-	row, found, err := bngcollect.LookupSessionByLogin(ctx, strings.TrimSpace(dev.IP), comm, q, profile, 25*time.Second, hintIndex)
+	devIP := strings.TrimSpace(dev.IP)
+	out, err := bngcollect.LookupSessionByLoginDetailed(ctx, devIP, comm, q, profile, 18*time.Second, hintIndex)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "SNMP", err.Error(), nil)
 		return
 	}
 
-	if !found {
-		if err := bngcollect.MarkKnownLoginOfflineIfExists(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix); err != nil {
-			s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao marcar offline")
+	if !out.Found {
+		// «Não encontrado» só vale como «offline» quando a consulta foi confiável. Um walk que devolveu zero
+		// linhas, ou muito menos do que as sessões online conhecidas, é inconclusivo (BNG respondeu tabela
+		// vazia/parcial) e NÃO pode marcar o cliente como offline. Se o inventário diz que ele estava online,
+		// tenta de novo uma vez antes de decidir.
+		knownOnline := bngcollect.CountKnownOnline(r.Context(), s.DB(), id)
+		inconclusive := func(o bngcollect.LookupOutcome) bool {
+			return o.RowsSeen == 0 || (knownOnline >= 50 && float64(o.RowsSeen) < 0.6*float64(knownOnline))
 		}
-		// Não está online agora, mas pode já ter sido visto antes — cai para o inventário
-		// permanente (bng_known_logins) em vez de simplesmente "não encontrado" (pedido do
-		// utilizador: toda pesquisa deve considerar também o histórico, mostrando offline com os
-		// últimos dados conhecidos quando não está online no BNG agora).
 		known, knownFound, kerr := bngcollect.FindKnownLogin(r.Context(), s.DB(), id, q)
 		if kerr != nil {
 			s.Log.Warn().Err(kerr).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao consultar histórico")
 		}
+		wasOnline := knownFound && strings.EqualFold(fmt.Sprint(known["status"]), "Up")
+		if inconclusive(out) || wasOnline {
+			if again, aerr := bngcollect.LookupSessionByLoginDetailed(ctx, devIP, comm, q, profile, 18*time.Second, hintIndex); aerr == nil {
+				out = again
+			}
+		}
+		if out.Found {
+			s.writeBngLookupFound(w, r, id, q, out, profile.Options.PPPoELoginStripSuffix)
+			return
+		}
+		if inconclusive(out) {
+			// não marca offline: devolve o último estado conhecido, dizendo que a consulta ao vivo falhou
+			if knownFound {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"found": true, "source": "known_logins", "query": q, "session": known, "inconclusive": true,
+					"note": fmt.Sprintf("Consulta ao vivo inconclusiva (o BNG devolveu %d de ~%d sessões online) — mostrando o último estado conhecido, sem marcar offline. Tente atualizar.", out.RowsSeen, knownOnline),
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found": false, "source": "snmp_live", "query": q, "session": sessionRowToJSON(out.Row), "inconclusive": true,
+				"note": fmt.Sprintf("Consulta ao vivo inconclusiva (o BNG devolveu %d de ~%d sessões online) — não dá para afirmar que está offline. Tente atualizar.", out.RowsSeen, knownOnline),
+			})
+			return
+		}
+		if err := bngcollect.MarkKnownLoginOfflineIfExists(r.Context(), s.DB(), id, q, profile.Options.PPPoELoginStripSuffix); err != nil {
+			s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao marcar offline")
+		}
+		// Não está online agora, mas pode já ter sido visto antes — cai para o inventário
+		// permanente (bng_known_logins) em vez de simplesmente "não encontrado".
 		if knownFound {
+			// o estado foi gravado como offline acima; reflete isso na resposta
+			known["status"] = "Down"
 			writeJSON(w, http.StatusOK, map[string]any{
 				"found": true, "source": "known_logins", "query": q,
 				"session": known,
@@ -1190,20 +1224,26 @@ func (s *Server) bngDeviceSessionLookup(w http.ResponseWriter, r *http.Request) 
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"found": false, "source": "snmp_live", "query": q,
-			"session": sessionRowToJSON(row),
+			"session": sessionRowToJSON(out.Row),
 			"note":    "Usuário nunca visto neste equipamento.",
 		})
 		return
 	}
-	if err := bngcollect.UpsertSessionInLatestSnapshot(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
+	s.writeBngLookupFound(w, r, id, q, out, profile.Options.PPPoELoginStripSuffix)
+}
+
+// writeBngLookupFound grava o resultado ao vivo (snapshot + inventário) e responde.
+func (s *Server) writeBngLookupFound(w http.ResponseWriter, r *http.Request, id uuid.UUID, q string, out bngcollect.LookupOutcome, stripSuffix string) {
+	row := out.Row
+	if err := bngcollect.UpsertSessionInLatestSnapshot(r.Context(), s.DB(), id, row, stripSuffix); err != nil {
 		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao atualizar snapshot")
 	}
-	if err := bngcollect.TouchKnownLoginOnline(r.Context(), s.DB(), id, row, profile.Options.PPPoELoginStripSuffix); err != nil {
+	if err := bngcollect.TouchKnownLoginOnline(r.Context(), s.DB(), id, row, stripSuffix); err != nil {
 		s.Log.Warn().Err(err).Str("device_id", id.String()).Str("login", q).Msg("bng session lookup: falha ao atualizar known login")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true, "source": "snmp_live", "query": q,
-		"session": sessionRowToJSON(row), "list_updated": true,
+		"session": sessionRowToJSON(row), "list_updated": true, "loose_match": out.Loose,
 	})
 }
 

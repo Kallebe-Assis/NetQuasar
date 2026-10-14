@@ -7,6 +7,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { ExportMenu } from "../../components/ExportMenu";
 
 type CC = { id: string; code: string; description: string; parent_id?: string | null; status: string; notes?: string | null };
 
@@ -50,7 +51,20 @@ export function FleetCostCentersPage({ embedded }: { embedded?: boolean } = {}) 
   const body = (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
-        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Centros de custo</h1>}
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          {embedded ? null : <h1 style={{ margin: 0 }}>Frota — Centros de custo</h1>}
+          <ExportMenu
+            filename="frota-centros-de-custo"
+            title="Frota — Centros de custo"
+            rows={q.data?.items ?? []}
+            columns={[
+              { header: "Código", value: (c) => c.code },
+              { header: "Descrição", value: (c) => c.description },
+              { header: "Status", value: (c) => (c.status === "active" ? "Ativo" : c.status === "inactive" ? "Inativo" : c.status) },
+              { header: "Observação", value: (c) => c.notes },
+            ]}
+          />
+        </div>
         {canMutate ? (
           <button
             type="button"

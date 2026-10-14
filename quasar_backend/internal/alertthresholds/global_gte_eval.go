@@ -280,11 +280,6 @@ func EvaluateNamedGteMetricWithThreshold(
 	}
 }
 
-func closeTelemetryThresholdAlert(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, key string) {
-	_ = log
-	closeNamedGteAlert(ctx, pool, deviceID, alertTypeTelemetryThreshold, key)
-}
-
 func closeNamedGteAlert(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, alertType, key string) {
 	_, _, _ = alertstore.Close(ctx, pool, (*zerolog.Logger)(nil), alertstore.CloseSpec{
 		DeviceID: deviceID, AlertType: alertType,

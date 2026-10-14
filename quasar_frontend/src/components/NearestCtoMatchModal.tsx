@@ -1,15 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch, downloadBlob } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import { errorMessageFromUnknown } from "../lib/apiErrors";
 import { useAppToast } from "../lib/appToast";
-import { buildExcelCsvBlob } from "../lib/excelCsv";
+import { ExportMenu } from "./ExportMenu";
 import { toastErr, toastOk } from "../lib/operationToast";
 import {
   ctoLabel,
   formatDistanceMeters,
   isValidGeoPoint,
   matchLoginsToNearestCtos,
+  NEAREST_CTO_CSV_HEADER,
   nearestCtoMatchesToCsvRows,
   type NearestCtoMatch,
 } from "../lib/nearestCtoMatch";
@@ -151,12 +152,6 @@ export function NearestCtoMatchModal({ open, onClose, canMutate }: Props) {
       if (m.login.id) ids.add(m.login.id);
     }
     setSelectedIds(ids);
-  }
-
-  function exportCsv() {
-    const stamp = new Date().toISOString().slice(0, 10);
-    downloadBlob(`comparacao_login_cto_${stamp}.csv`, buildExcelCsvBlob(nearestCtoMatchesToCsvRows(displayedMatches)));
-    toastOk(pushToast, "Comparação exportada.");
   }
 
   async function applySuggestions() {
@@ -305,14 +300,13 @@ export function NearestCtoMatchModal({ open, onClose, canMutate }: Props) {
           <button type="button" className="btn" onClick={onClose} disabled={applying}>
             Fechar
           </button>
-          <button
-            type="button"
-            className="btn"
+          <ExportMenu
+            filename="comparacao_login_cto"
+            title="Comparação login × CTO"
+            rows={nearestCtoMatchesToCsvRows(displayedMatches).slice(1)}
             disabled={loading || !!error || displayedMatches.length === 0}
-            onClick={exportCsv}
-          >
-            Exportar comparação CSV
-          </button>
+            columns={NEAREST_CTO_CSV_HEADER.map((header, idx) => ({ header, value: (r: string[]) => r[idx] }))}
+          />
           {canMutate ? (
             <button
               type="button"

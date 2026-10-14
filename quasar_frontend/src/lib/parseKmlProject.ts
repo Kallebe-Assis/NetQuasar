@@ -332,19 +332,6 @@ export async function parseKmlOrKmzFile(file: File): Promise<ParsedKmlReview> {
   return { projectName: projectName || "Projecto importado", items, skipped };
 }
 
-export function kmlImportSummary(p: ParsedKmlProject): string {
-  const parts = [
-    `${p.ctos.length} CTO`,
-    `${p.splice_boxes.length} emenda`,
-    `${p.poles.length} poste`,
-    `${p.cables.length} cabo`,
-    `${p.pops.length} POP`,
-  ];
-  let s = parts.join(" · ");
-  if (p.skipped > 0) s += ` · ${p.skipped} ignorado(s)`;
-  return s;
-}
-
 export function kmlReviewSummary(items: KmlReviewItem[]): string {
   const included = items.filter((i) => i.include);
   const counts = { cto: 0, splice_box: 0, pole: 0, cable: 0, pop: 0 };

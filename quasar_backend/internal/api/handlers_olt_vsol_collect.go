@@ -15,11 +15,6 @@ type vsolIfPreload struct {
 	Meta map[string]any
 }
 
-// collectVsolOLT: IF-MIB (opcional) + snmpwalk gOnuAuthList.
-func (s *Server) collectVsolOLT(parentCtx context.Context, deviceID uuid.UUID, host, community string, _ time.Duration, fullTelemetry bool) ([]map[string]any, []vsolparse.OnuRef, map[string]any) {
-	return s.collectVsolOLTWithPreload(parentCtx, deviceID, host, community, fullTelemetry, nil)
-}
-
 func (s *Server) collectVsolOLTWithPreload(parentCtx context.Context, deviceID uuid.UUID, host, community string, fullTelemetry bool, preload *vsolIfPreload) ([]map[string]any, []vsolparse.OnuRef, map[string]any) {
 	sum := map[string]any{}
 	var vPons []map[string]any

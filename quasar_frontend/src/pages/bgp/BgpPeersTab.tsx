@@ -1,3 +1,4 @@
+import { ExportMenu } from "../../components/ExportMenu";
 import { EM_DASH, formatDuration, peerStateBadge } from "./bgpFormat";
 import type { BFDSessionReport, PeerReport } from "./bgpTypes";
 
@@ -17,7 +18,25 @@ export function BgpPeersTab({ peers, bfdSessions }: Props) {
     <>
       {peers.length > 0 ? (
         <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Peers BGP</h3>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", margin: "0 0 10px" }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Peers BGP</h3>
+            <ExportMenu
+              filename="bgp-peers"
+              title="Peers BGP"
+              rows={peers}
+              columns={[
+                { header: "IP do peer", value: (p) => p.peer_ip },
+                { header: "AS remoto", value: (p) => p.remote_as },
+                { header: "Estado", value: (p) => p.state_label },
+                { header: "Tempo estabelecido", value: (p) => formatDuration(p.established_seconds) },
+                { header: "Updates in", value: (p) => p.in_updates },
+                { header: "Updates out", value: (p) => p.out_updates },
+                { header: "Prefixos recebidos", value: (p) => p.prefixes_received },
+                { header: "Prefixos ativos", value: (p) => p.prefixes_active },
+                { header: "Prefixos anunciados", value: (p) => p.prefixes_advertised },
+              ]}
+            />
+          </div>
           <div className="table-wrap">
             <table>
               <thead>
@@ -56,7 +75,22 @@ export function BgpPeersTab({ peers, bfdSessions }: Props) {
       )}
 
       <div className="card" style={{ padding: 14 }}>
-        <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Sessões BFD</h3>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", margin: "0 0 4px" }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>Sessões BFD</h3>
+          <ExportMenu
+            filename="bgp-sessoes-bfd"
+            title="Sessões BFD"
+            rows={bfdSessions}
+            columns={[
+              { header: "Peer", value: (s) => s.peer_addr },
+              { header: "Interface", value: (s) => s.bind_if_name },
+              { header: "Estado", value: (s) => s.state_label },
+              { header: "Diagnóstico", value: (s) => s.diag },
+              { header: "VRF", value: (s) => s.vpn_name },
+              { header: "Motivo da queda", value: (s) => s.down_reason },
+            ]}
+          />
+        </div>
         <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--muted)" }}>
           Detecção rápida de falha (HUAWEI-BFD-MIB) — cada sessão traz o motivo real da queda, quando aplicável.
         </p>

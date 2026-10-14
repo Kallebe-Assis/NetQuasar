@@ -7,7 +7,7 @@ import { SystemVersionTab } from "./about/SystemVersionTab";
 const DEVELOPER = {
   name: "Kallebe Assis Nogueira",
   portfolio: "https://portfolio-kallebe-assis.vercel.app/",
-  instagram: "kallbeassiss_",
+  instagram: "kallebeassiss_",
   email: "kallebe.assiss@gmail.com",
   createdAtLabel: "11 de maio de 2026",
 };

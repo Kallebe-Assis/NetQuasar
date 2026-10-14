@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,58 @@ type knownLoginRow struct {
 	Login          string
 	IsOnline       bool
 	CurrentEventID *int64
+}
+
+// Proteção contra «queda em massa» falsa. Uma leitura que veio vazia ou com muito menos logins que os que estavam
+// online (walk que terminou cedo sem erro, tabela devolvida vazia/parcial pelo BNG) marcaria milhares de clientes
+// como offline e, na volta seguinte, como online de novo — alarme e «offline» falsos. Na primeira leitura suspeita
+// o «ausentes → offline» é adiado; se a leitura seguinte confirmar a queda, ela é aceita (queda real).
+const (
+	massDropMinOnline = 50
+	massDropRatio     = 0.6
+)
+
+var (
+	massDropMu      sync.Mutex
+	massDropStrikes = map[uuid.UUID]int{}
+)
+
+// suspiciousMassDrop devolve true quando as marcações de offline desta leitura devem ser adiadas.
+func suspiciousMassDrop(deviceID uuid.UUID, prevOnline, nowOnline int) bool {
+	massDropMu.Lock()
+	defer massDropMu.Unlock()
+	if prevOnline < massDropMinOnline || float64(nowOnline) >= massDropRatio*float64(prevOnline) {
+		delete(massDropStrikes, deviceID)
+		return false
+	}
+	massDropStrikes[deviceID]++
+	if massDropStrikes[deviceID] >= 2 {
+		delete(massDropStrikes, deviceID)
+		return false
+	}
+	return true
+}
+
+func countOnlineExisting(existing map[string]knownLoginRow) int {
+	n := 0
+	for _, e := range existing {
+		if e.IsOnline {
+			n++
+		}
+	}
+	return n
+}
+
+// CountKnownOnline — quantos logins o inventário considera online neste BNG.
+func CountKnownOnline(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) int {
+	if pool == nil {
+		return 0
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bng_known_logins WHERE device_id=$1 AND is_online`, deviceID).Scan(&n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // SyncKnownLogins sincroniza o inventário de logins com uma coleta completa de sessões.
@@ -59,6 +112,9 @@ func SyncKnownLogins(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 		}
 	}
 
+	if suspiciousMassDrop(deviceID, countOnlineExisting(existing), len(online)) {
+		return tx.Commit(ctx)
+	}
 	for key, prev := range existing {
 		if !prev.IsOnline {
 			continue
@@ -130,6 +186,9 @@ func SyncKnownLoginsFast(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.
 		}
 	}
 
+	if suspiciousMassDrop(deviceID, countOnlineExisting(existing), len(online)) {
+		return tx.Commit(ctx)
+	}
 	for key, prev := range existing {
 		if !prev.IsOnline {
 			continue

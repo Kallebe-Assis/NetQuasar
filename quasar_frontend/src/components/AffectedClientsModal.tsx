@@ -1,8 +1,8 @@
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Send } from "lucide-react";
-import { apiFetch, downloadBlob } from "../lib/api";
-import { buildExcelCsvBlob } from "../lib/excelCsv";
+import { apiFetch } from "../lib/api";
+import { ExportMenu } from "./ExportMenu";
 import { useAppToast } from "../lib/appToast";
 import { EmptyState } from "./EmptyState";
 
@@ -49,15 +49,6 @@ export function AffectedClientsModal({
       pushToast({ tone: "err", text: e instanceof Error ? e.message : "Falha ao enviar clientes afetados." });
     },
   });
-
-  function exportCsv() {
-    if (!q.data) return;
-    const rows: string[][] = [["Cliente", "Serial", "PON", "ONU"]];
-    for (const c of q.data.clients) {
-      rows.push([c.client_name, c.serial, String(c.pon || ""), String(c.onu || "")]);
-    }
-    downloadBlob(`clientes_afetados_${alertId}.csv`, buildExcelCsvBlob(rows));
-  }
 
   if (!open) return null;
 
@@ -127,9 +118,18 @@ export function AffectedClientsModal({
           <button type="button" className="btn" onClick={onClose}>
             Fechar
           </button>
-          <button type="button" className="btn" onClick={exportCsv} disabled={clients.length === 0}>
-            Exportar CSV
-          </button>
+          <ExportMenu
+            filename={`clientes-afetados_${alertId}`}
+            title="Clientes afetados"
+            rows={clients}
+            disabled={clients.length === 0}
+            columns={[
+              { header: "Cliente", value: (c) => c.client_name },
+              { header: "Serial", value: (c) => c.serial },
+              { header: "PON", value: (c) => c.pon || "" },
+              { header: "ONU", value: (c) => c.onu || "" },
+            ]}
+          />
           <button
             type="button"
             className="btn btn--primary"

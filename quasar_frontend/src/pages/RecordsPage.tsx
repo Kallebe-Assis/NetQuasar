@@ -11,6 +11,7 @@ import { useAppToast } from "../lib/appToast";
 import { getStoredUserId, isAdminUser } from "../lib/auth";
 import { toastErr, toastOk } from "../lib/operationToast";
 import { queryKeys } from "../lib/queryKeys";
+import { exportTable, type ExportFormat } from "../lib/tableExport";
 
 type Kind = "equipment" | "server" | "site" | "orcamento" | "informacao" | "texto" | "outros";
 type Mode = "user_password" | "password";
@@ -109,41 +110,24 @@ function targetOf(it: RecordItem): string {
   return it.domain || it.title || "Site";
 }
 
-function csvCell(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-/** Exporta em CSV as colunas já visíveis na tabela — a senha só entra se `passwords` for
+/** Exporta as colunas já visíveis na tabela (CSV, Excel ou PDF) — a senha só entra se `passwords` for
  * passado (o chamador decide isso via o modal de confirmação, nunca por omissão), usando o
  * mesmo valor já revelado registo a registo (com o seu rasto de auditoria normal). */
-function exportRecordsCsv(items: RecordItem[], admin: boolean, passwords?: Record<string, string>) {
-  const headers = ["Tipo", "Destino", "Acesso", ...(admin ? ["Usuário"] : []), ...(passwords ? ["Senha"] : []), "Atualizado"];
-  const lines = [headers.map(csvCell).join(",")];
-  for (const it of items) {
-    const acesso = isTextKind(it.kind)
-      ? contentPreview(it.content)
-      : it.has_username
-        ? (it.username ?? "")
-        : "somente senha";
-    const senha = isTextKind(it.kind) ? "" : (passwords?.[it.id] ?? "");
-    const cols = [
-      KIND_LABEL[it.kind],
-      it.title || targetOf(it),
-      acesso,
-      ...(admin ? [it.owner_name] : []),
-      ...(passwords ? [senha] : []),
-      formatWhen(it.updated_at),
-    ];
-    lines.push(cols.map((c) => csvCell(String(c ?? ""))).join(","));
-  }
-  const csv = lines.join("\r\n");
-  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `registros-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+function exportRecords(format: ExportFormat, items: RecordItem[], admin: boolean, passwords?: Record<string, string>) {
+  const acessoOf = (it: RecordItem) => (isTextKind(it.kind) ? contentPreview(it.content) : it.has_username ? (it.username ?? "") : "somente senha");
+  exportTable(format, {
+    filename: "registros",
+    title: "Registros",
+    rows: items,
+    columns: [
+      { header: "Tipo", value: (it) => KIND_LABEL[it.kind] },
+      { header: "Destino", value: (it) => it.title || targetOf(it) },
+      { header: "Acesso", value: acessoOf },
+      ...(admin ? [{ header: "Usuário", value: (it: RecordItem) => it.owner_name }] : []),
+      ...(passwords ? [{ header: "Senha", value: (it: RecordItem) => (isTextKind(it.kind) ? "" : (passwords[it.id] ?? "")) }] : []),
+      { header: "Atualizado", value: (it) => formatWhen(it.updated_at) },
+    ],
+  });
 }
 
 async function copyText(text: string) {
@@ -186,6 +170,7 @@ export function RecordsPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportIncludePasswords, setExportIncludePasswords] = useState(false);
   const [exportAware, setExportAware] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
   const [exporting, setExporting] = useState(false);
 
   const lookupsQ = useQuery({
@@ -392,7 +377,7 @@ export function RecordsPage() {
     setExporting(true);
     try {
       const pwMap = exportIncludePasswords ? await revealPasswordsFor(items) : undefined;
-      exportRecordsCsv(items, admin, pwMap);
+      exportRecords(exportFormat, items, admin, pwMap);
       setExportModalOpen(false);
     } catch (e) {
       toastErr(push, e as Error);
@@ -457,8 +442,8 @@ export function RecordsPage() {
         <button
           type="button"
           className="btn btn--icon btn--icon-menu"
-          title="Exportar CSV (respeita os filtros aplicados)"
-          aria-label="Exportar CSV"
+          title="Exportar em CSV, Excel ou PDF (respeita os filtros aplicados)"
+          aria-label="Exportar"
           disabled={items.length === 0}
           onClick={openExportModal}
         >
@@ -830,12 +815,21 @@ export function RecordsPage() {
         ? createPortal(
             <div className="modal-backdrop" role="presentation" onMouseDown={() => !exporting && setExportModalOpen(false)}>
               <div className="modal" style={{ maxWidth: 480 }} role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-                <h3>Exportar registos (CSV)</h3>
+                <h3>Exportar registos</h3>
                 <div className="msg msg--warn" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
                   Este ficheiro pode conter <strong>dados sensíveis</strong> (senhas, strings de autenticação) se optar por
                   incluir as senhas abaixo. Guarde-o em local seguro e não o partilhe por canais inseguros — o sistema não
                   se responsabiliza por vazamento de dados a partir de um ficheiro exportado.
                 </div>
+
+                <label className="row" style={{ gap: 8, marginTop: 14, alignItems: "center" }}>
+                  <span style={{ fontSize: 13 }}>Formato</span>
+                  <select className="input" value={exportFormat} onChange={(e) => setExportFormat(e.target.value as ExportFormat)}>
+                    <option value="csv">CSV</option>
+                    <option value="xlsx">Excel (XLSX)</option>
+                    <option value="pdf">PDF</option>
+                  </select>
+                </label>
 
                 <label className="row" style={{ gap: 8, marginTop: 14, alignItems: "flex-start", cursor: "pointer" }}>
                   <input
@@ -845,7 +839,7 @@ export function RecordsPage() {
                     style={{ marginTop: 3 }}
                   />
                   <span style={{ fontSize: 13, lineHeight: 1.4 }}>
-                    Incluir as senhas numa coluna do CSV (senão, exporta só tipo/destino/acesso/data, como hoje).
+                    Incluir as senhas numa coluna (senão, exporta só tipo/destino/acesso/data, como hoje).
                   </span>
                 </label>
 

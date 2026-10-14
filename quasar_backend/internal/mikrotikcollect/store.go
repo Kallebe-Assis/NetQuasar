@@ -186,41 +186,6 @@ func CollectAndStore(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID
 	return telemetry, telnetOut, persistErr
 }
 
-// CollectInterfaceWalks devolve vars SNMP para interface_snapshots conforme perfil.
-func CollectInterfaceWalks(ctx context.Context, host, community string, pool *pgxpool.Pool, total time.Duration) ([]probing.SNMPVar, bool) {
-	profile := LoadGlobalProfile(ctx, pool)
-	out := CollectMetrics(ctx, host, community, profile, CollectOpts{
-		WalkTarget: TargetInterfaces,
-		Timeout:    workerShareTimeout(total, 0.35, 12*time.Second, 90*time.Second),
-	})
-	var merged []probing.SNMPVar
-	truncated := false
-	for _, fr := range out.Fields {
-		if fr.Walk == nil {
-			continue
-		}
-		merged = append(merged, fr.Walk.Vars...)
-		if fr.Walk.Truncated {
-			truncated = true
-		}
-	}
-	return merged, truncated
-}
-
-func workerShareTimeout(total time.Duration, frac float64, min, cap time.Duration) time.Duration {
-	if total <= 0 {
-		total = 120 * time.Second
-	}
-	w := time.Duration(float64(total) * frac)
-	if w < min {
-		return min
-	}
-	if w > cap {
-		return cap
-	}
-	return w
-}
-
 func formatSNMPValue(v any) string {
 	if v == nil {
 		return ""

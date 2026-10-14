@@ -107,10 +107,6 @@ type TelnetCredentials struct {
 	Port     string
 }
 
-func LoadTelnetCredentials(ctx context.Context, pool *pgxpool.Pool) TelnetCredentials {
-	return LoadTelnetCredentialsForDevice(ctx, pool, uuid.Nil)
-}
-
 // LoadTelnetCredentialsForDevice usa credenciais do equipamento quando definidas; caso contrário, os padrões globais.
 func LoadTelnetCredentialsForDevice(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) TelnetCredentials {
 	c := TelnetCredentials{Port: "23"}

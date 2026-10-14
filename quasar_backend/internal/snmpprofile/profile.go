@@ -36,12 +36,6 @@ type DiscoveryDebug struct {
 	Candidates []CandidateDecision `json:"candidates"`
 }
 
-// BuildCollectProfile analisa linhas do walk e escolhe OIDs conhecidos (HOST-RESOURCES / SNMPv2-MIB).
-func BuildCollectProfile(rows []probing.SNMPVar) CollectProfile {
-	p, _ := BuildCollectProfileWithDebug(rows)
-	return p
-}
-
 // BuildCollectProfileWithDebug devolve perfil e rastreio de decisões para troubleshooting.
 func BuildCollectProfileWithDebug(rows []probing.SNMPVar) (CollectProfile, DiscoveryDebug) {
 	var p CollectProfile

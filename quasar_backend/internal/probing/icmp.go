@@ -2,7 +2,6 @@ package probing
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"net"
 	"runtime"
@@ -187,7 +186,3 @@ func errString(err error) string {
 	return err.Error()
 }
 
-// ErrUnreachable combina erros para mensagem única.
-func ErrUnreachable(host string, icmpErr, tcpErr error) string {
-	return fmt.Sprintf("host %s inalcançável: icmp=%v; tcp=%v", host, icmpErr, tcpErr)
-}

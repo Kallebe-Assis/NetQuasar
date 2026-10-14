@@ -8,11 +8,6 @@ export function googleMapsUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
-/** @deprecated Use googleMapsUrl — mantido por compatibilidade. */
-export function formatLatLngWithGoogleMaps(lat: number, lng: number): string {
-  return googleMapsUrl(lat, lng);
-}
-
 export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);

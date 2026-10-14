@@ -15,8 +15,9 @@ import {
 import { InfoHint } from "../components/InfoHint";
 import { SendIcon } from "../components/icons/SendIcon";
 import { PageCountPill } from "../components/PageCountPill";
-import { apiFetch, downloadBlob } from "../lib/api";
-import { apiUrl, getStoredApiKey, can, isAdminUser } from "../lib/auth";
+import { apiFetch } from "../lib/api";
+import { ExportMenu } from "../components/ExportMenu";
+import { can, isAdminUser } from "../lib/auth";
 import { formatAlertDateTimePt } from "../lib/alertLabels";
 import { FloatingMenuPanel } from "../components/FloatingMenuPanel";
 import { useFloatingMenu } from "../hooks/useFloatingMenu";
@@ -389,15 +390,6 @@ export function CommercialPage() {
       notify(`Relatório comercial enviado por Telegram (${formatYearMonthPt(month)}), com texto formatado pelo servidor.`),
     onError: (e) => toastErr(pushToast, e, "Envio Telegram falhou."),
   });
-
-  async function exportCsv() {
-    const headers = new Headers();
-    const k = getStoredApiKey();
-    if (k) headers.set("X-API-Key", k);
-    const res = await fetch(apiUrl(`/api/v1/commercial/reports/export?format=csv&month=${encodeURIComponent(month)}`), { headers });
-    if (!res.ok) throw new Error(await res.text());
-    downloadBlob(`commercial_${month}.csv`, await res.blob());
-  }
 
   async function runOltCollection(targetOltIds: string[]) {
     setOltCollectRunning(true);
@@ -926,6 +918,19 @@ export function CommercialPage() {
                 </ResponsiveContainer>
               </div>
             </div>
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+              <ExportMenu
+                filename="clientes-total-por-mes"
+                title="Total de clientes por mês"
+                rows={[...(totalsHist.data?.months ?? [])].reverse()}
+                columns={[
+                  { header: "Mês", value: (r) => formatYearMonthPt(r.year_month) },
+                  { header: "Total de clientes", value: (r) => r.total },
+                  { header: "Variação", value: (r) => r.delta },
+                  { header: "Variação (%)", value: (r) => (r.delta_percent != null && Number.isFinite(r.delta_percent) ? Number(r.delta_percent.toFixed(1)) : "") },
+                ]}
+              />
+            </div>
             <div className="table-wrap" style={{ marginTop: 12 }}>
               <table style={{ fontSize: 11 }}>
                 <thead>
@@ -979,9 +984,18 @@ export function CommercialPage() {
           <button type="button" className="btn" disabled={agg.isFetching} onClick={() => setAggRefreshConfirmOpen(true)}>
             {agg.isFetching ? "A atualizar…" : "Atualizar totais"}
           </button>
-          <button type="button" className="btn" onClick={() => exportCsv().catch((e) => toastErr(pushToast, e))}>
-            Export CSV
-          </button>
+          <ExportMenu
+            filename={`clientes-por-localidade_${month}`}
+            title={`Clientes por localidade — ${formatYearMonthPt(month)}`}
+            rows={cmpSortedRows}
+            columns={[
+              { header: "Localidade", value: (r) => r.locality_name },
+              { header: cmp.data?.previous_month ? formatYearMonthPt(cmp.data.previous_month) : "Mês anterior", value: (r) => r.previous },
+              { header: formatYearMonthPt(cmp.data?.month || month), value: (r) => r.current },
+              { header: "Variação (abs.)", value: (r) => r.delta },
+              { header: "Variação (%)", value: (r) => (Number.isFinite(Number(r.delta_percent)) ? Number(r.delta_percent.toFixed(1)) : "") },
+            ]}
+          />
           {canMutate ? (
             <button
               type="button"
@@ -1112,7 +1126,20 @@ export function CommercialPage() {
 
       {mainTab === "registros" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Registros mensais</h2>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0 }}>Registros mensais</h2>
+            <ExportMenu
+              filename="registros-mensais-de-clientes"
+              title="Registros mensais de clientes"
+              rows={recsSorted}
+              columns={[
+                { header: "Localidade", value: (r) => locById.get(r.locality_id) ?? r.locality_id },
+                { header: "Mês", value: (r) => formatYearMonthPt(r.year_month) },
+                { header: "Clientes", value: (r) => r.client_count },
+                { header: "Criado em", value: (r) => (r.created_at ? formatAlertDateTimePt(String(r.created_at)) : "") },
+              ]}
+            />
+          </div>
           <p style={{ color: "var(--muted)", fontSize: 12 }}>
             Lista dos últimos registos na base (até 500). Use Editar para alterar mês ou quantidade; a localidade não pode ser mudada aqui.
           </p>

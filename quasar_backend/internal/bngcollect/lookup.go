@@ -9,11 +9,52 @@ import (
 	"github.com/netquasar/netquasar/quasar_backend/internal/probing"
 )
 
-// LookupSessionByLogin procura login via índice em cache (GET) ou walk da coluna username.
-func LookupSessionByLogin(ctx context.Context, host, community, login string, profile Profile, timeout time.Duration, hintIndex string) (SessionRow, bool, error) {
+// LookupOutcome é o resultado detalhado de uma procura de login no BNG.
+type LookupOutcome struct {
+	Row   SessionRow
+	Found bool
+	// RowsSeen é quantas linhas da coluna de login o walk percorreu até parar. Um «não encontrado» com
+	// RowsSeen = 0 (ou muito abaixo do esperado) NÃO prova que o login está offline: o BNG pode ter devolvido
+	// uma tabela vazia/parcial. Quem chama decide se a resposta é conclusiva.
+	RowsSeen int
+	// Loose indica que o login só foi achado pela comparação tolerante (sem domínio/@, sem espaços/controle).
+	Loose bool
+}
+
+// looseLoginKey — chave de comparação tolerante: minúsculas, sem controle/espaços e sem «@domínio».
+func looseLoginKey(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 || r == ' ' {
+			return -1
+		}
+		return r
+	}, strings.ToLower(s))
+	if i := strings.Index(s, "@"); i > 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+// ipv4AliasOfASCII4 — a leitura genérica de OCTET STRING mostra um login de exatamente 4 caracteres sem letras
+// (ex.: «1234») como IPv4 («49.50.51.52»). Devolve essa forma para o login pesquisado, ou "".
+func ipv4AliasOfASCII4(s string) string {
+	if len(s) != 4 {
+		return ""
+	}
+	for i := 0; i < 4; i++ {
+		c := s[i]
+		if c < 32 || c >= 127 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", s[0], s[1], s[2], s[3])
+}
+
+// LookupSessionByLoginDetailed é LookupSessionByLogin com os dados para decidir se um «não encontrado» é confiável.
+func LookupSessionByLoginDetailed(ctx context.Context, host, community, login string, profile Profile, timeout time.Duration, hintIndex string) (LookupOutcome, error) {
 	login = strings.TrimSpace(login)
 	if login == "" {
-		return SessionRow{}, false, fmt.Errorf("login vazio")
+		return LookupOutcome{}, fmt.Errorf("login vazio")
 	}
 	stripSuffix := profile.Options.PPPoELoginStripSuffix
 	profile = profileWithSessionWalksEnabled(profile)
@@ -28,6 +69,10 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 
 	targets := PPPoELoginLookupTargets(login, stripSuffix)
 	displayLogin := NormalizePPPoELogin(login, stripSuffix)
+	if alias := ipv4AliasOfASCII4(displayLogin); alias != "" {
+		targets = append(targets, alias)
+	}
+	looseWant := looseLoginKey(NormalizeSNMPLoginValue(login, stripSuffix))
 
 	matchFn := func(val string) bool {
 		for _, t := range targets {
@@ -40,18 +85,25 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 
 	if hint := strings.TrimSpace(hintIndex); hint != "" {
 		if row, ok := lookupSessionByIndex(ctx, host, community, profile, hint, displayLogin, matchFn, timeout); ok {
-			return row, true, nil
+			return LookupOutcome{Row: row, Found: true}, nil
 		}
 	}
 
-	var idx string
-	var matchedLogin string
-	matched, ok, walkErr := probing.SNMPWalkUntil(ctx, probing.SNMPWalkParams{
+	var idx, looseIdx string
+	var matchedLogin, looseLogin string
+	rows := 0
+	_, ok, walkErr := probing.SNMPWalkUntil(ctx, probing.SNMPWalkParams{
 		Host: host, Community: community, RootOID: baseOID, Version: "2c",
 		Timeout: timeout, MaxRows: maxSessionWalkRows,
 	}, func(v probing.SNMPVar) bool {
+		rows++
 		val := strings.TrimSpace(v.Value)
 		if !matchFn(val) {
+			if looseIdx == "" && looseWant != "" && looseLoginKey(NormalizeSNMPLoginValue(val, stripSuffix)) == looseWant {
+				if c := extractIndexFromOID(v.OID, baseOID); c != "" {
+					looseIdx, looseLogin = c, NormalizeSNMPLoginValue(val, stripSuffix)
+				}
+			}
 			return false
 		}
 		candidate := extractIndexFromOID(v.OID, baseOID)
@@ -63,11 +115,13 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 		return true
 	})
 	if walkErr != "" {
-		return SessionRow{}, false, fmt.Errorf("%s", walkErr)
+		return LookupOutcome{RowsSeen: rows}, fmt.Errorf("%s", walkErr)
 	}
-	if !ok || idx == "" {
-		_ = matched
-		return SessionRow{Status: "Down", Login: displayLogin}, false, nil
+	loose := false
+	if (!ok || idx == "") && looseIdx != "" {
+		idx, matchedLogin, loose = looseIdx, looseLogin, true
+	} else if !ok || idx == "" {
+		return LookupOutcome{Row: SessionRow{Status: "Down", Login: displayLogin}, RowsSeen: rows}, nil
 	}
 	if matchedLogin == "" {
 		matchedLogin = displayLogin
@@ -83,9 +137,9 @@ func LookupSessionByLogin(ctx context.Context, host, community, login string, pr
 	merged := mergeSessionMaps(columnMaps, true)
 	if len(merged) > 0 {
 		out := ApplyLoginStripToSessions(merged, stripSuffix)
-		return out[0], true, nil
+		return LookupOutcome{Row: out[0], Found: true, RowsSeen: rows, Loose: loose}, nil
 	}
-	return SessionRow{Index: idx, Login: displayLogin, Status: "Up"}, true, nil
+	return LookupOutcome{Row: SessionRow{Index: idx, Login: displayLogin, Status: "Up"}, Found: true, RowsSeen: rows, Loose: loose}, nil
 }
 
 func lookupSessionByIndex(ctx context.Context, host, community string, profile Profile, idx, displayLogin string, matchFn func(string) bool, timeout time.Duration) (SessionRow, bool) {

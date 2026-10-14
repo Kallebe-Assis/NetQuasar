@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { PeriodPicker } from "./HubsoftReportPage";
 import { useConsultaToast } from "./hubsoftConsulta";
 import { Switch } from "../../components/Switch";
@@ -7,6 +7,7 @@ import { TableCellExpandableText } from "../../integrations/TableCellExpandableT
 import { apiFetch } from "../../lib/api";
 import type { HubsoftConferenceItem, HubsoftConferenceJobStatus, HubsoftConferenceResponse } from "../../integrations/types";
 import { todayISO } from "./hubsoftDates";
+import { downloadCsv } from "./hubsoftCsv";
 
 const SLUG = "hubsoft";
 const POLL_MS = 1500;
@@ -203,6 +204,32 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
 
   const checkCols = Number(checkConnection) + Number(checkRemoteAccess) + Number(checkIPv6);
 
+  /** Exporta exatamente o que está na tabela (respeita os filtros ativos). */
+  function exportCsv() {
+    // texto livre que começa com = + @ viraria fórmula no Excel
+    const txt = (v?: string) => {
+      const t = (v ?? "").replace(/\s+/g, " ").trim();
+      return /^[=+@]/.test(t) ? `'${t}` : t;
+    };
+    const yesNo = (checked: boolean, v: boolean, yes: string, no: string) => (!checked ? "" : v ? yes : no);
+    const head = ["os", "atendimento", "tipo", "status", "cliente", "servico", "login", "fechada_em", "iniciada_em", "fechada_por", "tecnicos", "motivo_fechamento", "descricao_fechamento", "ipv4"];
+    if (checkConnection) head.push("conexao");
+    if (checkRemoteAccess) head.push("acesso_remoto");
+    if (checkIPv6) head.push("ipv6");
+    const rows = filteredItems.map((it) => {
+      const r = [
+        it.number ?? "", it.protocol ?? "", txt(it.type), txt(it.status), txt(it.client_name), txt(it.service_name), it.login ?? "",
+        fmtDateTime(it.closed_at) === "—" ? "" : fmtDateTime(it.closed_at), fmtDateTime(it.started_at) === "—" ? "" : fmtDateTime(it.started_at),
+        txt(it.closed_by), (it.technicians ?? []).join(", "), (it.closing_reasons ?? []).join(", "), txt(it.closing_description), it.ipv4 ?? "",
+      ];
+      if (checkConnection) r.push(yesNo(it.connection_checked, it.connection_online, "Conectado", "Desconectado"));
+      if (checkRemoteAccess) r.push(yesNo(it.remote_access_checked, it.remote_access_ok, "OK", "Sem acesso"));
+      if (checkIPv6) r.push(yesNo(it.ipv6_checked, it.ipv6_present, "Sim", "Não"));
+      return r;
+    });
+    downloadCsv(`conferencia-os-${from}-a-${to}.csv`, head, rows);
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -309,11 +336,17 @@ export function HubsoftConferenceModal({ onClose }: { onClose: () => void }) {
                 {statusFilter.size > 0 ? ` · status: ${Array.from(statusFilter).join(", ")}` : ""}{" "}
                 ({fmtInt(filteredItems.length)})
               </h4>
-              {filter ? (
-                <button type="button" className="btn btn--sm" onClick={() => setFilter(null)}>
-                  Limpar filtro
+              <div className="row" style={{ gap: 6 }}>
+                {filter ? (
+                  <button type="button" className="btn btn--sm" onClick={() => setFilter(null)}>
+                    Limpar filtro
+                  </button>
+                ) : null}
+                <button type="button" className="btn btn--sm" disabled={filteredItems.length === 0} onClick={exportCsv} title="Baixa a tabela como está (com os filtros aplicados)">
+                  <Download size={13} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+                  Exportar CSV
                 </button>
-              ) : null}
+              </div>
             </div>
 
             <div className="table-wrap" style={{ maxHeight: "56vh", overflow: "auto" }}>

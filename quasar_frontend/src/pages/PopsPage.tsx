@@ -12,6 +12,7 @@ import { pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCa
 import { queryKeys } from "../lib/queryKeys";
 import { useTabSearchParam } from "../lib/useTabSearchParam";
 import { ActionMenu } from "../components/ActionMenu";
+import { ExportMenu } from "../components/ExportMenu";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DropdownMenu } from "../components/DropdownMenu";
 import { PageCountPill } from "../components/PageCountPill";
@@ -706,13 +707,47 @@ export function PopsPage() {
         </button>
       </div>
 
-      <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div className="card" style={{ padding: 12, marginBottom: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <input
           className="input"
+          style={{ flex: "1 1 280px" }}
           placeholder={tab === "localidades" ? "Pesquisar por nome, UF, VLAN, POP…" : "Pesquisar POP ou localidade…"}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
+        {tab === "localidades" ? (
+          <ExportMenu
+            filename="localidades"
+            title="Localidades"
+            rows={locRows}
+            columns={[
+              { header: "Nome", value: (l) => l.name },
+              { header: "UF", value: (l) => l.uf || l.region_code },
+              { header: "Endereço", value: (l) => l.address },
+              { header: "Latitude", value: (l) => l.latitude },
+              { header: "Longitude", value: (l) => l.longitude },
+              { header: "POPs", value: (l) => (l.pops ?? []).map((p) => p.description).join(", ") },
+              { header: "Equipamentos nos POPs", value: (l) => (l.pops ?? []).reduce((n, p) => n + (p.device_count ?? 0), 0) },
+              { header: "VLANs", value: (l) => (l.vlans ?? []).join(", ") },
+              { header: "Clientes", value: (l) => l.client_count },
+              { header: "Mês dos clientes", value: (l) => l.client_month },
+            ]}
+          />
+        ) : (
+          <ExportMenu
+            filename="pops"
+            title="POPs"
+            rows={popRows}
+            columns={[
+              { header: "Nome", value: (p) => p.description },
+              { header: "Localidade", value: (p) => p.locality_name },
+              { header: "Endereço", value: (p) => p.address },
+              { header: "Latitude", value: (p) => p.latitude },
+              { header: "Longitude", value: (p) => p.longitude },
+              { header: "Equipamentos", value: (p) => p.device_count ?? 0 },
+            ]}
+          />
+        )}
       </div>
 
       {tab === "localidades" && (

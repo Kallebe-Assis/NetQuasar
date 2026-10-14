@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -205,32 +204,6 @@ func collectInternal(ctx context.Context, host, community string, profile Profil
 		out.Fields[entry.Key] = fr
 	}
 	return out
-}
-
-func buildSessionsFromOutput(profile Profile, out CollectOutput) []SessionRow {
-	columnMaps := make(map[string]map[string]string)
-	for _, key := range SessionWalkKeys() {
-		fr, ok := out.Fields[key]
-		if !ok || !fr.OK {
-			continue
-		}
-		def := profile.Metrics[key]
-		base := strings.TrimSpace(def.OID)
-		if base == "" {
-			base = catalogPlaceholder(key)
-		}
-		m := make(map[string]string)
-		for _, v := range walkVarsToSlice(fr.Value) {
-			idx := extractIndexFromOID(v.OID, base)
-			if idx == "" {
-				continue
-			}
-			m[idx] = strings.TrimSpace(v.Value)
-		}
-		columnMaps[key] = m
-	}
-	sessions := mergeSessionMaps(columnMaps)
-	return ApplyLoginStripToSessions(sessions, profile.Options.PPPoELoginStripSuffix)
 }
 
 func catalogPlaceholder(key string) string {
@@ -618,47 +591,3 @@ func CollectAndStorePeriodicMode(ctx context.Context, pool *pgxpool.Pool, device
 	return out, err
 }
 
-func fmtIntAny(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case float64:
-		return strconv.FormatInt(int64(x), 10)
-	case int:
-		return strconv.Itoa(x)
-	default:
-		return ""
-	}
-}
-
-func walkVarsToSlice(v any) []probing.SNMPVar {
-	switch x := v.(type) {
-	case []probing.SNMPVar:
-		return x
-	case []any:
-		out := make([]probing.SNMPVar, 0, len(x))
-		for _, item := range x {
-			m, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			out = append(out, probing.SNMPVar{
-				OID:   stringField(m, "oid"),
-				Type:  stringField(m, "type"),
-				Value: stringField(m, "value"),
-			})
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func stringField(m map[string]any, k string) string {
-	if v, ok := m[k]; ok && v != nil {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}

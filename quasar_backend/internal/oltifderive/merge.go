@@ -1,7 +1,6 @@
 package oltifderive
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -260,15 +259,3 @@ func MergePonRowsForIfaceRefresh(existing []map[string]any, fromIf []map[string]
 	return out
 }
 
-// MergeSummaryJSON combina JSON de summary existente com patch (preserva vsol_onu_rows, etc.).
-func MergeSummaryJSON(cur []byte, patch map[string]any) ([]byte, error) {
-	var m map[string]any
-	if len(cur) > 0 && json.Unmarshal(cur, &m) == nil && m != nil {
-	} else {
-		m = map[string]any{}
-	}
-	for k, v := range patch {
-		m[k] = v
-	}
-	return json.Marshal(m)
-}

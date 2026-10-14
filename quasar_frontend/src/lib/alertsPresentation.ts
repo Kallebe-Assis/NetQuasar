@@ -246,13 +246,6 @@ export const ALERT_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "onu_monitor_rx_low", label: "ONU monitorada — RX baixo" },
 ];
 
-export const ALERT_SEVERITY_FILTER_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "Todas as severidades" },
-  { value: "critical", label: "Crítico" },
-  { value: "warning", label: "Atenção" },
-  { value: "info", label: "Informação" },
-];
-
 /** Tempo relativo compacto (estilo «há 2 min») */
 export function formatRelativeCompactPt(iso: string | null | undefined, tick?: number): string {
   void tick;

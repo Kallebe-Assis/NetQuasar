@@ -1,4 +1,3 @@
-import { buildExcelCsvBlob } from "./excelCsv";
 import { apiFetch } from "./api";
 import { getAuthToken } from "./auth";
 
@@ -127,28 +126,6 @@ export type SystemReportPayload = {
   }>;
 };
 
-export const SYSTEM_REPORT_IDS: SystemReportId[] = [
-  "active-alerts",
-  "connections",
-  "equipment-by-pop",
-  "olt-overview",
-  "system-general",
-  "integrations",
-  "attention-devices",
-  "alerts-by-category",
-  "onu-per-pon",
-  "bng-subscribers",
-  "network-events",
-  "ftth-infra",
-  "pon-down",
-  "automations",
-  "monitoring-health",
-  "commercial-base",
-  "device-alert-analysis",
-  "bgp-overview",
-  "hubsoft-overview",
-];
-
 export function fetchSystemReportCatalog() {
   return apiFetch<{ reports: SystemReportCatalogItem[] }>("/api/v1/reports/system");
 }
@@ -232,17 +209,6 @@ export function downloadSystemReportCsv(id: SystemReportId, opts?: AnySystemRepo
     a.click();
     URL.revokeObjectURL(a.href);
   });
-}
-
-export function downloadSystemReportCsvClient(payload: SystemReportPayload) {
-  const cols = payload.columns ?? [];
-  const rows = payload.rows ?? [];
-  const blob = buildExcelCsvBlob([cols, ...rows]);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `relatorio_${payload.report_id}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
 }
 
 export function sendSystemReportTelegram(id: SystemReportId, opts?: AnySystemReportOptions) {

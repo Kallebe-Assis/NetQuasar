@@ -7,6 +7,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { ExportMenu } from "../../components/ExportMenu";
 
 type Fuel = { id: string; description: string; code?: string | null; fuel_type?: string | null; unit: string; active: boolean; notes?: string | null };
 
@@ -51,7 +52,22 @@ export function FleetFuelsPage({ embedded }: { embedded?: boolean } = {}) {
   const body = (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
-        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Combustíveis</h1>}
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          {embedded ? null : <h1 style={{ margin: 0 }}>Frota — Combustíveis</h1>}
+          <ExportMenu
+            filename="frota-combustiveis"
+            title="Frota — Combustíveis"
+            rows={q.data?.items ?? []}
+            columns={[
+              { header: "Descrição", value: (f) => f.description },
+              { header: "Código", value: (f) => f.code },
+              { header: "Tipo", value: (f) => f.fuel_type },
+              { header: "Unidade", value: (f) => f.unit },
+              { header: "Ativo", value: (f) => f.active },
+              { header: "Observação", value: (f) => f.notes },
+            ]}
+          />
+        </div>
         {canMutate ? (
           <button
             type="button"

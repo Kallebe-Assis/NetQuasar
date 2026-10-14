@@ -581,18 +581,6 @@ func formatYearMonthPTCommercial(ym string) string {
 	return meses[mi-1] + " de " + y
 }
 
-func escapeCommercialTelegramHTML(s string) string {
-	return strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-	).Replace(s)
-}
-
-func wrapCommercialTelegramPre(plain string) string {
-	return "<pre>" + escapeCommercialTelegramHTML(plain) + "</pre>"
-}
-
 func clipCommercialPlain(s string, max int) string {
 	if len(s) <= max {
 		return s

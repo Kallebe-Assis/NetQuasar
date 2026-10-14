@@ -158,11 +158,6 @@ func normalizeSteps(in []Step) []Step {
 	return out
 }
 
-// IsSimpleOnuWalk perfil com um único passo onu_snmp_walk ou onu_metrics_collect.
-func IsSimpleOnuWalk(steps []Step) bool {
-	return IsSimpleOnuCollect(steps)
-}
-
 // EnabledSteps devolve apenas passos activos.
 func EnabledSteps(steps []Step) []Step {
 	out := make([]Step, 0, len(steps))

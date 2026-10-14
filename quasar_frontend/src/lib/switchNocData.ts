@@ -1,6 +1,5 @@
 import {
   buildMikrotikNocKpis,
-  buildMikrotikPppoeTop,
   buildMikrotikSfpPanels,
   buildMikrotikSystemInfo,
   type MikrotikIfRow,
@@ -24,10 +23,6 @@ function mapSwitchMetrics(metrics: Record<string, unknown> | undefined): Record<
 
 export function buildSwitchNocKpis(metrics: Record<string, unknown> | undefined, deviceName: string): MikrotikNocKpis {
   return buildMikrotikNocKpis(mapSwitchMetrics(metrics), deviceName);
-}
-
-export function buildSwitchPppoeTop(metrics: Record<string, unknown> | undefined, limit = 5): MikrotikPppoeRow[] {
-  return buildMikrotikPppoeTop(mapSwitchMetrics(metrics), limit);
 }
 
 export function buildSwitchSfpPanels(metrics: Record<string, unknown> | undefined, ifaces: MikrotikIfRow[]): MikrotikSfpPanel[] {

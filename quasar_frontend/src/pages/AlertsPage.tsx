@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileExclamationPoint, LayoutGrid, Loader2, MessageCircleX, ShieldAlert, SquareStack } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, CircleAlert, Flame, Info, LayoutGrid, Loader2, MessageCircleX, Search, ShieldAlert, SquareStack, TriangleAlert } from "lucide-react";
 import { ActionMenu } from "../components/ActionMenu";
 import { AffectedClientsModal } from "../components/AffectedClientsModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { InfoHint } from "../components/InfoHint";
 import { EmptyState } from "../components/EmptyState";
+import { ExportMenu } from "../components/ExportMenu";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { flushSync } from "react-dom";
@@ -20,7 +21,6 @@ import {
   severityPillClass,
 } from "../lib/alertLabels";
 import {
-  ALERT_SEVERITY_FILTER_OPTIONS,
   ALERT_TYPE_FILTER_OPTIONS,
   alertCategoryFromType,
   alertCategoryLabel,
@@ -78,6 +78,8 @@ type ActiveAlert = {
   incident_id?: string | null;
   meta?: unknown;
   pop_name?: string | null;
+  /** Nome que o usuário deu à interface no cadastro do equipamento (aba Interfaces). */
+  interface_custom_name?: string | null;
   /** Categoria do equipamento (ex.: "OLT") — só usado para decidir se mostra «Clientes afetados». */
   device_category?: string | null;
 };
@@ -139,7 +141,27 @@ type HistoryEvent = {
   closed_at?: string | null;
   meta?: unknown;
   pop_name?: string | null;
+  interface_custom_name?: string | null;
 };
+
+type HistoryResponse = { events: HistoryEvent[]; total: number; page: number; page_size: number };
+
+/** Itens por página do histórico (paginação feita no servidor). */
+const HISTORY_PAGE_SIZE = 50;
+
+const SEVERITY_RANK: Record<string, number> = { critical: 3, warning: 2, info: 1 };
+type SevKey = "critical" | "warning" | "info";
+const SEV_CHIPS: { value: SevKey; label: string; Icon: typeof Flame }[] = [
+  { value: "critical", label: "Crítico", Icon: Flame },
+  { value: "warning", label: "Atenção", Icon: TriangleAlert },
+  { value: "info", label: "Informativo", Icon: Info },
+];
+const GROUP_ICON: Record<SevKey, typeof Flame> = { critical: TriangleAlert, warning: CircleAlert, info: TriangleAlert };
+
+function sevKeyOf(raw: string | null | undefined): SevKey {
+  const k = String(raw ?? "").trim().toLowerCase();
+  return k === "critical" || k === "warning" ? k : "info";
+}
 
 /** Recarrega alertas periodicamente — mesma instância pode ter message/meta novos (ex.: latência 243→210). */
 const ALERTS_ACTIVE_REFRESH_MS = 2_500;
@@ -159,14 +181,15 @@ export function AlertsPage() {
   const [sev, setSev] = useState("");
   const [typ, setTyp] = useState("");
   const [limitActive] = useState("5000");
-  const [limitHist] = useState("5000");
+  const [histPage, setHistPage] = useState(1);
   const [histSearch, setHistSearch] = useState("");
+  /** Texto do histórico já «assentado» (evita uma consulta a cada tecla). */
+  const [histQ, setHistQ] = useState("");
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
   const [searchActive, setSearchActive] = useState("");
   /** Agrupa a lista por tipo de alerta (offline, latência, SFP…). Ligado por defeito. */
   const [groupByType, setGroupByType] = useState(true);
-  const [sevMenuOpen, setSevMenuOpen] = useState(false);
   const [typMenuOpen, setTypMenuOpen] = useState(false);
   const toolbarFiltersRef = useRef<HTMLDivElement | null>(null);
 
@@ -177,17 +200,22 @@ export function AlertsPage() {
   }, [tab]);
 
   useEffect(() => {
-    if (!sevMenuOpen && !typMenuOpen) return;
+    if (!typMenuOpen) return;
     const onDoc = (ev: MouseEvent) => {
       const el = toolbarFiltersRef.current;
-      if (el && !el.contains(ev.target as Node)) {
-        setSevMenuOpen(false);
-        setTypMenuOpen(false);
-      }
+      if (el && !el.contains(ev.target as Node)) setTypMenuOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [sevMenuOpen, typMenuOpen]);
+  }, [typMenuOpen]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setHistQ(histSearch.trim());
+      setHistPage(1);
+    }, 350);
+    return () => window.clearTimeout(id);
+  }, [histSearch]);
 
   const monState = useQuery({
     queryKey: queryKeys.monState,
@@ -221,10 +249,9 @@ export function AlertsPage() {
   });
 
   const active = useQuery({
-    queryKey: [...queryKeys.alertsActive, sev, typ, limitActive],
+    queryKey: [...queryKeys.alertsActive, typ, limitActive],
     queryFn: () => {
       const p = new URLSearchParams();
-      if (sev.trim()) p.set("severity", sev.trim());
       if (typ.trim()) p.set("type", typ.trim());
       const lim = Math.min(5000, Math.max(1, Number(limitActive) || 5000));
       p.set("limit", String(lim));
@@ -239,19 +266,20 @@ export function AlertsPage() {
   });
 
   const hist = useQuery({
-    queryKey: ["alerts-hist", limitHist, histFrom, histTo],
+    queryKey: ["alerts-hist", HISTORY_PAGE_SIZE, histPage, histQ, histFrom, histTo],
     queryFn: () => {
-      const lim = Math.min(5000, Math.max(1, Number(limitHist) || 5000));
-      const p = new URLSearchParams({ limit: String(lim) });
+      const p = new URLSearchParams({ page: String(histPage), page_size: String(HISTORY_PAGE_SIZE) });
       const from = histFrom.trim();
       const to = histTo.trim();
       if (from && to) {
         p.set("from", new Date(from).toISOString());
         p.set("to", new Date(to).toISOString());
       }
-      return apiFetch<{ events: HistoryEvent[] }>(`/api/v1/alerts/history?${p}`);
+      if (histQ) p.set("q", histQ);
+      return apiFetch<HistoryResponse>(`/api/v1/alerts/history?${p}`);
     },
     enabled: tab === "hist",
+    placeholderData: keepPreviousData,
     refetchOnMount: "always",
     refetchInterval: tab === "hist" ? ALERTS_HISTORY_REFRESH_MS : false,
     refetchIntervalInBackground: tab === "hist",
@@ -347,15 +375,25 @@ export function AlertsPage() {
   }
 
   const rawAlerts = active.data?.alerts ?? [];
+  const sevCounts = useMemo(() => {
+    const c: Record<SevKey, number> = { critical: 0, warning: 0, info: 0 };
+    for (const a of rawAlerts) if (!a.closed_at) c[sevKeyOf(a.severity)] += 1;
+    return c;
+  }, [rawAlerts]);
+  const openCount = sevCounts.critical + sevCounts.warning + sevCounts.info;
+
   const filteredActive = useMemo(() => {
     const q = searchActive.trim().toLowerCase();
-    if (!q) return rawAlerts;
     return rawAlerts.filter((a) => {
+      if (sev && sevKeyOf(a.severity) !== sev) return false;
+      if (!q) return true;
       const hay = [
         a.device_name,
         a.ip,
+        a.interface_custom_name,
         a.message,
         a.type,
+        formatAlertPopName(a.pop_name, a.meta),
         displaySeverity(a.severity),
         displayActiveRowSeverity(a.severity, a.closed_at ?? null),
         alertProblemTitle(a.type, a.meta),
@@ -364,7 +402,7 @@ export function AlertsPage() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [rawAlerts, searchActive]);
+  }, [rawAlerts, searchActive, sev]);
 
   const groupedActive = useMemo(() => {
     const map = new Map<string, ActiveAlert[]>();
@@ -375,33 +413,34 @@ export function AlertsPage() {
       else map.set(key, [a]);
     }
     return [...map.entries()]
-      .map(([type, items]) => ({
-        type,
-        title: alertProblemTitle(type === "_other" ? "" : type),
-        items,
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title, "pt"));
+      .map(([type, items]) => {
+        // a cor do cabeçalho do grupo é a da pior severidade entre os alertas dele
+        let worst: SevKey = "info";
+        for (const a of items) if ((SEVERITY_RANK[sevKeyOf(a.severity)] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) worst = sevKeyOf(a.severity);
+        return { type, title: alertProblemTitle(type === "_other" ? "" : type), items, sev: worst };
+      })
+      .sort((a, b) => (SEVERITY_RANK[b.sev] ?? 0) - (SEVERITY_RANK[a.sev] ?? 0) || a.title.localeCompare(b.title, "pt"));
   }, [filteredActive]);
 
-
-  const filteredHistory = useMemo(() => {
-    const list = hist.data?.events ?? [];
-    const q = histSearch.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((e) => {
-      const haystack = [
-        e.message,
-        e.type,
-        e.severity,
-        e.device_name ?? "",
-        e.ip ?? "",
-        alertProblemTitle(e.type, e.meta),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [hist.data?.events, histSearch]);
+  // histórico: a página já vem filtrada e paginada do servidor
+  /** Todos os eventos do filtro atual (a tela pagina de 50 em 50; a exportação traz até 5000, os mais recentes). */
+  async function loadHistoryForExport(): Promise<HistoryEvent[]> {
+    const p = new URLSearchParams({ limit: "5000" });
+    const from = histFrom.trim();
+    const to = histTo.trim();
+    if (from && to) {
+      p.set("from", new Date(from).toISOString());
+      p.set("to", new Date(to).toISOString());
+    }
+    if (histQ) p.set("q", histQ);
+    const r = await apiFetch<{ events: HistoryEvent[] }>(`/api/v1/alerts/history?${p}`);
+    return r.events ?? [];
+  }
+  const historyEvents = hist.data?.events ?? [];
+  const histTotal = hist.data?.total ?? 0;
+  const histPages = Math.max(1, Math.ceil(histTotal / HISTORY_PAGE_SIZE));
+  const histFirst = histTotal === 0 ? 0 : (histPage - 1) * HISTORY_PAGE_SIZE + 1;
+  const histLast = Math.min(histTotal, histPage * HISTORY_PAGE_SIZE);
 
   const ignoredRows = ignoredQ.data?.ignored ?? [];
   const ignoredDeviceOptions = useMemo(() => {
@@ -510,114 +549,6 @@ export function AlertsPage() {
 
       {tab === "active" && (
         <>
-          <div className="alerts-toolbar" ref={toolbarFiltersRef}>
-            <input
-              className="input alerts-toolbar__search"
-              aria-label="Pesquisar alertas"
-              placeholder="Pesquisar equipamento, IP, tipo de problema…"
-              value={searchActive}
-              onChange={(e) => setSearchActive(e.target.value)}
-            />
-            <div className="alerts-toolbar__actions">
-              <button
-                type="button"
-                className="btn btn--icon btn--icon-menu"
-                disabled={verifyAll.isPending}
-                title="Verificar alertas"
-                aria-label="Verificar alertas"
-                onClick={() => setConfirmVerifyAll(true)}
-              >
-                {verifyAll.isPending ? <Loader2 size={18} className="map-refresh-spin" aria-hidden /> : <ShieldAlert size={18} aria-hidden />}
-              </button>
-
-              <div className="alerts-toolbar__menu-wrap">
-                <button
-                  type="button"
-                  className={`btn btn--icon btn--icon-menu${sev ? " btn--filter-active" : ""}${sevMenuOpen ? " btn--primary" : ""}`}
-                  title="Severidade"
-                  aria-label="Filtrar por severidade"
-                  aria-expanded={sevMenuOpen}
-                  onClick={() => {
-                    setSevMenuOpen((o) => !o);
-                    setTypMenuOpen(false);
-                  }}
-                >
-                  <FileExclamationPoint size={18} aria-hidden />
-                </button>
-                {sevMenuOpen ? (
-                  <div className="alerts-toolbar__menu" role="listbox" aria-label="Severidade">
-                    {ALERT_SEVERITY_FILTER_OPTIONS.map((o) => (
-                      <button
-                        key={o.value || "all-sev"}
-                        type="button"
-                        className={`alerts-toolbar__menu-item${sev === o.value ? " is-active" : ""}`}
-                        onClick={() => {
-                          setSev(o.value);
-                          setSevMenuOpen(false);
-                        }}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="alerts-toolbar__menu-wrap">
-                <button
-                  type="button"
-                  className={`btn btn--icon btn--icon-menu${typ ? " btn--filter-active" : ""}${typMenuOpen ? " btn--primary" : ""}`}
-                  title="Tipo"
-                  aria-label="Filtrar por tipo"
-                  aria-expanded={typMenuOpen}
-                  onClick={() => {
-                    setTypMenuOpen((o) => !o);
-                    setSevMenuOpen(false);
-                  }}
-                >
-                  <LayoutGrid size={18} aria-hidden />
-                </button>
-                {typMenuOpen ? (
-                  <div className="alerts-toolbar__menu alerts-toolbar__menu--wide alerts-toolbar__menu--end" role="listbox" aria-label="Tipo">
-                    {ALERT_TYPE_FILTER_OPTIONS.map((o) => (
-                      <button
-                        key={o.value || "all"}
-                        type="button"
-                        className={`alerts-toolbar__menu-item${typ === o.value ? " is-active" : ""}`}
-                        onClick={() => {
-                          setTyp(o.value);
-                          setTypMenuOpen(false);
-                        }}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              <button
-                type="button"
-                className={`btn btn--icon btn--icon-menu${groupByType ? " btn--primary" : ""}`}
-                title={groupByType ? "Categorizar: ligado (lista separada por tipo)" : "Categorizar: desligado (lista unificada)"}
-                aria-label="Categorizar alertas por tipo"
-                aria-pressed={groupByType}
-                onClick={() => setGroupByType((v) => !v)}
-              >
-                <SquareStack size={18} aria-hidden />
-              </button>
-
-              <button
-                type="button"
-                className="btn btn--icon btn--icon-menu"
-                title="Alertas ignorados"
-                aria-label="Alertas ignorados"
-                onClick={openIgnoredModal}
-              >
-                <MessageCircleX size={18} aria-hidden />
-              </button>
-            </div>
-          </div>
           {verifyAll.isError && <div className="msg msg--err margin-bottom mb-12">{(verifyAll.error as Error).message}</div>}
           {verifyAll.isPending ? (
             <div className="msg" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
@@ -626,16 +557,133 @@ export function AlertsPage() {
             </div>
           ) : null}
 
-          <div className="alerts-panel">
+          <div className="alerts-panel alerts-panel--cards">
             <div className="alerts-panel__head">
-              <strong style={{ fontSize: 14 }}>Lista de alertas</strong>
+              <div className="alerts-panel__title">
+                <strong>Lista de alertas</strong>
+                <span className={`alerts-count-pill${openCount > 0 ? " alerts-count-pill--on" : ""}`}>
+                  {openCount} {openCount === 1 ? "alerta ativo" : "alertas ativos"}
+                </span>
+              </div>
+              <div className="alerts-toolbar__actions" ref={toolbarFiltersRef}>
+                <ExportMenu
+                  filename="alertas-ativos"
+                  title="Alertas ativos"
+                  rows={filteredActive}
+                  columns={[
+                    { header: "Início", value: (a) => formatAlertDateTimePt(a.active_since) },
+                    { header: "Normalizado em", value: (a) => (a.closed_at ? formatAlertDateTimePt(a.closed_at) : "") },
+                    { header: "Severidade", value: (a) => displayActiveRowSeverity(a.severity, a.closed_at ?? null) },
+                    { header: "Categoria", value: (a) => alertCategoryLabel(alertCategoryFromType(a.type)) },
+                    { header: "Problema", value: (a) => alertProblemTitle(a.type, a.meta) },
+                    { header: "Interface", value: (a) => a.interface_custom_name },
+                    { header: "Valor", value: (a) => alertValueText(a.type, a.message, a.meta) },
+                    { header: "Equipamento", value: (a) => alertEquipmentPrimary(a.type, a.device_name, a.message, a.meta) },
+                    { header: "IP", value: (a) => a.ip },
+                    { header: "POP", value: (a) => formatAlertPopName(a.pop_name, a.meta) },
+                    { header: "Mensagem", value: (a) => a.message },
+                  ]}
+                />
+                <button
+                  type="button"
+                  className="btn btn--icon btn--icon-menu"
+                  disabled={verifyAll.isPending}
+                  title="Verificar alertas"
+                  aria-label="Verificar alertas"
+                  onClick={() => setConfirmVerifyAll(true)}
+                >
+                  {verifyAll.isPending ? <Loader2 size={18} className="map-refresh-spin" aria-hidden /> : <ShieldAlert size={18} aria-hidden />}
+                </button>
+
+                <div className="alerts-toolbar__menu-wrap">
+                  <button
+                    type="button"
+                    className={`btn btn--icon btn--icon-menu${typ ? " btn--filter-active" : ""}${typMenuOpen ? " btn--primary" : ""}`}
+                    title="Tipo"
+                    aria-label="Filtrar por tipo"
+                    aria-expanded={typMenuOpen}
+                    onClick={() => setTypMenuOpen((o) => !o)}
+                  >
+                    <LayoutGrid size={18} aria-hidden />
+                  </button>
+                  {typMenuOpen ? (
+                    <div className="alerts-toolbar__menu alerts-toolbar__menu--wide alerts-toolbar__menu--end" role="listbox" aria-label="Tipo">
+                      {ALERT_TYPE_FILTER_OPTIONS.map((o) => (
+                        <button
+                          key={o.value || "all"}
+                          type="button"
+                          className={`alerts-toolbar__menu-item${typ === o.value ? " is-active" : ""}`}
+                          onClick={() => {
+                            setTyp(o.value);
+                            setTypMenuOpen(false);
+                          }}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  className={`btn btn--icon btn--icon-menu${groupByType ? " btn--primary" : ""}`}
+                  title={groupByType ? "Categorizar: ligado (lista separada por tipo)" : "Categorizar: desligado (lista unificada)"}
+                  aria-label="Categorizar alertas por tipo"
+                  aria-pressed={groupByType}
+                  onClick={() => setGroupByType((v) => !v)}
+                >
+                  <SquareStack size={18} aria-hidden />
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn--icon btn--icon-menu"
+                  title="Alertas ignorados"
+                  aria-label="Alertas ignorados"
+                  onClick={openIgnoredModal}
+                >
+                  <MessageCircleX size={18} aria-hidden />
+                </button>
+              </div>
             </div>
+
+            <div className="alerts-filterbar">
+              <span className="alerts-filterbar__label">Filtrar por</span>
+              <div className="alerts-sev-chips" role="group" aria-label="Severidade">
+                {SEV_CHIPS.map(({ value, label, Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`alerts-sev-chip alerts-sev-chip--${value}${sev === value ? " is-active" : ""}`}
+                    aria-pressed={sev === value}
+                    title={sev === value ? "Clique para remover o filtro" : `Mostrar só ${label.toLowerCase()}`}
+                    onClick={() => setSev(sev === value ? "" : value)}
+                  >
+                    <Icon size={13} aria-hidden />
+                    {label}
+                    <span className="alerts-sev-chip__n">{sevCounts[value]}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="alerts-filterbar__search">
+                <Search size={14} aria-hidden />
+                <input
+                  className="input"
+                  aria-label="Pesquisar alertas"
+                  placeholder="Filtrar por equipamento, POP ou problema…"
+                  value={searchActive}
+                  onChange={(e) => setSearchActive(e.target.value)}
+                />
+              </label>
+            </div>
+
             {active.isLoading && <p style={{ padding: 16 }}>A carregar…</p>}
             {active.isError && <div className="msg msg--err margin m-14">{(active.error as Error).message}</div>}
             {!active.isLoading && active.data && (
               <>
-                <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
-                  <table>
+                <div className="alerts-table-wrap">
+                  <table className="alerts-table">
                     <thead>
                       <tr>
                         <th>Quando</th>
@@ -657,15 +705,18 @@ export function AlertsPage() {
                               key: `g-${g.type}`,
                               title: g.title,
                               count: g.items.length,
+                              sev: g.sev,
                             },
                             ...g.items.map((a) => ({ kind: "row" as const, key: a.id, alert: a })),
                           ])
                         : filteredActive.map((a) => ({ kind: "row" as const, key: a.id, alert: a }))
                       ).map((entry) => {
                         if (entry.kind === "group") {
+                          const GroupIcon = GROUP_ICON[entry.sev];
                           return (
-                            <tr key={entry.key} className="alerts-group-row">
+                            <tr key={entry.key} className={`alerts-group-row alerts-group-row--${entry.sev}`}>
                               <td colSpan={9}>
+                                <GroupIcon size={15} className="alerts-group-row__icon" aria-hidden />
                                 <span className="alerts-group-row__title">{entry.title}</span>
                                 <span className="alerts-group-row__count">{entry.count}</span>
                               </td>
@@ -678,7 +729,7 @@ export function AlertsPage() {
                         const timeRef = resolved ? (a.closed_at as string) : a.active_since;
                         const busy = verifyingId === a.id && verifyOneMut.isPending;
                         return (
-                          <tr key={a.id}>
+                          <tr key={a.id} className="alerts-row">
                             <td style={{ whiteSpace: "nowrap", fontSize: 12 }} title={formatAlertDateTimePt(timeRef)}>
                               {resolved ? (
                                 <>
@@ -699,11 +750,14 @@ export function AlertsPage() {
                             <td>
                               <span className="alerts-cat-badge">{alertCategoryLabel(cat)}</span>
                             </td>
-                            <td className="alerts-problem">{alertProblemTitle(a.type, a.meta)}</td>
+                            <td className="alerts-problem">
+                              {alertProblemTitle(a.type, a.meta)}
+                              {a.interface_custom_name ? <div className="alerts-problem__iface">Interface: {a.interface_custom_name}</div> : null}
+                            </td>
                             <td className="alerts-msg">{alertValueText(a.type, a.message, a.meta)}</td>
                             <td>
                               <div className="alerts-dev">
-                                {alertEquipmentPrimary(a.type, a.device_name, a.message, a.meta)}
+                                <span className="alerts-dev__name">{alertEquipmentPrimary(a.type, a.device_name, a.message, a.meta)}</span>
                                 {a.ip ? <div className="alerts-dev__ip">{a.ip}</div> : null}
                               </div>
                             </td>
@@ -720,7 +774,7 @@ export function AlertsPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <span className="alerts-status-pill alerts-status-pill--open">● Ativo</span>
+                                <span className="alerts-status-pill alerts-status-pill--active">● Ativo</span>
                               )}
                               {a.incident_id ? (
                                 <span className="badge badge--off" style={{ marginLeft: 6, fontSize: 10 }} title="Incidente correlacionado">
@@ -777,8 +831,8 @@ export function AlertsPage() {
 
       {tab === "hist" && (
         <>
-          <div className="alerts-toolbar">
-            <div className="field alerts-toolbar__search" style={{ margin: 0 }}>
+          <div className="alerts-toolbar alerts-toolbar--hist">
+            <div className="field alerts-toolbar__search alerts-toolbar__search--wide" style={{ margin: 0 }}>
               <label style={{ fontSize: 11, color: "var(--muted)" }}>Buscar histórico</label>
               <input className="input" placeholder="Texto livre…" value={histSearch} onChange={(e) => setHistSearch(e.target.value)} />
             </div>
@@ -790,7 +844,15 @@ export function AlertsPage() {
               <label style={{ fontSize: 11, color: "var(--muted)" }}>Até</label>
               <input className="input" type="datetime-local" value={histTo} onChange={(e) => setHistTo(e.target.value)} />
             </div>
-            <button type="button" className="btn btn--primary" disabled={!histFrom.trim() || !histTo.trim()} onClick={() => void hist.refetch()}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!histFrom.trim() || !histTo.trim()}
+              onClick={() => {
+                setHistPage(1);
+                void hist.refetch();
+              }}
+            >
               Aplicar datas
             </button>
             <button
@@ -800,6 +862,7 @@ export function AlertsPage() {
                 flushSync(() => {
                   setHistFrom("");
                   setHistTo("");
+                  setHistPage(1);
                 });
                 void hist.refetch();
               }}
@@ -811,20 +874,61 @@ export function AlertsPage() {
             </button>
           </div>
           <p style={{ color: "var(--muted)", fontSize: 12, marginTop: -4 }}>
-            Sem datas: mostra os eventos mais recentes (limite no servidor). Com datas, lista alertas que
+            Sem datas: mostra os eventos mais recentes, {HISTORY_PAGE_SIZE} por página. Com datas, lista alertas que
             <strong> abriram ou fecharam</strong> dentro do intervalo (hora local convertida para UTC).
           </p>
 
-          <div className="alerts-panel">
+          <div className="alerts-panel alerts-panel--cards">
             <div className="alerts-panel__head">
-              <strong style={{ fontSize: 14 }}>Histórico</strong>
+              <div className="alerts-panel__title">
+                <strong>Histórico</strong>
+                {hist.data ? <span className="alerts-count-pill">{histTotal.toLocaleString("pt-BR")} evento(s)</span> : null}
+                <ExportMenu
+                  filename="alertas-historico"
+                  title="Histórico de alertas"
+                  rows={loadHistoryForExport}
+                  columns={[
+                    { header: "Início", value: (e) => formatAlertDateTimePt(e.active_since) },
+                    { header: "Fim", value: (e) => (e.closed_at ? formatAlertDateTimePt(e.closed_at) : "") },
+                    { header: "Duração", value: (e) => formatAlertDuration(e.active_since, e.closed_at) },
+                    { header: "POP", value: (e) => formatAlertPopName(e.pop_name, e.meta) },
+                    { header: "Severidade", value: (e) => displaySeverity(e.severity) },
+                    { header: "Problema", value: (e) => alertProblemTitle(e.type, e.meta) },
+                    { header: "Interface", value: (e) => e.interface_custom_name },
+                    { header: "Valor normalizado", value: (e) => (e.closed_at ? formatAlertResolvedValue(e.type, e.meta, e.message) : "") },
+                    { header: "Equipamento", value: (e) => alertEquipmentPrimary(e.type, e.device_name ?? null, e.message, e.meta) },
+                    { header: "IP", value: (e) => e.ip },
+                    { header: "Estado", value: (e) => (e.closed_at ? "Resolvido" : "Em aberto") },
+                    { header: "Mensagem", value: (e) => e.message },
+                  ]}
+                />
+              </div>
+              {hist.data ? (
+              <nav className="alerts-pager" aria-label="Paginação do histórico">
+                <button type="button" className="btn btn--sm" disabled={histPage <= 1} onClick={() => setHistPage(1)} aria-label="Primeira página">
+                  «
+                </button>
+                <button type="button" className="btn btn--sm" disabled={histPage <= 1} onClick={() => setHistPage((p) => Math.max(1, p - 1))}>
+                  <ChevronLeft size={14} aria-hidden /> Anterior
+                </button>
+                <span className="alerts-pager__info">
+                  Página {histPage} de {histPages}
+                </span>
+                <button type="button" className="btn btn--sm" disabled={histPage >= histPages} onClick={() => setHistPage((p) => Math.min(histPages, p + 1))}>
+                  Próxima <ChevronRight size={14} aria-hidden />
+                </button>
+                <button type="button" className="btn btn--sm" disabled={histPage >= histPages} onClick={() => setHistPage(histPages)} aria-label="Última página">
+                  »
+                </button>
+              </nav>
+              ) : null}
             </div>
             {hist.isLoading && <p style={{ padding: 16 }}>A carregar…</p>}
             {hist.isError && <div className="msg msg--err margin m-14">{(hist.error as Error).message}</div>}
             {hist.data && (
               <>
-                <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
-                  <table>
+                <div className="alerts-table-wrap" style={{ opacity: hist.isPlaceholderData ? 0.6 : 1 }}>
+                  <table className="alerts-table">
                     <thead>
                       <tr>
                         <th>Início</th>
@@ -839,8 +943,8 @@ export function AlertsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredHistory.map((e) => (
-                        <tr key={e.id}>
+                      {historyEvents.map((e) => (
+                        <tr key={e.id} className="alerts-row">
                           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDateTimePt(e.active_since)}</td>
                           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{e.closed_at ? formatAlertDateTimePt(e.closed_at) : "—"}</td>
                           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAlertDuration(e.active_since, e.closed_at)}</td>
@@ -848,13 +952,16 @@ export function AlertsPage() {
                           <td>
                             <span className={severityPillClass(e.severity)}>{displaySeverity(e.severity)}</span>
                           </td>
-                          <td className="alerts-problem">{alertProblemTitle(e.type, e.meta)}</td>
+                          <td className="alerts-problem">
+                            {alertProblemTitle(e.type, e.meta)}
+                            {e.interface_custom_name ? <div className="alerts-problem__iface">Interface: {e.interface_custom_name}</div> : null}
+                          </td>
                           <td className="alerts-msg mono" style={{ fontSize: 12 }}>
                             {e.closed_at ? formatAlertResolvedValue(e.type, e.meta, e.message) : "—"}
                           </td>
                           <td>
                             <div className="alerts-dev">
-                              {alertEquipmentPrimary(e.type, e.device_name ?? null, e.message, e.meta)}
+                              <span className="alerts-dev__name">{alertEquipmentPrimary(e.type, e.device_name ?? null, e.message, e.meta)}</span>
                               {e.ip ? <div className="alerts-dev__ip">{e.ip}</div> : null}
                             </div>
                           </td>
@@ -870,9 +977,11 @@ export function AlertsPage() {
                     </tbody>
                   </table>
                 </div>
-                {filteredHistory.length === 0 && <p style={{ padding: 16, color: "var(--muted)", margin: 0 }}>Nenhum evento com este filtro.</p>}
+                {historyEvents.length === 0 && <p style={{ padding: 16, color: "var(--muted)", margin: 0 }}>Nenhum evento com este filtro.</p>}
                 <div className="alerts-panel__foot">
-                  <span>{filteredHistory.length} evento(s) nesta lista.</span>
+                  <span>
+                    {histTotal === 0 ? "0 eventos" : `Mostrando ${histFirst.toLocaleString("pt-BR")}–${histLast.toLocaleString("pt-BR")} de ${histTotal.toLocaleString("pt-BR")}`}
+                  </span>
                 </div>
               </>
             )}

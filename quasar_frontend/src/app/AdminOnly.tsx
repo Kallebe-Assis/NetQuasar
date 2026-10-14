@@ -12,10 +12,3 @@ export function AdminOnly({ children, also }: { children: ReactNode; also?: stri
   return <Navigate to={APP_ROUTES.dashboard} replace />;
 }
 
-/** Apenas usuários admin (perfil * / role admin). */
-export function StrictAdminOnly({ children }: { children: ReactNode }) {
-  if (isAdminUser()) {
-    return <>{children}</>;
-  }
-  return <Navigate to={APP_ROUTES.dashboard} replace />;
-}

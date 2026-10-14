@@ -283,14 +283,6 @@ func (c MetricsConfig) MergeWithCatalog(catalog []CatalogEntry, defaults Metrics
 	return out
 }
 
-func CatalogByKey() map[string]CatalogEntry {
-	m := make(map[string]CatalogEntry, len(MetricCatalog))
-	for _, e := range MetricCatalog {
-		m[e.Key] = e
-	}
-	return m
-}
-
 func CatalogEntryFor(key string) (CatalogEntry, bool) {
 	for _, e := range MetricCatalog {
 		if e.Key == key {
@@ -315,45 +307,6 @@ func HasEnabledMetricsForCatalog(c MetricsConfig, catalog []CatalogEntry) bool {
 		}
 	}
 	return false
-}
-
-func EnabledGetOIDs(c MetricsConfig) []string {
-	return EnabledGetOIDsForCatalog(c, MetricCatalog)
-}
-
-func EnabledGetOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, e := range catalog {
-		def, ok := c[e.Key]
-		if !ok || !def.Enabled {
-			continue
-		}
-		oid := strings.TrimSpace(def.OID)
-		if oid == "" {
-			continue
-		}
-		mode := def.CollectMode
-		if mode == "" {
-			mode = e.DefaultMode
-		}
-		if mode != ModeSNMPGet {
-			continue
-		}
-		if e.WalkTarget != TargetTelemetry {
-			continue
-		}
-		if _, dup := seen[oid]; dup {
-			continue
-		}
-		seen[oid] = struct{}{}
-		out = append(out, oid)
-	}
-	return out
-}
-
-func InterfaceWalkOIDs(c MetricsConfig) []string {
-	return InterfaceWalkOIDsForCatalog(c, MetricCatalog)
 }
 
 func InterfaceWalkOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
@@ -389,37 +342,3 @@ func InterfaceWalkOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []stri
 	return out
 }
 
-func TelemetryWalkOIDs(c MetricsConfig) []string {
-	return TelemetryWalkOIDsForCatalog(c, MetricCatalog)
-}
-
-func TelemetryWalkOIDsForCatalog(c MetricsConfig, catalog []CatalogEntry) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, e := range catalog {
-		if e.WalkTarget != TargetTelemetry {
-			continue
-		}
-		def, ok := c[e.Key]
-		if !ok || !def.Enabled {
-			continue
-		}
-		mode := def.CollectMode
-		if mode == "" {
-			mode = e.DefaultMode
-		}
-		if mode != ModeSNMPWalk {
-			continue
-		}
-		oid := strings.TrimSpace(def.OID)
-		if oid == "" {
-			continue
-		}
-		if _, dup := seen[oid]; dup {
-			continue
-		}
-		seen[oid] = struct{}{}
-		out = append(out, oid)
-	}
-	return out
-}

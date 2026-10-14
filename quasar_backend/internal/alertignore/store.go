@@ -201,10 +201,5 @@ func ptrStr(p *string) string {
 	return strings.TrimSpace(*p)
 }
 
-// GuardNewAlert retorna true se o alerta deve ser suprimido (ignorado).
-func GuardNewAlert(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, alertType string, meta map[string]any) bool {
-	return IsMuted(ctx, pool, deviceID, alertType, MetaKeyFromAlert(alertType, meta))
-}
-
 // ErrNotFound alerta não encontrado.
 var ErrNotFound = pgx.ErrNoRows

@@ -7,6 +7,7 @@ import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
 import { toastErr, toastOk } from "../../lib/operationToast";
 import { queryKeys } from "../../lib/queryKeys";
+import { ExportMenu } from "../../components/ExportMenu";
 import { STATION_KIND_LABEL, STATION_STATUS_LABEL, UF_OPTIONS } from "./fleetUtils";
 
 type Station = {
@@ -79,7 +80,24 @@ export function FleetStationsPage({ embedded }: { embedded?: boolean } = {}) {
   const body = (
     <>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
-        {embedded ? <div /> : <h1 style={{ margin: 0 }}>Frota — Postos</h1>}
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          {embedded ? null : <h1 style={{ margin: 0 }}>Frota — Postos</h1>}
+          <ExportMenu
+            filename="frota-postos"
+            title="Frota — Postos"
+            rows={stations.data?.items ?? []}
+            columns={[
+              { header: "Descrição", value: (s) => s.description },
+              { header: "Nome fantasia", value: (s) => s.trade_name },
+              { header: "CNPJ", value: (s) => s.cnpj },
+              { header: "Telefone", value: (s) => s.phone },
+              { header: "Cidade", value: (s) => s.city },
+              { header: "UF", value: (s) => s.uf },
+              { header: "Tipo", value: (s) => STATION_KIND_LABEL[s.station_kind] ?? s.station_kind },
+              { header: "Status", value: (s) => STATION_STATUS_LABEL[s.status] ?? s.status },
+            ]}
+          />
+        </div>
         {canMutate ? (
           <button
             type="button"

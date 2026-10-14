@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -280,73 +279,6 @@ func scaffoldOnuRows(refs []OnuRef) []map[string]any {
 	for _, r := range refs {
 		out = append(out, map[string]any{
 			"pon": r.Pon, "onu": r.Onu, "phase_sta": "—", "online": false, "onu_online_sta": -1,
-		})
-	}
-	return out
-}
-
-func rowsFromVars(vars []probing.SNMPVar) []map[string]any {
-	acc := map[string]*onuAcc{}
-	get := func(pon, onu int) *onuAcc {
-		k := fmt.Sprintf("%d.%d", pon, onu)
-		if acc[k] == nil {
-			acc[k] = newOnuAcc(pon, onu)
-		}
-		return acc[k]
-	}
-	for _, v := range vars {
-		t, col, pon, onu, ok := parseSuffix(v.OID)
-		if !ok {
-			continue
-		}
-		row := get(pon, onu)
-		val := normalizeVSOLString(v.Value)
-		switch t {
-		case 2:
-			switch col {
-			case 5:
-				if isPlausibleOnuSerial(val) {
-					row.sn = val
-				}
-			case 6:
-				row.model = val
-			}
-		case 3:
-			switch col {
-			case 3:
-				row.temp = val
-			case 4:
-				row.volt = val
-			case 7:
-				row.rx = val
-			}
-		case 4:
-			if col == 8 {
-				row.onuOnlineSta = intFromVal(val)
-			}
-		}
-	}
-	return accToOnuRows(acc)
-}
-
-func accToOnuRows(acc map[string]*onuAcc) []map[string]any {
-	keys := make([]string, 0, len(acc))
-	for k := range acc {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]map[string]any, 0, len(keys))
-	for _, k := range keys {
-		o := acc[k]
-		if o == nil {
-			continue
-		}
-		out = append(out, map[string]any{
-			"pon": o.pon, "onu": o.onu,
-			"phase_sta": onuPhaseLabel(o), "online": onuIsOnline(o),
-			"onu_online_sta": o.onuOnlineSta,
-			"temp": o.temp, "voltage": o.volt, "rx_pwr": o.rx,
-			"serial": o.sn, "model": o.model,
 		})
 	}
 	return out

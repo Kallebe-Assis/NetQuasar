@@ -269,24 +269,6 @@ func DefaultStepsFromMetrics(c OnuMetricsConfig) []Step {
 	return []Step{{ID: "onu_metrics", Method: MethodOnuMetricsCollect, Enabled: &en}}
 }
 
-func IsMetricsCollectProfile(steps []Step) bool {
-	en := EnabledSteps(steps)
-	if len(en) == 0 {
-		return false
-	}
-	for _, s := range en {
-		if s.Method != MethodOnuMetricsCollect && s.Method != MethodOnuSNMPWalk {
-			return false
-		}
-	}
-	for _, s := range en {
-		if s.Method == MethodOnuMetricsCollect {
-			return true
-		}
-	}
-	return false
-}
-
 func IsSimpleOnuCollect(steps []Step) bool {
 	en := EnabledSteps(steps)
 	if len(en) == 0 {

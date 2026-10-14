@@ -14,6 +14,7 @@ const ENTITY_TYPES = {
   produto: "hubsoft_stock_product",
   patrimonio: "hubsoft_stock_item",
   comodato: "hubsoft_stock_comodato",
+  transferencia: "hubsoft_stock_transfer",
 } as const;
 
 /**
@@ -22,11 +23,11 @@ const ENTITY_TYPES = {
  */
 // Ações do log que contam como sucesso (a linha cumpriu o que devia: criou, adicionou, corrigiu o
 // login ou confirmou que já existia) — antes só "created" contava e o resto aparecia como erro.
-const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already_exists", "already_done", "brand_repaired", "resumed"]);
+const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already_exists", "already_done", "transferred", "brand_repaired", "resumed"]);
 
 export function HubsoftBulkImportHistory() {
   const { notify } = useConsultaToast();
-  const [kind, setKind] = useState<"client" | "service" | "produto" | "patrimonio" | "comodato">("client");
+  const [kind, setKind] = useState<"client" | "service" | "produto" | "patrimonio" | "comodato" | "transferencia">("client");
   const [rows, setRows] = useState<AuditRowView[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -90,6 +91,7 @@ export function HubsoftBulkImportHistory() {
             { value: "produto", label: "Produtos de estoque" },
             { value: "patrimonio", label: "Patrimônios de estoque" },
             { value: "comodato", label: "Comodato de patrimônio" },
+            { value: "transferencia", label: "Transferência de estoque" },
           ]}
         />
         <div className="hsa-actions">

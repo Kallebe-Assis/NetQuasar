@@ -90,28 +90,6 @@ type WorkOrderConferenceData struct {
 	Truncated bool               `json:"truncated,omitempty"`
 }
 
-// BuildWorkOrderConferenceData faz duas varreduras paginadas (O.S. do período + roster completo
-// de clientes/serviços) e junta-as em memória — evita N chamadas extra (uma por O.S.) para
-// resolver login/IPv4/IPv6/estado de conexão.
-//
-// Uma primeira tentativa desta função ligava a O.S. a "qualquer serviço do cliente com login
-// preenchido" — errado quando o cliente tem mais de um serviço/login (relatado ao vivo: cliente
-// MARLETE GOMES DOMICIANO, O.S. do login "marlete", sistema a conferir "marletegomes" por
-// engano). Uma segunda tentativa foi buscar o atendimento vinculado à O.S., mas
-// /atendimento/todos?relacoes=cliente_servico voltou 0 resultados úteis em produção (confirmado
-// ao vivo via log) — provavelmente essa relação não é suportada nesse endpoint de listagem em
-// massa. A solução real, também confirmada ao vivo: exibir_atendimento=true no /ordem_servico/
-// todos já embute directamente "dados_servico":{"id_cliente_servico":...} e
-// "dados_cliente":{"codigo_cliente":...,"nome_razaosocial":...} em CADA O.S. — o ID exacto do
-// serviço envolvido naquela O.S. especificamente, sem precisar de nenhuma chamada extra nem de
-// adivinhar por cliente. byServiceID cruza isto directo com ReportServiceRow.ServiceID (o mesmo
-// id_cliente_servico já extraído em reportFromClientsTodos). Só cai para o roster completo do
-// cliente (heurística antiga, "primeiro com login") nos poucos casos em que dados_servico não
-// vem preenchido.
-func BuildWorkOrderConferenceData(ctx context.Context, cfg Config, token, from, to string) WorkOrderConferenceData {
-	return BuildWorkOrderConference(ctx, cfg, token, ConferenceOptions{From: from, To: to})
-}
-
 // conferenceMaxDirectClients — até este nº de clientes distintos, os dados de conexão vêm de uma consulta por
 // cliente (poucas chamadas); acima disso, da varredura completa da base (mais barata para muitos clientes).
 const conferenceMaxDirectClients = 150

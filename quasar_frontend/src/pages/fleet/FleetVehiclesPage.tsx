@@ -6,6 +6,7 @@ import { Archive, Ban, Check, CirclePlus, KeyRound, Pause, PenLine, Wrench, X } 
 import { APP_ROUTES } from "../../app/routes";
 import { ActionMenu } from "../../components/ActionMenu";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { ExportMenu } from "../../components/ExportMenu";
 import { apiFetch } from "../../lib/api";
 import { can, isAdminUser } from "../../lib/auth";
 import { useAppToast } from "../../lib/appToast";
@@ -277,6 +278,25 @@ export function FleetVehiclesPage() {
             <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
+        <ExportMenu
+          filename="frota-veiculos"
+          title="Frota — Veículos"
+          rows={filtered}
+          columns={[
+            { header: "Placa", value: (v) => formatFleetPlateOrUnknown(v.plate) },
+            { header: "Descrição", value: (v) => v.description },
+            { header: "Modelo", value: (v) => v.model },
+            { header: "Ano", value: (v) => v.year },
+            { header: "Cor", value: (v) => v.color },
+            { header: "Cidade", value: (v) => v.city },
+            { header: "UF", value: (v) => v.uf },
+            { header: "Combustível", value: (v) => v.primary_fuel_name },
+            { header: "Hodômetro (km)", value: (v) => v.odometer_current },
+            { header: "Centro de custo", value: (v) => v.cost_center_name },
+            { header: "Status", value: (v) => VEHICLE_STATUS.find((s) => s.value === v.status)?.label ?? v.status },
+            { header: "Observação", value: (v) => v.notes },
+          ]}
+        />
         {canMutate ? (
           <button type="button" className="btn btn--icon btn--icon-menu btn--primary" title="Novo veículo" aria-label="Novo veículo" onClick={openCreate}>
             <CirclePlus size={18} aria-hidden />

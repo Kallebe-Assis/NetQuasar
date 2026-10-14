@@ -22,6 +22,7 @@ import {
 } from "../../lib/networkInfraCache";
 import { pageCachedQueryOptions, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
+import { ExportMenu } from "../../components/ExportMenu";
 import {
   INFRA_CSV_TEMPLATES,
   INFRA_IMPORT_BATCH_SIZE,
@@ -621,15 +622,6 @@ export function InfrastructureTab({
     downloadBlob(tpl.fileName, buildExcelCsvBlob([tpl.headers, tpl.sample]));
   }
 
-  function exportCsv() {
-    const tpl = INFRA_CSV_TEMPLATES[variant];
-    const dataRows = filteredRows.map((row) => rowToCsvRow(variant, row));
-    const stamp = new Date().toISOString().slice(0, 10);
-    const slug = variant === "splice" ? "caixas_emenda" : `${variant}s`;
-    downloadBlob(`${slug}_${stamp}.csv`, buildExcelCsvBlob([tpl.headers, ...dataRows]));
-    toastOk(pushToast, `Exportados ${dataRows.length} registo(s).`);
-  }
-
   async function reloadFromDb() {
     try {
       const r = await listQ.refetch();
@@ -683,6 +675,15 @@ export function InfrastructureTab({
         }
       >
         <PageCountPill label={meta.label} count={filteredRows.length} />
+        <ExportMenu
+          filename={variant === "splice" ? "caixas_emenda" : `${variant}s`}
+          title={meta.label}
+          rows={filteredRows}
+          columns={INFRA_CSV_TEMPLATES[variant].headers.map((header, idx) => ({
+            header,
+            value: (row: Row) => rowToCsvRow(variant, row)[idx],
+          }))}
+        />
         {canMutate ? (
           <>
             <button
@@ -707,12 +708,6 @@ export function InfrastructureTab({
                   disabled: importing,
                   onClick: () => setImportOpen(true),
                 },
-                {
-                  id: "export",
-                  label: `Exportar ${meta.label.toLowerCase()} cadastrados`,
-                  disabled: filteredRows.length === 0,
-                  onClick: exportCsv,
-                },
                 ...(importReport && importReport.failed.length > 0
                   ? [
                       {
@@ -736,11 +731,7 @@ export function InfrastructureTab({
               }}
             />
           </>
-        ) : (
-          <button type="button" className="btn" disabled={filteredRows.length === 0} onClick={exportCsv}>
-            Exportar CSV
-          </button>
-        )}
+        ) : null}
       </ConnectionsTabToolbar>
 
       <ConnectionsPager

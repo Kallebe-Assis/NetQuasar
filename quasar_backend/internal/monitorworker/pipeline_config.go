@@ -247,11 +247,6 @@ func EnsureMonitoringBaselineSteps(steps []PipelineStep) []PipelineStep {
 	return ensureMonitoringBaselineSteps(steps)
 }
 
-// EnsureBgpPipelineStep expõe inserção do passo BGP para API/UI.
-func EnsureBgpPipelineStep(steps []PipelineStep) []PipelineStep {
-	return ensureBgpPipelineStep(steps)
-}
-
 // ensureBngPipelineStep insere passo BNG após telemetria quando ausente (instalações anteriores à migração 070).
 func ensureBngPipelineStep(steps []PipelineStep) []PipelineStep {
 	if hasPipelineKind(steps, StepKindBng) {

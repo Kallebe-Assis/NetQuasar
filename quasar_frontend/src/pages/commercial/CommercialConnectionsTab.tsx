@@ -14,6 +14,7 @@ import { filterClientConnectionsList } from "../../lib/connectionsListCache";
 import { invalidatePageCachedQuery, pageCachedQueryOptions, PAGE_DATA_GC_MS, PAGE_DATA_STALE_MS, wrapPageCachedQueryFn } from "../../lib/pageDataCache";
 import { CONN_IMPORT_BATCH_SIZE, parseConnectionsCsvFile } from "../../lib/connCsvImport";
 import { buildExcelCsvBlob } from "../../lib/excelCsv";
+import { ExportMenu } from "../../components/ExportMenu";
 import { toastErr, toastLoading, toastOk } from "../../lib/operationToast";
 import type { IntegrationSummary } from "../../integrations/types";
 import type { ConnectionsTabProps } from "../connections/shared";
@@ -195,28 +196,6 @@ const CSV_HEADER = [
   "latitude",
   "longitude",
 ];
-
-function connToCsvRow(c: ClientConnection): string[] {
-  return [
-    c.client_name,
-    c.address ?? "",
-    c.neighborhood ?? "",
-    c.login,
-    c.password ?? "",
-    c.ip_address ?? "",
-    c.connection_kind,
-    c.medium_type ?? "",
-    c.sales_plan ?? "",
-    c.onu_mac_sn ?? "",
-    c.rx_dbm ?? "",
-    c.tx_dbm ?? "",
-    c.transmitter ?? "",
-    c.cto ?? "",
-    c.port ?? "",
-    c.latitude != null ? String(c.latitude) : "",
-    c.longitude != null ? String(c.longitude) : "",
-  ];
-}
 
 function statusRank(c: ClientConnection): number {
   if (c.connection_kind !== "pppoe") return 3;
@@ -589,13 +568,6 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
     downloadBlob("modelo_conexoes_clientes.csv", buildExcelCsvBlob([CSV_HEADER, sample]));
   }
 
-  function exportConnectionsCsv() {
-    const rows = sortedConnections.map(connToCsvRow);
-    const stamp = new Date().toISOString().slice(0, 10);
-    downloadBlob(`conexoes_clientes_${stamp}.csv`, buildExcelCsvBlob([CSV_HEADER, ...rows]));
-    toastOk(pushToast, `Exportados ${rows.length} login(s).`);
-  }
-
   function openCreate() {
     setEditId(null);
     setForm(EMPTY_FORM);
@@ -683,6 +655,31 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
           <Search size={16} strokeWidth={2} style={{ marginRight: 6, verticalAlign: -3 }} />
           Integrações
         </button>
+        <ExportMenu
+          filename="clientes-logins"
+          title="Clientes — logins"
+          rows={sortedConnections}
+          columns={[
+            { header: "Nº", value: (c) => c.display_number },
+            { header: "Cliente", value: (c) => c.client_name },
+            { header: "Endereço", value: (c) => c.address },
+            { header: "Bairro", value: (c) => c.neighborhood },
+            { header: "Login", value: (c) => c.login },
+            { header: "IP", value: (c) => c.ip_address },
+            { header: "Tipo de conexão", value: (c) => (c.connection_kind === "pppoe" ? "PPPoE" : "DHCP") },
+            { header: "Meio", value: (c) => c.medium_type },
+            { header: "Plano", value: (c) => c.sales_plan },
+            { header: "MAC / SN da ONU", value: (c) => c.onu_mac_sn },
+            { header: "RX (dBm)", value: (c) => c.rx_dbm },
+            { header: "TX (dBm)", value: (c) => c.tx_dbm },
+            { header: "Transmissor", value: (c) => c.transmitter },
+            { header: "CTO", value: (c) => c.cto },
+            { header: "Porta", value: (c) => c.port },
+            { header: "Latitude", value: (c) => c.latitude },
+            { header: "Longitude", value: (c) => c.longitude },
+            { header: "BNG", value: (c) => (c.bng_status === "online" ? "Online" : c.bng_status === "offline" ? "Offline" : "") },
+          ]}
+        />
         {canMutate ? (
           <>
             <button type="button" className="btn btn--primary" onClick={openCreate}>
@@ -698,12 +695,6 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
                   label: importing ? "Importação em curso…" : "Importar CSV…",
                   disabled: importing,
                   onClick: () => setImportOpen(true),
-                },
-                {
-                  id: "export",
-                  label: "Exportar logins cadastrados",
-                  disabled: sortedConnections.length === 0,
-                  onClick: exportConnectionsCsv,
                 },
                 ...(importReport && importReport.failed.length > 0
                   ? [
@@ -728,16 +719,7 @@ export function CommercialConnectionsTab({ canMutate, filters, prefs, onSearchCh
               }}
             />
           </>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            disabled={sortedConnections.length === 0}
-            onClick={exportConnectionsCsv}
-          >
-            Exportar CSV
-          </button>
-        )}
+        ) : null}
       </ConnectionsTabToolbar>
 
       <ConnectionsPager

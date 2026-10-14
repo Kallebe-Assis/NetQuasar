@@ -155,72 +155,6 @@ var scanLetters = []string{"a", "e", "i", "o", "u", "s", "r", "m", "c", "l", "n"
 
 const maxIPMACScanClients = 240 // teto de segurança (12 letras × até 20 clientes cada — ver comentário sobre o limite de 64KB abaixo).
 
-// SearchByIPOrMAC varre clientes da HubSoft (por várias letras comuns em nome_razaosocial,
-// já que não há paginação real disponível — ver scanLetters) e procura
-// servicos[].ipv4 / servicos[].mac_addr até achar correspondência. A API da HubSoft não
-// tem um parâmetro de busca nativo por IP/MAC (confirmado na documentação oficial), mas o
-// retorno detalhado já traz esses campos por serviço.
-func SearchByIPOrMAC(ctx context.Context, cfg Config, token, termo, kind string) (ClientSearchResult, error) {
-	needle := strings.ToUpper(strings.TrimSpace(termo))
-	if kind == "mac" {
-		needle = normalizeMAC(needle)
-	}
-	if needle == "" {
-		return ClientSearchResult{Clients: []ClientCard{}}, fmt.Errorf("termo de busca vazio")
-	}
-
-	seenClientIDs := map[string]bool{}
-	scanned := 0
-	for _, letter := range scanLetters {
-		if scanned >= maxIPMACScanClients {
-			break
-		}
-		// Limit baixo de propósito: o preview de resposta do motor HTTP partilhado
-		// (internal/integrationhttp) tem um teto de 64KB, e cada cliente devolvido pela
-		// HubSoft (mesmo sem os includes extra) já pesa ~2-3KB — 100 clientes por página
-		// (o cap normal) estoura esse teto e a resposta chega truncada/ilegível (testado
-		// directamente contra a API de produção). 20 por letra fica com folga.
-		q := map[string]string{
-			"inativo": "todos", "limit": "20", "cancelado": "nao", "ultima_conexao": "nao",
-			"incluir_alarmes": "nao", "incluir_contrato": "nao", "incluir_stfc": "nao",
-			"incluir_mvno": "nao", "incluir_anexos": "nao", "incluir_desbloqueios": "nao",
-			"order_by": "data_cadastro", "order_type": "desc",
-			"busca": "nome_razaosocial", "termo_busca": letter,
-		}
-		res := integrationhttp.Execute(ctx, cfg.integ(token), integrationhttp.RequestConfig{
-			Method: "GET", Path: "/api/v1/integracao/cliente", QueryParams: paramKVs(q),
-		})
-		parsed := ParseClientSearch(ResponseBodyBytes(res))
-		if !res.OK {
-			continue // uma letra falhando não é fatal — segue para a próxima
-		}
-
-		for _, c := range parsed.Clients {
-			if seenClientIDs[c.ID] {
-				continue
-			}
-			seenClientIDs[c.ID] = true
-			for _, svc := range c.Services {
-				var hay string
-				if kind == "mac" {
-					hay = normalizeMAC(svc.MAC)
-				} else {
-					hay = strings.ToUpper(strings.TrimSpace(svc.IPv4))
-				}
-				if hay != "" && hay == needle {
-					return ClientSearchResult{OK: true, Clients: []ClientCard{c}}, nil
-				}
-			}
-		}
-		scanned += len(parsed.Clients)
-	}
-	return ClientSearchResult{
-		OK: true, Clients: []ClientCard{},
-		Message: fmt.Sprintf("Nenhum cliente encontrado com esse %s (varridos %d clientes únicos na base).",
-			map[string]string{"ipv4": "IPv4", "mac": "MAC"}[kind], len(seenClientIDs)),
-	}, nil
-}
-
 // SearchClientByConnectionTerm localiza um cliente por IPv4/MAC/login via
 // /cliente/extrato_conexao (busca directa e rápida — ver reportFromConnectionExtract) e, a
 // partir do código do cliente encontrado, busca o cartão COMPLETO com SearchClients (mesma
@@ -327,15 +261,6 @@ const (
 	fastScanConcurrency = 16
 	fastScanClientCap   = 120
 )
-
-func scanClientSampleFast(ctx context.Context, cfg Config, token string) (ClientSearchResult, error) {
-	const letters = "abcdefghijklmnopqrstuvwxyz"
-	buckets := make([]string, 0, len(letters))
-	for _, c := range letters {
-		buckets = append(buckets, string(c))
-	}
-	return scanClientSampleCore(ctx, cfg, token, buckets, fastScanConcurrency, fastScanClientCap)
-}
 
 func scanClientSampleCore(ctx context.Context, cfg Config, token string, buckets []string, concurrency, maxClients int) (ClientSearchResult, error) {
 	var mu sync.Mutex
@@ -787,88 +712,6 @@ type RecentActivityResult struct {
 	WorkOrderTechnicianBreakdown []NamedCount `json:"work_order_technician_breakdown"`
 }
 
-// BuildRecentActivity varre uma amostra rápida de clientes e, para cada um (em paralelo),
-// busca atendimentos e ordens de serviço — devolve os `limitEach` mais recentes de cada
-// categoria (com nome/código do cliente anexado — a resposta desses endpoints não inclui
-// isso por si só) mais os agregados por status (usados no modo "Atendimentos e Ordens de
-// Serviço" do Dashboard, sem precisar varrer tudo de novo).
-func BuildRecentActivity(ctx context.Context, cfg Config, token string, limitEach int) RecentActivityResult {
-	sample, err := scanClientSampleFast(ctx, cfg, token)
-	if err != nil {
-		return RecentActivityResult{OK: false, Message: "Falha ao coletar amostra de clientes: " + err.Error()}
-	}
-	clients := sample.Clients
-
-	var mu sync.Mutex
-	var attendance []AttendanceItem
-	var workOrders []WorkOrderItem
-	attStatusCount := map[string]int{}
-	woStatusCount := map[string]int{}
-
-	sem := make(chan struct{}, recentActivityConcurrency)
-	var wg sync.WaitGroup
-	for _, c := range clients {
-		codigo := firstNonEmpty(c.Code, c.ID)
-		if codigo == "" {
-			continue
-		}
-		wg.Add(1)
-		go func(c ClientCard, codigo string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-sem }()
-
-			att, attRes := SearchAttendance(ctx, cfg, token, "codigo_cliente", codigo)
-			wo, woRes := SearchWorkOrders(ctx, cfg, token, "codigo_cliente", codigo)
-
-			mu.Lock()
-			if attRes.OK {
-				for _, a := range att.Items {
-					a.ClientName, a.ClientCode = c.Name, codigo
-					attendance = append(attendance, a)
-					attStatusCount[firstNonEmpty(a.Status, "Sem status")]++
-				}
-			}
-			if woRes.OK {
-				for _, o := range wo.Items {
-					o.ClientName, o.ClientCode = c.Name, codigo
-					workOrders = append(workOrders, o)
-					woStatusCount[firstNonEmpty(o.Status, "Sem status")]++
-				}
-			}
-			mu.Unlock()
-		}(c, codigo)
-	}
-	wg.Wait()
-
-	totalAtt, totalWO := len(attendance), len(workOrders)
-
-	sort.Slice(attendance, func(i, j int) bool {
-		return parseBRDate(attendance[i].OpenedAt).After(parseBRDate(attendance[j].OpenedAt))
-	})
-	sort.Slice(workOrders, func(i, j int) bool {
-		return parseBRDate(workOrders[i].CreatedAt).After(parseBRDate(workOrders[j].CreatedAt))
-	})
-	if len(attendance) > limitEach {
-		attendance = attendance[:limitEach]
-	}
-	if len(workOrders) > limitEach {
-		workOrders = workOrders[:limitEach]
-	}
-
-	return RecentActivityResult{
-		OK: true, SampleClients: len(clients),
-		Attendance: attendance, WorkOrders: workOrders,
-		TotalAttendanceFound: totalAtt, TotalWorkOrdersFound: totalWO,
-		AttendanceStatusBreakdown: topNamedCounts(attStatusCount, nil, 8),
-		WorkOrderStatusBreakdown:  topNamedCounts(woStatusCount, nil, 8),
-	}
-}
-
 // --- Financeiro / faturas (GET /api/v1/integracao/cliente/financeiro) ----------------------
 //
 // Testado directamente contra a API de produção: o endpoint "irmão"
@@ -1056,77 +899,6 @@ type FinancialSummaryResult struct {
 	TotalPending    float64      `json:"total_pending"` // ainda não vencido
 	TotalPaid       float64      `json:"total_paid"`
 	TopDebtors      []ClientDebt `json:"top_debtors"`
-}
-
-// BuildFinancialSummary varre uma amostra rápida de clientes (scanClientSampleFast) e, para
-// cada um (em paralelo), busca o financeiro — soma pendente/vencido/pago e devolve os
-// maiores devedores (para follow-up de cobrança). Só números totais, sem detalhe fatura a
-// fatura — por isso não precisa da varredura exaustiva do Dashboard.
-func BuildFinancialSummary(ctx context.Context, cfg Config, token string) FinancialSummaryResult {
-	sample, err := scanClientSampleFast(ctx, cfg, token)
-	if err != nil {
-		return FinancialSummaryResult{OK: false, Message: "Falha ao coletar amostra de clientes: " + err.Error()}
-	}
-	clients := sample.Clients
-
-	var mu sync.Mutex
-	var totalInvoices, clientsWithDebt int
-	var totalOverdue, totalPending, totalPaid float64
-	var debtors []ClientDebt
-
-	sem := make(chan struct{}, financialSummaryConcurrency)
-	var wg sync.WaitGroup
-	for _, c := range clients {
-		codigo := firstNonEmpty(c.Code, c.ID)
-		if codigo == "" {
-			continue
-		}
-		wg.Add(1)
-		go func(c ClientCard, codigo string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-sem }()
-
-			fin, res := SearchFinancial(ctx, cfg, token, "codigo_cliente", codigo)
-			if !res.OK {
-				return
-			}
-
-			mu.Lock()
-			totalInvoices += fin.Summary.Total
-			totalOverdue += fin.Summary.OverdueValue
-			totalPending += fin.Summary.PendingValue
-			totalPaid += fin.Summary.PaidValue
-			if fin.Summary.OverdueValue+fin.Summary.PendingValue > 0 {
-				clientsWithDebt++
-				debtors = append(debtors, ClientDebt{
-					ClientName: c.Name, ClientCode: codigo,
-					PendingValue: fin.Summary.PendingValue, OverdueValue: fin.Summary.OverdueValue,
-					InvoiceCount: fin.Summary.OverdueCount + fin.Summary.PendingCount,
-				})
-			}
-			mu.Unlock()
-		}(c, codigo)
-	}
-	wg.Wait()
-
-	sort.Slice(debtors, func(i, j int) bool {
-		return (debtors[i].PendingValue + debtors[i].OverdueValue) > (debtors[j].PendingValue + debtors[j].OverdueValue)
-	})
-	if len(debtors) > financialSummaryTopDebtors {
-		debtors = debtors[:financialSummaryTopDebtors]
-	}
-
-	return FinancialSummaryResult{
-		OK: true, SampleClients: len(clients), ClientsWithDebt: clientsWithDebt,
-		TotalInvoices: totalInvoices, TotalReceivable: totalOverdue + totalPending,
-		TotalOverdue: totalOverdue, TotalPending: totalPending, TotalPaid: totalPaid,
-		TopDebtors: debtors,
-	}
 }
 
 // --- Paginação real (endpoints "todos"/"listar") ----------------------------------------------

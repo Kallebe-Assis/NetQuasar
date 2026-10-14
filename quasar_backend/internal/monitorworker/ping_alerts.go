@@ -63,22 +63,6 @@ func repairMissingPingUnreachableAlerts(ctx context.Context, pool *pgxpool.Pool,
 	}
 }
 
-// InsertPingUnreachableIfNew grava alerta ping_unreachable em aberto (se ainda não existir) e notifica Telegram (monitorização) quando novo.
-// Verifica elegibilidade do equipamento (ex.: ping manual em inativo).
-func InsertPingUnreachableIfNew(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {
-	eligible, err := DeviceEligibleForPingAlerts(ctx, pool, deviceID)
-	if err != nil {
-		if log != nil {
-			log.Error().Err(err).Str("device", deviceID.String()).Msg("ping_unreachable: elegibilidade")
-		}
-		return
-	}
-	if !eligible {
-		return
-	}
-	insertPingUnreachableIfNew(ctx, pool, log, deviceID, description, ip, probe, metaSource)
-}
-
 // InsertPingUnreachableIfNewForMonitoredDevice skips the eligibility query — use only when the device
 // was already loaded via loadPingableDevices or equivalent filter.
 func InsertPingUnreachableIfNewForMonitoredDevice(ctx context.Context, pool *pgxpool.Pool, log *zerolog.Logger, deviceID uuid.UUID, description, ip string, probe map[string]any, metaSource string) {

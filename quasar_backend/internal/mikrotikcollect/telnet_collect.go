@@ -182,10 +182,6 @@ func hasEnabledTelnetMetricsInCatalog(c TelnetMetricsConfig, catalog []TelnetCat
 	return false
 }
 
-func buildTelnetJobs(profile TelnetProfile) (global []telnetJob, scoped []telnetJob) {
-	return buildTelnetJobsFromCatalog(profile, TelnetMetricCatalog)
-}
-
 func buildTelnetJobsFromCatalog(profile TelnetProfile, catalog []TelnetCatalogEntry) (global []telnetJob, scoped []telnetJob) {
 	type pending struct {
 		keys    []string

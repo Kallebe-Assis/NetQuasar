@@ -32,10 +32,3 @@ export function saveMapConnectionFilters(filters: ConnectionsFilterState): void 
   }
 }
 
-export function mapShowsLogins(filters: ConnectionsFilterState): boolean {
-  return filters.visibleKinds.includes("logins");
-}
-
-export function mapShowsInfrastructure(filters: ConnectionsFilterState): boolean {
-  return filters.visibleKinds.some((k) => k !== "logins" && k !== "projects");
-}

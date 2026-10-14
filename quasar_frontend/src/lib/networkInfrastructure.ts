@@ -14,8 +14,6 @@ export const FIBER_COLORS = [
   "Aqua (Turquesa)",
 ] as const;
 
-export type FiberColor = (typeof FIBER_COLORS)[number];
-
 export const PROJECT_STATUSES = [
   { value: "planejamento", label: "Planejamento" },
   { value: "em_andamento", label: "Em andamento" },

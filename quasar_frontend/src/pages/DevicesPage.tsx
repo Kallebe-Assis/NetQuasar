@@ -3,6 +3,7 @@ import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionMenu } from "../components/ActionMenu";
+import { ExportMenu } from "../components/ExportMenu";
 import { PageCountPill } from "../components/PageCountPill";
 import { apiFetch, downloadBlob } from "../lib/api";
 import { apiUrl, can, getStoredApiKey, isAdminUser } from "../lib/auth";
@@ -964,15 +965,6 @@ export function DevicesPage() {
     onError: (e) => toastErr(pushToast, e),
   });
 
-  async function exportCsv() {
-    const headers = new Headers();
-    const k = getStoredApiKey();
-    if (k) headers.set("X-API-Key", k);
-    const res = await fetch(apiUrl("/api/v1/devices/export?format=csv"), { headers });
-    if (!res.ok) throw new Error(await res.text());
-    downloadBlob("devices_export.csv", await res.blob());
-  }
-
   function downloadCsvTemplate() {
     const header = [
       "description",
@@ -1125,6 +1117,29 @@ export function DevicesPage() {
               Adicionar
             </button>
           ) : null}
+          <ExportMenu
+            filename="equipamentos"
+            title="Equipamentos"
+            rows={sortedDevices}
+            columns={[
+              { header: "Categoria", value: (d) => d.category },
+              { header: "Marca", value: (d) => d.brand },
+              { header: "Modelo", value: (d) => d.model },
+              { header: "Descrição", value: (d) => d.description },
+              { header: "IP", value: (d) => d.ip },
+              { header: "POP", value: (d) => (pops.data?.pops ?? []).find((p) => p.id === d.pop_id)?.description },
+              { header: "Localidade", value: (d) => (locs.data?.localities ?? []).find((l) => l.id === d.locality_id)?.name },
+              { header: "MAC", value: (d) => d.mac },
+              { header: "Nº de série", value: (d) => d.serial_number },
+              { header: "Versão de software", value: (d) => d.software_version },
+              { header: "Versão de hardware", value: (d) => d.hardware_version },
+              { header: "Status de rede", value: (d) => d.network_status },
+              { header: "Ping", value: (d) => d.ping_enabled },
+              { header: "Telemetria", value: (d) => d.telemetry_enabled },
+              { header: "Modo operacional", value: (d) => d.operational_mode },
+              { header: "SNMP saúde", value: (d) => (!d.telemetry_enabled ? "" : d.snmp_health_status === "ok" ? "OK" : d.snmp_health_status === "partial" ? "Parcial" : d.snmp_health_status === "failed" ? "Falha" : "") },
+            ]}
+          />
           <ActionMenu
             align="start"
             title="Mais opções"
@@ -1148,13 +1163,6 @@ export function DevicesPage() {
                     },
                   ]
                 : []),
-              {
-                id: "csv-export",
-                label: "Exportar CSV",
-                onClick: () => {
-                  void exportCsv().catch((e) => alert(String(e)));
-                },
-              },
             ]}
           />
           {canMutate ? (
