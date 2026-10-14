@@ -114,7 +114,22 @@ func stripOfflineOnuTelemetry(rows []map[string]any) {
 		for _, k := range onuLiveMetricsKeys {
 			delete(row, k)
 		}
+		// ONU offline não tem leitura nenhuma: some também o que veio do relatório telnet (RX, TX,
+		// temperatura, tensão, distância, tempo online…) — fica só a identidade (SN, nome, modelo…).
+		if tf, ok := row["telnet_fields"].(map[string]any); ok {
+			for k := range tf {
+				if isLiveTelnetField(k) {
+					delete(tf, k)
+				}
+			}
+		}
 	}
+}
+
+// StripOfflineOnuTelemetryInSummary aplica a limpeza de ONU offline ao summary já montado (usado
+// logo antes de gravar o snapshot, depois de qualquer fusão com dados anteriores).
+func StripOfflineOnuTelemetryInSummary(summary map[string]any) {
+	stripOfflineOnuTelemetry(OnuRowsFromSummary(summary))
 }
 
 func onuTargetFromRow(row map[string]any) OnuReportTarget {

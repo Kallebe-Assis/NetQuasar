@@ -60,7 +60,9 @@ import {
   BNG_SESSION_SEARCH_FIELDS,
   countActiveBngSessionFilters,
   EMPTY_BNG_SESSION_FILTERS,
+  bngLoginBase,
   filterBngSessions,
+  hideStaleDuplicateLogins,
   type BngSessionAdvancedFilters,
   type BngSessionSearchField,
 } from "../lib/bngSessionFilters";
@@ -1546,7 +1548,7 @@ export function BngPage() {
   const cacheFilteredSessions = useMemo(() => {
     // login: filtra a lista já carregada por trecho enquanto digita; o Enter confirma e acrescenta a consulta ao vivo
     const effectiveQuery = searchField === "login" && loginSearchActive ? submittedLoginQuery : searchQuery;
-    const list = filterBngSessions(sessions.data?.sessions ?? [], searchField, effectiveQuery, advancedFilters);
+    const list = filterBngSessions(hideStaleDuplicateLogins(sessions.data?.sessions ?? []), searchField, effectiveQuery, advancedFilters);
     if (searchField !== "login") return list;
     const q = effectiveQuery.trim().toLowerCase();
     if (!q) return list;
@@ -1559,8 +1561,8 @@ export function BngPage() {
       // trechos achados na lista + a consulta ao vivo do login exato (que vale mais que a linha em cache)
       const live = loginSearch.data?.found ? loginSearch.data.session : undefined;
       if (!live) return cacheFilteredSessions;
-      const liveKey = String(live.login ?? "").trim().toLowerCase();
-      const rest = cacheFilteredSessions.filter((s) => String(s.login ?? "").trim().toLowerCase() !== liveKey);
+      const liveKey = bngLoginBase(live.login);
+      const rest = cacheFilteredSessions.filter((s) => bngLoginBase(s.login) !== liveKey);
       return [live, ...rest];
     }
     return cacheFilteredSessions;

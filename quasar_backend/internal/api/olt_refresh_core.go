@@ -182,6 +182,7 @@ func (s *Server) refreshOLTDeviceCore(ctx context.Context, id uuid.UUID, opts Ol
 
 	oltcollect.LoadAndCarryForwardOnuIdentity(ctx, pool, id, summary)
 	oltcollect.SanitizeOnuSerialsMap(summary)
+	oltcollect.StripOfflineOnuTelemetryInSummary(summary)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)
 	if _, err := pool.Exec(ctx, `

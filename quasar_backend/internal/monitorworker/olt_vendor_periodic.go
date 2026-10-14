@@ -190,6 +190,7 @@ func CollectOltVendorPeriodic(
 	summary["if_mib_derived_at"] = time.Now().UTC().Format(time.RFC3339)
 	oltcollect.LoadAndCarryForwardOnuIdentity(sctx, pool, deviceID, summary)
 	oltcollect.SanitizeOnuSerialsMap(summary)
+	oltcollect.StripOfflineOnuTelemetryInSummary(summary)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)
 	_, _ = pool.Exec(sctx, `

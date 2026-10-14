@@ -201,7 +201,8 @@ func oltWorkerOnuMetricsCollect(ctx context.Context, st *oltWorkerExecState) err
 		}
 	}
 	mctx, mcancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
-	sum, pons, _, err := oltcollect.CollectOnuMetrics(mctx, st.Host, st.Community, metrics, budget, st.MaxPons)
+	prevRows, _ := oltcollect.LoadPrevOnuTelnetState(mctx, st.Pool, st.DeviceID)
+	sum, pons, _, err := oltcollect.CollectOnuMetrics(oltcollect.WithPrevOnuRows(mctx, prevRows), st.Host, st.Community, metrics, budget, st.MaxPons)
 	mcancel()
 	if err != nil {
 		return err

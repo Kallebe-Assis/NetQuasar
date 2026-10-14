@@ -22,6 +22,7 @@ import {
   type OltTelnetReportStep,
 } from "../../lib/oltTelnetReportFormat";
 import { EM_DASH, formatSnmpMetricCell } from "../../lib/formatDisplay";
+import { SortableTh, useTableSort, type SortValue } from "../../lib/tableSort";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
@@ -382,12 +383,53 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     return list;
   }, [snapshotResults, telnetResult, debouncedQ]);
 
-  const enrichedResults = useMemo(() => {
+  const enrichedBase = useMemo(() => {
     return displayResults.map((r) => {
       const ov = rowOverrides[rowKey(r)];
       return ov ? { ...r, ...ov } : r;
     });
   }, [displayResults, rowOverrides]);
+
+  const { sort: resultSort, toggle: toggleResultSort, sortRows: sortResultRows } = useTableSort<
+    "olt" | "pon" | "onu" | "serial" | "client" | "model" | "status" | "rx" | "tx" | "temp" | "voltage"
+  >();
+  // a ordenação vale para TODAS as páginas (a paginação vem depois) e para a exportação
+  const enrichedResults = useMemo(
+    () =>
+      sortResultRows(enrichedBase, (r, key): SortValue => {
+        const num = (s: unknown): number | null => {
+          const n = Number.parseFloat(String(s ?? "").replace(",", "."));
+          return Number.isFinite(n) ? n : null;
+        };
+        switch (key) {
+          case "olt":
+            return r.olt_description;
+          case "pon":
+            return r.pon;
+          case "onu":
+            return r.onu;
+          case "serial":
+            return r.serial;
+          case "client":
+            return r.client_name;
+          case "model":
+            return r.model;
+          case "status":
+            return r.online === true ? "Online" : r.online === false ? "Offline" : null;
+          case "rx":
+            return typeof r.rx_dbm === "number" ? r.rx_dbm : num(r.rx_pwr);
+          case "tx":
+            return num(r.tx_pwr);
+          case "temp":
+            return num(r.temp);
+          case "voltage":
+            return num(r.voltage);
+          default:
+            return null;
+        }
+      }),
+    [enrichedBase, sortResultRows],
+  );
 
   // Seriais (únicos, maiúsculas) das ONUs no resultado actual que têm cliente vinculado — alvo do
   // desvínculo em massa. Segue o mesmo âmbito do CSV (OLT / PON / filtros actuais).
@@ -857,17 +899,17 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
         <table className="conn-table conn-table--center" style={{ fontSize: 12 }}>
           <thead>
             <tr>
-              <th>OLT</th>
-              <th>PON</th>
-              <th>ONU</th>
-              <th>Série</th>
-              <th>Cliente</th>
-              <th>Modelo</th>
-              <th>Status</th>
-              <th>RX</th>
-              <th>TX</th>
-              <th>Temp.</th>
-              <th>Voltagem</th>
+              <SortableTh col="olt" sort={resultSort} onSort={toggleResultSort}>OLT</SortableTh>
+              <SortableTh col="pon" sort={resultSort} onSort={toggleResultSort}>PON</SortableTh>
+              <SortableTh col="onu" sort={resultSort} onSort={toggleResultSort}>ONU</SortableTh>
+              <SortableTh col="serial" sort={resultSort} onSort={toggleResultSort}>Série</SortableTh>
+              <SortableTh col="client" sort={resultSort} onSort={toggleResultSort}>Cliente</SortableTh>
+              <SortableTh col="model" sort={resultSort} onSort={toggleResultSort}>Modelo</SortableTh>
+              <SortableTh col="status" sort={resultSort} onSort={toggleResultSort}>Status</SortableTh>
+              <SortableTh col="rx" sort={resultSort} onSort={toggleResultSort}>RX</SortableTh>
+              <SortableTh col="tx" sort={resultSort} onSort={toggleResultSort}>TX</SortableTh>
+              <SortableTh col="temp" sort={resultSort} onSort={toggleResultSort}>Temp.</SortableTh>
+              <SortableTh col="voltage" sort={resultSort} onSort={toggleResultSort}>Voltagem</SortableTh>
               {canMutate ? <th style={{ width: 56 }} /> : null}
             </tr>
           </thead>

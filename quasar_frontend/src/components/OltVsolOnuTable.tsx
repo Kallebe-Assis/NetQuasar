@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ActionMenu } from "./ActionMenu";
 import { ExportMenu } from "./ExportMenu";
 import { EM_DASH, formatNullable, formatSnmpMetricCell } from "../lib/formatDisplay";
+import { SortableTh, useTableSort, type SortValue } from "../lib/tableSort";
 import { classifyOnuRx, ONU_RX_QUALITY_COLOR, ONU_RX_QUALITY_LABEL, useOnuRxThresholds } from "../lib/onuRxQuality";
 
 export type VsOnuRow = {
@@ -239,7 +240,8 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
     [enabledMetrics, rows, rxStatusMode, vlanForPon],
   );
 
-  const displayRows = useMemo(() => {
+  const { sort, toggle, sortRows } = useTableSort<ColKey | "pon" | "onu">();
+  const baseRows = useMemo(() => {
     if (offlineRxDbm == null || !Number.isFinite(offlineRxDbm)) {
       return rows;
     }
@@ -248,6 +250,44 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
       offline_rx_dbm: u.offline_rx_dbm ?? offlineRxDbm,
     }));
   }, [rows, offlineRxDbm]);
+  const displayRows = useMemo(
+    () =>
+      sortRows(baseRows, (u, key): SortValue => {
+        const num = (s: unknown): number | null => {
+          const n = Number.parseFloat(String(s ?? "").replace(",", "."));
+          return Number.isFinite(n) ? n : null;
+        };
+        switch (key) {
+          case "pon":
+            return u.pon ?? null;
+          case "onu":
+            return u.onu ?? null;
+          case "interface":
+            return u.if_name ?? u.if_descr ?? null;
+          case "status":
+            return onlineText(u, rxStatusMode);
+          case "phase":
+            return u.phase_sta ?? null;
+          case "rx":
+            return onuRxDbmValue(u);
+          case "tx":
+            return num(u.tx_pwr);
+          case "voltage":
+            return num(u.voltage);
+          case "temp":
+            return num(u.temp);
+          case "model":
+            return u.model ?? null;
+          case "serial":
+            return u.serial ?? null;
+          case "vlan":
+            return String(u.vlan ?? "").trim() || vlanForPon?.(u.pon)?.trim() || null;
+          default:
+            return null;
+        }
+      }),
+    [baseRows, sortRows, rxStatusMode, vlanForPon],
+  );
 
   if (rows.length === 0) {
     const hint =
@@ -286,18 +326,18 @@ export function OltVsolOnuTable({ rows, note, onuRefs, enabledMetrics, rxStatusM
         <table className="table table--compact" style={{ width: "100%", fontSize: 12 }}>
           <thead>
             <tr>
-              <th>PON</th>
-              <th>ONU</th>
-              {visible.has("interface") && <th>Interface</th>}
-              {visible.has("status") && <th>Status</th>}
-              {visible.has("phase") && <th>Fase</th>}
-              {visible.has("rx") && <th className="mono">RX ONU</th>}
-              {visible.has("tx") && <th className="mono">TX ONU</th>}
-              {visible.has("voltage") && <th className="mono">Voltagem</th>}
-              {visible.has("temp") && <th className="mono">Temp.</th>}
-              {visible.has("model") && <th>Modelo da ONU</th>}
-              {visible.has("serial") && <th>Serial</th>}
-              {visible.has("vlan") && <th className="mono">VLAN</th>}
+              <SortableTh col="pon" sort={sort} onSort={toggle}>PON</SortableTh>
+              <SortableTh col="onu" sort={sort} onSort={toggle}>ONU</SortableTh>
+              {visible.has("interface") && <SortableTh col="interface" sort={sort} onSort={toggle}>Interface</SortableTh>}
+              {visible.has("status") && <SortableTh col="status" sort={sort} onSort={toggle}>Status</SortableTh>}
+              {visible.has("phase") && <SortableTh col="phase" sort={sort} onSort={toggle}>Fase</SortableTh>}
+              {visible.has("rx") && <SortableTh col="rx" sort={sort} onSort={toggle} className="mono">RX ONU</SortableTh>}
+              {visible.has("tx") && <SortableTh col="tx" sort={sort} onSort={toggle} className="mono">TX ONU</SortableTh>}
+              {visible.has("voltage") && <SortableTh col="voltage" sort={sort} onSort={toggle} className="mono">Voltagem</SortableTh>}
+              {visible.has("temp") && <SortableTh col="temp" sort={sort} onSort={toggle} className="mono">Temp.</SortableTh>}
+              {visible.has("model") && <SortableTh col="model" sort={sort} onSort={toggle}>Modelo da ONU</SortableTh>}
+              {visible.has("serial") && <SortableTh col="serial" sort={sort} onSort={toggle}>Serial</SortableTh>}
+              {visible.has("vlan") && <SortableTh col="vlan" sort={sort} onSort={toggle} className="mono">VLAN</SortableTh>}
               {onShowHistory && <th aria-label="Ações" />}
             </tr>
           </thead>

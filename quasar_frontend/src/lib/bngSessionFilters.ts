@@ -238,6 +238,22 @@ export function applyBngSessionAdvancedFilters(s: BngSessionLike, filters: BngSe
   return true;
 }
 
+/** Login sem o «@domínio» e em minúsculas — «fulano» e «fulano@provedor.com.br» são o mesmo cliente. */
+export function bngLoginBase(login: string | undefined | null): string {
+  const s = String(login ?? "").trim().toLowerCase();
+  const at = s.indexOf("@");
+  return at > 0 ? s.slice(0, at) : s;
+}
+
+/** Quando o mesmo cliente aparece online e também offline (ex.: reconectou passando a enviar o domínio no usuário),
+ * esconde a linha offline antiga. Só some a offline que tem uma irmã online — dois online diferentes continuam os dois. */
+export function hideStaleDuplicateLogins<T extends BngSessionLike>(sessions: T[]): T[] {
+  const online = new Set<string>();
+  for (const s of sessions) if (formatBngSessionStatus(s.status).online) online.add(bngLoginBase(s.login));
+  if (online.size === 0) return sessions;
+  return sessions.filter((s) => formatBngSessionStatus(s.status).online || !online.has(bngLoginBase(s.login)));
+}
+
 export function filterBngSessions(
   sessions: BngSessionLike[],
   searchField: BngSessionSearchField,

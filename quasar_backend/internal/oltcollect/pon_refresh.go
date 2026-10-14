@@ -67,6 +67,9 @@ var (
 	// ZTE baseinfo: gpon-onu_1/1/9:3   ZTE-F670   sn   SN:ZTEGC1234567
 	zteOnuIndexLineRE = regexp.MustCompile(`(?i)^(?:gpon[-_]onu[-_])?(\d+)/(\d+)/(\d+):(\d+)\s+(.+)$`)
 	zteSnTokenRE      = regexp.MustCompile(`(?i)\bSN:([A-Za-z0-9]{8,})`)
+	// `show gpon onu state` com coluna «Auth configuration»: SN(ZTEGC1234567). A coluna «SN report» vem truncada/quebrada
+	// em duas linhas («SN(000062F88DD» + «5)») e por isso só vale o token COMPLETO, com o parêntese fechado.
+	zteSnParenRE = regexp.MustCompile(`(?i)\bSN\(([A-Za-z0-9]{8,})\)`)
 )
 
 // phase → online. Valores da coluna "Phase State" do `show gpon onu state` da ZTE (e equivalentes).
@@ -138,6 +141,12 @@ func ParsePonRefreshOutput(output string) []PonRefreshEntry {
 				e.Model = f[0]
 			}
 			continue
+		}
+		// state com serial na coluna «Auth configuration»: vale o último SN(...) completo da linha (o primeiro é o
+		// «SN report», que o equipamento quebra no meio) e a fase da mesma linha continua sendo lida abaixo.
+		if all := zteSnParenRE.FindAllStringSubmatch(rest, -1); len(all) > 0 {
+			e := get(pon, onu)
+			e.Serial = strings.ToUpper(all[len(all)-1][1])
 		}
 		for _, tok := range strings.Fields(rest) {
 			if o := onlineFromState(tok); o != nil {

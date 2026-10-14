@@ -189,7 +189,8 @@ func (s *Server) oltStepOnuMetricsCollect(ctx context.Context, st *oltCollectExe
 	}
 	mctx, mcancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer mcancel()
-	sum, pons, _, err := oltcollect.CollectOnuMetrics(mctx, st.Host, st.Community, metrics, budget, st.MaxPons)
+	prevRows, _ := oltcollect.LoadPrevOnuTelnetState(mctx, s.DB(), st.DeviceID)
+	sum, pons, _, err := oltcollect.CollectOnuMetrics(oltcollect.WithPrevOnuRows(mctx, prevRows), st.Host, st.Community, metrics, budget, st.MaxPons)
 	if err != nil {
 		return err
 	}

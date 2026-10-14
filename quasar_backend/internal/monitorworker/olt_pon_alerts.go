@@ -286,6 +286,7 @@ deriveLoop:
 	}
 	oltcollect.LoadAndCarryForwardOnuIdentity(ctx, pool, deviceID, summary)
 	oltcollect.SanitizeOnuSerialsMap(summary)
+	oltcollect.StripOfflineOnuTelemetryInSummary(summary)
 	sb, _ := json.Marshal(summary)
 	pb, _ := json.Marshal(pons)
 	_, _ = pool.Exec(ctx, `

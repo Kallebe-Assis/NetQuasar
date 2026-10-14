@@ -441,6 +441,19 @@ func CollectOnuMetrics(ctx context.Context, host, community string, metrics OnuM
 	for _, ptr := range byKey {
 		onuRows = append(onuRows, *ptr)
 	}
+	// ONU sem serial não entra (ver onu_prune.go): herda do snapshot anterior e, se a leitura do
+	// serial foi confiável, descarta as que continuam sem.
+	if containsMetricKey(keys, MetricSerial) {
+		var dropped []string
+		onuRows, dropped = pruneOnuRowsWithoutSerial(onuRows, prevOnuRowsFrom(ctx), serialWalkReliable(walkLog))
+		if len(dropped) > 0 {
+			summary["onu_rows_sem_serial_descartadas"] = len(dropped)
+			if len(dropped) > 40 {
+				dropped = dropped[:40]
+			}
+			summary["onu_rows_sem_serial_exemplos"] = dropped
+		}
+	}
 	sort.Slice(onuRows, func(i, j int) bool {
 		pi, _ := onuRows[i]["pon"].(int)
 		pj, _ := onuRows[j]["pon"].(int)
