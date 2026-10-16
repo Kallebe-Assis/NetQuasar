@@ -15,6 +15,7 @@ const ENTITY_TYPES = {
   patrimonio: "hubsoft_stock_item",
   comodato: "hubsoft_stock_comodato",
   transferencia: "hubsoft_stock_transfer",
+  atendimento: "hubsoft_service_order",
 } as const;
 
 /**
@@ -27,7 +28,7 @@ const OK_ACTIONS = new Set(["created", "service_added", "login_repair", "already
 
 export function HubsoftBulkImportHistory() {
   const { notify } = useConsultaToast();
-  const [kind, setKind] = useState<"client" | "service" | "produto" | "patrimonio" | "comodato" | "transferencia">("client");
+  const [kind, setKind] = useState<"client" | "service" | "produto" | "patrimonio" | "comodato" | "transferencia" | "atendimento">("client");
   const [rows, setRows] = useState<AuditRowView[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -92,6 +93,7 @@ export function HubsoftBulkImportHistory() {
             { value: "patrimonio", label: "Patrimônios de estoque" },
             { value: "comodato", label: "Comodato de patrimônio" },
             { value: "transferencia", label: "Transferência de estoque" },
+            { value: "atendimento", label: "Atendimento / O.S." },
           ]}
         />
         <div className="hsa-actions">

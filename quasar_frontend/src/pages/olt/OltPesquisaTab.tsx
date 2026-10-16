@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, Filter, Menu, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionMenu } from "../../components/ActionMenu";
@@ -8,6 +8,7 @@ import { DropdownMenu } from "../../components/DropdownMenu";
 import { PageCountPill } from "../../components/PageCountPill";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { ApiError, apiFetch } from "../../lib/api";
+import { isAdminUser } from "../../lib/auth";
 import { parseApiErrorForModal, type ParsedApiError } from "../../lib/apiErrors";
 import { useAppToast } from "../../lib/appToast";
 import { ExportMenu } from "../../components/ExportMenu";
@@ -79,6 +80,24 @@ type TelnetSerialResult = {
   onu?: number;
   parsed?: Record<string, string>;
   error?: string;
+};
+
+type PonFullRefreshState = {
+  running?: boolean;
+  idle?: boolean;
+  already_running?: boolean;
+  phase?: string;
+  total?: number;
+  done?: number;
+  ok?: number;
+  errors?: number;
+  skipped_offline?: number;
+  message?: string;
+  error?: string;
+  warnings?: string[];
+  cancelled?: boolean;
+  started_at?: string;
+  finished_at?: string;
 };
 
 type SearchFilters = {
@@ -162,6 +181,7 @@ type Props = {
 
 export function OltPesquisaTab({ canMutate, olts }: Props) {
   const { push: pushToast } = useAppToast();
+  const queryClient = useQueryClient();
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 320);
   const [selectedOltId, setSelectedOltId] = useState("");
@@ -205,19 +225,6 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     staleTime: 60_000,
   });
 
-  const ponOptions = useMemo(() => {
-    const rows = oltDetailQ.data?.pons_table ?? [];
-    const nums = rows
-      .map((r) => {
-        if (typeof r.pon === "number" && r.pon > 0) return r.pon;
-        const name = String(r.name ?? r.id ?? "");
-        const m = name.match(/GPON0\/(\d+)/i);
-        return m ? Number.parseInt(m[1], 10) : 0;
-      })
-      .filter((n) => n > 0);
-    return [...new Set(nums)].sort((a, b) => a - b);
-  }, [oltDetailQ.data?.pons_table]);
-
   const effectivePon = useMemo(() => {
     const manual = Number.parseInt(ponManual.trim(), 10);
     if (Number.isFinite(manual) && manual > 0) return manual;
@@ -246,6 +253,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
   const searchMut = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch<{ results: OltOnuSearchResult[]; total: number }>("/api/v1/olt/onu-search", { method: "POST", json: body }),
+    // A lista recarregada já traz o que foi gravado no servidor (leituras manuais incluídas): descarta os ajustes locais.
+    onSuccess: () => setRowOverrides({}),
     onError: (e) => openErrorModal(e, "Erro na pesquisa de ONUs"),
   });
 
@@ -313,6 +322,52 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       void oltDetailQ.refetch();
     },
     onError: (e) => openErrorModal(e, "Erro ao atualizar a PON"),
+  });
+
+  // "Atualizar PON inteira": o servidor atualiza serial/status e depois lê o RX de cada ONU online, uma a uma, em segundo
+  // plano. A tela só acompanha o andamento (e continua funcionando se o utilizador sair e voltar).
+  const fullRefreshKey = ["olt", "pon-full-refresh", selectedOltId, effectivePon] as const;
+  const fullRefreshQ = useQuery({
+    queryKey: fullRefreshKey,
+    enabled: Boolean(selectedOltId) && effectivePon > 0,
+    queryFn: () => apiFetch<PonFullRefreshState>(`/api/v1/olt/devices/${selectedOltId}/pons/${effectivePon}/refresh-full`),
+    refetchInterval: (q) => (q.state.data?.running ? 2000 : false),
+    refetchOnWindowFocus: false,
+  });
+  const fullRefresh = fullRefreshQ.data;
+  const fullRefreshRunning = fullRefresh?.running === true;
+  const [lastReloadedJob, setLastReloadedJob] = useState("");
+  useEffect(() => {
+    // Ao terminar (ou ao voltar à tela com um trabalho já concluído e ainda não visto), recarrega a lista com os dados novos.
+    if (fullRefresh && !fullRefresh.running && !fullRefresh.idle && fullRefresh.finished_at) {
+      const id = `${selectedOltId}:${effectivePon}:${fullRefresh.finished_at}`;
+      if (id !== lastReloadedJob) {
+        setLastReloadedJob(id);
+        searchMut.mutate(payload);
+        // Aviso só se terminou agora há pouco (não repete ao voltar para a tela dias depois).
+        if (Date.now() - new Date(fullRefresh.finished_at).getTime() < 60_000) {
+          if (fullRefresh.error) {
+            toastErr(pushToast, new Error(fullRefresh.error), `PON ${effectivePon}: ${fullRefresh.message || "falha na atualização"}`);
+          } else {
+            const warn = fullRefresh.warnings?.length ? ` · aviso: ${fullRefresh.warnings.join("; ")}` : "";
+            toastOk(pushToast, `PON ${effectivePon}: ${fullRefresh.message || "atualizada"}${warn}`);
+          }
+        }
+      }
+    }
+  }, [fullRefresh?.running, fullRefresh?.finished_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fullRefreshStart = useMutation({
+    mutationFn: () => apiFetch<PonFullRefreshState>(`/api/v1/olt/devices/${selectedOltId}/pons/${effectivePon}/refresh-full`, { method: "POST" }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(fullRefreshKey, res);
+      toastOk(pushToast, res.already_running ? `A PON ${effectivePon} já está sendo atualizada.` : `Atualização completa da PON ${effectivePon} iniciada.`);
+    },
+    onError: (e) => openErrorModal(e, "Erro ao iniciar a atualização da PON"),
+  });
+  const fullRefreshCancel = useMutation({
+    mutationFn: () => apiFetch<PonFullRefreshState>(`/api/v1/olt/devices/${selectedOltId}/pons/${effectivePon}/refresh-full`, { method: "DELETE" }),
+    onSuccess: (res) => queryClient.setQueryData(fullRefreshKey, res),
+    onError: (e) => openErrorModal(e, "Erro ao interromper"),
   });
 
   const runTelnetSerialSearch = useCallback(async (oltId: string, serial: string, pon: number) => {
@@ -457,6 +512,16 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     onError: (e) => toastErr(pushToast, e, "Falha ao desvincular em massa."),
   });
 
+  const onlineCounts = useMemo(() => {
+    let online = 0;
+    let offline = 0;
+    for (const r of enrichedResults) {
+      if (r.online === true) online++;
+      else if (r.online === false) offline++;
+    }
+    return { online, offline };
+  }, [enrichedResults]);
+
   const totalPages = Math.max(1, Math.ceil(enrichedResults.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pagedResults = useMemo(
@@ -482,6 +547,7 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       onu?: number;
       pon_description?: string;
       pon_vlan?: string | number;
+      persisted?: boolean;
     }>(
       `/api/v1/olt/devices/${row.olt_id}/onu-report`,
       {
@@ -520,6 +586,8 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
       });
       const updated = applyTelnetFieldsToRow(row, steps);
       setRowOverrides((prev) => ({ ...prev, [rowKey(row)]: updated }));
+      // O servidor gravou a leitura no snapshot: recarrega para a tela mostrar exatamente o que ficou gravado.
+      if (res.persisted) searchMut.mutate(payload);
     } catch (e) {
       openErrorModal(e, "Erro no relatório telnet da ONU");
       setReportOpen(false);
@@ -536,9 +604,10 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
     const key = rowKey(row);
     setRefreshingRows((prev) => new Set(prev).add(key));
     try {
-      const { steps } = await fetchOnuTelnetReport(row);
+      const { res, steps } = await fetchOnuTelnetReport(row);
       const updated = applyTelnetFieldsToRow(row, steps);
       setRowOverrides((prev) => ({ ...prev, [key]: updated }));
+      if (res.persisted) searchMut.mutate(payload);
       const label = updated.serial || row.serial || `PON ${row.pon ?? "?"} / ONU ${row.onu ?? "?"}`;
       toastOk(pushToast, `ONU ${label} atualizada.`);
     } catch (e) {
@@ -683,51 +752,6 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
         {selectedOltId ? (
           <>
-            <DropdownMenu
-              align="start"
-              minWidth={160}
-              trigger={({ toggle }) => (
-                <button type="button" className="btn olt-pesquisa-toolbar__olt-btn" onClick={toggle} title="Filtrar porta PON">
-                  <span className="olt-pesquisa-toolbar__olt-label">{selectedPonLabel}</span>
-                  <ChevronDown size={14} aria-hidden />
-                </button>
-              )}
-            >
-              {({ close }) => (
-                <div>
-                  <button
-                    type="button"
-                    className="action-menu__item"
-                    onClick={() => {
-                      setSelectedPon(0);
-                      setPonManual("");
-                      close();
-                    }}
-                  >
-                    Todas as PONs
-                  </button>
-                  {ponOptions.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      className="action-menu__item"
-                      onClick={() => {
-                        setSelectedPon(p);
-                        setPonManual(String(p));
-                        close();
-                      }}
-                    >
-                      PON {p}
-                    </button>
-                  ))}
-                  {ponOptions.length === 0 ? (
-                    <p style={{ padding: "8px 12px", margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                      Sem snapshot PON — informe o número ao lado ou atualize a OLT.
-                    </p>
-                  ) : null}
-                </div>
-              )}
-            </DropdownMenu>
             <input
               className="input mono"
               type="text"
@@ -742,6 +766,33 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
               }}
               style={{ width: 72, minWidth: 72, padding: "6px 8px", fontSize: 12 }}
             />
+            {effectivePon > 0 && canMutate ? (
+              fullRefreshRunning ? (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={fullRefreshCancel.isPending}
+                  title="Interrompe a leitura; o que já foi lido fica gravado"
+                  onClick={() => fullRefreshCancel.mutate()}
+                >
+                  <RefreshCw size={14} className="map-refresh-spin" style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+                  {`PON ${effectivePon}: ${fullRefresh?.phase ?? "atualizando"}${
+                    (fullRefresh?.total ?? 0) > 0 ? ` ${fullRefresh?.done ?? 0}/${fullRefresh?.total}` : ""
+                  } — parar`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={fullRefreshStart.isPending}
+                  title={`Atualiza serial e status das ONUs da PON ${effectivePon} e lê o RX de cada ONU, uma a uma — online primeiro; as offline têm o status confirmado e, se voltarem, são atualizadas também (pode levar alguns minutos; roda em segundo plano)`}
+                  onClick={() => fullRefreshStart.mutate()}
+                >
+                  <RefreshCw size={14} style={{ marginRight: 6, verticalAlign: -2 }} aria-hidden />
+                  {`Atualizar PON ${effectivePon} inteira`}
+                </button>
+              )
+            ) : null}
             {effectivePon > 0 && oltDetailQ.data?.pon_refresh_available ? (
               <button
                 type="button"
@@ -782,13 +833,17 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
                     label: "Vincular clientes às ONUs…",
                     onClick: () => setClientLinkOpen(true),
                   },
-                  {
-                    id: "bulk-unlink",
-                    label: `Desvincular clientes em massa${linkedSerials.length ? ` (${linkedSerials.length})` : ""}`,
-                    danger: true as const,
-                    disabled: linkedSerials.length === 0,
-                    onClick: () => setBulkUnlinkOpen(true),
-                  },
+                  ...(isAdminUser()
+                    ? [
+                        {
+                          id: "bulk-unlink",
+                          label: `Desvincular clientes em massa${linkedSerials.length ? ` (${linkedSerials.length})` : ""}`,
+                          danger: true as const,
+                          disabled: linkedSerials.length === 0,
+                          onClick: () => setBulkUnlinkOpen(true),
+                        },
+                      ]
+                    : []),
                 ]
               : []),
           ]}
@@ -796,6 +851,12 @@ export function OltPesquisaTab({ canMutate, olts }: Props) {
 
         <div className="conn-toolbar__spacer" aria-hidden />
         <PageCountPill label="ONUs encontradas" count={enrichedResults.length} />
+        <span className="page-count-pill" title="ONUs online nesta lista">
+          Online: <span className="mono" style={{ color: "var(--ok, #16a34a)" }}>{onlineCounts.online}</span>
+        </span>
+        <span className="page-count-pill" title="ONUs offline nesta lista">
+          Offline: <span className="mono" style={{ color: onlineCounts.offline > 0 ? "var(--danger, #dc2626)" : undefined }}>{onlineCounts.offline}</span>
+        </span>
       </div>
 
       {canMutate && selectedOltId && debouncedQ.trim().length >= 2 && telnetLoading ? (

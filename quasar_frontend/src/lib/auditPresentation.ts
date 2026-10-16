@@ -44,6 +44,7 @@ const ENTITY_LABELS: Record<string, string> = {
   hubsoft_stock_item: "Cadastro de patrimônio de estoque — HubSoft",
   hubsoft_stock_comodato: "Comodato de patrimônio para cliente — HubSoft",
   hubsoft_stock_transfer: "Transferência de patrimônio entre locais de estoque — HubSoft",
+  hubsoft_service_order: "Atendimento com O.S. — HubSoft",
   commercial_report: "Relatório comercial",
   ixc_login: "Login IXC (radusuarios)",
   olt_snapshot: "Snapshot da OLT",

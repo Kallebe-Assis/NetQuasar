@@ -331,7 +331,7 @@ func EnsureKnownLoginsFromLatestSnapshot(ctx context.Context, pool *pgxpool.Pool
 }
 
 // ListKnownLoginsAsSessions devolve inventário no formato da lista de sessões da UI.
-func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID) ([]map[string]any, *time.Time, int, int, error) {
+func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, stripSuffix string) ([]map[string]any, *time.Time, int, int, error) {
 	if pool == nil {
 		return nil, nil, 0, 0, nil
 	}
@@ -350,7 +350,9 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 	defer rows.Close()
 
 	out := make([]map[string]any, 0)
-	onlineN := 0
+	// Linhas antigas gravadas com o sufixo RADIUS («x@dominio») e a versão sem sufixo são o MESMO login: mostra uma só
+	// (a online, ou a vista por último), sem apagar nada do inventário.
+	byKey := map[string]int{}
 	var latest *time.Time
 	for rows.Next() {
 		var (
@@ -369,9 +371,7 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 		); err != nil {
 			return nil, nil, 0, 0, err
 		}
-		if isOnline {
-			onlineN++
-		}
+		login = NormalizeSNMPLoginValue(login, stripSuffix)
 		if latest == nil || updated.After(*latest) {
 			t := updated
 			latest = &t
@@ -419,9 +419,35 @@ func ListKnownLoginsAsSessions(ctx context.Context, pool *pgxpool.Pool, deviceID
 		if lastOffline != nil {
 			m["last_offline_at"] = lastOffline.UTC().Format(time.RFC3339Nano)
 		}
-		out = append(out, EnrichSessionMaps([]map[string]any{m})[0])
+		m = EnrichSessionMaps([]map[string]any{m})[0]
+		key := strings.ToLower(strings.TrimSpace(login))
+		if i, dup := byKey[key]; dup {
+			prev := out[i]
+			prevOn, _ := prev["is_online"].(bool)
+			prevSeen, _ := prev["last_seen_at"].(string)
+			if (isOnline && !prevOn) || (isOnline == prevOn && lastSeen.UTC().Format(time.RFC3339Nano) > prevSeen) {
+				if m["comment"] == nil {
+					m["comment"] = prev["comment"]
+				}
+				out[i] = m
+			} else if prev["comment"] == nil {
+				prev["comment"] = m["comment"]
+			}
+			continue
+		}
+		byKey[key] = len(out)
+		out = append(out, m)
 	}
-	return out, latest, onlineN, len(out), rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, 0, 0, err
+	}
+	onlineN := 0
+	for _, m := range out {
+		if on, _ := m["is_online"].(bool); on {
+			onlineN++
+		}
+	}
+	return out, latest, onlineN, len(out), nil
 }
 
 // FindKnownLogin procura um único login no inventário permanente (bng_known_logins) — usado como

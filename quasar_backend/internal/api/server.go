@@ -537,6 +537,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/{id}/hubsoft/stock-comodato/apply-batch", s.hubsoftStockComodatoApplyBatch)
 				r.Post("/{id}/hubsoft/stock-transfer/preview", s.hubsoftStockTransferPreview)
 				r.Post("/{id}/hubsoft/stock-transfer/apply", s.hubsoftStockTransferApply)
+				r.Get("/{id}/hubsoft/service-order/catalogs", s.hubsoftServiceOrderCatalogs)
+				r.Post("/{id}/hubsoft/service-order/preview", s.hubsoftServiceOrderPreview)
+				r.Post("/{id}/hubsoft/service-order/apply", s.hubsoftServiceOrderApply)
 			})
 			// IXC: inativar/reativar logins em massa (migração para a HubSoft) — administradores ou perfis com a permissão.
 			r.Group(func(r chi.Router) {
@@ -644,6 +647,9 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/onu-report", s.reportOLTOnu)
 				r.Post("/devices/{id}/onu-serial-search", s.searchOLTOnuBySerial)
 				r.Post("/devices/{id}/pons/{pon}/refresh", s.refreshOLTPon)
+				r.Post("/devices/{id}/pons/{pon}/refresh-full", s.startOLTPonFullRefresh)
+				r.Get("/devices/{id}/pons/{pon}/refresh-full", s.getOLTPonFullRefresh)
+				r.Delete("/devices/{id}/pons/{pon}/refresh-full", s.cancelOLTPonFullRefresh)
 				r.Post("/devices/{id}/unauthorized-onus", s.listOLTUnauthorizedOnus)
 				r.Post("/devices/{id}/onu-authorize-preview", s.previewAuthorizeOLTOnu)
 				r.Post("/devices/{id}/onu-authorize", s.authorizeOLTOnu)
@@ -651,7 +657,7 @@ func NewServer(log zerolog.Logger, cfg *config.Config, dbHolder *atomic.Pointer[
 				r.Post("/devices/{id}/discover-vlans", s.discoverOLTVlanCatalog)
 				r.Post("/onu-client-links", s.linkOnuClientDirect)
 				r.Post("/onu-client-links/import", s.importOnuClientLinks)
-				r.Post("/onu-client-links/unlink", s.bulkUnlinkOnuClients)
+				r.With(s.requireAdminMiddleware).Post("/onu-client-links/unlink", s.bulkUnlinkOnuClients)
 				r.Delete("/onu-client-links/{serial}", s.deleteOnuClientLink)
 				r.Post("/onu-monitors", s.upsertOnuMonitor)
 				r.Delete("/onu-monitors/{id}", s.deleteOnuMonitor)

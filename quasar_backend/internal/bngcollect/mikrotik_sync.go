@@ -53,7 +53,7 @@ func mikrotikActiveToSessionRows(entries []mikrotikcollect.PPPActiveEntry) []Ses
 // bng_known_logins para login nunca visto online (dá o roster completo, mesmo sem nenhuma conexão
 // ainda) e, em quem já existe, só toca no comentário — nunca em is_online/last_seen_at/etc., que
 // pertencem ao sync online/offline (SyncKnownLogins, chamado antes desta função).
-func syncMikrotikSecretRoster(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, secrets []mikrotikcollect.PPPSecretEntry) error {
+func syncMikrotikSecretRoster(ctx context.Context, pool *pgxpool.Pool, deviceID uuid.UUID, secrets []mikrotikcollect.PPPSecretEntry, stripSuffix string) error {
 	if pool == nil || len(secrets) == 0 {
 		return nil
 	}
@@ -64,7 +64,7 @@ func syncMikrotikSecretRoster(ctx context.Context, pool *pgxpool.Pool, deviceID 
 	defer tx.Rollback(ctx)
 	now := time.Now().UTC()
 	for _, sec := range secrets {
-		login := strings.TrimSpace(sec.Name)
+		login := strings.TrimSpace(NormalizeSNMPLoginValue(sec.Name, stripSuffix))
 		if login == "" {
 			continue
 		}
@@ -94,11 +94,13 @@ func CollectAndSyncMikrotikPPPoE(ctx context.Context, pool *pgxpool.Pool, device
 		return 0, 0, err
 	}
 	rows := mikrotikActiveToSessionRows(active)
-	if err := SyncKnownLogins(ctx, pool, deviceID, rows, ""); err != nil {
+	// Mesmo sufixo RADIUS (@dominio) removido nos BNGs SNMP: «fulano@g2.com.br» e «fulano» são o mesmo login.
+	stripSuffix := LoadGlobalProfile(ctx, pool).Options.PPPoELoginStripSuffix
+	if err := SyncKnownLogins(ctx, pool, deviceID, rows, stripSuffix); err != nil {
 		return len(rows), 0, err
 	}
 	if len(secrets) > 0 {
-		if err := syncMikrotikSecretRoster(ctx, pool, deviceID, secrets); err != nil {
+		if err := syncMikrotikSecretRoster(ctx, pool, deviceID, secrets, stripSuffix); err != nil {
 			return len(rows), len(secrets), err
 		}
 	}

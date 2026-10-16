@@ -662,7 +662,7 @@ func (s *Server) bngDeviceSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile := bngcollect.LoadGlobalProfile(r.Context(), s.DB())
-	sessions, capturedAt, onlineN, totalN, err := bngcollect.ListKnownLoginsAsSessions(r.Context(), s.DB(), id)
+	sessions, capturedAt, onlineN, totalN, err := bngcollect.ListKnownLoginsAsSessions(r.Context(), s.DB(), id, profile.Options.PPPoELoginStripSuffix)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "DB", err.Error(), nil)
 		return

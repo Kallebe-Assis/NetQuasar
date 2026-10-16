@@ -917,6 +917,24 @@ export function OltPage() {
             >
               <Filter size={18} />
             </button>
+            <ExportMenu
+              filename="olts"
+              title="OLTs"
+              rows={sortedRows}
+              columns={[
+                { header: "Descrição", value: (r) => r.description },
+                { header: "IP", value: (r) => r.ip },
+                { header: "Marca", value: (r) => r.brand },
+                { header: "Modelo", value: (r) => r.model },
+                { header: "Localidade", value: (r) => r.locality_name },
+                { header: "PONs", value: (r) => r.computed?.pon_count },
+                { header: "ONUs", value: (r) => r.computed?.onu_total_sum },
+                { header: "Online", value: (r) => r.computed?.onu_online_sum },
+                { header: "Offline", value: (r) => r.computed?.onu_offline_sum },
+                { header: "SNMP saúde", value: (r) => (r.snmp_health_status === "ok" ? "OK" : r.snmp_health_status === "partial" ? "Parcial" : r.snmp_health_status === "failed" ? "Falha" : "") },
+                { header: "Última atualização", value: (r) => (r.olt_snapshot_at ? formatCollectedPt(r.olt_snapshot_at) : "") },
+              ]}
+            />
             <input
               className="input devices-toolbar__search"
               aria-label="Busca geral em OLTs"
@@ -1206,26 +1224,6 @@ export function OltPage() {
       </style>
       {!sel ? (
         <div className="table-wrap olt-anim-enter" style={{ maxWidth: "100%", overflowX: "auto" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 0 8px" }}>
-            <ExportMenu
-              filename="olts"
-              title="OLTs"
-              rows={sortedRows}
-              columns={[
-                { header: "Descrição", value: (r) => r.description },
-                { header: "IP", value: (r) => r.ip },
-                { header: "Marca", value: (r) => r.brand },
-                { header: "Modelo", value: (r) => r.model },
-                { header: "Localidade", value: (r) => r.locality_name },
-                { header: "PONs", value: (r) => r.computed?.pon_count },
-                { header: "ONUs", value: (r) => r.computed?.onu_total_sum },
-                { header: "Online", value: (r) => r.computed?.onu_online_sum },
-                { header: "Offline", value: (r) => r.computed?.onu_offline_sum },
-                { header: "SNMP saúde", value: (r) => (r.snmp_health_status === "ok" ? "OK" : r.snmp_health_status === "partial" ? "Parcial" : r.snmp_health_status === "failed" ? "Falha" : "") },
-                { header: "Última atualização", value: (r) => (r.olt_snapshot_at ? formatCollectedPt(r.olt_snapshot_at) : "") },
-              ]}
-            />
-          </div>
           <table style={{ fontSize: 12 }}>
             <thead>
               <tr>

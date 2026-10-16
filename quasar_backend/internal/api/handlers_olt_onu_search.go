@@ -343,6 +343,26 @@ func (s *Server) reportOLTOnu(w http.ResponseWriter, r *http.Request) {
 	if !script.OK {
 		meta["error"] = script.Error
 	}
+	// Leitura manual vale para sempre: grava no snapshot, substituindo o que havia, para sobreviver a sair da tela.
+	if script.OK {
+		var steps []struct {
+			Command string
+			Output  string
+		}
+		for _, st := range script.Steps {
+			steps = append(steps, struct {
+				Command string
+				Output  string
+			}{Command: st.Command, Output: st.Output})
+		}
+		if fields := oltcollect.ParseOnuReportSteps(steps); len(fields) > 0 {
+			n, perr := s.applyOnuReportResults(ctx, id, []oltcollect.OnuReportResult{{Pon: ponN, Onu: onuN, Serial: strings.TrimSpace(body.Serial), Fields: fields}})
+			meta["persisted"] = perr == nil && n > 0
+			if perr != nil {
+				meta["persist_error"] = perr.Error()
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, meta)
 }
 
